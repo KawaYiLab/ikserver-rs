@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET status = 'draft', published_at = NULL, pinned_at = NULL, pinned_by = NULL,\n                revision = revision + 1, updated_at = $2\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b88e87802ea0cf32192b1b6a7e2b69c1a17f7bd38ca09d80112dcc3841b2bbe1"
+}

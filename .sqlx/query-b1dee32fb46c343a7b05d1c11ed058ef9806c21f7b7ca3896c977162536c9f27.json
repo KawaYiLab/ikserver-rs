@@ -1,0 +1,147 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id, p.status, p.title, p.is_anonymous,\n                  EXISTS (SELECT 1 FROM post_drafts d WHERE d.post_id = p.id) AS \"has_pending_changes!\",\n                  p.hidden_at, p.view_count, p.like_count, p.comment_count, p.published_at,\n                  p.updated_at\n           FROM posts p\n           WHERE p.author_id = $1\n             AND NOT (p.is_anonymous AND p.status = 'published')\n             AND ($2::text IS NULL OR p.status = $2)\n             AND ($3::timestamptz IS NULL OR (p.updated_at, p.id) < ($3, $4::bigint))\n           ORDER BY p.updated_at DESC, p.id DESC\n           LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "is_anonymous"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "has_pending_changes!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "hidden_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "view_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "view_count"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "like_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "like_count"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "comment_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "comment_count"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "b1dee32fb46c343a7b05d1c11ed058ef9806c21f7b7ca3896c977162536c9f27"
+}

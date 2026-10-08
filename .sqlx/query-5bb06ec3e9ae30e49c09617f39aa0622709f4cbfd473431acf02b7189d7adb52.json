@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tag_id FROM post_tags WHERE post_id = $1 ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tag_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "post_tags",
+            "name": "tag_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5bb06ec3e9ae30e49c09617f39aa0622709f4cbfd473431acf02b7189d7adb52"
+}

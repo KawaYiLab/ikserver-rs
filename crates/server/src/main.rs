@@ -2,6 +2,7 @@ use std::io::Write;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
+use ik_kernel::Role;
 use ik_kernel::config::{Config, LogFormat};
 use ik_server::{AppState, build_app, openapi};
 use tracing_subscriber::EnvFilter;
@@ -21,6 +22,47 @@ enum Command {
     Openapi,
     /// 对 DATABASE_URL 指向的库执行全部待应用的迁移
     Migrate,
+    /// 用户运维
+    #[command(subcommand)]
+    User(UserCommand),
+    /// 分区运维
+    #[command(subcommand)]
+    Category(CategoryCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum UserCommand {
+    /// 设置用户角色（例如创建第一个管理员）
+    SetRole {
+        /// 用户邮箱
+        email: String,
+        /// user / moderator / admin
+        role: Role,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CategoryCommand {
+    /// 新建分区
+    Create {
+        /// URL 用的标识，小写字母、数字、连字符
+        #[arg(long)]
+        slug: String,
+        /// 展示名
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value = "")]
+        description: String,
+        /// 排序（小的在前）
+        #[arg(long, default_value_t = 0)]
+        order: i32,
+        /// 只有管理员能发帖
+        #[arg(long)]
+        admin_only: bool,
+        /// 允许帖主采纳评论
+        #[arg(long)]
+        allow_accept: bool,
+    },
 }
 
 #[tokio::main]
@@ -34,7 +76,63 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Serve => serve().await,
         Command::Migrate => migrate().await,
+        Command::User(cmd) => user_command(cmd).await,
+        Command::Category(cmd) => category_command(cmd).await,
     }
+}
+
+async fn connect_for_cli() -> anyhow::Result<AppState> {
+    let _ = dotenvy::dotenv();
+    let config = Config::load()?;
+    init_tracing(config.log.format);
+    let db = ik_kernel::db::connect(&config.database)
+        .await
+        .context("连接数据库失败")?;
+    AppState::new(config, db)
+}
+
+async fn user_command(cmd: UserCommand) -> anyhow::Result<()> {
+    let state = connect_for_cli().await?;
+    match cmd {
+        UserCommand::SetRole { email, role } => {
+            let found = ik_auth::service::set_role_by_email(&state.db, &email, role)
+                .await
+                .map_err(|p| anyhow::anyhow!("{p}"))?;
+            anyhow::ensure!(found, "找不到该邮箱的用户");
+            tracing::info!(role = %role, "角色已更新");
+        }
+    }
+    Ok(())
+}
+
+async fn category_command(cmd: CategoryCommand) -> anyhow::Result<()> {
+    let state = connect_for_cli().await?;
+    match cmd {
+        CategoryCommand::Create {
+            slug,
+            name,
+            description,
+            order,
+            admin_only,
+            allow_accept,
+        } => {
+            let created = ik_content::service::create_category(
+                &state.content,
+                ik_content::service::NewCategoryInput {
+                    slug,
+                    name,
+                    description,
+                    sort_order: order,
+                    admin_only,
+                    allow_comment_accept: allow_accept,
+                },
+            )
+            .await
+            .map_err(|p| anyhow::anyhow!("{p}"))?;
+            tracing::info!(id = %created.id, slug = %created.slug, "分区已创建");
+        }
+    }
+    Ok(())
 }
 
 async fn migrate() -> anyhow::Result<()> {

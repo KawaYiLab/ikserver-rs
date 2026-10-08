@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO sessions (id, user_id, token_hash, login_method, created_at, last_seen_at, expires_at, max_expires_at)\n           SELECT g, $1, sha256(g::text::bytea), 'password',\n                  now() - make_interval(mins => g), now() - make_interval(mins => g),\n                  now() + interval '1 day', now() + interval '2 days'\n           FROM generate_series(1, 120) AS g",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "196a6e20c9a7dc62536295b627aa04efcbc4265edfa9a471345ca6ad525046d9"
+}

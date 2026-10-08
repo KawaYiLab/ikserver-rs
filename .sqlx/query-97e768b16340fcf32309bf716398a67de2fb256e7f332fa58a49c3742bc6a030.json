@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_tags (post_id, tag_id, position)\n         SELECT $1, tag_id, (ord - 1)::smallint\n         FROM unnest($2::bigint[]) WITH ORDINALITY AS t(tag_id, ord)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "97e768b16340fcf32309bf716398a67de2fb256e7f332fa58a49c3742bc6a030"
+}

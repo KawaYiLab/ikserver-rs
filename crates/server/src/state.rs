@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use ik_auth::{AuthSettings, AuthState};
+use ik_content::ContentState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
@@ -16,6 +17,7 @@ pub struct AppState {
     pub ids: Arc<Snowflake>,
     pub bus: Arc<LocalBus>,
     pub auth: AuthState,
+    pub content: ContentState,
 }
 
 impl AppState {
@@ -30,12 +32,15 @@ impl AppState {
             mailer,
             AuthSettings::from_config(&config)?,
         );
+        let bus = Arc::new(LocalBus::new(4096));
+        let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
             ids,
-            bus: Arc::new(LocalBus::new(4096)),
+            bus,
             auth,
+            content,
         })
     }
 }
@@ -43,5 +48,11 @@ impl AppState {
 impl FromRef<AppState> for AuthState {
     fn from_ref(state: &AppState) -> Self {
         state.auth.clone()
+    }
+}
+
+impl FromRef<AppState> for ContentState {
+    fn from_ref(state: &AppState) -> Self {
+        state.content.clone()
     }
 }

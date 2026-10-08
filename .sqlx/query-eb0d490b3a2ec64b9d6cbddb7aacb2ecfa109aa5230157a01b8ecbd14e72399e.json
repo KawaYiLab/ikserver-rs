@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, email, role AS \"role: Role\", exam_passed_at, is_ai_agent, created_at\n           FROM users WHERE id = $1",
+  "query": "SELECT id, slug, name, description, is_active, admin_only, allow_comment_accept\n         FROM categories WHERE slug = $1",
   "describe": {
     "columns": [
       {
@@ -9,92 +9,92 @@
         "type_info": "Int8",
         "origin": {
           "Table": {
-            "table": "users",
+            "table": "categories",
             "name": "id"
           }
         }
       },
       {
         "ordinal": 1,
-        "name": "username",
+        "name": "slug",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "username"
+            "table": "categories",
+            "name": "slug"
           }
         }
       },
       {
         "ordinal": 2,
-        "name": "email",
+        "name": "name",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "email"
+            "table": "categories",
+            "name": "name"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "role: Role",
+        "name": "description",
         "type_info": "Text",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "role"
+            "table": "categories",
+            "name": "description"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "exam_passed_at",
-        "type_info": "Timestamptz",
+        "name": "is_active",
+        "type_info": "Bool",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "exam_passed_at"
+            "table": "categories",
+            "name": "is_active"
           }
         }
       },
       {
         "ordinal": 5,
-        "name": "is_ai_agent",
+        "name": "admin_only",
         "type_info": "Bool",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "is_ai_agent"
+            "table": "categories",
+            "name": "admin_only"
           }
         }
       },
       {
         "ordinal": 6,
-        "name": "created_at",
-        "type_info": "Timestamptz",
+        "name": "allow_comment_accept",
+        "type_info": "Bool",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "created_at"
+            "table": "categories",
+            "name": "allow_comment_accept"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
-      true,
       false,
-      true,
+      false,
+      false,
       false,
       false
     ]
   },
-  "hash": "dae775015805b50a938f431a7b5df3d4fbda6f427a3b2bae4de33d2f02d02576"
+  "hash": "eb0d490b3a2ec64b9d6cbddb7aacb2ecfa109aa5230157a01b8ecbd14e72399e"
 }

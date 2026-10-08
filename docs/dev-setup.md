@@ -47,6 +47,27 @@ cargo run -p ik-server -- serve
 
 打开 API 文档：<http://127.0.0.1:8080/docs>（Scalar）。
 
+### 运维命令
+
+**必须在仓库根目录执行**：程序从当前目录读取 `.env`，在别的目录运行会连到错误的库或连不上。
+
+```powershell
+cargo run -p ik-server -- user set-role someone@example.com admin     # 设置角色（创建第一个管理员）
+cargo run -p ik-server -- category create --slug guide --name 攻略 --order 1
+cargo run -p ik-server -- category create --slug notice --name 公告 --admin-only --allow-accept
+```
+
+### 数据库集成测试
+
+`#[sqlx::test]` 每个测试会新建一个 `_sqlx_test_*` 临时库。远程开发库除了 `CREATEDB` 权限，
+`pg_hba.conf` 还必须允许开发账号连接任意库（不能只允许连它自己的那一个库），例如：
+
+```
+host  all  <开发账号>  <你的 IP 段>  scram-sha-256
+```
+
+改完执行 `SELECT pg_reload_conf();` 生效。CI 用自带的 PostgreSQL 服务容器，不受影响。
+
 ## 目录约定
 
 - `.sqlx/`：编译期查询缓存（**提交**，CI 用 `SQLX_OFFLINE=true`）。

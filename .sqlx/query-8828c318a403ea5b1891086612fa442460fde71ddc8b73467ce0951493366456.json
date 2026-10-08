@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.id AS session_id, s.user_id, s.last_seen_at,\n                  u.status, u.role AS \"role: Role\", u.exam_passed_at, u.is_ai_agent\n           FROM sessions s JOIN users u ON u.id = s.user_id\n           WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2",
+  "query": "SELECT s.id AS session_id, s.user_id, s.last_seen_at,\n                  u.status, u.role AS \"role: Role\", u.exam_passed_at, u.is_ai_agent, u.level\n           FROM sessions s JOIN users u ON u.id = s.user_id\n           WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2",
   "describe": {
     "columns": [
       {
@@ -79,6 +79,17 @@
             "name": "is_ai_agent"
           }
         }
+      },
+      {
+        "ordinal": 7,
+        "name": "level",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "level"
+          }
+        }
       }
     ],
     "parameters": {
@@ -94,8 +105,9 @@
       false,
       false,
       true,
+      false,
       false
     ]
   },
-  "hash": "7e559666d7b73b440145019be9332197c19b1a4ea0d8c32b5d127e0ef550b741"
+  "hash": "8828c318a403ea5b1891086612fa442460fde71ddc8b73467ce0951493366456"
 }

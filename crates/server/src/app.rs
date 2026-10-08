@@ -34,6 +34,7 @@ use crate::{AppState, system};
         (name = "system", description = "运维探针"),
         (name = "auth", description = "验证码、注册、登录、重置密码、登出"),
         (name = "me", description = "当前用户与登录设备"),
+        (name = "content", description = "分区、标签、帖子与信息流"),
     )
 )]
 pub struct ApiDoc;
@@ -68,6 +69,7 @@ fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(system::router())
         .merge(ik_auth::router())
+        .merge(ik_content::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

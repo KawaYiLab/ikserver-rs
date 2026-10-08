@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET category_id = $2, title = $3, body = $4, editor_state = $5,\n                external_videos = $6, is_anonymous = $7, anonymous_seed = $8,\n                revision = revision + 1, updated_at = $9\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Bool",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d85ca488a5a55585378b7656106ef0ec47c59b77ad81cb2481b8318615c1d3a8"
+}

@@ -27,12 +27,36 @@ pub struct Principal {
     pub role: Role,
     pub exam_passed: bool,
     pub is_ai_agent: bool,
+    /// 用户等级 0–7（0 = 未通过考试）。
+    pub level: i16,
 }
 
 impl Principal {
     /// 是否可以执行写操作：通过入站考试，或为工作人员 / AI 账号（REG-007）。
     pub fn can_write(&self) -> bool {
         self.exam_passed || self.role.is_staff() || self.is_ai_agent
+    }
+
+    /// 写操作的入站考试门控（POST-040）。
+    pub fn require_write(&self) -> Result<(), Problem> {
+        if self.can_write() {
+            Ok(())
+        } else {
+            Err(Problem::new(
+                StatusCode::FORBIDDEN,
+                "EXAM_REQUIRED",
+                "需要先通过入站考试才能执行此操作",
+            ))
+        }
+    }
+
+    /// 权益矩阵使用的等级：管理员与 AI 账号恒为最高档（POST-012）。
+    pub fn benefit_level(&self) -> usize {
+        if self.role.is_admin() || self.is_ai_agent {
+            7
+        } else {
+            usize::try_from(self.level.clamp(0, 7)).unwrap_or(0)
+        }
     }
 }
 

@@ -1,14 +1,16 @@
 //! 认证业务逻辑。所有入口都返回 `Problem`，handler 只负责协议转换。
 
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 use chrono::{DateTime, Duration, Utc};
 use http::StatusCode;
 use ik_kernel::Id;
-use ik_kernel::Problem;
 use ik_kernel::db::is_unique_violation;
+use ik_kernel::id::marker::User;
 use ik_kernel::mail::{OutgoingMail, mask_email};
-use sqlx::PgConnection;
+use ik_kernel::{Problem, Role};
+use sqlx::{PgConnection, PgPool};
 
 use crate::code::{
     self, CODE_TTL_SECS, CodePurpose, MAX_ATTEMPTS, MAX_CODES_PER_IP_PER_HOUR, SEND_COOLDOWN_SECS,
@@ -46,6 +48,17 @@ pub struct Issued {
     pub token: String,
 }
 
+impl std::fmt::Debug for Issued {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Issued")
+            .field("user", &self.user)
+            .field("session", &self.session)
+            .field("token", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Debug)]
 pub enum Resolution {
     Active(Principal),
     /// 令牌不存在、已过期或已撤销。
@@ -502,6 +515,7 @@ pub async fn resolve(state: &AuthState, raw_token: &str) -> Result<Resolution, P
         role: row.role,
         exam_passed: row.exam_passed_at.is_some(),
         is_ai_agent: row.is_ai_agent,
+        level: row.level,
     }))
 }
 
@@ -590,8 +604,40 @@ fn me_view(row: MeRow) -> MeView {
         role: row.role,
         exam_passed: row.exam_passed_at.is_some(),
         is_ai_agent: row.is_ai_agent,
+        level: row.level,
         created_at: row.created_at,
     }
+}
+
+/// 其他域展示作者用的公开资料。
+#[derive(Debug, Clone)]
+pub struct Author {
+    pub id: Id<User>,
+    pub username: String,
+    pub level: i16,
+    /// 已注销或已合并的账号：调用方应显示为「已注销用户」，不链接主页。
+    pub gone: bool,
+}
+
+/// 批量读取作者资料；不存在的 id 不出现在结果里。
+pub async fn authors(db: &PgPool, ids: &[i64]) -> Result<HashMap<i64, Author>, Problem> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut conn = db.acquire().await?;
+    let rows = repo::authors(&mut conn, ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let author = Author {
+                id: Id::new(row.id),
+                gone: matches!(row.status.as_str(), "deleted" | "merged"),
+                username: row.username,
+                level: row.level,
+            };
+            (row.id, author)
+        })
+        .collect())
 }
 
 fn session_view(row: SessionRow, current_session_id: i64) -> SessionView {
@@ -606,6 +652,13 @@ fn session_view(row: SessionRow, current_session_id: i64) -> SessionView {
         expires_at: row.expires_at,
         current: row.id == current_session_id,
     }
+}
+
+/// 运维命令用：按邮箱设置角色（例如创建第一个管理员）。返回是否找到该用户。
+pub async fn set_role_by_email(db: &PgPool, email: &str, role: Role) -> Result<bool, Problem> {
+    let email = validate::normalize_email(email)?;
+    let mut conn = db.acquire().await?;
+    Ok(repo::set_role_by_email(&mut conn, &email, role, Utc::now()).await?)
 }
 
 #[cfg(test)]

@@ -95,6 +95,8 @@ pub struct MeView {
     pub role: Role,
     pub exam_passed: bool,
     pub is_ai_agent: bool,
+    /// 等级 0–7（0 = 未通过入站考试）。
+    pub level: i16,
     pub created_at: DateTime<Utc>,
 }
 

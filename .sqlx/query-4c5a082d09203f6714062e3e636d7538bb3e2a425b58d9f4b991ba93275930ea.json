@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_drafts (post_id, title, body, editor_state, external_videos, category_id,\n                                  tag_ids, updated_at)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n         ON CONFLICT (post_id) DO UPDATE SET\n             title = EXCLUDED.title, body = EXCLUDED.body, editor_state = EXCLUDED.editor_state,\n             external_videos = EXCLUDED.external_videos, category_id = EXCLUDED.category_id,\n             tag_ids = EXCLUDED.tag_ids, updated_at = EXCLUDED.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Int8",
+        "Int8Array",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4c5a082d09203f6714062e3e636d7538bb3e2a425b58d9f4b991ba93275930ea"
+}

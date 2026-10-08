@@ -288,13 +288,14 @@ pub(crate) struct MeRow {
     pub role: Role,
     pub exam_passed_at: Option<DateTime<Utc>>,
     pub is_ai_agent: bool,
+    pub level: i16,
     pub created_at: DateTime<Utc>,
 }
 
 pub(crate) async fn me(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<MeRow>> {
     sqlx::query_as!(
         MeRow,
-        r#"SELECT id, username, email, role AS "role: Role", exam_passed_at, is_ai_agent, created_at
+        r#"SELECT id, username, email, role AS "role: Role", exam_passed_at, is_ai_agent, level, created_at
            FROM users WHERE id = $1"#,
         id,
     )
@@ -369,6 +370,7 @@ pub(crate) struct ResolvedSession {
     pub role: Role,
     pub exam_passed_at: Option<DateTime<Utc>>,
     pub is_ai_agent: bool,
+    pub level: i16,
 }
 
 pub(crate) async fn resolve_session(
@@ -379,7 +381,7 @@ pub(crate) async fn resolve_session(
     sqlx::query_as!(
         ResolvedSession,
         r#"SELECT s.id AS session_id, s.user_id, s.last_seen_at,
-                  u.status, u.role AS "role: Role", u.exam_passed_at, u.is_ai_agent
+                  u.status, u.role AS "role: Role", u.exam_passed_at, u.is_ai_agent, u.level
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2"#,
         token_hash,
@@ -491,4 +493,40 @@ pub(crate) async fn revoke_user_sessions(
     .execute(conn)
     .await?;
     Ok(result.rows_affected())
+}
+
+// ---------- 供其他域读取的公开资料 ----------
+
+pub(crate) struct AuthorRow {
+    pub id: i64,
+    pub username: String,
+    pub status: String,
+    pub level: i16,
+}
+
+pub(crate) async fn authors(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<Vec<AuthorRow>> {
+    sqlx::query_as!(
+        AuthorRow,
+        "SELECT id, username, status, level FROM users WHERE id = ANY($1)",
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn set_role_by_email(
+    conn: &mut PgConnection,
+    email: &str,
+    role: Role,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET role = $2, updated_at = $3 WHERE email = $1",
+        email,
+        role as Role,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }

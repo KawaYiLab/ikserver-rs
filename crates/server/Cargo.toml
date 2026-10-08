@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 ik-kernel.workspace = true
 ik-auth.workspace = true
+ik-content.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

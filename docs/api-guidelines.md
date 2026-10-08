@@ -84,12 +84,15 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CSRF_REJECTED | 403 | 跨站请求被拒绝 | CsrfLayer 拒绝 |
 | FORBIDDEN | 403 | 没有权限执行该操作 | |
 | EXAM_REQUIRED | 403 | 需要先通过入站考试才能执行此操作 | |
+| ANONYMOUS_POST_LOCKED | 403 | 匿名委托发布后不能再修改、下线或删除 | POST-043 |
+| CATEGORY_ADMIN_ONLY | 403 | 只有管理员可以在该分区发帖 | |
 | ACCOUNT_BLOCKED | 403 | 该账号已被封禁或已注销 | |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
-| NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404 |
+| NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
-| REVISION_CONFLICT | 412 | 内容已被其他人修改，请刷新后重试 | If-Match 失败 |
+| NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
+| REVISION_CONFLICT | 412 | 内容已在别处被修改，请刷新后重试 | If-Match 失败或格式不对 |
 | PAYLOAD_TOO_LARGE | 413 | 请求体过大 | |
 | UNSUPPORTED_MEDIA_TYPE | 415 | 请求体必须是 application/json | |
 | RATE_LIMITED | 429 | 操作过于频繁，请稍后再试 | 带 `Retry-After`（秒） |
