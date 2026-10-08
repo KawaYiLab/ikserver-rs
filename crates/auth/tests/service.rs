@@ -102,7 +102,8 @@ impl Harness {
 
     async fn register(&self, email: &str, password: &str) -> service::Issued {
         self.send(email, "register").await.unwrap();
-        let code = self.mailer.last_code(email);
+        // 邮件发往规范化后的地址。
+        let code = self.mailer.last_code(&email.trim().to_lowercase());
         service::register(
             &self.state,
             RegisterRequest {
