@@ -1,0 +1,43 @@
+[package]
+name = "ik-server"
+description = "InterKnot 后端可执行程序：组装路由、中间件与后台任务"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ik-server"
+path = "src/main.rs"
+
+[dependencies]
+ik-kernel.workspace = true
+ik-auth.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+utoipa-scalar.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+dotenvy.workspace = true
+getrandom.workspace = true
+
+[dev-dependencies]
+http-body-util.workspace = true
+dotenvy.workspace = true
+tower = { workspace = true, features = ["util"] }
+
+[lints]
+workspace = true

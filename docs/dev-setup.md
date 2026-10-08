@@ -1,0 +1,61 @@
+# 本地开发环境（Windows）
+
+## 一次性安装
+
+| 工具 | 安装 |
+|---|---|
+| Rust | `winget install Rustlang.Rustup`，然后 `rustup default stable-x86_64-pc-windows-gnu` |
+| MinGW-w64 | `winget install BrechtSanders.WinLibs.POSIX.MSVCRT --scope user`（提供 gcc 与 dlltool） |
+| sqlx-cli | `cargo install sqlx-cli --no-default-features --features postgres` |
+| cargo-nextest | `cargo install cargo-nextest` |
+| Node LTS | `winget install OpenJS.NodeJS.LTS`（仅管理后台需要） |
+
+不需要 Docker、不需要 MSVC、不需要本机 PostgreSQL/Redis。
+
+> 注意：windows-gnu 工具链自带的 mingw 只有链接器，不含汇编器；`windows-sys`、`getrandom`
+> 等依赖编译时要调用 `dlltool`，必须装 MinGW-w64。选 **MSVCRT** 运行时版本，与 Rust 的
+> `x86_64-pc-windows-gnu` 目标一致。安装后新开终端即可在 PATH 中找到 `gcc` / `dlltool`。
+>
+> 仓库不放 `rust-toolchain.toml`：本机默认宿主是 msvc，写 `stable` 会让 rustup 去下载
+> 用不了的 msvc 工具链。Rust 版本由 CI 固定。
+
+## 数据库（远程开发库）
+
+开发统一连远程开发库（PostgreSQL），本机不跑数据库。连接串只写在 `.env` 的
+`DATABASE_URL` 里（不入库），向维护者索取。
+
+- 开发账号需要 `CREATEDB` 权限：`#[sqlx::test]` 会为每个测试临时建库、测完删除。
+- 迁移：`cargo sqlx migrate run`。
+- 开发库与生产库物理隔离；不要把生产连接串写进 `.env`。
+
+## 环境变量
+
+复制 `.env.example` 为 `.env`：
+
+- `DATABASE_URL`：sqlx 宏编译期用（`cargo check` 时需要数据库在线）。
+- `IK_*`：运行时配置，见 `crates/kernel/src/config.rs` 的层级注释。
+
+## 日常
+
+```powershell
+cargo check --workspace
+cargo nextest run --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all
+cargo run -p ik-server -- serve
+```
+
+打开 API 文档：<http://127.0.0.1:8080/docs>（Scalar）。
+
+## 目录约定
+
+- `.sqlx/`：编译期查询缓存（**提交**，CI 用 `SQLX_OFFLINE=true`）。
+- `target/`：构建产物（gitignore）。
+
+## 常见问题
+
+- **`cargo check` 报 `error: DATABASE_URL` 或连接失败**：`.env` 缺失，或连不上远程开发库
+  （检查网络与白名单）。连不上时可用 `SQLX_OFFLINE=true` 走 `.sqlx/` 缓存编译。
+- **首次 `cargo build` 很慢**：正常（约 5–15 分钟）；之后增量编译秒级。
+  可在 `cargo check` 时加 `-p <crate>` 只看单个 crate。
+- **想完全离线编译**：`cargo sqlx prepare --workspace` 后设 `SQLX_OFFLINE=true`。

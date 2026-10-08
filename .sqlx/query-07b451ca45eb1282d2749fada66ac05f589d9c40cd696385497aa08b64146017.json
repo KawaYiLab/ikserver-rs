@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE email_codes SET consumed_at = $2\n         WHERE id = $1 AND consumed_at IS NULL AND attempts < 5 AND expires_at > $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07b451ca45eb1282d2749fada66ac05f589d9c40cd696385497aa08b64146017"
+}

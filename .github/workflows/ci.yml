@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: short
+  RUST_VERSION: "1.99.0"
+  SQLX_VERSION: "0.9.0"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    env:
+      SQLX_OFFLINE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: ik
+          POSTGRES_PASSWORD: ik
+          POSTGRES_DB: ik
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ik"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://ik:ik@localhost:5432/ik
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --version ${{ env.SQLX_VERSION }} --no-default-features --features postgres --locked
+      - name: Apply migrations
+        run: cargo sqlx migrate run
+      # .sqlx/ 必须与迁移后的真实库一致；忘了 `cargo sqlx prepare` 会在这里失败。
+      - name: Check .sqlx offline cache
+        run: cargo sqlx prepare --workspace --check -- --all-targets
+      - name: Tests
+        run: cargo nextest run --workspace --locked --no-tests=warn
+      - name: Doc tests
+        run: cargo test --workspace --doc --locked
+      - name: OpenAPI document builds
+        run: cargo run -q -p ik-server --locked -- openapi > openapi.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openapi
+          path: openapi.json

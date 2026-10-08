@@ -1,0 +1,102 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+# 内部 crate
+ik-kernel = { path = "crates/kernel" }
+ik-auth = { path = "crates/auth" }
+
+# 异步运行时与 Web
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
+axum = { version = "0.8.9", features = ["macros"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
+cookie = "0.18"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["trace", "cors", "request-id", "timeout", "limit", "compression-gzip", "compression-br", "catch-panic", "set-header", "sensitive-headers", "csrf"] }
+http = "1.5"
+http-body-util = "0.1"
+futures-util = "0.3"
+async-trait = "0.1"
+
+# 数据库（不启用 TLS：本机与生产都走本地/内网连接，避免引入 C 依赖）
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "postgres", "macros", "migrate", "chrono", "json"] }
+
+# 序列化
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# OpenAPI
+utoipa = { version = "6", features = ["chrono"] }
+utoipa-axum = "0.3"
+utoipa-scalar = { version = "0.4", features = ["axum"] }
+
+# 日志
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+
+# 错误
+thiserror = "2"
+anyhow = "1"
+
+# 时间
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+chrono-tz = "0.10"
+
+# 配置与命令行
+figment = { version = "0.10", features = ["env", "toml"] }
+dotenvy = "0.15"
+clap = { version = "4.6", features = ["derive"] }
+
+# 密码学
+argon2 = "0.6"
+bcrypt = "0.19"
+sha2 = "0.11"
+hmac = "0.13"
+getrandom = "0.4"
+base64 = "0.23"
+subtle = "2.6"
+
+# 其他
+moka = { version = "0.12", features = ["future"] }
+governor = "0.10"
+validator = { version = "0.21", features = ["derive"] }
+unicode-normalization = "0.1"
+parking_lot = "0.12"
+
+# 测试
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+await_holding_lock = "deny"
+large_futures = "warn"
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package.sqlx-macros]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

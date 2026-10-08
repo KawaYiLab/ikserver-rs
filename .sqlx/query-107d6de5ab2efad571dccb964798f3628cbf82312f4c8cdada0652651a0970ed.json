@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET revoked_at = $3, revoke_reason = 'overflow'\n         WHERE id IN (\n             SELECT id FROM sessions\n             WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > $3\n             ORDER BY last_seen_at DESC, id DESC\n             OFFSET $2\n         )",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "107d6de5ab2efad571dccb964798f3628cbf82312f4c8cdada0652651a0970ed"
+}

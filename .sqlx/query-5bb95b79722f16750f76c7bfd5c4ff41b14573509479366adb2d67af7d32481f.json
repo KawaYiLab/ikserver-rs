@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET revoked_at = $3, revoke_reason = $4\n         WHERE user_id = $1 AND revoked_at IS NULL AND ($2::BIGINT IS NULL OR id <> $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5bb95b79722f16750f76c7bfd5c4ff41b14573509479366adb2d67af7d32481f"
+}

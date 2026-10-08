@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE email_codes SET consumed_at = $3\n         WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9bb6a3e16662c03bf68002862bcbdb8d4819b267bbd921cdbe1b0246b2363ac"
+}

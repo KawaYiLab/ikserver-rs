@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET last_seen_at = $2, expires_at = LEAST($3, max_expires_at)\n         WHERE id = $1 AND revoked_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e262312524e47ab087d4ebf0302e2c5504c975fc435719557fec7f8bd6b6cc87"
+}

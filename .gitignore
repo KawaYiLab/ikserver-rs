@@ -1,0 +1,18 @@
+/target
+.env
+*.log
+*.pending-snap
+*.snap.new
+
+# 编辑器
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# 管理后台（Nuxt）
+/admin/node_modules
+/admin/.nuxt
+/admin/.output
+/admin/dist
