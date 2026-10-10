@@ -675,7 +675,8 @@ pub async fn record_view(
 
 // ---------- 读取 ----------
 
-fn author_view(
+/// 作者展示：匿名内容只给派生的假名；已注销账号显示「已注销用户」。评论等其他域共用。
+pub fn author_view(
     author_id: i64,
     is_anonymous: bool,
     seed: Option<&str>,

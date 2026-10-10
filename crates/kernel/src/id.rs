@@ -101,6 +101,7 @@ pub mod marker {
     pub enum Category {}
     pub enum Tag {}
     pub enum Post {}
+    pub enum Comment {}
 }
 
 /// 从雪花 ID 反解出生成时间（Unix 毫秒）。旧系统迁移来的小整数 id 返回 None。

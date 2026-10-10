@@ -530,3 +530,22 @@ pub(crate) async fn set_role_by_email(
     .await?;
     Ok(result.rows_affected() > 0)
 }
+
+pub(crate) struct UsernameRow {
+    pub id: i64,
+    pub username: String,
+}
+
+/// 按用户名精确匹配（大小写敏感，D-018），只返回正常状态的账号。
+pub(crate) async fn active_users_by_usernames(
+    conn: &mut PgConnection,
+    names: &[String],
+) -> sqlx::Result<Vec<UsernameRow>> {
+    sqlx::query_as!(
+        UsernameRow,
+        "SELECT id, username FROM users WHERE username = ANY($1) AND status = 'active'",
+        names,
+    )
+    .fetch_all(conn)
+    .await
+}

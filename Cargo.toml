@@ -13,6 +13,7 @@ publish = false
 ik-kernel = { path = "crates/kernel" }
 ik-auth = { path = "crates/auth" }
 ik-content = { path = "crates/content" }
+ik-comments = { path = "crates/comments" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }

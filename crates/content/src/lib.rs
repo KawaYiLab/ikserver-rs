@@ -2,9 +2,10 @@
 //!
 //! 业务规则：`docs/business-rules/posts.md`。评论在后续的 comments 模块。
 
-mod anonymous;
+pub mod anonymous;
 mod benefits;
 pub mod dto;
+pub mod interop;
 mod repo;
 mod routes;
 pub mod service;

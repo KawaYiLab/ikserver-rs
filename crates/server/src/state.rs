@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use ik_auth::{AuthSettings, AuthState};
+use ik_comments::CommentsState;
 use ik_content::ContentState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
@@ -18,6 +19,7 @@ pub struct AppState {
     pub bus: Arc<LocalBus>,
     pub auth: AuthState,
     pub content: ContentState,
+    pub comments: CommentsState,
 }
 
 impl AppState {
@@ -34,6 +36,7 @@ impl AppState {
         );
         let bus = Arc::new(LocalBus::new(4096));
         let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
+        let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -41,6 +44,7 @@ impl AppState {
             bus,
             auth,
             content,
+            comments,
         })
     }
 }
@@ -54,5 +58,11 @@ impl FromRef<AppState> for AuthState {
 impl FromRef<AppState> for ContentState {
     fn from_ref(state: &AppState) -> Self {
         state.content.clone()
+    }
+}
+
+impl FromRef<AppState> for CommentsState {
+    fn from_ref(state: &AppState) -> Self {
+        state.comments.clone()
     }
 }

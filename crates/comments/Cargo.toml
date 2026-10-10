@@ -1,0 +1,30 @@
+[package]
+name = "ik-comments"
+description = "评论：楼层、楼中楼、置顶、采纳、@提及"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ik-kernel.workspace = true
+ik-auth.workspace = true
+ik-content.workspace = true
+tokio.workspace = true
+axum.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+governor.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

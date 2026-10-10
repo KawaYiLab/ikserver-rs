@@ -661,6 +661,22 @@ pub async fn set_role_by_email(db: &PgPool, email: &str, role: Role) -> Result<b
     Ok(repo::set_role_by_email(&mut conn, &email, role, Utc::now()).await?)
 }
 
+/// 用户名 → 用户 id（精确匹配、大小写敏感，只含正常状态的账号）。用于 @ 提及解析。
+pub async fn active_user_ids_by_usernames(
+    db: &PgPool,
+    names: &[String],
+) -> Result<HashMap<String, Id<User>>, Problem> {
+    if names.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let mut conn = db.acquire().await?;
+    Ok(repo::active_users_by_usernames(&mut conn, names)
+        .await?
+        .into_iter()
+        .map(|row| (row.username, Id::new(row.id)))
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

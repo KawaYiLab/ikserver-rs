@@ -656,3 +656,109 @@ pub(crate) async fn insert_category(
     .await?;
     Ok(())
 }
+
+// ---------- 供评论域在同一事务里调用 ----------
+
+pub(crate) struct PostRefRow {
+    pub id: i64,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub is_public: bool,
+    pub allow_comment_accept: bool,
+}
+
+pub(crate) async fn post_ref(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<PostRefRow>> {
+    sqlx::query_as!(
+        PostRefRow,
+        r#"SELECT p.id, p.author_id, p.is_anonymous,
+                  (p.status = 'published' AND p.hidden_at IS NULL) AS "is_public!",
+                  COALESCE(c.allow_comment_accept, FALSE) AS "allow_comment_accept!"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id = $1"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn lock_post_ref(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<PostRefRow>> {
+    sqlx::query_as!(
+        PostRefRow,
+        r#"SELECT p.id, p.author_id, p.is_anonymous,
+                  (p.status = 'published' AND p.hidden_at IS NULL) AS "is_public!",
+                  COALESCE(c.allow_comment_accept, FALSE) AS "allow_comment_accept!"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id = $1
+           FOR UPDATE OF p"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 新评论：评论数 +1 并顶帖（CMT-084/088）。
+pub(crate) async fn comment_added(
+    conn: &mut PgConnection,
+    id: i64,
+    by: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE posts SET comment_count = comment_count + 1, bumped_at = $3, last_bumped_by = $2
+         WHERE id = $1",
+        id,
+        by,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn comments_removed(conn: &mut PgConnection, id: i64, n: i32) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE posts SET comment_count = GREATEST(comment_count - $2, 0) WHERE id = $1",
+        id,
+        n,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn mark_solved(
+    conn: &mut PgConnection,
+    id: i64,
+    comment_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE posts SET solved_at = $3, accepted_comment_id = $2 WHERE id = $1",
+        id,
+        comment_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 只有帖子当前指向的正是这条评论时才清除（防止误清并发采纳的另一条，CMT-060）。
+pub(crate) async fn clear_solved(
+    conn: &mut PgConnection,
+    id: i64,
+    comment_id: i64,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE posts SET solved_at = NULL, accepted_comment_id = NULL
+         WHERE id = $1 AND accepted_comment_id = $2",
+        id,
+        comment_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
