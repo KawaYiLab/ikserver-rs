@@ -134,6 +134,7 @@ async fn openapi_document_is_served() {
     assert!(body["paths"]["/v1/me/sessions/{id}"]["delete"].is_object());
     assert!(body["paths"]["/v1/me/check-in"]["post"].is_object());
     assert!(body["paths"]["/v1/posts/{id}/denny"]["post"].is_object());
+    assert!(body["paths"]["/v1/exam/attempts/{id}/submit"]["post"].is_object());
     let schemes = &body["components"]["securitySchemes"];
     assert_eq!(schemes["session_cookie"]["in"], "cookie");
     assert_eq!(schemes["bearer"]["scheme"], "bearer");
@@ -153,6 +154,13 @@ async fn benefits_are_public() {
     assert_eq!(body["level"], 0);
     assert_eq!(body["benefits"]["postMaxBodyChars"], 0);
     assert_eq!(body["nextBenefits"]["postMaxBodyChars"], 3000);
+}
+
+#[tokio::test]
+async fn exam_requires_login() {
+    let (status, _, body) = send(get("/v1/exam")).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["code"], "UNAUTHORIZED");
 }
 
 #[tokio::test]

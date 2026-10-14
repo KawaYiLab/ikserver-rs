@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE exam_attempts a\n         SET submitted_at = a.expires_at, passed = FALSE, score = 0, score_percent = 0,\n             total_score = (SELECT COALESCE(SUM((q ->> 'weight')::int), 0)\n                            FROM jsonb_array_elements(a.questions) q)\n         WHERE a.user_id = $1 AND a.submitted_at IS NULL AND a.expires_at <= $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "afd7fbc2c7562ee72c44904e5ec05d162ce307654e9e2debabbb945cb445a48e"
+}

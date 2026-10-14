@@ -309,6 +309,15 @@ pub(crate) async fn lock_active_user_state(
     .await
 }
 
+pub(crate) async fn exam_passed_at(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<Option<DateTime<Utc>>>> {
+    sqlx::query_scalar!("SELECT exam_passed_at FROM users WHERE id = $1", id)
+        .fetch_optional(conn)
+        .await
+}
+
 pub(crate) async fn set_level(
     conn: &mut PgConnection,
     id: i64,
@@ -324,6 +333,23 @@ pub(crate) async fn set_level(
     .execute(conn)
     .await?;
     Ok(())
+}
+
+/// 首次通过考试时写入通过时间；已通过的不改写。返回是否命中（即首次通过）。
+pub(crate) async fn mark_exam_passed(
+    conn: &mut PgConnection,
+    id: i64,
+    at: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET exam_passed_at = $2, updated_at = $2
+         WHERE id = $1 AND exam_passed_at IS NULL",
+        id,
+        at,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 pub(crate) struct MeRow {

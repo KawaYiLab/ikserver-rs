@@ -55,7 +55,27 @@ cargo run -p ik-server -- serve
 cargo run -p ik-server -- user set-role someone@example.com admin     # 设置角色（创建第一个管理员）
 cargo run -p ik-server -- category create --slug guide --name 攻略 --order 1
 cargo run -p ik-server -- category create --slug notice --name 公告 --admin-only --allow-accept
+cargo run -p ik-server -- exam import questions.json                  # 导入入站考试题库
 ```
+
+题库文件是 JSON 数组，每题字段：
+
+```json
+[
+  {
+    "question": "绳网的货币叫什么？",
+    "kind": "single",
+    "options": [{ "key": "A", "text": "丁尼" }, { "key": "B", "text": "菲林" }],
+    "correctKeys": ["A"],
+    "explanation": "绳网通用货币是丁尼。",
+    "weight": 1,
+    "tag": "常识"
+  }
+]
+```
+
+`kind` 为 `single`（≥2 个选项、1 个答案）、`multiple`（≥3 个选项、≥2 个答案）或 `boolean`（恰好 2 个选项、1 个答案）；
+`explanation`、`weight`（默认 1）、`enabled`（默认 true）、`tag` 可省略。逐题校验写入，遇到不合格的题会停下并报出是第几题。
 
 ### 数据库集成测试
 

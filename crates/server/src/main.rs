@@ -28,6 +28,18 @@ enum Command {
     /// 分区运维
     #[command(subcommand)]
     Category(CategoryCommand),
+    /// 入站考试题库运维
+    #[command(subcommand)]
+    Exam(ExamCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum ExamCommand {
+    /// 从 JSON 文件导入题目（数组，每项字段同 QuestionInput：question、kind、options、correctKeys……）
+    Import {
+        /// JSON 文件路径
+        path: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -78,7 +90,37 @@ async fn main() -> anyhow::Result<()> {
         Command::Migrate => migrate().await,
         Command::User(cmd) => user_command(cmd).await,
         Command::Category(cmd) => category_command(cmd).await,
+        Command::Exam(cmd) => exam_command(cmd).await,
     }
+}
+
+/// 逐题校验并写入；遇到不合格的题立即停止并报出是第几题（前面的题已经写入）。
+async fn exam_command(cmd: ExamCommand) -> anyhow::Result<()> {
+    let state = connect_for_cli().await?;
+    match cmd {
+        ExamCommand::Import { path } => {
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("读取 {} 失败", path.display()))?;
+            let questions: Vec<ik_exam::dto::QuestionInput> =
+                serde_json::from_str(&raw).context("题目文件不是合法的 JSON 数组")?;
+            let mut imported = 0usize;
+            for (index, question) in questions.into_iter().enumerate() {
+                ik_exam::service::create_question(&state.exam, question)
+                    .await
+                    .map_err(|p| {
+                        let fields: Vec<String> = p
+                            .field_errors()
+                            .iter()
+                            .map(|e| format!("{}：{}", e.field, e.detail))
+                            .collect();
+                        anyhow::anyhow!("第 {} 题：{p} {}", index + 1, fields.join("；"))
+                    })?;
+                imported += 1;
+            }
+            tracing::info!(imported, "题目已导入");
+        }
+    }
+    Ok(())
 }
 
 async fn connect_for_cli() -> anyhow::Result<AppState> {

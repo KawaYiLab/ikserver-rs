@@ -99,15 +99,20 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
 | CHECK_IN_ALREADY_TODAY | 409 | 今天已经签到过了，明天 4 点后再来吧 | 签到日按北京时间 04:00 切日 |
 | DENNY_ALREADY_GIVEN | 409 | 你已经给这篇委托投过丁尼了 | 每人每帖终身一次 |
+| EXAM_ALREADY_PASSED | 409 | 你已通过入站考试 | 开考时 |
+| EXAM_ATTEMPT_ALREADY_SUBMITTED | 409 | 本场考试已提交 | |
+| EXAM_ATTEMPT_EXPIRED | 409 | 考试已超时，请重新开始 | 超时交卷照样记一次失败 |
 | REVISION_CONFLICT | 412 | 内容已在别处被修改，请刷新后重试 | If-Match 失败或格式不对 |
 | PAYLOAD_TOO_LARGE | 413 | 请求体过大 | |
 | UNSUPPORTED_MEDIA_TYPE | 415 | 请求体必须是 application/json | |
 | RATE_LIMITED | 429 | 操作过于频繁，请稍后再试 | 带 `Retry-After`（秒） |
 | CODE_COOLDOWN | 429 | 验证码发送过于频繁，请 N 秒后再试 | 仅注册用途；带 `Retry-After` |
 | CODE_TOO_MANY_ATTEMPTS | 429 | 验证码错误次数过多，请重新获取 | 同一验证码错 5 次作废 |
+| EXAM_COOLDOWN | 429 | 考试失败次数过多，请 N 分钟后再试 | 最近 3 次都未通过；带 `Retry-After` |
 | INTERNAL | 500 | 服务器开小差了，请稍后再试 | 仅 requestId |
 | SERVICE_UNAVAILABLE | 503 | 服务暂时不可用，请稍后再试 | 外部依赖超时 |
 | MAIL_SEND_FAILED | 503 | 验证码邮件发送失败，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
+| EXAM_NOT_AVAILABLE | 503 | 题库暂未配置，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 
 ## 限流
 

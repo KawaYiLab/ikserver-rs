@@ -5,6 +5,7 @@ use ik_auth::{AuthSettings, AuthState};
 use ik_comments::CommentsState;
 use ik_content::ContentState;
 use ik_economy::EconomyState;
+use ik_exam::ExamState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
@@ -22,6 +23,7 @@ pub struct AppState {
     pub content: ContentState,
     pub comments: CommentsState,
     pub economy: EconomyState,
+    pub exam: ExamState,
 }
 
 impl AppState {
@@ -40,6 +42,7 @@ impl AppState {
         let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
         let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
+        let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -49,6 +52,7 @@ impl AppState {
             content,
             comments,
             economy,
+            exam,
         })
     }
 }
@@ -74,5 +78,11 @@ impl FromRef<AppState> for CommentsState {
 impl FromRef<AppState> for EconomyState {
     fn from_ref(state: &AppState) -> Self {
         state.economy.clone()
+    }
+}
+
+impl FromRef<AppState> for ExamState {
+    fn from_ref(state: &AppState) -> Self {
+        state.exam.clone()
     }
 }

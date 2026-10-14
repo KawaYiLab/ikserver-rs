@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT passed AS \"passed!\", at AS \"at!\" FROM (\n               SELECT passed, submitted_at AS at FROM exam_attempts\n               WHERE user_id = $1 AND submitted_at IS NOT NULL\n               UNION ALL\n               SELECT FALSE, expires_at FROM exam_attempts\n               WHERE user_id = $1 AND submitted_at IS NULL AND expires_at <= $2\n           ) r\n           ORDER BY at DESC\n           LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "8b5df0b5feb14f5261310702912662e1c515dbcfb7ae3fde3ea9fb3afd79fa1a"
+}

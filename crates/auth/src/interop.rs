@@ -44,8 +44,25 @@ pub async fn lock_active_user(
         }))
 }
 
+/// 入站考试通过时间（不加锁）。用户不存在时返回 None，未通过时返回 `Some(None)`。
+pub async fn exam_passed_at(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Option<Option<DateTime<Utc>>>, Problem> {
+    Ok(repo::exam_passed_at(conn, user_id).await?)
+}
+
 /// 写入等级（0–7）。调用方必须已锁住该用户行。
 pub async fn set_level(conn: &mut PgConnection, user_id: i64, level: i16) -> Result<(), Problem> {
     repo::set_level(conn, user_id, level.clamp(0, 7), Utc::now()).await?;
     Ok(())
+}
+
+/// 记录通过入站考试。已经通过的不会改写通过时间；返回这次是否是首次通过。
+pub async fn mark_exam_passed(
+    conn: &mut PgConnection,
+    user_id: i64,
+    at: DateTime<Utc>,
+) -> Result<bool, Problem> {
+    Ok(repo::mark_exam_passed(conn, user_id, at).await?)
 }

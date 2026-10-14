@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, questions, answers, passed, score, total_score, score_percent, started_at,\n                expires_at, submitted_at\n         FROM exam_attempts\n         WHERE user_id = $1 AND submitted_at IS NULL AND expires_at > $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "questions",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "questions"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "answers",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "answers"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "passed",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "passed"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "score",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "score"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "total_score",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "total_score"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "score_percent",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "score_percent"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "started_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "started_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "expires_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "submitted_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "exam_attempts",
+            "name": "submitted_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f925439ec825d03c59350c18b40cbb9be21369ed5dc819c91e10d3b31413bd7f"
+}

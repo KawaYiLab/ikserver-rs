@@ -43,7 +43,8 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`content → economy`（发帖经验、投币）；`comments → content, economy`。economy 不能依赖 content，所以投币的入口在 content，记账在 economy。
+- 实际依赖：`economy → auth`；`content → economy`（发帖经验、投币）；`comments → content, economy`；
+  `exam → economy`（通过奖励）。economy 不能依赖 content，所以投币的入口在 content，记账在 economy。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。
 
 ## 请求处理流

@@ -1420,6 +1420,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-exam"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "getrandom 0.4.3",
+ "http",
+ "ik-auth",
+ "ik-economy",
+ "ik-kernel",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
 name = "ik-kernel"
 version = "0.1.0"
 dependencies = [
@@ -1461,6 +1482,7 @@ dependencies = [
  "ik-comments",
  "ik-content",
  "ik-economy",
+ "ik-exam",
  "ik-kernel",
  "serde",
  "serde_json",

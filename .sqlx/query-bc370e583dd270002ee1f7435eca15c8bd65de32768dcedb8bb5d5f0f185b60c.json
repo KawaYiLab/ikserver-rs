@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE exam_attempts SET started_at = now() - interval '2 hours',\n                                      expires_at = now() - interval '1 second'\n             WHERE submitted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "bc370e583dd270002ee1f7435eca15c8bd65de32768dcedb8bb5d5f0f185b60c"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE exam_attempts SET submitted_at = submitted_at - interval '31 minutes'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "be26e158b3277ecc50ad39482355c91fae2cf1fe418dd7a430031932587f4bec"
+}

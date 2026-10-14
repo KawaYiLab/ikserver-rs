@@ -19,6 +19,7 @@ ik-auth.workspace = true
 ik-content.workspace = true
 ik-comments.workspace = true
 ik-economy.workspace = true
+ik-exam.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

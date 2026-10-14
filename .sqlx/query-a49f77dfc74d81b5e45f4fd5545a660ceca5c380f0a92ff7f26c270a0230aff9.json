@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET exam_passed_at = $2, updated_at = $2\n         WHERE id = $1 AND exam_passed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a49f77dfc74d81b5e45f4fd5545a660ceca5c380f0a92ff7f26c270a0230aff9"
+}

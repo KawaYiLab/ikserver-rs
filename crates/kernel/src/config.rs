@@ -63,6 +63,37 @@ pub struct Config {
     pub mail: Mail,
     pub secrets: Secrets,
     pub log: Log,
+    pub exam: Exam,
+}
+
+/// 入站考试参数（EXAM-004）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Exam {
+    /// 每场抽题数（题库不足时取全部）。
+    pub question_count: u32,
+    /// 及格线（百分比，含边界）。
+    pub pass_score_percent: u32,
+    pub time_limit_secs: i64,
+    /// 最近这么多次全部未通过就进入冷却。
+    pub max_fails_before_cooldown: u32,
+    pub fail_cooldown_secs: i64,
+    pub reward_denny: i32,
+    pub reward_exp: i32,
+}
+
+impl Default for Exam {
+    fn default() -> Self {
+        Self {
+            question_count: 100,
+            pass_score_percent: 60,
+            time_limit_secs: 3600,
+            max_fails_before_cooldown: 3,
+            fail_cooldown_secs: 1800,
+            reward_denny: 50,
+            reward_exp: 50,
+        }
+    }
 }
 
 impl Default for Config {
@@ -77,6 +108,7 @@ impl Default for Config {
             mail: Mail::default(),
             secrets: Secrets::default(),
             log: Log::default(),
+            exam: Exam::default(),
         }
     }
 }
@@ -241,6 +273,21 @@ impl Config {
         if self.session.ttl_days <= 0 || self.session.max_lifetime_days < self.session.ttl_days {
             return Err(ConfigError::Invalid(
                 "session.ttl_days 必须为正，且不大于 session.max_lifetime_days".to_owned(),
+            ));
+        }
+        let exam = &self.exam;
+        if exam.question_count == 0
+            || exam.pass_score_percent == 0
+            || exam.pass_score_percent > 100
+            || exam.time_limit_secs <= 0
+            || exam.max_fails_before_cooldown == 0
+            || exam.fail_cooldown_secs < 0
+            || exam.reward_denny < 0
+            || exam.reward_exp < 0
+        {
+            return Err(ConfigError::Invalid(
+                "exam 配置不合法：题数、及格线（1–100）、时限、冷却次数必须为正，冷却时长与奖励不能为负"
+                    .to_owned(),
             ));
         }
         if self.env.is_prod() {
