@@ -107,6 +107,7 @@
 
 - 主键 `(post_id, giver_id)`：每人每帖终身一次；金额固定 1。帖子删除时级联删除。
 - 帖子上的 `denny_count` 由 content 在同一事务里 +1。
+
 ## 考试域（`20261014000002_exam.sql`）
 
 ### `exam_questions`
@@ -122,3 +123,17 @@
 - 每人最多一场未交卷的场次（部分唯一索引）。过期未交卷的场次在下次开考时按失败收尾，交卷时间记为过期时间，计入冷却（D-060 方案 A）。
 - 通过状态写在 `users.exam_passed_at`（auth interop），丁尼、经验奖励经 economy 发放，与交卷在同一事务。奖励按 `user:<id>` 幂等，已发过视为成功（D-064 方案 A）。
 - 旧系统存量用户的考试豁免（EXAM-014）在数据迁移脚本里处理：导入时把存量用户的 `exam_passed_at` 设为导入时间。
+## 社交关系域（`20261015000001_social.sql`）
+
+### `follows`
+
+- 主键 `(follower_id, followee_id)`，`CHECK` 不能关注自己。旧系统关注的是「作者」，新系统作者就是用户。
+- 粉丝数实时 `count(*)`（走 `follows_followee_idx`），不做物化列：写入频率低，且计数列应归 auth 的 `users` 表所有。
+
+### `user_blocks`
+
+- 主键 `(blocker_id, blocked_id)`，单向记录、不可修改，只能删除。
+- 「任一方向」判断与列表过滤的排除集合由 `ik_social::interop` 提供，其他域不直接读这张表。
+  列表 SQL 里写成 `(is_anonymous OR NOT (author_id = ANY($excluded)))`，匿名内容永远不过滤。
+- 同一对用户之间的关注 / 拉黑写入用事务级 advisory lock（按两人 id 的有序对哈希）串行化，
+  避免「关注」与「拉黑」并发提交后留下拉黑双方之间的关注。

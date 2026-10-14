@@ -65,7 +65,7 @@ async fn list_comments(
     responses(
         (status = 201, body = CommentView),
         (status = 400, description = "VALIDATION_FAILED", body = ProblemBody, content_type = "application/problem+json"),
-        (status = 403, description = "EXAM_REQUIRED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "EXAM_REQUIRED / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
         (status = 404, description = "帖子不存在或不公开", body = ProblemBody, content_type = "application/problem+json"),
         (status = 429, description = "RATE_LIMITED", body = ProblemBody, content_type = "application/problem+json"),
     )

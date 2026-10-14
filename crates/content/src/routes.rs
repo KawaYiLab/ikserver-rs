@@ -164,6 +164,7 @@ async fn create_post(
     params(("id" = String, Path, description = "帖子 id")),
     responses(
         (status = 200, body = PostDetail),
+        (status = 403, description = "USER_BLOCKED：与作者存在拉黑关系（匿名帖不受影响）", body = ProblemBody, content_type = "application/problem+json"),
         (status = 404, body = ProblemBody, content_type = "application/problem+json"),
     )
 )]
@@ -373,7 +374,7 @@ async fn record_view(
     responses(
         (status = 200, body = GiftResult),
         (status = 402, description = "INSUFFICIENT_DENNY", body = ProblemBody, content_type = "application/problem+json"),
-        (status = 403, description = "EXAM_REQUIRED / DENNY_SELF_GIVE / DENNY_ANONYMOUS_POST", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "EXAM_REQUIRED / DENNY_SELF_GIVE / DENNY_ANONYMOUS_POST / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
         (status = 404, description = "帖子不存在或不公开", body = ProblemBody, content_type = "application/problem+json"),
         (status = 409, description = "DENNY_ALREADY_GIVEN", body = ProblemBody, content_type = "application/problem+json"),
     )

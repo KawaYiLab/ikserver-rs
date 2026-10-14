@@ -16,6 +16,7 @@ ik-content = { path = "crates/content" }
 ik-comments = { path = "crates/comments" }
 ik-economy = { path = "crates/economy" }
 ik-exam = { path = "crates/exam" }
+ik-social = { path = "crates/social" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }

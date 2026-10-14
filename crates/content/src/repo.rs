@@ -521,6 +521,8 @@ pub(crate) struct FeedFilter {
     pub exclude_pinned: bool,
     pub after: Option<(DateTime<Utc>, i64)>,
     pub limit: i64,
+    /// 与读者有拉黑关系的作者；他们的匿名帖不受影响（COMMON-008）。
+    pub excluded_authors: Vec<i64>,
 }
 
 /// 公开帖子按 (bumped_at, id) 倒序。可选按分区、标签筛选。
@@ -544,6 +546,7 @@ pub(crate) async fn feed(
                      SELECT 1 FROM post_tags pt WHERE pt.post_id = p.id AND pt.tag_id = $2))
              AND (NOT $3 OR p.pinned_at IS NULL)
              AND ($4::timestamptz IS NULL OR (p.bumped_at, p.id) < ($4, $5::bigint))
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($7)))
            ORDER BY p.bumped_at DESC, p.id DESC
            LIMIT $6"#,
         filter.category_id,
@@ -552,6 +555,7 @@ pub(crate) async fn feed(
         after_at,
         after_id,
         filter.limit,
+        &filter.excluded_authors,
     )
     .fetch_all(conn)
     .await
@@ -559,6 +563,7 @@ pub(crate) async fn feed(
 
 pub(crate) async fn pinned_cards(
     conn: &mut PgConnection,
+    excluded_authors: &[i64],
     limit: i64,
 ) -> sqlx::Result<Vec<CardRow>> {
     sqlx::query_as!(
@@ -571,9 +576,11 @@ pub(crate) async fn pinned_cards(
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.pinned_at IS NOT NULL AND p.status = 'published' AND p.hidden_at IS NULL
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))
            ORDER BY p.pinned_at DESC, p.id DESC
            LIMIT $1"#,
         limit,
+        excluded_authors,
     )
     .fetch_all(conn)
     .await

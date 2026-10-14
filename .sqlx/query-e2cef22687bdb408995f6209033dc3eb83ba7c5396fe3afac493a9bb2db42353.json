@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL\n           AND pinned_at IS NULL AND accepted_at IS NULL\n           AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::bigint))\n         ORDER BY created_at DESC, id DESC\n         LIMIT $4",
+  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL\n           AND pinned_at IS NULL AND accepted_at IS NULL\n           AND (is_anonymous OR NOT (author_id = ANY($5)))\n           AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::bigint))\n         ORDER BY created_at DESC, id DESC\n         LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -152,7 +152,8 @@
         "Int8",
         "Timestamptz",
         "Int8",
-        "Int8"
+        "Int8",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -171,5 +172,5 @@
       false
     ]
   },
-  "hash": "665c6cbf90408b228ab4ace6c1857ee116201881aa480359f3149f4b9b1f1e06"
+  "hash": "e2cef22687bdb408995f6209033dc3eb83ba7c5396fe3afac493a9bb2db42353"
 }

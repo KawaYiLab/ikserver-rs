@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE comments SET is_anonymous = TRUE, anonymous_seed = 'seed' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c85f0558e4cf61338da023752a870c1a83523228975061a5b3074bb621c756ec"
+}

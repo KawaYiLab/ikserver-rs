@@ -186,9 +186,12 @@ pub(crate) async fn unaccept(conn: &mut PgConnection, id: i64) -> sqlx::Result<(
 // ---------- 读取 ----------
 
 /// 普通一级评论：可见、未置顶、未采纳，新的在前。
+///
+/// 本节所有读取都带 excluded_authors：与读者有拉黑关系的人的非匿名评论不出现（BLOCK-014）。
 pub(crate) async fn top_level_page(
     conn: &mut PgConnection,
     post_id: i64,
+    excluded_authors: &[i64],
     after: Option<(DateTime<Utc>, i64)>,
     limit: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
@@ -200,6 +203,7 @@ pub(crate) async fn top_level_page(
          FROM comments
          WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
            AND pinned_at IS NULL AND accepted_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($5)))
            AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::bigint))
          ORDER BY created_at DESC, id DESC
          LIMIT $4",
@@ -207,6 +211,7 @@ pub(crate) async fn top_level_page(
         after_at,
         after_id,
         limit,
+        excluded_authors,
     )
     .fetch_all(conn)
     .await
@@ -215,14 +220,17 @@ pub(crate) async fn top_level_page(
 pub(crate) async fn accepted(
     conn: &mut PgConnection,
     post_id: i64,
+    excluded_authors: &[i64],
 ) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
                 like_count, pinned_at, accepted_at, hidden_at, created_at
          FROM comments
-         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL",
+         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL
+           AND (is_anonymous OR NOT (author_id = ANY($2)))",
         post_id,
+        excluded_authors,
     )
     .fetch_optional(conn)
     .await
@@ -231,6 +239,7 @@ pub(crate) async fn accepted(
 pub(crate) async fn pinned(
     conn: &mut PgConnection,
     post_id: i64,
+    excluded_authors: &[i64],
 ) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
@@ -238,8 +247,10 @@ pub(crate) async fn pinned(
                 like_count, pinned_at, accepted_at, hidden_at, created_at
          FROM comments
          WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
-           AND pinned_at IS NOT NULL AND accepted_at IS NULL",
+           AND pinned_at IS NOT NULL AND accepted_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($2)))",
         post_id,
+        excluded_authors,
     )
     .fetch_optional(conn)
     .await
@@ -249,6 +260,7 @@ pub(crate) async fn pinned(
 pub(crate) async fn inline_replies(
     conn: &mut PgConnection,
     parent_ids: &[i64],
+    excluded_authors: &[i64],
     per_parent: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
     sqlx::query_as!(
@@ -261,12 +273,14 @@ pub(crate) async fn inline_replies(
            CROSS JOIN LATERAL (
                SELECT * FROM comments c
                WHERE c.parent_id = p.id AND c.hidden_at IS NULL
+                 AND (c.is_anonymous OR NOT (c.author_id = ANY($3)))
                ORDER BY c.created_at, c.id
                LIMIT $2
            ) r
            ORDER BY r.parent_id, r.created_at, r.id"#,
         parent_ids,
         per_parent,
+        excluded_authors,
     )
     .fetch_all(conn)
     .await
@@ -280,14 +294,17 @@ pub(crate) struct ReplyCount {
 pub(crate) async fn visible_reply_counts(
     conn: &mut PgConnection,
     parent_ids: &[i64],
+    excluded_authors: &[i64],
 ) -> sqlx::Result<Vec<ReplyCount>> {
     sqlx::query_as!(
         ReplyCount,
         r#"SELECT parent_id AS "parent_id!", count(*) AS "n!"
            FROM comments
            WHERE parent_id = ANY($1) AND hidden_at IS NULL
+             AND (is_anonymous OR NOT (author_id = ANY($2)))
            GROUP BY parent_id"#,
         parent_ids,
+        excluded_authors,
     )
     .fetch_all(conn)
     .await
@@ -297,6 +314,7 @@ pub(crate) async fn visible_reply_counts(
 pub(crate) async fn replies_page(
     conn: &mut PgConnection,
     parent_id: i64,
+    excluded_authors: &[i64],
     after: Option<(DateTime<Utc>, i64)>,
     limit: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
@@ -307,6 +325,7 @@ pub(crate) async fn replies_page(
                 like_count, pinned_at, accepted_at, hidden_at, created_at
          FROM comments
          WHERE parent_id = $1 AND hidden_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($5)))
            AND ($2::timestamptz IS NULL OR (created_at, id) > ($2, $3::bigint))
          ORDER BY created_at, id
          LIMIT $4",
@@ -314,6 +333,7 @@ pub(crate) async fn replies_page(
         after_at,
         after_id,
         limit,
+        excluded_authors,
     )
     .fetch_all(conn)
     .await

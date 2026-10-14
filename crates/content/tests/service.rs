@@ -840,3 +840,85 @@ async fn first_publish_grants_exp_once_per_day(db: PgPool) {
         .unwrap();
     assert_eq!(exp_of(&h.db, 2).await, 0);
 }
+
+// ---------- 拉黑 ----------
+
+async fn block(db: &PgPool, blocker: i64, blocked: i64) {
+    sqlx::query!(
+        "INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)",
+        blocker,
+        blocked,
+    )
+    .execute(db)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn blocks_hide_non_anonymous_posts_both_ways(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let reader = h.writer(2).await;
+    let bystander = h.writer(3).await;
+    let named = service::create(&h.state, &author, input("实名"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let mut anon = input("匿名");
+    anon.is_anonymous = true;
+    let anonymous = service::create(&h.state, &author, anon, true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let pinned = service::create(&h.state, &author, input("置顶"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let admin = h.user(9, Role::Admin, 7, true).await;
+    service::pin(&h.state, &admin, pinned).await.unwrap();
+    // 作者拉黑了读者：对读者来说，方向无关。
+    block(&h.db, 1, 2).await;
+
+    let page = service::feed(&h.state, Some(&reader), latest())
+        .await
+        .unwrap();
+    let ids: Vec<i64> = page.items.iter().map(|c| c.id.get()).collect();
+    assert_eq!(ids, vec![anonymous], "匿名帖不按拉黑过滤");
+    assert!(page.pinned.is_empty());
+
+    let err = service::detail(&h.state, Some(&reader), named)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "USER_BLOCKED");
+    service::detail(&h.state, Some(&reader), anonymous)
+        .await
+        .unwrap();
+
+    // 旁观者和游客不受影响。
+    let page = service::feed(&h.state, Some(&bystander), latest())
+        .await
+        .unwrap();
+    assert_eq!(page.items.len() + page.pinned.len(), 3);
+    service::detail(&h.state, None, named).await.unwrap();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn gift_is_rejected_between_blocked_users(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = service::create(&h.state, &author, input("帖子"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    block(&h.db, 1, 2).await;
+    let err = service::gift_denny(&h.state, &fan, post, gift())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "USER_BLOCKED");
+    assert_eq!(balance(&h.db, 2).await, (30, 0));
+}

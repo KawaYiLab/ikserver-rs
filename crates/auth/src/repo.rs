@@ -309,6 +309,22 @@ pub(crate) async fn lock_active_user_state(
     .await
 }
 
+pub(crate) struct UserRefRow {
+    pub id: i64,
+    pub status: String,
+    pub is_ai_agent: bool,
+}
+
+pub(crate) async fn user_ref(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<UserRefRow>> {
+    sqlx::query_as!(
+        UserRefRow,
+        "SELECT id, status, is_ai_agent FROM users WHERE id = $1",
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
 pub(crate) async fn exam_passed_at(
     conn: &mut PgConnection,
     id: i64,

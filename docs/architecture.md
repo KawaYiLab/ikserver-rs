@@ -36,15 +36,19 @@ kernel ◄── auth ◄── content ◄── feed
 
 - `kernel`：不依赖任何业务域。提供配置、Problem 错误、ID、时间、游标、
   `AuthCtx`（鉴权上下文）、`EventBus` trait、任务入队 helper、限流 helper。
-- 业务域 crate：`auth`、`content`（帖子/评论/版块/标签/表情）、`feed`（信息流/热榜/搜索）、
-  `social`（赞/藏/关注/拉黑/三连）、`economy`（丁尼/经验/签到/权益/装扮）、`exam`、
+- 业务域 crate：`auth`、`content`（帖子/版块/标签/表情/帖子的赞藏与三连）、`comments`（评论与评论点赞）、
+  `feed`（信息流/热榜/搜索）、`social`（关注/拉黑）、`economy`（丁尼/经验/签到/权益/装扮）、`exam`、
   `messaging`（私信）、`notify`（通知/收件箱）、`realtime`（WS 网关）、`media`（上传/文件）、
   `search`、`moderation`（举报/处罚/审计）、`ai`（供应商/模型/角色/编排/额度）、`admin`。
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`content → economy`（发帖经验、投币）；`comments → content, economy`；
-  `exam → economy`（通过奖励）。economy 不能依赖 content，所以投币的入口在 content，记账在 economy。
+- 实际依赖：`economy → auth`；`social → auth`；`content → economy, social`（发帖经验、投币、拉黑判断）；
+  `comments → content, economy, social`；`exam → economy`（通过奖励）。economy 不能依赖 content，
+  所以投币的入口在 content，记账在 economy。
+- 拉黑几乎在每个读写路径上生效，所以 `social` 只放用户之间的关系（关注、拉黑），位于 content 之下，
+  由 `ik_social::interop` 提供「任一方向拉黑」判断与列表过滤的排除集合。点赞、收藏、三连是帖子和评论
+  上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。
 
 ## 请求处理流

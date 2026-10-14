@@ -665,8 +665,7 @@ pub async fn unpin(
 }
 
 /// 给帖子投 1 丁尼（DENNY-008）。帖子必须公开（D-048 方案 A：被隐藏的也不能投）、
-/// 不能是匿名帖、不能是自己的帖子；每人每帖终身一次。
-// TODO(social)：拉黑关系拦截（BLOCK-016）在 social 域接入后补上。
+/// 不能是匿名帖、不能是自己的帖子、双方不能有拉黑关系（BLOCK-016）；每人每帖终身一次。
 pub async fn gift_denny(
     state: &ContentState,
     principal: &Principal,
@@ -691,6 +690,7 @@ pub async fn gift_denny(
     if post.author_id == giver_id {
         return Err(ik_economy::service::self_gift());
     }
+    ik_social::interop::ensure_no_block(&mut tx, giver_id, post.author_id).await?;
     let outcome = ik_economy::service::gift_post(
         &mut tx,
         &state.ids,
@@ -912,9 +912,12 @@ pub async fn feed(
         None => None,
     };
 
+    // 与读者有拉黑关系的作者的非匿名帖不出现（BLOCK-013），置顶帖也一样。
+    let excluded_authors =
+        ik_social::interop::excluded_authors(&mut conn, viewer.map(|p| p.user_id.get())).await?;
     let show_pinned = tag_id.is_none();
     let pinned_rows = if show_pinned && after.is_none() {
-        repo::pinned_cards(&mut conn, MAX_PINNED).await?
+        repo::pinned_cards(&mut conn, &excluded_authors, MAX_PINNED).await?
     } else {
         Vec::new()
     };
@@ -926,6 +929,7 @@ pub async fn feed(
             exclude_pinned: show_pinned,
             after,
             limit: limit + 1,
+            excluded_authors,
         },
     )
     .await?;
@@ -945,7 +949,12 @@ pub async fn feed(
     })
 }
 
+fn blocked_post() -> Problem {
+    Problem::new(StatusCode::FORBIDDEN, "USER_BLOCKED", "无法查看该委托")
+}
+
 /// 公开详情。草稿、不存在一律 404；被隐藏的帖子只有作者本人能看。
+/// 读者与作者之间存在拉黑时，非匿名帖返回 403 `USER_BLOCKED`（BLOCK-012）；匿名帖照常可看。
 pub async fn detail(
     state: &ContentState,
     viewer: Option<&Principal>,
@@ -958,6 +967,12 @@ pub async fn detail(
     let is_owner = viewer.is_some_and(|p| p.user_id.get() == row.author_id);
     if row.status != "published" || (row.hidden_at.is_some() && !is_owner) {
         return Err(post_not_found());
+    }
+    if let Some(viewer) = viewer
+        && !row.is_anonymous
+        && ik_social::interop::any_block(&mut conn, viewer.user_id.get(), row.author_id).await?
+    {
+        return Err(blocked_post());
     }
     let (Some(published_at), Some(first_published_at), Some(bumped_at)) =
         (row.published_at, row.first_published_at, row.bumped_at)

@@ -79,6 +79,9 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | IDEMPOTENCY_KEY_INVALID | 400 | 幂等键格式不正确 | 需为 UUID |
 | CODE_INVALID | 400 | 验证码错误或已过期 | 已使用的验证码同样返回此码 |
 | COMMENT_NOT_TOP_LEVEL | 400 | 只有一级评论可以置顶或采纳 | |
+| FOLLOW_SELF | 400 | 不能关注自己 | |
+| BLOCK_SELF | 400 | 不能拉黑自己 | |
+| BLOCK_SYSTEM_ACCOUNT | 400 | 不能拉黑系统账号 | AI 账号不能被拉黑 |
 | UNAUTHORIZED | 401 | 请先登录 | 没带凭据 |
 | SESSION_EXPIRED | 401 | 登录已过期，请重新登录 | 凭据无效/过期/已吊销；触发前端跳登录 |
 | INVALID_CREDENTIALS | 401 | 账号或密码错误 | 账号不存在与密码错误不区分 |
@@ -92,6 +95,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | ACCEPT_DISABLED | 403 | 该分区未开启评论采纳 | CMT-039 |
 | DENNY_SELF_GIVE | 403 | 不能给自己的委托投丁尼 | DENNY-008 |
 | DENNY_ANONYMOUS_POST | 403 | 不能给匿名委托投丁尼 | DENNY-008 |
+| USER_BLOCKED | 403 | 你与对方存在拉黑关系，无法进行此操作 | 任一方向的拉黑；不说明谁拉黑了谁。查看帖子详情时文案为「无法查看该委托」。匿名内容永不返回此码 |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |

@@ -28,8 +28,9 @@ crates/
   comments/  评论、楼中楼、置顶、采纳、@提及
   economy/   经验与等级、丁尼钱包与流水、签到、等级权益
   exam/      入站考试：题库、开考、判分、冷却、首次通过奖励
+  social/    关注、拉黑（位于 content 之下，供各域做拉黑判断与过滤）
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：feed social messaging notify realtime media search
+  （后续按业务域新增：feed messaging notify realtime media search
     moderation ai admin）
 docs/
   architecture.md     架构与模块边界

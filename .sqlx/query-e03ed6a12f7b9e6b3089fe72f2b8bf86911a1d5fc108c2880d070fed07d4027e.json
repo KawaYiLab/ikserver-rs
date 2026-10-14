@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL",
+  "query": "SELECT r.id AS \"id!\", r.post_id AS \"post_id!\", r.parent_id, r.author_id AS \"author_id!\",\n                  r.floor, r.body AS \"body!\", r.is_anonymous AS \"is_anonymous!\", r.anonymous_seed,\n                  r.like_count AS \"like_count!\", r.pinned_at, r.accepted_at, r.hidden_at,\n                  r.created_at AS \"created_at!\"\n           FROM unnest($1::bigint[]) AS p(id)\n           CROSS JOIN LATERAL (\n               SELECT * FROM comments c\n               WHERE c.parent_id = p.id AND c.hidden_at IS NULL\n                 AND (c.is_anonymous OR NOT (c.author_id = ANY($3)))\n               ORDER BY c.created_at, c.id\n               LIMIT $2\n           ) r\n           ORDER BY r.parent_id, r.created_at, r.id",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "id!",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -16,7 +16,7 @@
       },
       {
         "ordinal": 1,
-        "name": "post_id",
+        "name": "post_id!",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -38,7 +38,7 @@
       },
       {
         "ordinal": 3,
-        "name": "author_id",
+        "name": "author_id!",
         "type_info": "Int8",
         "origin": {
           "Table": {
@@ -60,7 +60,7 @@
       },
       {
         "ordinal": 5,
-        "name": "body",
+        "name": "body!",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -71,7 +71,7 @@
       },
       {
         "ordinal": 6,
-        "name": "is_anonymous",
+        "name": "is_anonymous!",
         "type_info": "Bool",
         "origin": {
           "Table": {
@@ -93,7 +93,7 @@
       },
       {
         "ordinal": 8,
-        "name": "like_count",
+        "name": "like_count!",
         "type_info": "Int4",
         "origin": {
           "Table": {
@@ -137,7 +137,7 @@
       },
       {
         "ordinal": 12,
-        "name": "created_at",
+        "name": "created_at!",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
@@ -149,7 +149,9 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8Array",
+        "Int8",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -168,5 +170,5 @@
       false
     ]
   },
-  "hash": "5bfd404171fd5f40a4a016b0feb5dfae0843b76baa5098db874feef82218ee46"
+  "hash": "e03ed6a12f7b9e6b3089fe72f2b8bf86911a1d5fc108c2880d070fed07d4027e"
 }

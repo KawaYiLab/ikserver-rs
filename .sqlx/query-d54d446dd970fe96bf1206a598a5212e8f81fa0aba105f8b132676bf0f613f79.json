@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT p.id, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by,\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.pinned_at IS NOT NULL AND p.status = 'published' AND p.hidden_at IS NULL\n           ORDER BY p.pinned_at DESC, p.id DESC\n           LIMIT $1",
+  "query": "SELECT p.id, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by,\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.pinned_at IS NOT NULL AND p.status = 'published' AND p.hidden_at IS NULL\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))\n           ORDER BY p.pinned_at DESC, p.id DESC\n           LIMIT $1",
   "describe": {
     "columns": [
       {
@@ -199,7 +199,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -223,5 +224,5 @@
       false
     ]
   },
-  "hash": "e583937121e50780a813235351d4753c43c3c598657e3b5744b662efb26a9186"
+  "hash": "d54d446dd970fe96bf1206a598a5212e8f81fa0aba105f8b132676bf0f613f79"
 }

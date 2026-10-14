@@ -44,6 +44,23 @@ pub async fn lock_active_user(
         }))
 }
 
+/// 作为关注、拉黑等关系目标的用户。
+#[derive(Debug, Clone)]
+pub struct UserRef {
+    pub id: i64,
+    /// 已注销或已合并：不能再被关注、拉黑。
+    pub gone: bool,
+    pub is_ai_agent: bool,
+}
+
+pub async fn user_ref(conn: &mut PgConnection, user_id: i64) -> Result<Option<UserRef>, Problem> {
+    Ok(repo::user_ref(conn, user_id).await?.map(|row| UserRef {
+        id: row.id,
+        gone: matches!(row.status.as_str(), "deleted" | "merged"),
+        is_ai_agent: row.is_ai_agent,
+    }))
+}
+
 /// 入站考试通过时间（不加锁）。用户不存在时返回 None，未通过时返回 `Some(None)`。
 pub async fn exam_passed_at(
     conn: &mut PgConnection,

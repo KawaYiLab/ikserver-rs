@@ -735,3 +735,109 @@ async fn same_user_commenting_concurrently_does_not_deadlock(db: PgPool) {
     assert!(results.iter().all(Result::is_ok), "{results:?}");
     assert_eq!(exp_of(&h.db, 2).await, 3, "每天只有第一条评论给经验");
 }
+
+// ---------- 拉黑 ----------
+
+async fn block(db: &PgPool, blocker: i64, blocked: i64) {
+    sqlx::query!(
+        "INSERT INTO user_blocks (blocker_id, blocked_id) VALUES ($1, $2)",
+        blocker,
+        blocked,
+    )
+    .execute(db)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn blocked_users_cannot_comment_or_reply(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let alice = h.user(2).await;
+    let carol = h.user(3).await;
+    let post = h.post(&op, false).await;
+    let top = h.comment(&alice, post, None, "一楼").await;
+
+    // 帖主拉黑了 carol：carol 不能在帖下评论。
+    block(&h.db, 1, 3).await;
+    let err = h.try_comment(&carol, post, None, "评论").await.unwrap_err();
+    assert_eq!(err.code(), "USER_BLOCKED");
+
+    // carol 拉黑了 alice：alice 回复不了 carol，carol 也回复不了 alice。
+    let op_post = h.post(&alice, false).await;
+    sqlx::query!("DELETE FROM user_blocks")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    block(&h.db, 3, 2).await;
+    let err = h
+        .try_comment(&carol, post, Some(top), "回复")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "USER_BLOCKED");
+    let err = h
+        .try_comment(&carol, op_post, None, "评论")
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "USER_BLOCKED");
+    assert_eq!(h.post_counts(post).await.0, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn lists_hide_blocked_authors_but_not_anonymous_comments(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let alice = h.user(2).await;
+    let carol = h.user(3).await;
+    let post = h.post(&op, false).await;
+    let named = h.comment(&alice, post, None, "实名").await;
+    let anonymous = service::create(
+        &h.comments,
+        &alice,
+        post,
+        CreateCommentRequest {
+            body: "匿名".into(),
+            parent_id: None,
+            is_anonymous: false,
+        },
+    )
+    .await
+    .unwrap()
+    .id
+    .get();
+    sqlx::query!(
+        "UPDATE comments SET is_anonymous = TRUE, anonymous_seed = 'seed' WHERE id = $1",
+        anonymous
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    let mine = h.comment(&carol, post, None, "我的").await;
+    h.comment(&alice, post, Some(mine), "回复 carol").await;
+    h.comment(&op, post, Some(mine), "帖主回复").await;
+    block(&h.db, 3, 2).await;
+
+    let page = service::list(&h.comments, Some(&carol), post, first_page())
+        .await
+        .unwrap();
+    let ids: Vec<i64> = page.items.iter().map(|t| t.comment.id.get()).collect();
+    assert_eq!(ids, vec![mine, anonymous]);
+    assert_eq!(page.items[0].reply_count, 1);
+    assert_eq!(page.items[0].replies.len(), 1);
+
+    let replies = service::replies(&h.comments, Some(&carol), mine, first_page())
+        .await
+        .unwrap();
+    assert_eq!(replies.items.len(), 1);
+    let err = service::replies(&h.comments, Some(&carol), named, first_page())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+
+    // 游客看到全部。
+    let page = service::list(&h.comments, None, post, first_page())
+        .await
+        .unwrap();
+    assert_eq!(page.items.len(), 3);
+    assert_eq!(page.items[0].reply_count, 2);
+}

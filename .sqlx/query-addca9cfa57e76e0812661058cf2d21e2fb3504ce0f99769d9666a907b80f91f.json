@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL\n           AND pinned_at IS NOT NULL AND accepted_at IS NULL",
+  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL\n           AND (is_anonymous OR NOT (author_id = ANY($2)))",
   "describe": {
     "columns": [
       {
@@ -149,7 +149,8 @@
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -168,5 +169,5 @@
       false
     ]
   },
-  "hash": "6e1fcfa9335125f71f6cc592252a6c5f701643ccd12753be8f55d225a7a3b66c"
+  "hash": "addca9cfa57e76e0812661058cf2d21e2fb3504ce0f99769d9666a907b80f91f"
 }

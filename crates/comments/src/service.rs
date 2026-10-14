@@ -144,17 +144,24 @@ pub async fn create(
         .await?
         .filter(|p| p.is_public)
         .ok_or_else(post_not_found)?;
+    // 拉黑拦截只看被评论 / 被回复的内容是否匿名（BLOCK-015），匿名内容不拦，防止反推作者。
+    if !post.is_anonymous {
+        ik_social::interop::ensure_no_block(&mut tx, author_id, post.author_id).await?;
+    }
     let parent_id = request.parent_id.map(Id::get);
     if let Some(parent_id) = parent_id {
-        let valid = repo::get(&mut tx, parent_id).await?.is_some_and(|p| {
-            p.post_id == post.id && p.parent_id.is_none() && p.hidden_at.is_none()
-        });
-        if !valid {
+        let parent = repo::get(&mut tx, parent_id)
+            .await?
+            .filter(|p| p.post_id == post.id && p.parent_id.is_none() && p.hidden_at.is_none());
+        let Some(parent) = parent else {
             return Err(Problem::field(
                 "parentId",
                 "INVALID",
                 "只能回复本帖下未隐藏的一级评论",
             ));
+        };
+        if !parent.is_anonymous {
+            ik_social::interop::ensure_no_block(&mut tx, author_id, parent.author_id).await?;
         }
     }
     let floor = match parent_id {
@@ -452,16 +459,17 @@ pub async fn list(
     let after = decode_cursor(query.cursor.as_deref())?;
     let mut conn = state.db.acquire().await?;
     readable_post(&mut conn, post_id, viewer_id).await?;
+    let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
 
     let (accepted, pinned) = if after.is_none() {
         (
-            repo::accepted(&mut conn, post_id).await?,
-            repo::pinned(&mut conn, post_id).await?,
+            repo::accepted(&mut conn, post_id, &excluded).await?,
+            repo::pinned(&mut conn, post_id, &excluded).await?,
         )
     } else {
         (None, None)
     };
-    let mut rows = repo::top_level_page(&mut conn, post_id, after, limit + 1).await?;
+    let mut rows = repo::top_level_page(&mut conn, post_id, &excluded, after, limit + 1).await?;
     let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
     rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
 
@@ -471,8 +479,8 @@ pub async fn list(
         .chain(rows.iter())
         .collect();
     let top_ids: Vec<i64> = tops.iter().map(|r| r.id).collect();
-    let replies = repo::inline_replies(&mut conn, &top_ids, INLINE_REPLIES).await?;
-    let counts: HashMap<i64, i64> = repo::visible_reply_counts(&mut conn, &top_ids)
+    let replies = repo::inline_replies(&mut conn, &top_ids, &excluded, INLINE_REPLIES).await?;
+    let counts: HashMap<i64, i64> = repo::visible_reply_counts(&mut conn, &top_ids, &excluded)
         .await?
         .into_iter()
         .map(|c| (c.parent_id, c.n))
@@ -510,7 +518,8 @@ pub async fn list(
     })
 }
 
-/// 一级评论的回复，旧的在前。目标不存在、被隐藏、本身是回复、或帖子不可见时 404（CMT-074）。
+/// 一级评论的回复，旧的在前。目标不存在、被隐藏、本身是回复、或帖子不可见时 404（CMT-074）；
+/// 目标是与读者有拉黑关系的人的非匿名评论时同样 404。
 pub async fn replies(
     state: &CommentsState,
     viewer: Option<&Principal>,
@@ -521,13 +530,15 @@ pub async fn replies(
     let limit = page_limit(query.limit);
     let after = decode_cursor(query.cursor.as_deref())?;
     let mut conn = state.db.acquire().await?;
+    let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
     let parent = repo::get(&mut conn, comment_id)
         .await?
         .filter(|c| c.parent_id.is_none() && c.hidden_at.is_none())
+        .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
         .ok_or_else(comment_not_found)?;
     readable_post(&mut conn, parent.post_id, viewer_id).await?;
 
-    let rows = repo::replies_page(&mut conn, parent.id, after, limit + 1).await?;
+    let rows = repo::replies_page(&mut conn, parent.id, &excluded, after, limit + 1).await?;
     let authors = author_map(state, &rows.iter().collect::<Vec<_>>()).await?;
     let items: Vec<CommentView> = rows.iter().map(|r| view(r, &authors, viewer_id)).collect();
     Page::from_rows(

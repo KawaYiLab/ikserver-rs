@@ -10,6 +10,7 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
+use ik_social::SocialState;
 use sqlx::PgPool;
 
 /// 所有 handler 共享的应用状态。克隆代价很低（内部都是 Arc / 连接池句柄）。
@@ -24,6 +25,7 @@ pub struct AppState {
     pub comments: CommentsState,
     pub economy: EconomyState,
     pub exam: ExamState,
+    pub social: SocialState,
 }
 
 impl AppState {
@@ -43,6 +45,7 @@ impl AppState {
         let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
         let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
+        let social = SocialState::new(db.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -53,6 +56,7 @@ impl AppState {
             comments,
             economy,
             exam,
+            social,
         })
     }
 }
@@ -84,5 +88,11 @@ impl FromRef<AppState> for EconomyState {
 impl FromRef<AppState> for ExamState {
     fn from_ref(state: &AppState) -> Self {
         state.exam.clone()
+    }
+}
+
+impl FromRef<AppState> for SocialState {
+    fn from_ref(state: &AppState) -> Self {
+        state.social.clone()
     }
 }
