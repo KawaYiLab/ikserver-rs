@@ -78,20 +78,27 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CURSOR_INVALID | 400 | 分页游标无效 | |
 | IDEMPOTENCY_KEY_INVALID | 400 | 幂等键格式不正确 | 需为 UUID |
 | CODE_INVALID | 400 | 验证码错误或已过期 | 已使用的验证码同样返回此码 |
+| COMMENT_NOT_TOP_LEVEL | 400 | 只有一级评论可以置顶或采纳 | |
 | UNAUTHORIZED | 401 | 请先登录 | 没带凭据 |
 | SESSION_EXPIRED | 401 | 登录已过期，请重新登录 | 凭据无效/过期/已吊销；触发前端跳登录 |
 | INVALID_CREDENTIALS | 401 | 账号或密码错误 | 账号不存在与密码错误不区分 |
+| INSUFFICIENT_DENNY | 402 | 丁尼余额不足 | 投币、改名、自定义头像等扣费操作 |
 | CSRF_REJECTED | 403 | 跨站请求被拒绝 | CsrfLayer 拒绝 |
 | FORBIDDEN | 403 | 没有权限执行该操作 | |
 | EXAM_REQUIRED | 403 | 需要先通过入站考试才能执行此操作 | |
 | ANONYMOUS_POST_LOCKED | 403 | 匿名委托发布后不能再修改、下线或删除 | POST-043 |
 | CATEGORY_ADMIN_ONLY | 403 | 只有管理员可以在该分区发帖 | |
 | ACCOUNT_BLOCKED | 403 | 该账号已被封禁或已注销 | |
+| ACCEPT_DISABLED | 403 | 该分区未开启评论采纳 | CMT-039 |
+| DENNY_SELF_GIVE | 403 | 不能给自己的委托投丁尼 | DENNY-008 |
+| DENNY_ANONYMOUS_POST | 403 | 不能给匿名委托投丁尼 | DENNY-008 |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
 | NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
+| CHECK_IN_ALREADY_TODAY | 409 | 今天已经签到过了，明天 4 点后再来吧 | 签到日按北京时间 04:00 切日 |
+| DENNY_ALREADY_GIVEN | 409 | 你已经给这篇委托投过丁尼了 | 每人每帖终身一次 |
 | REVISION_CONFLICT | 412 | 内容已在别处被修改，请刷新后重试 | If-Match 失败或格式不对 |
 | PAYLOAD_TOO_LARGE | 413 | 请求体过大 | |
 | UNSUPPORTED_MEDIA_TYPE | 415 | 请求体必须是 application/json | |

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_economy SET denny_balance = $2, denny_given = denny_given + $3, updated_at = $4\n         WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7c0b6c6a7c0c40a5fb10fe8f5d44be4409d54231a02881fd7290c19ec6a4b910"
+}

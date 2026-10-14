@@ -24,10 +24,12 @@ InterKnot 论坛的新一代后端：Rust 模块化单体，替代旧 Strapi 5 �
 crates/
   kernel/    配置、Problem 错误、ID、时间、分页游标、鉴权上下文、事件总线、任务入队
   auth/      账号、验证码、注册登录、会话
-  content/   分区、标签、帖子（草稿/发布/编辑/置顶/浏览量/最新信息流）
+  content/   分区、标签、帖子（草稿/发布/编辑/置顶/浏览量/最新信息流/投币）
+  comments/  评论、楼中楼、置顶、采纳、@提及
+  economy/   经验与等级、丁尼钱包与流水、签到、等级权益
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：comments feed social economy exam messaging notify
-    realtime media search moderation ai admin）
+  （后续按业务域新增：exam feed social messaging notify realtime media search
+    moderation ai admin）
 docs/
   architecture.md     架构与模块边界
   api-guidelines.md   接口设计规范（含错误码登记表）

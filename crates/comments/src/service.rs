@@ -11,6 +11,7 @@ use http::StatusCode;
 use ik_auth::Principal;
 use ik_auth::service::Author;
 use ik_content::interop::{self, PostRef};
+use ik_economy::service::{Dedup, ExpAction, grant_exp};
 use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::cursor::{self, Page};
 use ik_kernel::{Id, Problem};
@@ -176,6 +177,19 @@ pub async fn create(
     )
     .await?;
     interop::comment_added(&mut tx, post.id, author_id, now).await?;
+    // 在别人的帖子下评论：每个业务日第一条 +3 经验；匿名评论同样给（CMT-101）。
+    if post.author_id != author_id {
+        grant_exp(
+            &mut tx,
+            &state.ids,
+            author_id,
+            ExpAction::CreateComment,
+            3,
+            Dedup::Daily,
+            now,
+        )
+        .await?;
+    }
     effects.publish(bumped_event(post.id)?);
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
@@ -323,6 +337,19 @@ pub async fn accept(
         repo::clear_accepts(&mut tx, post.id).await?;
         repo::set_accept(&mut tx, comment.id, principal.user_id.get(), now).await?;
         interop::mark_solved(&mut tx, post.id, comment.id, now).await?;
+        // 答主被别人采纳：+10 经验，按评论终身一次；匿名评论照常给（CMT-102/151）。
+        if comment.author_id != principal.user_id.get() {
+            grant_exp(
+                &mut tx,
+                &state.ids,
+                comment.author_id,
+                ExpAction::CommentAccepted,
+                10,
+                Dedup::Ref(format!("comment:{}", comment.id)),
+                now,
+            )
+            .await?;
+        }
     }
     tx.commit().await?;
     Ok(())

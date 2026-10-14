@@ -17,8 +17,8 @@ use utoipa_axum::routes;
 
 use crate::ContentState;
 use crate::dto::{
-    CategoryView, CreatePostQuery, FeedPage, FeedQuery, MyPostItem, MyPostsQuery, PostDetail,
-    PostEditView, PostInput, TagRef, TagSuggestQuery, ViewResult,
+    CategoryView, CreatePostQuery, FeedPage, FeedQuery, GiftRequest, GiftResult, MyPostItem,
+    MyPostsQuery, PostDetail, PostEditView, PostInput, TagRef, TagSuggestQuery, ViewResult,
 };
 use crate::service;
 
@@ -38,6 +38,7 @@ where
         .routes(routes!(publish))
         .routes(routes!(unpublish))
         .routes(routes!(record_view))
+        .routes(routes!(gift_denny))
         .routes(routes!(pin, unpin))
         .routes(routes!(my_posts))
 }
@@ -357,6 +358,35 @@ async fn record_view(
         None => format!("ip:{}", meta.ip),
     };
     Ok(Json(service::record_view(&state, key, id.get()).await?))
+}
+
+/// 投币（给帖子投 1 丁尼）
+///
+/// 每人每帖终身一次。不能投给自己的帖子和匿名帖子。作者同时获得 1 丁尼与 1 点经验。
+#[utoipa::path(
+    post,
+    path = "/v1/posts/{id}/denny",
+    tag = "content",
+    params(("id" = String, Path)),
+    request_body = GiftRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = GiftResult),
+        (status = 402, description = "INSUFFICIENT_DENNY", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "EXAM_REQUIRED / DENNY_SELF_GIVE / DENNY_ANONYMOUS_POST", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "帖子不存在或不公开", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "DENNY_ALREADY_GIVEN", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn gift_denny(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Post>>,
+    Json(request): Json<GiftRequest>,
+) -> Result<Json<GiftResult>, Problem> {
+    Ok(Json(
+        service::gift_denny(&state, &principal, id.get(), request).await?,
+    ))
 }
 
 /// 置顶（管理员）

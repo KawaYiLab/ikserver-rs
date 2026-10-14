@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT comment_count, accepted_comment_id, solved_at IS NOT NULL AS \"solved!\"\n             FROM posts WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "comment_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "comment_count"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "accepted_comment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "accepted_comment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "solved!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      null
+    ]
+  },
+  "hash": "7b9cae7cec5c7ef30cf8ff2ae43195db5773ccaba06068a2e02aeb335304aefe"
+}

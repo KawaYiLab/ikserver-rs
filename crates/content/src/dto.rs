@@ -187,6 +187,8 @@ pub struct PostDetail {
     pub is_owner: bool,
     /// 被隐藏（只有作者本人能看到被隐藏的帖子）。
     pub is_hidden: bool,
+    /// 当前用户已经给这篇帖子投过丁尼（每人每帖只能投一次）。
+    pub denny_given: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -258,6 +260,23 @@ pub struct MyPostItem {
     pub comment_count: i32,
     pub published_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GiftRequest {
+    /// 附言，最多 100 字。
+    #[serde(default)]
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GiftResult {
+    /// 投币后自己的丁尼余额。
+    pub balance: i32,
+    /// 帖子收到的丁尼总数。
+    pub denny_count: i32,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE comments SET pinned_at = NULL, pinned_by = NULL WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76fc3c2f726e9f0645782f329157801504b785ff2bd702f6252ce6fa32ab2cd4"
+}

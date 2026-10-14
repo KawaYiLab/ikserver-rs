@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET level = $2, updated_at = $3 WHERE id = $1 AND level <> $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int2",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e5b853d2d43a3923b4764947247eae45950e71eecc617c8603d11c18b9f2ba67"
+}

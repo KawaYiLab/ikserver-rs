@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT floor FROM comments WHERE post_id = $1 ORDER BY floor",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "floor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "floor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "3615ec8bf95d6b721744b355af38f543a87609451c379c145cbe2414a8d8444c"
+}

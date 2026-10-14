@@ -4,6 +4,7 @@ use axum::extract::FromRef;
 use ik_auth::{AuthSettings, AuthState};
 use ik_comments::CommentsState;
 use ik_content::ContentState;
+use ik_economy::EconomyState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
@@ -20,6 +21,7 @@ pub struct AppState {
     pub auth: AuthState,
     pub content: ContentState,
     pub comments: CommentsState,
+    pub economy: EconomyState,
 }
 
 impl AppState {
@@ -37,6 +39,7 @@ impl AppState {
         let bus = Arc::new(LocalBus::new(4096));
         let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
         let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone());
+        let economy = EconomyState::new(db.clone(), ids.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -45,6 +48,7 @@ impl AppState {
             auth,
             content,
             comments,
+            economy,
         })
     }
 }
@@ -64,5 +68,11 @@ impl FromRef<AppState> for ContentState {
 impl FromRef<AppState> for CommentsState {
     fn from_ref(state: &AppState) -> Self {
         state.comments.clone()
+    }
+}
+
+impl FromRef<AppState> for EconomyState {
+    fn from_ref(state: &AppState) -> Self {
+        state.economy.clone()
     }
 }

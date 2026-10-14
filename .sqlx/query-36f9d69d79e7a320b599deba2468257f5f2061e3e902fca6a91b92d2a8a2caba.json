@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET denny_count = denny_count + 1 WHERE id = $1 RETURNING denny_count",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "denny_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "denny_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "36f9d69d79e7a320b599deba2468257f5f2061e3e902fca6a91b92d2a8a2caba"
+}

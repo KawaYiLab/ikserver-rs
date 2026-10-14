@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE comments SET accepted_at = NULL, accepted_by = NULL\n         WHERE post_id = $1 AND accepted_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b74a19f7212c6f86236e4eef9e242d85abc5ace595372d9969054041fb6f0382"
+}

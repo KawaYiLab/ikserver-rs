@@ -13,12 +13,15 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
 use crate::dto::{
-    AuthorView, CategoryRef, CategoryView, FeedPage, FeedQuery, MyPostItem, MyPostsQuery,
-    MyPostsState, PostCard, PostDetail, PostEditView, PostInput, PostStatus, TagRef, ViewResult,
+    AuthorView, CategoryRef, CategoryView, FeedPage, FeedQuery, GiftRequest, GiftResult,
+    MyPostItem, MyPostsQuery, MyPostsState, PostCard, PostDetail, PostEditView, PostInput,
+    PostStatus, TagRef, ViewResult,
 };
 use crate::repo::{self, CardRow, Content, DraftRow, FeedFilter, PostRow};
 use crate::video::{self, ExternalVideo, MAX_EXTERNAL_VIDEOS};
-use crate::{ContentState, anonymous, benefits, tags};
+use crate::{ContentState, anonymous, tags};
+use ik_economy::benefits;
+use ik_economy::service::{Dedup, ExpAction};
 
 const TITLE_MAX_CHARS: usize = 50;
 const EDITOR_STATE_MAX_BYTES: usize = 256 * 1024;
@@ -91,7 +94,7 @@ struct Prepared {
 
 fn body_limit(principal: &Principal) -> usize {
     // 能走到写接口的人已经通过考试（或是工作人员）；等级数据缺失时至少按 Lv1 计。
-    benefits::max_body_chars(principal.benefit_level().max(1))
+    benefits::max_post_body_chars(principal.benefit_level().max(1))
 }
 
 fn check_body(principal: &Principal, body: &str, errors: &mut Vec<FieldError>) {
@@ -364,6 +367,27 @@ fn removed_event(post_id: i64) -> Result<Event, Problem> {
     )
 }
 
+/// 首次发布的发帖经验：+4，每个业务日只有第一篇（POST-073）。
+/// 「是否首次发布」看帖子自己的 `first_published_at`，不看经验流水（D-025 方案 A）。
+async fn grant_first_publish_exp(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    author_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    ik_economy::service::grant_exp(
+        conn,
+        &state.ids,
+        author_id,
+        ExpAction::CreatePost,
+        4,
+        Dedup::Daily,
+        now,
+    )
+    .await?;
+    Ok(())
+}
+
 // ---------- 写入 ----------
 
 /// 新建帖子。`publish` 为真时直接发布，否则存为草稿。
@@ -387,6 +411,7 @@ pub async fn create(
     repo::set_post_tags(&mut tx, post_id, &content.tag_ids).await?;
     if publish {
         repo::mark_published(&mut tx, post_id, author_id, now).await?;
+        grant_first_publish_exp(state, &mut tx, author_id, now).await?;
         effects.publish(published_event(post_id, content.category_id, true)?);
     }
     tx.commit().await?;
@@ -518,12 +543,12 @@ pub async fn publish(
     }
 
     if !was_published {
+        let first = row.first_published_at.is_none();
         repo::mark_published(&mut tx, post_id, author_id, now).await?;
-        effects.publish(published_event(
-            post_id,
-            category_id,
-            row.first_published_at.is_none(),
-        )?);
+        if first {
+            grant_first_publish_exp(state, &mut tx, author_id, now).await?;
+        }
+        effects.publish(published_event(post_id, category_id, first)?);
     } else if changed {
         repo::mark_edited(&mut tx, post_id, now).await?;
         effects.publish(published_event(post_id, category_id, false)?);
@@ -637,6 +662,51 @@ pub async fn unpin(
     } else {
         Err(post_not_found())
     }
+}
+
+/// 给帖子投 1 丁尼（DENNY-008）。帖子必须公开（D-048 方案 A：被隐藏的也不能投）、
+/// 不能是匿名帖、不能是自己的帖子；每人每帖终身一次。
+// TODO(social)：拉黑关系拦截（BLOCK-016）在 social 域接入后补上。
+pub async fn gift_denny(
+    state: &ContentState,
+    principal: &Principal,
+    post_id: i64,
+    request: GiftRequest,
+) -> Result<GiftResult, Problem> {
+    principal.require_write()?;
+    let giver_id = principal.user_id.get();
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    let post = repo::lock_post_ref(&mut tx, post_id)
+        .await?
+        .filter(|p| p.is_public)
+        .ok_or_else(post_not_found)?;
+    if post.is_anonymous {
+        return Err(Problem::new(
+            StatusCode::FORBIDDEN,
+            "DENNY_ANONYMOUS_POST",
+            "不能给匿名委托投丁尼",
+        ));
+    }
+    if post.author_id == giver_id {
+        return Err(ik_economy::service::self_gift());
+    }
+    let outcome = ik_economy::service::gift_post(
+        &mut tx,
+        &state.ids,
+        giver_id,
+        post.author_id,
+        post.id,
+        &request.message,
+        now,
+    )
+    .await?;
+    let denny_count = repo::increment_denny_count(&mut tx, post.id).await?;
+    tx.commit().await?;
+    Ok(GiftResult {
+        balance: outcome.balance,
+        denny_count,
+    })
 }
 
 /// 浏览量计数（POST-080）。`viewer` 是 `u:<用户 id>` 或 `ip:<地址>`。
@@ -911,6 +981,12 @@ pub async fn detail(
     };
     let external_videos: Vec<ExternalVideo> =
         serde_json::from_value(row.external_videos.clone()).unwrap_or_default();
+    let denny_given = match viewer {
+        Some(p) => !ik_economy::service::gifted_posts(&mut conn, p.user_id.get(), &[row.id])
+            .await?
+            .is_empty(),
+        None => false,
+    };
 
     Ok(PostDetail {
         id: Id::new(row.id),
@@ -945,6 +1021,7 @@ pub async fn detail(
         bumped_at,
         is_owner,
         is_hidden: row.hidden_at.is_some(),
+        denny_given,
     })
 }
 

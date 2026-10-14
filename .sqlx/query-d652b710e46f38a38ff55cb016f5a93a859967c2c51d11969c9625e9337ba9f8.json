@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT exp, denny_balance, denny_given, last_check_in_day, check_in_streak, check_in_total\n         FROM user_economy WHERE user_id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exp",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "exp"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "denny_balance",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "denny_balance"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "denny_given",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "denny_given"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_check_in_day",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "last_check_in_day"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "check_in_streak",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "check_in_streak"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "check_in_total",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "check_in_total"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d652b710e46f38a38ff55cb016f5a93a859967c2c51d11969c9625e9337ba9f8"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_denny_gifts (post_id, giver_id, message, created_at)\n         VALUES ($1, $2, $3, $4)\n         ON CONFLICT (post_id, giver_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "923152363a1ee531d5bfe223775eef6afbde495a2efd33bfdc4959ffa6022fac"
+}

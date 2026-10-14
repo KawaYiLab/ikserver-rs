@@ -132,6 +132,8 @@ async fn openapi_document_is_served() {
     assert!(body["components"]["schemas"]["ProblemBody"].is_object());
     assert!(body["paths"]["/v1/auth/login"]["post"].is_object());
     assert!(body["paths"]["/v1/me/sessions/{id}"]["delete"].is_object());
+    assert!(body["paths"]["/v1/me/check-in"]["post"].is_object());
+    assert!(body["paths"]["/v1/posts/{id}/denny"]["post"].is_object());
     let schemes = &body["components"]["securitySchemes"];
     assert_eq!(schemes["session_cookie"]["in"], "cookie");
     assert_eq!(schemes["bearer"]["scheme"], "bearer");
@@ -142,6 +144,15 @@ fn post_json(uri: &str, body: &str) -> Request<Body> {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.to_owned()))
         .unwrap()
+}
+
+#[tokio::test]
+async fn benefits_are_public() {
+    let (status, _, body) = send(get("/v1/benefits")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["level"], 0);
+    assert_eq!(body["benefits"]["postMaxBodyChars"], 0);
+    assert_eq!(body["nextBenefits"]["postMaxBodyChars"], 3000);
 }
 
 #[tokio::test]

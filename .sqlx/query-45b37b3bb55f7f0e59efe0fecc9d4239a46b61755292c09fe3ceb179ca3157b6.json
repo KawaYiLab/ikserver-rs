@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET comment_count = GREATEST(comment_count - $2, 0) WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45b37b3bb55f7f0e59efe0fecc9d4239a46b61755292c09fe3ceb179ca3157b6"
+}

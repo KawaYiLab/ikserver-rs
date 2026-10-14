@@ -281,6 +281,51 @@ pub(crate) async fn lock_active_user(
     .await
 }
 
+pub(crate) struct UserStateRow {
+    pub id: i64,
+    pub role: Role,
+    pub is_ai_agent: bool,
+    pub exam_passed_at: Option<DateTime<Utc>>,
+    pub level: i16,
+}
+
+/// 锁住活跃用户行并读出权限相关状态（供其他域在自己的事务里使用）。
+///
+/// 用 `FOR NO KEY UPDATE` 而不是 `FOR UPDATE`：调用方的事务往往先插入了引用该用户的行
+/// （帖子、评论……），外键检查会对用户行加 `FOR KEY SHARE`。`FOR UPDATE` 与之冲突，
+/// 同一用户的两个并发事务会互相等待对方的 KEY SHARE 而死锁；`FOR NO KEY UPDATE` 与之兼容，
+/// 彼此之间仍然互斥，足以串行化同一用户的经验、丁尼写入。
+pub(crate) async fn lock_active_user_state(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<UserStateRow>> {
+    sqlx::query_as!(
+        UserStateRow,
+        r#"SELECT id, role AS "role: Role", is_ai_agent, exam_passed_at, level
+           FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn set_level(
+    conn: &mut PgConnection,
+    id: i64,
+    level: i16,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE users SET level = $2, updated_at = $3 WHERE id = $1 AND level <> $2",
+        id,
+        level,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
 pub(crate) struct MeRow {
     pub id: i64,
     pub username: String,

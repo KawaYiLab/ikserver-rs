@@ -5,6 +5,7 @@
 mod code;
 pub mod dto;
 mod extract;
+pub mod interop;
 mod password;
 mod repo;
 mod routes;

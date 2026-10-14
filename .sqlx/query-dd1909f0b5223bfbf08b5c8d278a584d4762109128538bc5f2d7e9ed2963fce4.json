@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_economy (user_id, last_check_in_day, check_in_streak, check_in_total)\n         VALUES (1, $1, 4, 10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd1909f0b5223bfbf08b5c8d278a584d4762109128538bc5f2d7e9ed2963fce4"
+}

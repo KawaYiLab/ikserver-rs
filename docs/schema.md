@@ -72,3 +72,38 @@
 - `revision`：乐观并发版本号，每次改工作副本 +1，对外以 `ETag: "rev:<n>"` 暴露。
 - 计数器（浏览、点赞、评论、收藏、丁尼）只由服务端维护，`CHECK >= 0`。
 - 删除是物理删除，`post_tags`、`post_drafts` 级联删除；后续的评论、点赞等表同样级联。
+
+## 评论域（`20261008000003_comments.sql`）
+
+- 楼中楼只有一层：`parent_id` 必须指向同帖的一级评论（服务端校验），删除一级评论级联删除回复。
+- `floor` 只属于一级评论（`CHECK (parent_id IS NULL) = (floor IS NOT NULL)`），在锁住帖子行后按 `MAX(floor)+1` 分配，删除不回收。
+- 每帖最多一条置顶、一条采纳，由部分唯一索引兜底；`posts.accepted_comment_id` 外键 `ON DELETE SET NULL`。
+
+## 经济域（`20261014000001_economy.sql`）
+
+### `user_economy`
+
+- 每个用户一行，**第一次发生经济行为时才创建**（`INSERT … ON CONFLICT DO NOTHING`）；没有行时读接口按初始值（经验 0、余额 30）返回。
+- 余额 `CHECK (0..9999)`：所有入账统一按 9999 封顶，超出部分丢弃（D-002 方案 A）。
+- 等级不存这里：结果写回 `users.level`（鉴权上下文直接读），由 economy 通过 `ik_auth::interop::set_level` 写入。
+- 串行化：所有经济写入先锁 `users` 行（auth interop），再锁本行。多人时按用户 id 升序加锁；与帖子相关的写入先锁帖子行。
+
+### `exp_logs`
+
+- 只记实际发放量 > 0 的行；被每日上限截断为 0 时不写，按日去重的动作因此不会被占掉「今日首次」名额（EXP-010）。
+- `dedup_key`：按日去重为 `day:<业务日>`，按实体去重为 `ref:<…>`；`UNIQUE (user_id, action, dedup_key)` 兜底并发。
+- `bucket` 与 `biz_day` 冗余存储，按日统计额度只走 `exp_logs_daily_idx`。
+
+### `denny_logs`
+
+- `amount` 有符号，`balance` 为变动后余额。`ref_key` 非空时 `(user_id, action, ref_key)` 唯一，用于幂等入账（签到 `day:<业务日>`、考试 `user:<id>`、投币 `post:<id>` 等）。
+
+### `check_ins` / `check_in_days`
+
+- `check_ins` 主键 `(user_id, day)`：每人每个签到日一行。
+- 当日排名由 `check_in_days` 计数器 `INSERT … ON CONFLICT DO UPDATE … RETURNING` 原子分配，唯一且连续。
+
+### `post_denny_gifts`
+
+- 主键 `(post_id, giver_id)`：每人每帖终身一次；金额固定 1。帖子删除时级联删除。
+- 帖子上的 `denny_count` 由 content 在同一事务里 +1。

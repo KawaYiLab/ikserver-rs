@@ -729,6 +729,16 @@ pub(crate) async fn comments_removed(conn: &mut PgConnection, id: i64, n: i32) -
     Ok(())
 }
 
+/// 投币：帖子丁尼数 +1，返回新值。
+pub(crate) async fn increment_denny_count(conn: &mut PgConnection, id: i64) -> sqlx::Result<i32> {
+    sqlx::query_scalar!(
+        "UPDATE posts SET denny_count = denny_count + 1 WHERE id = $1 RETURNING denny_count",
+        id,
+    )
+    .fetch_one(conn)
+    .await
+}
+
 pub(crate) async fn mark_solved(
     conn: &mut PgConnection,
     id: i64,

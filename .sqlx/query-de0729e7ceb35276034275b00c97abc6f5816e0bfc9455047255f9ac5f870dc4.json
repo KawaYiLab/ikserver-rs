@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_economy (user_id, denny_balance) VALUES (2, 0)\n                  ON CONFLICT (user_id) DO UPDATE SET denny_balance = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "de0729e7ceb35276034275b00c97abc6f5816e0bfc9455047255f9ac5f870dc4"
+}

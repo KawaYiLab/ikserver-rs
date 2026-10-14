@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET solved_at = NULL, accepted_comment_id = NULL\n         WHERE id = $1 AND accepted_comment_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "02f6dcc0cfe6cbb363820bbedbac06dabcc8252ad1fcb392e17379361ed2be47"
+}

@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT parent_id AS \"parent_id!\", count(*) AS \"n!\"\n           FROM comments\n           WHERE parent_id = ANY($1) AND hidden_at IS NULL\n           GROUP BY parent_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "parent_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "e58d6bf46de77ddb93e2949466c2aa7a291160f2c8b3b7ed6df47e60f389e348"
+}

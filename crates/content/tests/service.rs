@@ -636,3 +636,207 @@ async fn delete_cascades(db: PgPool) {
     .unwrap();
     assert_eq!(left, Some(0));
 }
+
+// ---------- 投币与发帖经验 ----------
+
+async fn balance(db: &PgPool, id: i64) -> (i32, i32) {
+    sqlx::query!(
+        "SELECT denny_balance, denny_given FROM user_economy WHERE user_id = $1",
+        id
+    )
+    .fetch_optional(db)
+    .await
+    .unwrap()
+    .map_or((30, 0), |r| (r.denny_balance, r.denny_given))
+}
+
+async fn exp_of(db: &PgPool, id: i64) -> i64 {
+    sqlx::query_scalar!("SELECT exp FROM user_economy WHERE user_id = $1", id)
+        .fetch_optional(db)
+        .await
+        .unwrap()
+        .unwrap_or(0)
+}
+
+fn gift() -> ik_content::dto::GiftRequest {
+    ik_content::dto::GiftRequest {
+        message: "好帖".into(),
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn gift_moves_one_denny_and_counts_once(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = service::create(&h.state, &author, input("帖子"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+
+    let result = service::gift_denny(&h.state, &fan, post, gift())
+        .await
+        .unwrap();
+    assert_eq!((result.balance, result.denny_count), (29, 1));
+    assert_eq!(balance(&h.db, 2).await, (29, 1));
+    assert_eq!(balance(&h.db, 1).await, (31, 0));
+    // 作者：发帖 4 + 被投币 1（被动桶）。
+    assert_eq!(exp_of(&h.db, 1).await, 5);
+
+    let err = service::gift_denny(&h.state, &fan, post, gift())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "DENNY_ALREADY_GIVEN");
+    assert_eq!(balance(&h.db, 2).await, (29, 1), "重复投币不扣费");
+
+    let detail = service::detail(&h.state, Some(&fan), post).await.unwrap();
+    assert!(detail.denny_given);
+    assert_eq!(detail.denny_count, 1);
+    let other = service::detail(&h.state, Some(&author), post)
+        .await
+        .unwrap();
+    assert!(!other.denny_given);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn gift_rejects_self_anonymous_hidden_and_broke(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = service::create(&h.state, &author, input("帖子"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let err = service::gift_denny(&h.state, &author, post, gift())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "DENNY_SELF_GIVE");
+
+    let mut anon = input("匿名");
+    anon.is_anonymous = true;
+    let anon_post = service::create(&h.state, &author, anon, true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let err = service::gift_denny(&h.state, &fan, anon_post, gift())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "DENNY_ANONYMOUS_POST");
+
+    let hidden = service::create(&h.state, &author, input("隐藏"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    sqlx::query!("UPDATE posts SET hidden_at = now() WHERE id = $1", hidden)
+        .execute(&h.db)
+        .await
+        .unwrap();
+    let err = service::gift_denny(&h.state, &fan, hidden, gift())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "NOT_FOUND");
+
+    sqlx::query!(
+        "INSERT INTO user_economy (user_id, denny_balance) VALUES (2, 0)
+                  ON CONFLICT (user_id) DO UPDATE SET denny_balance = 0"
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    let err = service::gift_denny(&h.state, &fan, post, gift())
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "INSUFFICIENT_DENNY");
+    let count: i32 = sqlx::query_scalar!("SELECT denny_count FROM posts WHERE id = $1", post)
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn concurrent_gifts_from_same_user_count_once(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = service::create(&h.state, &author, input("帖子"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let tasks: Vec<_> = (0..6)
+        .map(|_| {
+            let state = h.state.clone();
+            let fan = fan.clone();
+            tokio::spawn(async move { service::gift_denny(&state, &fan, post, gift()).await })
+        })
+        .collect();
+    let mut ok = 0;
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(_) => ok += 1,
+            Err(e) => assert_eq!(e.code(), "DENNY_ALREADY_GIVEN"),
+        }
+    }
+    assert_eq!(ok, 1);
+    assert_eq!(balance(&h.db, 2).await, (29, 1));
+    assert_eq!(balance(&h.db, 1).await, (31, 0));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn mutual_gifts_do_not_deadlock(db: PgPool) {
+    let h = harness(db);
+    let a = h.writer(1).await;
+    let b = h.writer(2).await;
+    let post_a = service::create(&h.state, &a, input("A"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let post_b = service::create(&h.state, &b, input("B"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let (s1, s2) = (h.state.clone(), h.state.clone());
+    let (b2, a2) = (b.clone(), a.clone());
+    let t1 = tokio::spawn(async move { service::gift_denny(&s1, &b2, post_a, gift()).await });
+    let t2 = tokio::spawn(async move { service::gift_denny(&s2, &a2, post_b, gift()).await });
+    t1.await.unwrap().unwrap();
+    t2.await.unwrap().unwrap();
+    assert_eq!(balance(&h.db, 1).await, (30, 1));
+    assert_eq!(balance(&h.db, 2).await, (30, 1));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn first_publish_grants_exp_once_per_day(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let first = service::create(&h.state, &author, input("一"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    assert_eq!(exp_of(&h.db, 1).await, 4);
+    // 同一天第二篇不再给；下线再发布也不算首次发布。
+    service::create(&h.state, &author, input("二"), true)
+        .await
+        .unwrap();
+    service::unpublish(&h.state, &author, first, false)
+        .await
+        .unwrap();
+    service::publish(&h.state, &author, first, None, None)
+        .await
+        .unwrap();
+    assert_eq!(exp_of(&h.db, 1).await, 4);
+    // 草稿不给经验。
+    let newbie = h.writer(2).await;
+    service::create(&h.state, &newbie, input("草稿"), false)
+        .await
+        .unwrap();
+    assert_eq!(exp_of(&h.db, 2).await, 0);
+}

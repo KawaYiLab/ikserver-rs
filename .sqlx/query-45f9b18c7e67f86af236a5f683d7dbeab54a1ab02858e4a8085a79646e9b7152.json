@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_economy\n         SET last_check_in_day = $2, check_in_streak = $3, check_in_total = check_in_total + 1,\n             updated_at = $4\n         WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45f9b18c7e67f86af236a5f683d7dbeab54a1ab02858e4a8085a79646e9b7152"
+}

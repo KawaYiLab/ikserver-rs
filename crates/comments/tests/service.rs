@@ -326,17 +326,22 @@ async fn exam_gate_rate_limit_and_body_rules(db: PgPool) {
     );
 
     // 被拒绝的请求也计入频率（上面 3 次），换一个新用户测上限。
+    // 11 条同时发出：限流判断在访问数据库之前，结果与远程库的耗时无关
+    // （串行发送时，10 条评论耗时一旦超过 6 秒就会回补 1 个额度）。
     let me = h.user(4).await;
-    for i in 0..10 {
-        h.comment(&me, post, None, &format!("{i}")).await;
-    }
-    assert_eq!(
-        h.try_comment(&me, post, None, "第 11 条")
-            .await
-            .unwrap_err()
-            .code(),
-        "RATE_LIMITED"
-    );
+    let bodies: Vec<String> = (0..11).map(|i| format!("第 {i} 条")).collect();
+    let attempts = futures_util::future::join_all(
+        bodies
+            .iter()
+            .map(|body| h.try_comment(&me, post, None, body)),
+    )
+    .await;
+    let limited = attempts
+        .iter()
+        .filter(|r| r.as_ref().is_err_and(|e| e.code() == "RATE_LIMITED"))
+        .count();
+    assert_eq!(limited, 1);
+    assert_eq!(attempts.iter().filter(|r| r.is_ok()).count(), 10);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -669,4 +674,64 @@ async fn deleting_post_cascades_comments(db: PgPool) {
         .await
         .unwrap();
     assert_eq!(left, 0);
+}
+
+async fn exp_of(db: &PgPool, id: i64) -> i64 {
+    sqlx::query_scalar!("SELECT exp FROM user_economy WHERE user_id = $1", id)
+        .fetch_optional(db)
+        .await
+        .unwrap()
+        .unwrap_or(0)
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comment_and_accept_grant_exp(db: PgPool) {
+    let h = harness(db);
+    let owner = h.user(1).await;
+    let answerer = h.user(2).await;
+    let post = h.post(&owner, true).await;
+    let owner_exp = exp_of(&h.db, 1).await;
+
+    // 在自己的帖子下评论不给经验。
+    h.comment(&owner, post, None, "自己顶一下").await;
+    assert_eq!(exp_of(&h.db, 1).await, owner_exp);
+
+    // 在别人的帖子下评论：每天第一条 +3。
+    let answer = h.comment(&answerer, post, None, "答案").await;
+    h.comment(&answerer, post, None, "补充").await;
+    assert_eq!(exp_of(&h.db, 2).await, 3);
+
+    // 被采纳 +10，反复采纳 / 取消不重复发放。
+    service::accept(&h.comments, &owner, answer).await.unwrap();
+    assert_eq!(exp_of(&h.db, 2).await, 13);
+    service::unaccept(&h.comments, &owner, answer)
+        .await
+        .unwrap();
+    service::accept(&h.comments, &owner, answer).await.unwrap();
+    assert_eq!(exp_of(&h.db, 2).await, 13);
+
+    // 采纳自己的评论不给经验。
+    let own = h.comment(&owner, post, None, "我自己的答案").await;
+    service::accept(&h.comments, &owner, own).await.unwrap();
+    assert_eq!(exp_of(&h.db, 1).await, owner_exp);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn same_user_commenting_concurrently_does_not_deadlock(db: PgPool) {
+    // 评论插入的外键检查会对用户行加 KEY SHARE，随后发经验要锁同一用户行；
+    // 两个事务交错时不能互相等待（锁用 FOR NO KEY UPDATE）。
+    let h = harness(db);
+    let op = h.user(1).await;
+    let me = h.user(2).await;
+    let posts = [h.post(&op, false).await, h.post(&op, false).await];
+    let bodies: Vec<String> = (0..6).map(|i| format!("并发 {i}")).collect();
+    let results = futures_util::future::join_all(
+        bodies
+            .iter()
+            .enumerate()
+            .map(|(i, body)| h.try_comment(&me, posts[i % 2], None, body)),
+    )
+    .await;
+    assert!(results.iter().all(Result::is_ok), "{results:?}");
+    assert_eq!(exp_of(&h.db, 2).await, 3, "每天只有第一条评论给经验");
 }

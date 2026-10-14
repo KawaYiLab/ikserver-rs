@@ -36,6 +36,7 @@ use crate::{AppState, system};
         (name = "me", description = "当前用户与登录设备"),
         (name = "content", description = "分区、标签、帖子与信息流"),
         (name = "comments", description = "评论、回复、置顶与采纳"),
+        (name = "economy", description = "经验、等级、丁尼、签到与等级权益"),
     )
 )]
 pub struct ApiDoc;
@@ -72,6 +73,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_auth::router())
         .merge(ik_content::router())
         .merge(ik_comments::router())
+        .merge(ik_economy::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

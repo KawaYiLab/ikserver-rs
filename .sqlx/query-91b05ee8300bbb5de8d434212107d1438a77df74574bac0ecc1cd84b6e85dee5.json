@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT exp FROM user_economy WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exp",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "exp"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "91b05ee8300bbb5de8d434212107d1438a77df74574bac0ecc1cd84b6e85dee5"
+}

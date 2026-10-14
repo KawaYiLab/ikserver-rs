@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET bumped_at = '2026-01-01T00:00:00Z'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b4770b9253bee9060d5e105d95dcf7d4f62a9fc1cc069c3da7dab57d1d10a781"
+}
