@@ -189,6 +189,10 @@ pub struct PostDetail {
     pub is_hidden: bool,
     /// 当前用户已经给这篇帖子投过丁尼（每人每帖只能投一次）。
     pub denny_given: bool,
+    /// 当前用户已点赞。
+    pub liked: bool,
+    /// 当前用户已收藏。
+    pub favorited: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -287,4 +291,55 @@ pub struct ViewResult {
     /// 计数时返回最新浏览量。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_count: Option<i64>,
+}
+
+// ---------- 点赞、收藏、三连 ----------
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LikeResult {
+    pub liked: bool,
+    pub like_count: i32,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteResult {
+    pub favorited: bool,
+    pub favorite_count: i32,
+}
+
+/// 一键三连：点赞、收藏一定成功（已有则保持）；投币失败不影响前两步，原因见 `dennyError`。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TripleResult {
+    pub like_count: i32,
+    pub favorite_count: i32,
+    /// 这次投币成功。
+    pub denny_given: bool,
+    /// 投币没成功时的错误码，例如 `DENNY_ALREADY_GIVEN`、`DENNY_SELF_GIVE`、
+    /// `DENNY_ANONYMOUS_POST`、`INSUFFICIENT_DENNY`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub denny_error: Option<String>,
+    pub denny_count: i32,
+    /// 投币成功时为投币后的余额。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balance: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct SavedQuery {
+    pub cursor: Option<String>,
+    /// 默认 20，最大 50。
+    pub limit: Option<u32>,
+}
+
+/// 我的点赞 / 收藏列表项。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedPost {
+    pub post: PostCard,
+    /// 点赞 / 收藏的时间。
+    pub saved_at: DateTime<Utc>,
 }

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2) AS \"liked!\",\n                  EXISTS (SELECT 1 FROM post_favorites WHERE post_id = $1 AND user_id = $2) AS \"favorited!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "liked!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "favorited!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "0e75115bc89648767ed60071864d2ccd16d1aa50d7cca03ffe4688c93c7bfbb6"
+}

@@ -841,3 +841,127 @@ async fn lists_hide_blocked_authors_but_not_anonymous_comments(db: PgPool) {
     assert_eq!(page.items.len(), 3);
     assert_eq!(page.items[0].reply_count, 2);
 }
+
+// ---------- 评论点赞 ----------
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comment_likes_count_once_and_show_in_lists(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let fan = h.user(2).await;
+    let post = h.post(&op, false).await;
+    let top = h.comment(&op, post, None, "一楼").await;
+    let reply = h.comment(&op, post, Some(top), "回复").await;
+
+    let liked = service::like(&h.comments, &fan, top).await.unwrap();
+    assert!(liked.liked);
+    assert_eq!(liked.like_count, 1);
+    assert_eq!(
+        service::like(&h.comments, &fan, top)
+            .await
+            .unwrap()
+            .like_count,
+        1
+    );
+    service::like(&h.comments, &fan, reply).await.unwrap();
+    // 帖子和评论的点赞经验共用「每日第一次」。
+    ik_content::service::like(&h.content, &fan, post)
+        .await
+        .unwrap();
+    assert_eq!(exp_of(&h.db, 2).await, 1);
+
+    let page = service::list(&h.comments, Some(&fan), post, first_page())
+        .await
+        .unwrap();
+    assert!(page.items[0].comment.liked);
+    assert_eq!(page.items[0].comment.like_count, 1);
+    assert!(page.items[0].replies[0].liked);
+    let page = service::list(&h.comments, Some(&op), post, first_page())
+        .await
+        .unwrap();
+    assert!(!page.items[0].comment.liked);
+
+    let off = service::unlike(&h.comments, &fan, top).await.unwrap();
+    assert_eq!((off.liked, off.like_count), (false, 0));
+    assert_eq!(
+        service::unlike(&h.comments, &fan, top)
+            .await
+            .unwrap()
+            .like_count,
+        0
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comment_like_rules(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let fan = h.user(2).await;
+    let newbie = h.user_named(3, "newbie", Role::User, false).await;
+    let post = h.post(&op, false).await;
+    let top = h.comment(&op, post, None, "一楼").await;
+    let reply = h.comment(&op, post, Some(top), "回复").await;
+
+    assert_eq!(
+        service::like(&h.comments, &newbie, top)
+            .await
+            .unwrap_err()
+            .code(),
+        "EXAM_REQUIRED"
+    );
+    service::like(&h.comments, &fan, reply).await.unwrap();
+    // 一级评论被隐藏后，它的回复也不能再赞，但可以取消。
+    sqlx::query!("UPDATE comments SET hidden_at = now() WHERE id = $1", top)
+        .execute(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(
+        service::like(&h.comments, &fan, top)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        service::like(&h.comments, &op, reply)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        service::unlike(&h.comments, &fan, reply)
+            .await
+            .unwrap()
+            .like_count,
+        0
+    );
+
+    let second = h.comment(&op, post, None, "二楼").await;
+    block(&h.db, 1, 2).await;
+    assert_eq!(
+        service::like(&h.comments, &fan, second)
+            .await
+            .unwrap_err()
+            .code(),
+        "USER_BLOCKED"
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn deleting_a_comment_removes_its_likes(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let fan = h.user(2).await;
+    let post = h.post(&op, false).await;
+    let top = h.comment(&op, post, None, "一楼").await;
+    let reply = h.comment(&op, post, Some(top), "回复").await;
+    service::like(&h.comments, &fan, top).await.unwrap();
+    service::like(&h.comments, &fan, reply).await.unwrap();
+    service::delete(&h.comments, &op, top).await.unwrap();
+    let left = sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM comment_likes"#)
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(left, 0, "D-029：不留孤儿点赞行");
+}

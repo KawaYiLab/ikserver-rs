@@ -12,7 +12,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::CommentsState;
-use crate::dto::{CommentView, CommentsPage, CreateCommentRequest, PageQuery};
+use crate::dto::{CommentLikeResult, CommentView, CommentsPage, CreateCommentRequest, PageQuery};
 use crate::service;
 
 pub fn router<S>() -> OpenApiRouter<S>
@@ -27,6 +27,7 @@ where
         .routes(routes!(list_replies))
         .routes(routes!(pin, unpin))
         .routes(routes!(accept, unaccept))
+        .routes(routes!(like, unlike))
 }
 
 /// 帖子的评论
@@ -212,4 +213,49 @@ async fn unaccept(
 ) -> Result<StatusCode, Problem> {
     service::unaccept(&state, &principal, id.get()).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 给评论点赞
+///
+/// 幂等。需要通过入站考试。
+#[utoipa::path(
+    put,
+    path = "/v1/comments/{id}/like",
+    tag = "comments",
+    params(("id" = String, Path, description = "评论 id")),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = CommentLikeResult),
+        (status = 403, description = "EXAM_REQUIRED / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "评论不存在或不可见", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn like(
+    State(state): State<CommentsState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Comment>>,
+) -> Result<Json<CommentLikeResult>, Problem> {
+    Ok(Json(service::like(&state, &principal, id.get()).await?))
+}
+
+/// 取消评论点赞
+///
+/// 幂等。评论已不可见时也能取消。
+#[utoipa::path(
+    delete,
+    path = "/v1/comments/{id}/like",
+    tag = "comments",
+    params(("id" = String, Path, description = "评论 id")),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = CommentLikeResult),
+        (status = 404, description = "评论不存在", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn unlike(
+    State(state): State<CommentsState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Comment>>,
+) -> Result<Json<CommentLikeResult>, Problem> {
+    Ok(Json(service::unlike(&state, &principal, id.get()).await?))
 }

@@ -779,3 +779,258 @@ pub(crate) async fn clear_solved(
     .await?;
     Ok(())
 }
+
+// ---------- 点赞与收藏 ----------
+
+/// 新增点赞，返回是否真的插入（已赞过时为 false）。
+pub(crate) async fn insert_like(
+    conn: &mut PgConnection,
+    post_id: i64,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "INSERT INTO post_likes (post_id, user_id, created_at) VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING",
+        post_id,
+        user_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn delete_like(
+    conn: &mut PgConnection,
+    post_id: i64,
+    user_id: i64,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "DELETE FROM post_likes WHERE post_id = $1 AND user_id = $2",
+        post_id,
+        user_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn insert_favorite(
+    conn: &mut PgConnection,
+    post_id: i64,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "INSERT INTO post_favorites (post_id, user_id, created_at) VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING",
+        post_id,
+        user_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn delete_favorite(
+    conn: &mut PgConnection,
+    post_id: i64,
+    user_id: i64,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "DELETE FROM post_favorites WHERE post_id = $1 AND user_id = $2",
+        post_id,
+        user_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) struct ReactionCounts {
+    pub like_count: i32,
+    pub favorite_count: i32,
+}
+
+/// 调整点赞数、收藏数（单条原子 UPDATE，下限 0，LIKE-003），返回调整后的值。
+/// 两个增量都为 0 时就是读取当前值。
+pub(crate) async fn add_reaction_counts(
+    conn: &mut PgConnection,
+    post_id: i64,
+    like_delta: i32,
+    favorite_delta: i32,
+) -> sqlx::Result<Option<ReactionCounts>> {
+    if like_delta == 0 && favorite_delta == 0 {
+        return sqlx::query_as!(
+            ReactionCounts,
+            "SELECT like_count, favorite_count FROM posts WHERE id = $1",
+            post_id,
+        )
+        .fetch_optional(conn)
+        .await;
+    }
+    sqlx::query_as!(
+        ReactionCounts,
+        "UPDATE posts SET like_count = GREATEST(like_count + $2, 0),
+                          favorite_count = GREATEST(favorite_count + $3, 0)
+         WHERE id = $1
+         RETURNING like_count, favorite_count",
+        post_id,
+        like_delta,
+        favorite_delta,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct ViewerMarks {
+    pub liked: bool,
+    pub favorited: bool,
+}
+
+pub(crate) async fn viewer_marks(
+    conn: &mut PgConnection,
+    post_id: i64,
+    user_id: i64,
+) -> sqlx::Result<ViewerMarks> {
+    sqlx::query_as!(
+        ViewerMarks,
+        r#"SELECT EXISTS (SELECT 1 FROM post_likes WHERE post_id = $1 AND user_id = $2) AS "liked!",
+                  EXISTS (SELECT 1 FROM post_favorites WHERE post_id = $1 AND user_id = $2) AS "favorited!""#,
+        post_id,
+        user_id,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 我的点赞 / 收藏列表里的一行：卡片字段 + 点赞（收藏）时间。
+pub(crate) struct SavedCardRow {
+    pub saved_at: DateTime<Utc>,
+    pub id: i64,
+    pub author_id: i64,
+    pub title: String,
+    pub excerpt_source: String,
+    pub is_anonymous: bool,
+    pub anonymous_seed: Option<String>,
+    pub pinned_at: Option<DateTime<Utc>>,
+    pub solved_at: Option<DateTime<Utc>>,
+    pub view_count: i64,
+    pub like_count: i32,
+    pub comment_count: i32,
+    pub published_at: DateTime<Utc>,
+    pub bumped_at: DateTime<Utc>,
+    pub edited_at: Option<DateTime<Utc>>,
+    pub last_bumped_by: Option<i64>,
+    pub category_id: Option<i64>,
+    pub category_slug: Option<String>,
+    pub category_name: Option<String>,
+}
+
+impl SavedCardRow {
+    pub(crate) fn split(self) -> (DateTime<Utc>, CardRow) {
+        (
+            self.saved_at,
+            CardRow {
+                id: self.id,
+                author_id: self.author_id,
+                title: self.title,
+                excerpt_source: self.excerpt_source,
+                is_anonymous: self.is_anonymous,
+                anonymous_seed: self.anonymous_seed,
+                pinned_at: self.pinned_at,
+                solved_at: self.solved_at,
+                view_count: self.view_count,
+                like_count: self.like_count,
+                comment_count: self.comment_count,
+                published_at: self.published_at,
+                bumped_at: self.bumped_at,
+                edited_at: self.edited_at,
+                last_bumped_by: self.last_bumped_by,
+                category_id: self.category_id,
+                category_slug: self.category_slug,
+                category_name: self.category_name,
+            },
+        )
+    }
+}
+
+/// 我点赞过、当前仍公开且不被拉黑过滤的帖子，按点赞时间倒序（LIKE-012、BLOCK-021）。
+/// 过滤在 SQL 里完成，翻页不会出现「不满的一页」（D-020 方案 B）。
+pub(crate) async fn liked_cards(
+    conn: &mut PgConnection,
+    user_id: i64,
+    excluded_authors: &[i64],
+    after: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> sqlx::Result<Vec<SavedCardRow>> {
+    let (after_at, after_id) = after.unzip();
+    sqlx::query_as!(
+        SavedCardRow,
+        r#"SELECT s.created_at AS saved_at,
+                  p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
+                  p.view_count, p.like_count, p.comment_count,
+                  p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
+                  p.edited_at, p.last_bumped_by,
+                  c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
+           FROM post_likes s
+           JOIN posts p ON p.id = s.post_id
+           LEFT JOIN categories c ON c.id = p.category_id
+           WHERE s.user_id = $1 AND p.status = 'published' AND p.hidden_at IS NULL
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))
+             AND ($3::timestamptz IS NULL OR (s.created_at, s.post_id) < ($3, $4::bigint))
+           ORDER BY s.created_at DESC, s.post_id DESC
+           LIMIT $5"#,
+        user_id,
+        excluded_authors,
+        after_at,
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 我收藏的帖子，规则同 [`liked_cards`]（FAV-008）。
+pub(crate) async fn favorite_cards(
+    conn: &mut PgConnection,
+    user_id: i64,
+    excluded_authors: &[i64],
+    after: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> sqlx::Result<Vec<SavedCardRow>> {
+    let (after_at, after_id) = after.unzip();
+    sqlx::query_as!(
+        SavedCardRow,
+        r#"SELECT s.created_at AS saved_at,
+                  p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
+                  p.view_count, p.like_count, p.comment_count,
+                  p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
+                  p.edited_at, p.last_bumped_by,
+                  c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
+           FROM post_favorites s
+           JOIN posts p ON p.id = s.post_id
+           LEFT JOIN categories c ON c.id = p.category_id
+           WHERE s.user_id = $1 AND p.status = 'published' AND p.hidden_at IS NULL
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))
+             AND ($3::timestamptz IS NULL OR (s.created_at, s.post_id) < ($3, $4::bigint))
+           ORDER BY s.created_at DESC, s.post_id DESC
+           LIMIT $5"#,
+        user_id,
+        excluded_authors,
+        after_at,
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+pub(crate) async fn denny_count(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<i32>> {
+    sqlx::query_scalar!("SELECT denny_count FROM posts WHERE id = $1", id)
+        .fetch_optional(conn)
+        .await
+}

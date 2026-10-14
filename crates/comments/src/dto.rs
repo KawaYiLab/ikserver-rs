@@ -41,6 +41,8 @@ pub struct CommentView {
     pub is_accepted: bool,
     /// 当前用户就是评论作者（用于显示删除按钮；匿名评论也只对作者本人为 true）。
     pub is_mine: bool,
+    /// 当前用户已点赞。
+    pub liked: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -75,4 +77,11 @@ pub struct PageQuery {
     pub cursor: Option<String>,
     /// 默认 20，最大 50。
     pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentLikeResult {
+    pub liked: bool,
+    pub like_count: i32,
 }

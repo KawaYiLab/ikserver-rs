@@ -3,7 +3,7 @@
 //! 加锁顺序固定为「帖子行 → 评论行」，所有写操作都先锁帖子，避免死锁，
 //! 也让同一帖子下的楼层分配、置顶、采纳天然串行。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use governor::clock::{Clock, DefaultClock};
@@ -19,7 +19,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
 use crate::CommentsState;
-use crate::dto::{CommentView, CommentsPage, CreateCommentRequest, PageQuery, ThreadView};
+use crate::dto::{
+    CommentLikeResult, CommentView, CommentsPage, CreateCommentRequest, PageQuery, ThreadView,
+};
 use crate::repo::{self, CommentRow, NewComment};
 use crate::text;
 
@@ -221,7 +223,7 @@ pub async fn create(
         hidden_at: None,
         created_at: now,
     };
-    Ok(view(&row, &authors, Some(author_id)))
+    Ok(view(&row, &authors, Some(author_id), &HashSet::new()))
 }
 
 // ---------- 删除 ----------
@@ -380,9 +382,86 @@ pub async fn unaccept(
     Ok(())
 }
 
-// ---------- 读取 ----------
+// ---------- 点赞 ----------
 
-fn view(row: &CommentRow, authors: &HashMap<i64, Author>, viewer_id: Option<i64>) -> CommentView {
+/// 点赞（幂等）。需要通过入站考试。评论必须可见：未隐藏、帖子公开、回复的一级评论也未隐藏
+/// （COMMON-007）；非匿名评论还要求双方没有拉黑（LIKE-007）。
+/// 每个业务日第一次点赞（帖子与评论合计）+1 经验，赞自己的评论不给（LIKE-015）。
+// TODO(notify)：点赞通知（LIKE-013：匿名评论、自己赞自己不发）。
+pub async fn like(
+    state: &CommentsState,
+    principal: &Principal,
+    comment_id: i64,
+) -> Result<CommentLikeResult, Problem> {
+    principal.require_write()?;
+    let me = principal.user_id.get();
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    let comment = repo::get(&mut tx, comment_id)
+        .await?
+        .filter(|c| c.hidden_at.is_none())
+        .ok_or_else(comment_not_found)?;
+    if let Some(parent_id) = comment.parent_id {
+        repo::get(&mut tx, parent_id)
+            .await?
+            .filter(|p| p.hidden_at.is_none())
+            .ok_or_else(comment_not_found)?;
+    }
+    interop::post(&mut tx, comment.post_id)
+        .await?
+        .filter(|p| p.is_public)
+        .ok_or_else(comment_not_found)?;
+    if !comment.is_anonymous {
+        ik_social::interop::ensure_no_block(&mut tx, me, comment.author_id).await?;
+    }
+    let added = repo::insert_like(&mut tx, comment.id, me, now).await?;
+    let like_count = repo::add_like_count(&mut tx, comment.id, i32::from(added))
+        .await?
+        .ok_or_else(comment_not_found)?;
+    if added && comment.author_id != me {
+        grant_exp(
+            &mut tx,
+            &state.ids,
+            me,
+            ExpAction::LikeGive,
+            1,
+            Dedup::Daily,
+            now,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(CommentLikeResult {
+        liked: true,
+        like_count,
+    })
+}
+
+/// 取消点赞（幂等）。不要求通过考试；评论已经不可见时也能取消（LIKE-018）。
+pub async fn unlike(
+    state: &CommentsState,
+    principal: &Principal,
+    comment_id: i64,
+) -> Result<CommentLikeResult, Problem> {
+    let mut tx = state.db.begin().await?;
+    let removed = repo::delete_like(&mut tx, comment_id, principal.user_id.get()).await?;
+    let like_count = repo::add_like_count(&mut tx, comment_id, -i32::from(removed))
+        .await?
+        .ok_or_else(comment_not_found)?;
+    tx.commit().await?;
+    Ok(CommentLikeResult {
+        liked: false,
+        like_count,
+    })
+}
+
+// ---------- 读取 ----------
+fn view(
+    row: &CommentRow,
+    authors: &HashMap<i64, Author>,
+    viewer_id: Option<i64>,
+    liked: &HashSet<i64>,
+) -> CommentView {
     CommentView {
         id: Id::new(row.id),
         post_id: Id::new(row.post_id),
@@ -400,8 +479,25 @@ fn view(row: &CommentRow, authors: &HashMap<i64, Author>, viewer_id: Option<i64>
         is_pinned: row.pinned_at.is_some(),
         is_accepted: row.accepted_at.is_some(),
         is_mine: viewer_id == Some(row.author_id),
+        liked: liked.contains(&row.id),
         created_at: row.created_at,
     }
+}
+
+/// 读者点过赞的评论。未登录时为空。
+async fn liked_set(
+    conn: &mut PgConnection,
+    viewer_id: Option<i64>,
+    rows: &[&CommentRow],
+) -> Result<HashSet<i64>, Problem> {
+    let Some(viewer_id) = viewer_id else {
+        return Ok(HashSet::new());
+    };
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    Ok(repo::liked_among(conn, viewer_id, &ids)
+        .await?
+        .into_iter()
+        .collect())
 }
 
 /// 只查非匿名评论的作者：匿名评论的真实作者不进入任何后续流程。
@@ -487,16 +583,17 @@ pub async fn list(
         .collect();
     let everyone: Vec<&CommentRow> = tops.iter().copied().chain(replies.iter()).collect();
     let authors = author_map(state, &everyone).await?;
+    let liked = liked_set(&mut conn, viewer_id, &everyone).await?;
 
     let thread = |row: &CommentRow| {
         let replies: Vec<CommentView> = replies
             .iter()
             .filter(|r| r.parent_id == Some(row.id))
-            .map(|r| view(r, &authors, viewer_id))
+            .map(|r| view(r, &authors, viewer_id, &liked))
             .collect();
         let reply_count = counts.get(&row.id).copied().unwrap_or(0);
         ThreadView {
-            comment: view(row, &authors, viewer_id),
+            comment: view(row, &authors, viewer_id, &liked),
             replies_has_more: reply_count > i64::try_from(replies.len()).unwrap_or(i64::MAX),
             replies,
             reply_count,
@@ -539,8 +636,13 @@ pub async fn replies(
     readable_post(&mut conn, parent.post_id, viewer_id).await?;
 
     let rows = repo::replies_page(&mut conn, parent.id, &excluded, after, limit + 1).await?;
-    let authors = author_map(state, &rows.iter().collect::<Vec<_>>()).await?;
-    let items: Vec<CommentView> = rows.iter().map(|r| view(r, &authors, viewer_id)).collect();
+    let refs: Vec<&CommentRow> = rows.iter().collect();
+    let authors = author_map(state, &refs).await?;
+    let liked = liked_set(&mut conn, viewer_id, &refs).await?;
+    let items: Vec<CommentView> = rows
+        .iter()
+        .map(|r| view(r, &authors, viewer_id, &liked))
+        .collect();
     Page::from_rows(
         items,
         usize::try_from(limit).unwrap_or(20),

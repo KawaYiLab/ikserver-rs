@@ -137,3 +137,12 @@
   列表 SQL 里写成 `(is_anonymous OR NOT (author_id = ANY($excluded)))`，匿名内容永远不过滤。
 - 同一对用户之间的关注 / 拉黑写入用事务级 advisory lock（按两人 id 的有序对哈希）串行化，
   避免「关注」与「拉黑」并发提交后留下拉黑双方之间的关注。
+## 点赞与收藏（`20261015000002_reactions.sql`）
+
+- `post_likes`、`post_favorites` 主键 `(post_id, user_id)`，`comment_likes` 主键 `(comment_id, user_id)`：
+  每人每个目标一条，并发重复点赞由主键收敛（`INSERT … ON CONFLICT DO NOTHING`，按是否真的插入决定计数是否 +1）。
+- 计数是 `posts.like_count`、`posts.favorite_count`、`comments.like_count`，与关系行在同一事务里用
+  单条 `UPDATE … GREATEST(x + delta, 0)` 增减（LIKE-003）。
+- 帖子、评论、用户删除时级联删除。删除一级评论会级联删除回复，回复的点赞也随之删除（D-029）。
+- 表归属：帖子的赞、藏归 content，评论的赞归 comments；拉黑判断经 `ik_social::interop`。
+- 「我的点赞 / 收藏」按 `(user_id, created_at DESC, post_id DESC)` 索引分页，可见性与拉黑过滤都在 SQL 里完成。

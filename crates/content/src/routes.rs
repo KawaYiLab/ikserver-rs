@@ -17,8 +17,9 @@ use utoipa_axum::routes;
 
 use crate::ContentState;
 use crate::dto::{
-    CategoryView, CreatePostQuery, FeedPage, FeedQuery, GiftRequest, GiftResult, MyPostItem,
-    MyPostsQuery, PostDetail, PostEditView, PostInput, TagRef, TagSuggestQuery, ViewResult,
+    CategoryView, CreatePostQuery, FavoriteResult, FeedPage, FeedQuery, GiftRequest, GiftResult,
+    LikeResult, MyPostItem, MyPostsQuery, PostDetail, PostEditView, PostInput, SavedPost,
+    SavedQuery, TagRef, TagSuggestQuery, TripleResult, ViewResult,
 };
 use crate::service;
 
@@ -39,6 +40,11 @@ where
         .routes(routes!(unpublish))
         .routes(routes!(record_view))
         .routes(routes!(gift_denny))
+        .routes(routes!(like, unlike))
+        .routes(routes!(favorite, unfavorite))
+        .routes(routes!(triple))
+        .routes(routes!(my_likes))
+        .routes(routes!(my_favorites))
         .routes(routes!(pin, unpin))
         .routes(routes!(my_posts))
 }
@@ -452,4 +458,164 @@ async fn my_posts(
     Query(query): Query<MyPostsQuery>,
 ) -> Result<Json<Page<MyPostItem>>, Problem> {
     Ok(Json(service::my_posts(&state, &principal, query).await?))
+}
+
+/// 点赞
+///
+/// 幂等。需要通过入站考试。每个业务日第一次点赞（帖子与评论合计）+1 经验。
+#[utoipa::path(
+    put,
+    path = "/v1/posts/{id}/like",
+    tag = "content",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = LikeResult),
+        (status = 403, description = "EXAM_REQUIRED / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "帖子不存在或不公开", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn like(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Post>>,
+) -> Result<Json<LikeResult>, Problem> {
+    Ok(Json(service::like(&state, &principal, id.get()).await?))
+}
+
+/// 取消点赞
+///
+/// 幂等。帖子已不可见时也能取消。
+#[utoipa::path(
+    delete,
+    path = "/v1/posts/{id}/like",
+    tag = "content",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = LikeResult),
+        (status = 404, description = "帖子不存在", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn unlike(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Post>>,
+) -> Result<Json<LikeResult>, Problem> {
+    Ok(Json(service::unlike(&state, &principal, id.get()).await?))
+}
+
+/// 收藏
+///
+/// 幂等。需要通过入站考试。
+#[utoipa::path(
+    put,
+    path = "/v1/posts/{id}/favorite",
+    tag = "content",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = FavoriteResult),
+        (status = 403, description = "EXAM_REQUIRED / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "帖子不存在或不公开", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn favorite(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Post>>,
+) -> Result<Json<FavoriteResult>, Problem> {
+    Ok(Json(service::favorite(&state, &principal, id.get()).await?))
+}
+
+/// 取消收藏
+///
+/// 幂等。帖子已不可见时也能取消。
+#[utoipa::path(
+    delete,
+    path = "/v1/posts/{id}/favorite",
+    tag = "content",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = FavoriteResult),
+        (status = 404, description = "帖子不存在", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn unfavorite(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Post>>,
+) -> Result<Json<FavoriteResult>, Problem> {
+    Ok(Json(
+        service::unfavorite(&state, &principal, id.get()).await?,
+    ))
+}
+
+/// 一键三连
+///
+/// 点赞 + 收藏 + 投 1 丁尼。点赞、收藏已存在时保持不变；投币失败（已投过、余额不足、
+/// 自己的帖子、匿名帖）不影响前两步，原因见 `dennyError`。
+#[utoipa::path(
+    post,
+    path = "/v1/posts/{id}/triple",
+    tag = "content",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = TripleResult),
+        (status = 403, description = "EXAM_REQUIRED / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "帖子不存在或不公开", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn triple(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<Post>>,
+) -> Result<Json<TripleResult>, Problem> {
+    Ok(Json(service::triple(&state, &principal, id.get()).await?))
+}
+
+/// 我点赞过的帖子（新赞的在前）
+#[utoipa::path(
+    get,
+    path = "/v1/me/likes",
+    tag = "content",
+    params(SavedQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Page<SavedPost>),
+        (status = 400, description = "CURSOR_INVALID", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn my_likes(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Query(query): Query<SavedQuery>,
+) -> Result<Json<Page<SavedPost>>, Problem> {
+    Ok(Json(service::my_likes(&state, &principal, query).await?))
+}
+
+/// 我收藏的帖子（新收藏的在前）
+#[utoipa::path(
+    get,
+    path = "/v1/me/favorites",
+    tag = "content",
+    params(SavedQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Page<SavedPost>),
+        (status = 400, description = "CURSOR_INVALID", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn my_favorites(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Query(query): Query<SavedQuery>,
+) -> Result<Json<Page<SavedPost>>, Problem> {
+    Ok(Json(
+        service::my_favorites(&state, &principal, query).await?,
+    ))
 }

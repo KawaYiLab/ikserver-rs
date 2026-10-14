@@ -13,9 +13,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
 use crate::dto::{
-    AuthorView, CategoryRef, CategoryView, FeedPage, FeedQuery, GiftRequest, GiftResult,
-    MyPostItem, MyPostsQuery, MyPostsState, PostCard, PostDetail, PostEditView, PostInput,
-    PostStatus, TagRef, ViewResult,
+    AuthorView, CategoryRef, CategoryView, FavoriteResult, FeedPage, FeedQuery, GiftRequest,
+    GiftResult, LikeResult, MyPostItem, MyPostsQuery, MyPostsState, PostCard, PostDetail,
+    PostEditView, PostInput, PostStatus, SavedPost, SavedQuery, TagRef, TripleResult, ViewResult,
 };
 use crate::repo::{self, CardRow, Content, DraftRow, FeedFilter, PostRow};
 use crate::video::{self, ExternalVideo, MAX_EXTERNAL_VIDEOS};
@@ -1002,6 +1002,10 @@ pub async fn detail(
             .is_empty(),
         None => false,
     };
+    let marks = match viewer {
+        Some(p) => Some(repo::viewer_marks(&mut conn, row.id, p.user_id.get()).await?),
+        None => None,
+    };
 
     Ok(PostDetail {
         id: Id::new(row.id),
@@ -1037,6 +1041,8 @@ pub async fn detail(
         is_owner,
         is_hidden: row.hidden_at.is_some(),
         denny_given,
+        liked: marks.as_ref().is_some_and(|m| m.liked),
+        favorited: marks.as_ref().is_some_and(|m| m.favorited),
     })
 }
 
@@ -1300,6 +1306,252 @@ pub async fn create_category(
         admin_only: input.admin_only,
         allow_comment_accept: input.allow_comment_accept,
     })
+}
+
+// ---------- 点赞、收藏、三连 ----------
+
+/// 可以新增点赞 / 收藏的帖子：必须公开（LIKE-009、FAV-007）；非匿名帖还要求双方没有拉黑
+/// （LIKE-007、FAV-004），匿名帖不做拉黑检查。
+async fn reactable_post(
+    conn: &mut PgConnection,
+    user_id: i64,
+    post_id: i64,
+) -> Result<repo::PostRefRow, Problem> {
+    let post = repo::post_ref(conn, post_id)
+        .await?
+        .filter(|p| p.is_public)
+        .ok_or_else(post_not_found)?;
+    if !post.is_anonymous {
+        ik_social::interop::ensure_no_block(conn, user_id, post.author_id).await?;
+    }
+    Ok(post)
+}
+
+/// 点赞者每个业务日第一次点赞（帖子与评论合计）+1 经验；赞自己的帖子不给，赞匿名帖照常给。
+/// 被点赞者没有经验（LIKE-015、D-049）。
+async fn grant_like_exp(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    liker_id: i64,
+    author_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    if liker_id != author_id {
+        ik_economy::service::grant_exp(
+            conn,
+            &state.ids,
+            liker_id,
+            ExpAction::LikeGive,
+            1,
+            Dedup::Daily,
+            now,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// 点赞（幂等）。需要通过入站考试。
+// TODO(notify)：点赞通知（LIKE-013：匿名帖、自己赞自己不发）。
+pub async fn like(
+    state: &ContentState,
+    principal: &Principal,
+    post_id: i64,
+) -> Result<LikeResult, Problem> {
+    principal.require_write()?;
+    let me = principal.user_id.get();
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    let post = reactable_post(&mut tx, me, post_id).await?;
+    let added = repo::insert_like(&mut tx, post.id, me, now).await?;
+    let counts = repo::add_reaction_counts(&mut tx, post.id, i32::from(added), 0)
+        .await?
+        .ok_or_else(post_not_found)?;
+    if added {
+        grant_like_exp(state, &mut tx, me, post.author_id, now).await?;
+    }
+    tx.commit().await?;
+    Ok(LikeResult {
+        liked: true,
+        like_count: counts.like_count,
+    })
+}
+
+/// 取消点赞（幂等）。不要求通过考试；帖子已经不可见（隐藏、下线、拉黑）时也能取消（LIKE-018）。
+/// 当天的点赞经验不收回。
+pub async fn unlike(
+    state: &ContentState,
+    principal: &Principal,
+    post_id: i64,
+) -> Result<LikeResult, Problem> {
+    let mut tx = state.db.begin().await?;
+    let removed = repo::delete_like(&mut tx, post_id, principal.user_id.get()).await?;
+    let counts = repo::add_reaction_counts(&mut tx, post_id, -i32::from(removed), 0)
+        .await?
+        .ok_or_else(post_not_found)?;
+    tx.commit().await?;
+    Ok(LikeResult {
+        liked: false,
+        like_count: counts.like_count,
+    })
+}
+
+/// 收藏（幂等）。需要通过入站考试；收藏没有经验（FAV-010）。
+// TODO(notify)：收藏通知（FAV-009：匿名帖、自己收藏自己不发）。
+pub async fn favorite(
+    state: &ContentState,
+    principal: &Principal,
+    post_id: i64,
+) -> Result<FavoriteResult, Problem> {
+    principal.require_write()?;
+    let me = principal.user_id.get();
+    let mut tx = state.db.begin().await?;
+    let post = reactable_post(&mut tx, me, post_id).await?;
+    let added = repo::insert_favorite(&mut tx, post.id, me, Utc::now()).await?;
+    let counts = repo::add_reaction_counts(&mut tx, post.id, 0, i32::from(added))
+        .await?
+        .ok_or_else(post_not_found)?;
+    tx.commit().await?;
+    Ok(FavoriteResult {
+        favorited: true,
+        favorite_count: counts.favorite_count,
+    })
+}
+
+/// 取消收藏（幂等）。不要求通过考试，帖子不可见时也能取消。
+pub async fn unfavorite(
+    state: &ContentState,
+    principal: &Principal,
+    post_id: i64,
+) -> Result<FavoriteResult, Problem> {
+    let mut tx = state.db.begin().await?;
+    let removed = repo::delete_favorite(&mut tx, post_id, principal.user_id.get()).await?;
+    let counts = repo::add_reaction_counts(&mut tx, post_id, 0, -i32::from(removed))
+        .await?
+        .ok_or_else(post_not_found)?;
+    tx.commit().await?;
+    Ok(FavoriteResult {
+        favorited: false,
+        favorite_count: counts.favorite_count,
+    })
+}
+
+/// 一键三连：点赞 + 收藏 + 投 1 丁尼（TRIPLE-001）。
+///
+/// 点赞、收藏是「确保存在」，在同一个事务里完成；任一步被拒（不可见、拉黑）整个三连失败，
+/// 不会只成功一半（旧系统并行执行，可能留下一半，TRIPLE-004）。投币随后单独执行，
+/// 失败只通过 `dennyError` 返回原因，不回滚点赞和收藏（TRIPLE-003）。
+pub async fn triple(
+    state: &ContentState,
+    principal: &Principal,
+    post_id: i64,
+) -> Result<TripleResult, Problem> {
+    principal.require_write()?;
+    let me = principal.user_id.get();
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    let post = reactable_post(&mut tx, me, post_id).await?;
+    let liked = repo::insert_like(&mut tx, post.id, me, now).await?;
+    let favorited = repo::insert_favorite(&mut tx, post.id, me, now).await?;
+    let counts =
+        repo::add_reaction_counts(&mut tx, post.id, i32::from(liked), i32::from(favorited))
+            .await?
+            .ok_or_else(post_not_found)?;
+    if liked {
+        grant_like_exp(state, &mut tx, me, post.author_id, now).await?;
+    }
+    tx.commit().await?;
+
+    let (denny_given, denny_error, denny_count, balance) =
+        match gift_denny(state, principal, post.id, GiftRequest::default()).await {
+            Ok(gift) => (true, None, gift.denny_count, Some(gift.balance)),
+            Err(error) => {
+                if error.status().is_server_error() {
+                    tracing::error!(post_id = post.id, code = error.code(), "三连投币失败");
+                }
+                let mut conn = state.db.acquire().await?;
+                let count = repo::denny_count(&mut conn, post.id).await?.unwrap_or(0);
+                (false, Some(error.code().to_owned()), count, None)
+            }
+        };
+    Ok(TripleResult {
+        like_count: counts.like_count,
+        favorite_count: counts.favorite_count,
+        denny_given,
+        denny_error,
+        denny_count,
+        balance,
+    })
+}
+
+#[derive(Serialize, Deserialize)]
+struct SavedCursor {
+    s: DateTime<Utc>,
+    i: i64,
+}
+
+#[derive(Clone, Copy)]
+enum Saved {
+    Likes,
+    Favorites,
+}
+
+async fn saved_posts(
+    state: &ContentState,
+    principal: &Principal,
+    query: SavedQuery,
+    kind: Saved,
+) -> Result<Page<SavedPost>, Problem> {
+    let limit = page_limit(query.limit);
+    let after = query
+        .cursor
+        .as_deref()
+        .map(cursor::decode::<SavedCursor>)
+        .transpose()?
+        .map(|c| (c.s, c.i));
+    let me = principal.user_id.get();
+    let mut conn = state.db.acquire().await?;
+    let excluded = ik_social::interop::excluded_authors(&mut conn, Some(me)).await?;
+    let rows = match kind {
+        Saved::Likes => repo::liked_cards(&mut conn, me, &excluded, after, limit + 1).await?,
+        Saved::Favorites => {
+            repo::favorite_cards(&mut conn, me, &excluded, after, limit + 1).await?
+        }
+    };
+    let (times, rows): (Vec<DateTime<Utc>>, Vec<CardRow>) =
+        rows.into_iter().map(repo::SavedCardRow::split).unzip();
+    let cards = cards(state, &mut conn, Some(principal), rows).await?;
+    let items = times
+        .into_iter()
+        .zip(cards)
+        .map(|(saved_at, post)| SavedPost { post, saved_at })
+        .collect();
+    Page::from_rows(
+        items,
+        usize::try_from(limit).unwrap_or(20),
+        |item: &SavedPost| SavedCursor {
+            s: item.saved_at,
+            i: item.post.id.get(),
+        },
+    )
+}
+
+/// 我点赞过的帖子（新赞的在前）。只含当前仍公开、且不被拉黑过滤的帖子。
+pub async fn my_likes(
+    state: &ContentState,
+    principal: &Principal,
+    query: SavedQuery,
+) -> Result<Page<SavedPost>, Problem> {
+    saved_posts(state, principal, query, Saved::Likes).await
+}
+
+/// 我收藏的帖子（新收藏的在前）。只含当前仍公开、且不被拉黑过滤的帖子。
+pub async fn my_favorites(
+    state: &ContentState,
+    principal: &Principal,
+    query: SavedQuery,
+) -> Result<Page<SavedPost>, Problem> {
+    saved_posts(state, principal, query, Saved::Favorites).await
 }
 
 #[cfg(test)]

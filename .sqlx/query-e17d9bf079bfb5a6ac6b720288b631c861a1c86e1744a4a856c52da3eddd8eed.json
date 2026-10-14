@@ -1,0 +1,42 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET like_count = GREATEST(like_count + $2, 0),\n                          favorite_count = GREATEST(favorite_count + $3, 0)\n         WHERE id = $1\n         RETURNING like_count, favorite_count",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "like_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "like_count"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "favorite_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "favorite_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e17d9bf079bfb5a6ac6b720288b631c861a1c86e1744a4a856c52da3eddd8eed"
+}

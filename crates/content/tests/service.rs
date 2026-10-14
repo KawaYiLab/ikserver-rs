@@ -922,3 +922,268 @@ async fn gift_is_rejected_between_blocked_users(db: PgPool) {
     assert_eq!(err.code(), "USER_BLOCKED");
     assert_eq!(balance(&h.db, 2).await, (30, 0));
 }
+
+// ---------- 点赞、收藏、三连 ----------
+
+async fn publish(h: &Harness, author: &Principal, title: &str, anonymous: bool) -> i64 {
+    let mut post = input(title);
+    post.is_anonymous = anonymous;
+    service::create(&h.state, author, post, true)
+        .await
+        .unwrap()
+        .id
+        .get()
+}
+
+fn saved_page() -> ik_content::dto::SavedQuery {
+    ik_content::dto::SavedQuery {
+        cursor: None,
+        limit: None,
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn like_and_unlike_are_idempotent(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = publish(&h, &author, "帖子", false).await;
+    let other = publish(&h, &author, "另一篇", false).await;
+
+    let liked = service::like(&h.state, &fan, post).await.unwrap();
+    assert!(liked.liked);
+    assert_eq!(liked.like_count, 1);
+    assert_eq!(
+        service::like(&h.state, &fan, post)
+            .await
+            .unwrap()
+            .like_count,
+        1
+    );
+    let detail = service::detail(&h.state, Some(&fan), post).await.unwrap();
+    assert!(detail.liked && !detail.favorited);
+    assert_eq!(detail.like_count, 1);
+    assert!(
+        !service::detail(&h.state, Some(&author), post)
+            .await
+            .unwrap()
+            .liked
+    );
+
+    // 点赞者每个业务日第一次点赞 +1 经验；被点赞者没有经验。
+    service::like(&h.state, &fan, other).await.unwrap();
+    assert_eq!(exp_of(&h.db, 2).await, 1);
+    assert_eq!(exp_of(&h.db, 1).await, 4, "作者只有发帖经验");
+    // 赞自己的帖子：计数照常，不给经验。
+    assert_eq!(
+        service::like(&h.state, &author, post)
+            .await
+            .unwrap()
+            .like_count,
+        2
+    );
+    assert_eq!(exp_of(&h.db, 1).await, 4);
+
+    let off = service::unlike(&h.state, &fan, post).await.unwrap();
+    assert!(!off.liked);
+    assert_eq!(off.like_count, 1);
+    assert_eq!(
+        service::unlike(&h.state, &fan, post)
+            .await
+            .unwrap()
+            .like_count,
+        1
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn like_rules(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let newbie = h.user(3, Role::User, 0, false).await;
+    let post = publish(&h, &author, "帖子", false).await;
+    let anonymous = publish(&h, &author, "匿名", true).await;
+
+    assert_eq!(
+        service::like(&h.state, &newbie, post)
+            .await
+            .unwrap_err()
+            .code(),
+        "EXAM_REQUIRED"
+    );
+    service::like(&h.state, &fan, post).await.unwrap();
+    sqlx::query!("UPDATE posts SET hidden_at = now() WHERE id = $1", post)
+        .execute(&h.db)
+        .await
+        .unwrap();
+    // 不可见的帖子不能再赞，但能取消（LIKE-018）。
+    assert_eq!(
+        service::favorite(&h.state, &fan, post)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+    assert_eq!(
+        service::unlike(&h.state, &fan, post)
+            .await
+            .unwrap()
+            .like_count,
+        0
+    );
+    assert_eq!(
+        service::unlike(&h.state, &fan, 999)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+
+    // 拉黑拦截非匿名帖，不拦匿名帖。
+    block(&h.db, 1, 2).await;
+    let other = publish(&h, &author, "另一篇", false).await;
+    assert_eq!(
+        service::like(&h.state, &fan, other)
+            .await
+            .unwrap_err()
+            .code(),
+        "USER_BLOCKED"
+    );
+    assert_eq!(
+        service::favorite(&h.state, &fan, other)
+            .await
+            .unwrap_err()
+            .code(),
+        "USER_BLOCKED"
+    );
+    service::like(&h.state, &fan, anonymous).await.unwrap();
+    service::favorite(&h.state, &fan, anonymous).await.unwrap();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn concurrent_likes_from_same_user_count_once(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = publish(&h, &author, "帖子", false).await;
+    let tasks: Vec<_> = (0..6)
+        .map(|_| {
+            let state = h.state.clone();
+            let fan = fan.clone();
+            tokio::spawn(async move { service::like(&state, &fan, post).await })
+        })
+        .collect();
+    for task in tasks {
+        task.await.unwrap().unwrap();
+    }
+    let detail = service::detail(&h.state, None, post).await.unwrap();
+    assert_eq!(detail.like_count, 1);
+    assert_eq!(exp_of(&h.db, 2).await, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn favorites_and_saved_lists(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let a = publish(&h, &author, "A", false).await;
+    let b = publish(&h, &author, "B", false).await;
+    let c = publish(&h, &author, "C", false).await;
+
+    let fav = service::favorite(&h.state, &fan, a).await.unwrap();
+    assert!(fav.favorited);
+    assert_eq!(fav.favorite_count, 1);
+    assert_eq!(
+        service::favorite(&h.state, &fan, a)
+            .await
+            .unwrap()
+            .favorite_count,
+        1
+    );
+    service::favorite(&h.state, &fan, b).await.unwrap();
+    service::favorite(&h.state, &fan, c).await.unwrap();
+    sqlx::query!("UPDATE posts SET hidden_at = now() WHERE id = $1", b)
+        .execute(&h.db)
+        .await
+        .unwrap();
+
+    let page = service::my_favorites(
+        &h.state,
+        &fan,
+        ik_content::dto::SavedQuery {
+            cursor: None,
+            limit: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.items[0].post.id.get(), c);
+    let page = service::my_favorites(
+        &h.state,
+        &fan,
+        ik_content::dto::SavedQuery {
+            cursor: page.next_cursor,
+            limit: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    // 被隐藏的 b 不出现，也不会产生空页。
+    assert_eq!(page.items[0].post.id.get(), a);
+    assert!(page.next_cursor.is_none());
+
+    let off = service::unfavorite(&h.state, &fan, a).await.unwrap();
+    assert!(!off.favorited);
+    assert_eq!(off.favorite_count, 0);
+
+    service::like(&h.state, &fan, c).await.unwrap();
+    let likes = service::my_likes(&h.state, &fan, saved_page())
+        .await
+        .unwrap();
+    assert_eq!(likes.items.len(), 1);
+    assert_eq!(likes.items[0].post.like_count, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn triple_likes_favorites_and_gifts_once(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = publish(&h, &author, "帖子", false).await;
+
+    let first = service::triple(&h.state, &fan, post).await.unwrap();
+    assert_eq!((first.like_count, first.favorite_count), (1, 1));
+    assert!(first.denny_given);
+    assert_eq!(first.denny_error, None);
+    assert_eq!((first.denny_count, first.balance), (1, Some(29)));
+
+    // 再来一次：赞、藏保持，投币软失败，不扣费。
+    let again = service::triple(&h.state, &fan, post).await.unwrap();
+    assert_eq!((again.like_count, again.favorite_count), (1, 1));
+    assert!(!again.denny_given);
+    assert_eq!(again.denny_error.as_deref(), Some("DENNY_ALREADY_GIVEN"));
+    assert_eq!((again.denny_count, again.balance), (1, None));
+    assert_eq!(balance(&h.db, 2).await, (29, 1));
+
+    // 自己的帖子：赞、藏照常，投币原因是 DENNY_SELF_GIVE。
+    let own = service::triple(&h.state, &author, post).await.unwrap();
+    assert_eq!((own.like_count, own.favorite_count), (2, 2));
+    assert_eq!(own.denny_error.as_deref(), Some("DENNY_SELF_GIVE"));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn blocked_triple_writes_nothing(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = publish(&h, &author, "帖子", false).await;
+    block(&h.db, 2, 1).await;
+    let err = service::triple(&h.state, &fan, post).await.unwrap_err();
+    assert_eq!(err.code(), "USER_BLOCKED");
+    let detail = service::detail(&h.state, None, post).await.unwrap();
+    assert_eq!(
+        (detail.like_count, detail.favorite_count, detail.denny_count),
+        (0, 0, 0)
+    );
+}

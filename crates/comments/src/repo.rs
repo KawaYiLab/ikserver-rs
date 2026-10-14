@@ -338,3 +338,74 @@ pub(crate) async fn replies_page(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 点赞 ----------
+
+pub(crate) async fn insert_like(
+    conn: &mut PgConnection,
+    comment_id: i64,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "INSERT INTO comment_likes (comment_id, user_id, created_at) VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING",
+        comment_id,
+        user_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn delete_like(
+    conn: &mut PgConnection,
+    comment_id: i64,
+    user_id: i64,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "DELETE FROM comment_likes WHERE comment_id = $1 AND user_id = $2",
+        comment_id,
+        user_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 点赞数加减（单条原子 UPDATE，下限 0），返回新值；`delta` 为 0 时就是读取。评论不存在时返回 None。
+pub(crate) async fn add_like_count(
+    conn: &mut PgConnection,
+    comment_id: i64,
+    delta: i32,
+) -> sqlx::Result<Option<i32>> {
+    if delta == 0 {
+        return sqlx::query_scalar!("SELECT like_count FROM comments WHERE id = $1", comment_id)
+            .fetch_optional(conn)
+            .await;
+    }
+    sqlx::query_scalar!(
+        "UPDATE comments SET like_count = GREATEST(like_count + $2, 0) WHERE id = $1
+         RETURNING like_count",
+        comment_id,
+        delta,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// `comment_ids` 中我点过赞的。
+pub(crate) async fn liked_among(
+    conn: &mut PgConnection,
+    user_id: i64,
+    comment_ids: &[i64],
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT comment_id FROM comment_likes WHERE user_id = $1 AND comment_id = ANY($2)",
+        user_id,
+        comment_ids,
+    )
+    .fetch_all(conn)
+    .await
+}
