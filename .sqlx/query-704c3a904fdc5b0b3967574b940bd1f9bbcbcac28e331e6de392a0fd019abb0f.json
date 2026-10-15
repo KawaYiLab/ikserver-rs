@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mihoyo_qr_logins SET last_polled_at = now() - interval '5 seconds'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "704c3a904fdc5b0b3967574b940bd1f9bbcbcac28e331e6de392a0fd019abb0f"
+}

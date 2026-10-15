@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mihoyo_qr_logins SET last_polled_at = NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "92844782f55f7c5f722f6b5b1d890883310a0d7117a3cf869cc71902ce768d32"
+}

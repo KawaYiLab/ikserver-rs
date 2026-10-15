@@ -148,8 +148,13 @@ pub async fn profile(
         (followers, following, is_following)
     };
 
-    let (exp, stats) = if t.access == Access::Full {
+    let (exp, stats, zzz) = if t.access == Access::Full {
         let exp = ik_economy::service::exp_of(&mut conn, user_id).await?;
+        let zzz = if t.user.gone {
+            None
+        } else {
+            ik_mihoyo::interop::zzz_profile(&mut conn, user_id).await?
+        };
         drop(conn);
         let posts = ik_content::service::author_stats(&state.content, user_id).await?;
         let comment_count =
@@ -163,9 +168,10 @@ pub async fn profile(
                 total_comments: posts.total_comments,
                 total_likes: posts.total_likes,
             }),
+            zzz,
         )
     } else {
-        (None, None)
+        (None, None, None)
     };
 
     let avatar = avatar_view(state, t.user.avatar_media_id.filter(|_| !t.user.gone)).await?;
@@ -180,6 +186,7 @@ pub async fn profile(
         avatar,
         equipped_avatar,
         equipped_card,
+        zzz,
         id: Id::new(t.user.id),
         username: t.user.username,
         level: t.user.level,

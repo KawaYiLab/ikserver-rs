@@ -25,6 +25,7 @@ ik-feed = { path = "crates/feed" }
 ik-search = { path = "crates/search" }
 ik-media = { path = "crates/media" }
 ik-cosmetics = { path = "crates/cosmetics" }
+ik-mihoyo = { path = "crates/mihoyo" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
@@ -89,6 +90,9 @@ thumbhash = "0.1"
 
 # 后台任务（PostgreSQL 队列）。不启用 TLS，与 sqlx 一致。
 graphile_worker = { version = "0.14", default-features = false, features = ["runtime-tokio", "driver-sqlx"] }
+
+# 调用米游社等外部 HTTPS 接口（rustls + ring，与对象存储一致，不引入 aws-lc）。
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 # 其他
 moka = { version = "0.12", features = ["future"] }

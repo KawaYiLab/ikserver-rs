@@ -43,7 +43,7 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`profile → …, cosmetics`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
+- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
   `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
   `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
@@ -69,6 +69,10 @@ kernel ◄── auth ◄── content ◄── feed
 - `cosmetics → auth, media`：系统头像、论坛名片的目录。装备状态写在账号上（`ik_auth::interop::equip_*`），
   系统头像的图片 id 也冗余在账号上，所以 `ik_auth::service::authors` 直接给出「装备头像优先，其次自定义头像」，
   展示作者的各域不依赖 cosmetics。目录换图时 cosmetics 在同一事务里调用 `refresh_equipped_avatar` 同步。
+- `mihoyo → auth`：米游社身份（`mihoyo_bindings`）与扫码会话（`mihoyo_qr_logins`，替代旧系统的 Redis 键）。
+  建号经 `ik_auth::interop::insert_user_without_email`，登录经 `ik_auth::service::issue_session_with_secret`
+  （确定性会话）。上游协议在 `ik_mihoyo::upstream`（trait，测试用假实现；HTTP 实现另有本地桩服务器测试）。
+  上游调用都在事务之外；米游社 Cookie 只在确认后的那次请求里用，不落库、不打日志。
   对象存储的读写都在数据库事务之外；校验并发由进程内闸门（`ik_media::gate`）限制。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。
@@ -110,7 +114,8 @@ HTTP → SetRequestId → Trace → CORS → CsrfLayer → 限流 → BodyLimit 
 ### 多实例部署要求
 
 - 每个实例 `IK_NODE_ID` 不同（雪花 ID 与集群事件去重都靠它），`IK_BUS__CLUSTER=true`。
-- 所有实例配置相同的 `IK_SECRETS__CODE_HMAC_KEY`（上传凭证在一个实例签发、在另一个实例校验）。
+- 所有实例配置相同的 `IK_SECRETS__CODE_HMAC_KEY`（上传凭证在一个实例签发、在另一个实例校验）与
+  `IK_SECRETS__QR_SESSION_KEY`（扫码登录的确定性会话，轮询可能落在任何实例）。
 - 后台任务由 graphile_worker 在实例间分配，定时任务只安排一次；可以用 `IK_JOBS__RUN_WORKER=false` 让部分实例只服务 HTTP。
 - 仍按实例计的（可接受的近似）：全站与各接口限流、浏览量冷却、热榜缓存、每个用户的 WebSocket 连接数上限。
 
@@ -125,6 +130,7 @@ graphile_worker（schema `graphile_worker`，由它自己迁移：执行器启�
     做完一批在同一事务里安排下一批；执行时帖子已下线、隐藏、删除就停止。最多 10 次尝试。
   - `media.sweep_staging`：定时任务，每小时第 17 分钟，清理过期的上传暂存对象。只尝试一次，失败等下个小时。
   - `server.prune_idempotency_keys`：定时任务，每天一次，删除超过 24 小时的幂等键。只尝试一次。
+  - `mihoyo.prune_qr_logins`：定时任务，每小时第 41 分钟，删除过期的扫码会话。只尝试一次。
 - 仍在进程内（每个实例各自做，不适合放进队列）：热榜刷新（结果是本实例的内存缓存）、搜索索引同步
   （订阅事件总线，失败的文档进重试表，另有定期对账）。
 - 计划：会话清理、计数/余额对账、过期验证码/登录尝试清理（D-022）、AI 回复、举报处置、账号清理。

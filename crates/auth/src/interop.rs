@@ -251,3 +251,19 @@ pub async fn refresh_equipped_avatar(
 ) -> Result<u64, Problem> {
     Ok(repo::refresh_equipped_avatar(conn, avatar_id, media_id).await?)
 }
+
+/// 建一个没有邮箱、没有密码的账号（米游社首登，ACC-013、MHY-010）。用户名已被占用时返回 false，
+/// 调用方换一个名字重试。注册开关由调用方检查。
+pub async fn insert_user_without_email(
+    conn: &mut PgConnection,
+    user_id: i64,
+    username: &str,
+    now: DateTime<Utc>,
+) -> Result<bool, Problem> {
+    Ok(repo::insert_user_without_email(conn, user_id, username, now).await?)
+}
+
+/// 账号是否有可用邮箱（没有的账号只能扫码登录，不能解绑米游社，MHY-014）。
+pub async fn has_email(conn: &mut PgConnection, user_id: i64) -> Result<bool, Problem> {
+    Ok(repo::has_email(conn, user_id).await?)
+}

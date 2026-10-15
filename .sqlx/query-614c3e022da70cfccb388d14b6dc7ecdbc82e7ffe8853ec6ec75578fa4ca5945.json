@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mihoyo_qr_logins\n         WHERE expires_at < $1 AND (result_expires_at IS NULL OR result_expires_at < $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "614c3e022da70cfccb388d14b6dc7ecdbc82e7ffe8853ec6ec75578fa4ca5945"
+}

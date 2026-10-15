@@ -256,7 +256,9 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
          INSERT INTO system_avatars (id, name, image_media_id) VALUES (1, '头像', 900);
          INSERT INTO business_cards (id, name, image_media_id) VALUES (1, '名片', 900);
          UPDATE users SET equipped_avatar_id = 1, equipped_avatar_media_id = 900, equipped_card_id = 1
-         WHERE id = 1;",
+         WHERE id = 1;
+         INSERT INTO mihoyo_bindings (user_id, aid, zzz_uid, zzz_nickname, zzz_level, zzz_region_name)
+         VALUES (1, 'aid-1', '10000001', '邦布', 45, '新艾利都');",
         "f".repeat(64)
     ))
     .await;
@@ -265,6 +267,8 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
         .unwrap();
     assert_eq!(view.equipped_avatar.unwrap().name, "头像");
     assert_eq!(view.equipped_card.unwrap().name, "名片");
+    let zzz = view.zzz.unwrap();
+    assert_eq!((zzz.uid.as_str(), zzz.level), ("10000001", 45));
 
     service::update_profile(
         &h.state,
@@ -284,6 +288,7 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
         view.equipped_avatar.is_none() && view.equipped_card.is_none(),
         "隐藏主页不给装扮（PROFILE-022）"
     );
+    assert!(view.zzz.is_none());
     assert_eq!(view.follower_count, 1, "隐藏主页仍返回关注数");
     assert!(view.is_following);
     assert!(

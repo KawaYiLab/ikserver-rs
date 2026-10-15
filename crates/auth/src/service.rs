@@ -90,7 +90,7 @@ fn email_taken() -> Problem {
     Problem::conflict("EMAIL_TAKEN", "该邮箱已注册")
 }
 
-fn registration_closed() -> Problem {
+pub fn registration_closed() -> Problem {
     Problem::new(
         StatusCode::FORBIDDEN,
         "REGISTRATION_CLOSED",
@@ -444,9 +444,68 @@ async fn issue_session(
     if repo::lock_active_user(conn, user_id).await?.is_none() {
         return Err(account_blocked());
     }
-    repo::revoke_overflow_sessions(conn, user_id, MAX_ACTIVE_SESSIONS - 1, now).await?;
+    insert_session(
+        state,
+        conn,
+        user_id,
+        login_method,
+        meta,
+        now,
+        token::generate()?,
+    )
+    .await
+}
 
-    let new_token = token::generate()?;
+/// 确定性会话（米游社扫码登录，SESS-019）：令牌由调用方给的 32 字节秘密决定，同一秘密永远兑换出
+/// 同一个会话——并发轮询、断线重连拿到的是同一个。这个会话已经被登出、吊销或过期时返回
+/// 409 `QR_SESSION_CONSUMED`，不会另起新会话。在调用方的事务里执行；账号不可用返回 403 `ACCOUNT_BLOCKED`。
+pub async fn issue_session_with_secret(
+    state: &AuthState,
+    conn: &mut PgConnection,
+    user_id: i64,
+    login_method: &'static str,
+    secret: &[u8; 32],
+    meta: &RequestMeta,
+    now: DateTime<Utc>,
+) -> Result<Issued, Problem> {
+    if repo::lock_active_user(conn, user_id).await?.is_none() {
+        return Err(account_blocked());
+    }
+    let new_token = token::from_secret(secret);
+    let Some(existing) = repo::session_by_hash(conn, &new_token.hash).await? else {
+        return insert_session(state, conn, user_id, login_method, meta, now, new_token).await;
+    };
+    if existing.user_id != user_id {
+        tracing::error!("确定性会话的令牌属于另一个账号");
+        return Err(Problem::internal());
+    }
+    if existing.revoked_at.is_some() || existing.session.expires_at <= now {
+        return Err(Problem::conflict(
+            "QR_SESSION_CONSUMED",
+            "这次扫码登录已经失效，请重新扫码",
+        ));
+    }
+    let me = repo::me(conn, user_id)
+        .await?
+        .ok_or_else(Problem::internal)?;
+    let session_id = existing.session.id;
+    Ok(Issued {
+        user: me_view(me),
+        session: session_view(existing.session, session_id),
+        token: new_token.token,
+    })
+}
+
+async fn insert_session(
+    state: &AuthState,
+    conn: &mut PgConnection,
+    user_id: i64,
+    login_method: &'static str,
+    meta: &RequestMeta,
+    now: DateTime<Utc>,
+    new_token: token::NewToken,
+) -> Result<Issued, Problem> {
+    repo::revoke_overflow_sessions(conn, user_id, MAX_ACTIVE_SESSIONS - 1, now).await?;
     let session_id = state.ids.next_raw();
     let max_expires_at = now + state.settings.session_max_lifetime;
     let expires_at = (now + state.settings.session_ttl).min(max_expires_at);

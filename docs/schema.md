@@ -250,3 +250,13 @@
 - 装备是账号上的列（auth 的表）：`equipped_avatar_id`、`equipped_card_id`，以及冗余的 `equipped_avatar_media_id`
   （作者展示经 auth 一次取到 `COALESCE(equipped_avatar_media_id, avatar_media_id)`）。CHECK 保证系统头像 id 与图片 id 同时有或同时无；
   外键不级联，删除目录项前须先卸下。
+
+## 米游社（`20261024000001_mihoyo.sql`）
+
+- `mihoyo_bindings` 即米游社身份（替代旧的 `user_identities` 里 provider = mihoyo 的行与 `mihoyo_bindings` 两处）：
+  主键 `user_id`（一个账号最多一个米游社账号），`aid` 唯一、`mid` 部分唯一（一个米游社账号最多绑一个账号）。
+  解析时 aid、mid 指向不同账号 → `IDENTITY_CONFLICT`，由运维处理，不自动合并。绝区零角色字段拉取失败时为空。
+- `mihoyo_qr_logins` 替代旧系统的 Redis 键（会话、状态微缓存、处理互斥、结果）。主键是客户端 qrId 的 SHA-256，
+  米游社 ticket 只在服务端。`claimed_until` 是「已确认」的处理权，`result` 是可重放的处理结果
+  （成功 5 分钟、失败 1 分钟）。每小时的定时任务清理过期行。
+- 米游社首登的账号 `users.email` 为 NULL（D-069 方案 A），没有 `user_passwords` 行。

@@ -112,6 +112,14 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | DENNY_ANONYMOUS_POST | 403 | 不能给匿名委托投丁尼 | DENNY-008 |
 | USER_BLOCKED | 403 | 你与对方存在拉黑关系，无法进行此操作 | 任一方向的拉黑；不说明谁拉黑了谁。查看帖子详情时文案为「无法查看该委托」。匿名内容永不返回此码 |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
+| MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
+| MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |
+| MIHOYO_UNBIND_FORBIDDEN | 403 | 当前账号只能通过米游社扫码登录，请先绑定邮箱 | 没有邮箱的账号解绑会把自己锁在外面（MHY-014） |
+| MIHOYO_NOT_BOUND | 404 | 当前账号未绑定米游社 | |
+| IDENTITY_ALREADY_BOUND | 409 | 该米游社账号已绑定其他绳网账号，请先在原账号解绑或注销 | 不接管任何账号（MHY-013） |
+| USER_ALREADY_BOUND | 409 | 当前账号已绑定其他米游社账号，请先解绑 | |
+| IDENTITY_CONFLICT | 409 | 这个米游社账号关联了多个绳网账号，请联系管理员 | aid 与 mid 指向不同账号（历史数据），运维处理 |
+| QR_SESSION_CONSUMED | 409 | 这次扫码登录已经失效，请重新扫码 | 同一个二维码登录的会话已登出或过期，不会另起新会话 |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
@@ -141,6 +149,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | SERVICE_UNAVAILABLE | 503 | 服务暂时不可用，请稍后再试 | 外部依赖超时 |
 | MAIL_SEND_FAILED | 503 | 验证码邮件发送失败，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | EXAM_NOT_AVAILABLE | 503 | 题库暂未配置，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
+| MIHOYO_UPSTREAM_ERROR | 502 | 米游社服务暂时不可用，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
+| MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | `IK_MIHOYO__ENABLED=false`；5xx 统一文案 |
 
 ## 限流
 

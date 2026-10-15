@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT aid, zzz_uid, zzz_nickname, zzz_level, zzz_region, zzz_region_name,\n                last_synced_at, created_at\n         FROM mihoyo_bindings WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "aid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "aid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "zzz_uid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_uid"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "zzz_nickname",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_nickname"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "zzz_level",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_level"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "zzz_region",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_region"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "zzz_region_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_region_name"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "last_synced_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "last_synced_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "c3f4f9009d4ce7122556bfef7e1057cf8fce58e21069db6ce7183fe35a6fd163"
+}

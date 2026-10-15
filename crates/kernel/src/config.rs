@@ -70,6 +70,30 @@ pub struct Config {
     pub jobs: Jobs,
     pub rate_limit: RateLimit,
     pub bus: Bus,
+    pub mihoyo: Mihoyo,
+}
+
+/// 米游社扫码登录与绑定（MHY）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Mihoyo {
+    /// 关闭时扫码接口返回 503 `MIHOYO_DISABLED`；已有的绑定照常展示与解绑。
+    pub enabled: bool,
+    pub passport_base_url: String,
+    pub takumi_base_url: String,
+    /// 上游请求超时（1–60 秒）。
+    pub timeout_secs: u64,
+}
+
+impl Default for Mihoyo {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            passport_base_url: "https://passport-api.miyoushe.com".to_owned(),
+            takumi_base_url: "https://api-takumi.mihoyo.com".to_owned(),
+            timeout_secs: 10,
+        }
+    }
 }
 
 /// 事件总线。
@@ -288,6 +312,7 @@ impl Default for Config {
             jobs: Jobs::default(),
             rate_limit: RateLimit::default(),
             bus: Bus::default(),
+            mihoyo: Mihoyo::default(),
         }
     }
 }
@@ -392,6 +417,8 @@ impl Default for Session {
 pub struct Secrets {
     /// 验证码哈希用的 HMAC 密钥（base64，解码后至少 32 字节）。
     pub code_hmac_key: Secret,
+    /// 米游社扫码登录的确定性会话密钥（base64，解码后至少 32 字节，D-070 方案 A）。
+    pub qr_session_key: Secret,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -550,9 +577,27 @@ impl Config {
                 "IK_SECRETS__CODE_HMAC_KEY（bus.cluster 打开时必须配置，且各实例相同）",
             ));
         }
+        if self.bus.cluster && self.secrets.qr_session_key.is_empty() {
+            return Err(ConfigError::Missing(
+                "IK_SECRETS__QR_SESSION_KEY（bus.cluster 打开时必须配置，且各实例相同）",
+            ));
+        }
+        let mihoyo = &self.mihoyo;
+        let base_ok = |url: &str| url.starts_with("https://") || url.starts_with("http://");
+        if !(1..=60).contains(&mihoyo.timeout_secs)
+            || !base_ok(&mihoyo.passport_base_url)
+            || !base_ok(&mihoyo.takumi_base_url)
+        {
+            return Err(ConfigError::Invalid(
+                "mihoyo 配置不合法：timeout_secs 1–60，上游地址须为 http(s)://".to_owned(),
+            ));
+        }
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
+            }
+            if self.secrets.qr_session_key.is_empty() {
+                return Err(ConfigError::Missing("IK_SECRETS__QR_SESSION_KEY"));
             }
             if !self.session.cookie_secure {
                 return Err(ConfigError::Invalid(
@@ -595,22 +640,33 @@ mod tests {
             ("database.url", "postgres://x"),
             ("env", "prod"),
             ("secrets.code_hmac_key", "a2V5"),
+            ("secrets.qr_session_key", "a2V5"),
         ]))
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
     #[test]
-    fn cluster_requires_a_shared_hmac_key() {
+    fn cluster_requires_shared_keys() {
         let cluster = Serialized::default("bus.cluster", true);
         let err =
             Config::from_figment(with(&[("database.url", "postgres://x")]).merge(cluster.clone()))
                 .unwrap_err();
         assert!(matches!(err, ConfigError::Missing(_)));
+        let err = Config::from_figment(
+            with(&[
+                ("database.url", "postgres://x"),
+                ("secrets.code_hmac_key", "a2V5"),
+            ])
+            .merge(cluster.clone()),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::Missing(key) if key.contains("QR_SESSION_KEY")));
         let config = Config::from_figment(
             with(&[
                 ("database.url", "postgres://x"),
                 ("secrets.code_hmac_key", "a2V5"),
+                ("secrets.qr_session_key", "a2V5"),
             ])
             .merge(cluster),
         )

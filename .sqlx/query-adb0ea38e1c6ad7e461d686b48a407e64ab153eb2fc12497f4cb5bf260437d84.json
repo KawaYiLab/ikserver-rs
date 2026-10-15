@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mihoyo_bindings\n         SET zzz_uid = $2, zzz_nickname = $3, zzz_level = $4, zzz_region = $5,\n             zzz_region_name = $6, last_synced_at = $7\n         WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Int4",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "adb0ea38e1c6ad7e461d686b48a407e64ab153eb2fc12497f4cb5bf260437d84"
+}

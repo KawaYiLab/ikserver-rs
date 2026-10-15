@@ -53,8 +53,8 @@ fn removal_cookie(settings: &AuthSettings) -> Cookie<'static> {
         .build()
 }
 
-/// 按客户端类型交付令牌：网页写 HttpOnly Cookie，App 放进响应体。
-fn deliver(
+/// 按客户端类型交付令牌：网页写 HttpOnly Cookie，App 放进响应体。其他登录方式（米游社扫码）也用它。
+pub fn deliver(
     settings: &AuthSettings,
     jar: CookieJar,
     issued: Issued,

@@ -214,6 +214,26 @@ pub(crate) async fn insert_user(
     Ok(result.rows_affected() == 1)
 }
 
+/// 没有邮箱的账号（米游社首登，ACC-013）。用户名冲突时返回 false。
+pub(crate) async fn insert_user_without_email(
+    conn: &mut PgConnection,
+    id: i64,
+    username: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "INSERT INTO users (id, username, created_at, updated_at)
+         VALUES ($1, $2, $3, $3)
+         ON CONFLICT ON CONSTRAINT users_username_uq DO NOTHING",
+        id,
+        username,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
 pub(crate) async fn upsert_password(
     conn: &mut PgConnection,
     user_id: i64,
@@ -621,6 +641,41 @@ pub(crate) struct SessionRow {
     pub expires_at: DateTime<Utc>,
 }
 
+pub(crate) struct SessionByHashRow {
+    pub user_id: i64,
+    pub revoked_at: Option<DateTime<Utc>>,
+    pub session: SessionRow,
+}
+
+/// 按令牌摘要找会话（不论是否已吊销、过期）。
+pub(crate) async fn session_by_hash(
+    conn: &mut PgConnection,
+    token_hash: &[u8],
+) -> sqlx::Result<Option<SessionByHashRow>> {
+    let row = sqlx::query!(
+        "SELECT id, user_id, revoked_at, login_method, user_agent, ip, location, created_at,
+                last_seen_at, expires_at
+         FROM sessions WHERE token_hash = $1",
+        token_hash,
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|r| SessionByHashRow {
+        user_id: r.user_id,
+        revoked_at: r.revoked_at,
+        session: SessionRow {
+            id: r.id,
+            login_method: r.login_method,
+            user_agent: r.user_agent,
+            ip: r.ip,
+            location: r.location,
+            created_at: r.created_at,
+            last_seen_at: r.last_seen_at,
+            expires_at: r.expires_at,
+        },
+    }))
+}
+
 pub(crate) async fn session_by_id(
     conn: &mut PgConnection,
     id: i64,
@@ -828,4 +883,13 @@ pub(crate) async fn refresh_equipped_avatar(
     .execute(conn)
     .await?
     .rows_affected())
+}
+
+pub(crate) async fn has_email(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND email IS NOT NULL) AS "has!""#,
+        user_id
+    )
+    .fetch_one(conn)
+    .await
 }

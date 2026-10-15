@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mihoyo_qr_logins SET last_status = $2, last_polled_at = $3 WHERE id_hash = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "03a55a13d344aa11c3a7699b0481c162292f33897f20e8f54046caa3f5a1145b"
+}

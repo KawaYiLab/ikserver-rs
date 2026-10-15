@@ -37,6 +37,7 @@ crates/
   search/    搜索：帖子与评论全文搜索、联想（Meilisearch + 数据库回查与兜底）、索引同步
   media/     媒体：直传上传（签名、完成校验与发布）、媒体文件、我的图库、CDN 缩略图地址
   cosmetics/ 装扮：系统头像与论坛名片的目录、装备（装备状态存在账号上）
+  mihoyo/    米游社扫码登录（自动建号）、绑定与解绑、上游协议客户端
   server/    二进制入口：组装路由、中间件、任务、CLI
   （后续按业务域新增：moderation ai admin）
 docs/

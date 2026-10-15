@@ -24,6 +24,13 @@ pub fn generate() -> Result<NewToken, Problem> {
     Ok(NewToken { token, hash })
 }
 
+/// 由调用方给的 32 字节秘密得到令牌（确定性会话用：同一秘密永远是同一个令牌）。
+pub fn from_secret(secret: &[u8; 32]) -> NewToken {
+    let token = format!("{PREFIX}{}", URL_SAFE_NO_PAD.encode(secret));
+    let hash = hash(&token);
+    NewToken { token, hash }
+}
+
 pub fn hash(token: &str) -> Vec<u8> {
     Sha256::digest(token.as_bytes()).to_vec()
 }
@@ -49,6 +56,14 @@ mod tests {
         assert_ne!(a.token, b.token);
         assert_eq!(a.hash, hash(&a.token));
         assert_eq!(a.hash.len(), 32);
+    }
+
+    #[test]
+    fn tokens_from_secrets_are_well_formed_and_stable() {
+        let a = from_secret(&[7u8; 32]);
+        assert!(looks_valid(&a.token));
+        assert_eq!(a.token, from_secret(&[7u8; 32]).token);
+        assert_ne!(a.token, from_secret(&[8u8; 32]).token);
     }
 
     #[test]

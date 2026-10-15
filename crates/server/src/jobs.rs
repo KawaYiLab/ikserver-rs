@@ -15,6 +15,10 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .map_err(|e| anyhow::anyhow!("定时任务配置错误：{e:?}"))?
         .max_attempts(1)
         .build();
+    let prune_qr = Cron::hourly_at::<ik_mihoyo::jobs::PruneQrLogins>(41)
+        .map_err(|e| anyhow::anyhow!("定时任务配置错误：{e:?}"))?
+        .max_attempts(1)
+        .build();
     Ok(WorkerOptions::default()
         .schema(SCHEMA)
         .concurrency(state.config.jobs.concurrency)
@@ -24,9 +28,12 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_content::jobs::FanoutNewPost>()
         .define_job::<ik_media::jobs::SweepStaging>()
         .define_job::<crate::idempotency::PruneIdempotencyKeys>()
+        .define_job::<ik_mihoyo::jobs::PruneQrLogins>()
+        .add_extension(state.mihoyo.clone())
         .add_extension(state.db.clone())
         .add_extension(state.content.clone())
         .add_extension(state.media.clone())
         .with_cron(sweep_staging)
-        .with_cron(prune_idempotency))
+        .with_cron(prune_idempotency)
+        .with_cron(prune_qr))
 }

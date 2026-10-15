@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mihoyo_qr_logins SET result = $2, result_expires_at = $3, claimed_until = NULL\n         WHERE id_hash = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fab699ad4c90104d8f287b2f098b7777eb665f280cd55e3220e72e6f10a4155a"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mihoyo_bindings (user_id, aid, mid) VALUES ($1, $2, $3)\n         ON CONFLICT (user_id) DO UPDATE\n         SET aid = EXCLUDED.aid, mid = COALESCE(EXCLUDED.mid, mihoyo_bindings.mid)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37f97198f45b34b5e29bcf31d5fc6ee56d8d2a8196360116614eee0d3ef8db42"
+}

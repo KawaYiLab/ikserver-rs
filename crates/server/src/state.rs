@@ -15,6 +15,7 @@ use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
 use ik_media::MediaState;
 use ik_messaging::MessagingState;
+use ik_mihoyo::MihoyoState;
 use ik_notify::NotifyState;
 use ik_profile::ProfileState;
 use ik_realtime::{RealtimeState, TypingHandler};
@@ -46,6 +47,7 @@ pub struct AppState {
     pub search: SearchState,
     pub media: MediaState,
     pub cosmetics: CosmeticsState,
+    pub mihoyo: MihoyoState,
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
 }
 
@@ -106,8 +108,10 @@ impl AppState {
         let search = SearchState::new(content.clone(), comments.clone(), &config.search)?;
         let rate_limit = crate::rate_limit::GlobalLimiter::new(&config.rate_limit);
         let cosmetics = CosmeticsState::new(db.clone(), ids.clone(), media.clone());
+        let mihoyo = MihoyoState::from_config(auth.clone(), &config)?;
         Ok(Self {
             cosmetics,
+            mihoyo,
             rate_limit,
             config: Arc::new(config),
             db,
@@ -206,6 +210,12 @@ impl FromRef<AppState> for SearchState {
 impl FromRef<AppState> for CosmeticsState {
     fn from_ref(state: &AppState) -> Self {
         state.cosmetics.clone()
+    }
+}
+
+impl FromRef<AppState> for MihoyoState {
+    fn from_ref(state: &AppState) -> Self {
+        state.mihoyo.clone()
     }
 }
 

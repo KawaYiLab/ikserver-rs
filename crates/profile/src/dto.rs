@@ -59,6 +59,9 @@ pub struct ProfileView {
     /// 装备的论坛名片。省略规则同 `equippedAvatar`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub equipped_card: Option<ik_cosmetics::dto::CardView>,
+    /// 绑定的米游社账号上的绝区零主角色。没有绑定、存在拉黑或对方隐藏主页时省略（PROFILE-021/022）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub zzz: Option<ik_mihoyo::dto::ZzzProfile>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ToSchema)]

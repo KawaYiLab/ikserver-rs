@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT zzz_uid, zzz_nickname, zzz_level, zzz_region_name\n         FROM mihoyo_bindings WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "zzz_uid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_uid"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "zzz_nickname",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_nickname"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "zzz_level",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_level"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "zzz_region_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_bindings",
+            "name": "zzz_region_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "1964406c1797d934fa36113199cfb70d71c147cc9b5a67aafab87f622ab4df02"
+}

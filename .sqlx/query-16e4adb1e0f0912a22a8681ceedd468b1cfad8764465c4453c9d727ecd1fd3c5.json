@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE mihoyo_qr_logins SET claimed_until = $3\n         WHERE id_hash = $1 AND result IS NULL\n           AND (claimed_until IS NULL OR claimed_until < $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "16e4adb1e0f0912a22a8681ceedd468b1cfad8764465c4453c9d727ecd1fd3c5"
+}
