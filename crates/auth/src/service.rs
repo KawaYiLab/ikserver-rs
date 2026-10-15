@@ -17,8 +17,9 @@ use crate::code::{
     self, CODE_TTL_SECS, CodePurpose, MAX_ATTEMPTS, MAX_CODES_PER_IP_PER_HOUR, SEND_COOLDOWN_SECS,
 };
 use crate::dto::{
-    CodeLoginRequest, MeView, PasswordLoginRequest, RegisterRequest, ResetPasswordRequest,
-    SendCodeRequest, SendCodeResponse, SessionView,
+    BindEmailCodeRequest, BindEmailRequest, ChangePasswordRequest, CodeLoginRequest, MeView,
+    PasswordLoginRequest, RegisterRequest, ResetPasswordRequest, SendCodeRequest, SendCodeResponse,
+    SessionView,
 };
 use crate::extract::Principal;
 use crate::repo::{self, MeRow, NewSession, SessionRow};
@@ -156,14 +157,18 @@ pub async fn send_code(
                 .await?
                 .is_some()
         }
+        // 反序列化时已经拒绝；这两种用途有各自需要登录的接口。
+        CodePurpose::BindEmail | CodePurpose::DeleteAccount => {
+            return Err(Problem::field("purpose", "INVALID", "不支持的用途"));
+        }
     };
 
     if let Some(latest) = repo::latest_open_code(&mut conn, &email, purpose.as_str()).await? {
         let elapsed = (now - latest.sent_at).num_seconds();
         if elapsed < SEND_COOLDOWN_SECS {
             return match purpose {
-                CodePurpose::Register => Err(code_cooldown((SEND_COOLDOWN_SECS - elapsed).max(1))),
                 CodePurpose::Login | CodePurpose::ResetPassword => Ok(accepted),
+                _ => Err(code_cooldown((SEND_COOLDOWN_SECS - elapsed).max(1))),
             };
         }
     }
@@ -171,21 +176,32 @@ pub async fn send_code(
         return Ok(accepted);
     }
     drop(conn);
+    deliver_code(state, &email, purpose, &ip, now).await?;
+    Ok(accepted)
+}
 
+/// 生成、保存并发出一条验证码（作废同邮箱同用途的旧码，CODE-005）。
+async fn deliver_code(
+    state: &AuthState,
+    email: &str,
+    purpose: CodePurpose,
+    ip: &str,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
     let code = code::generate_code()?;
-    let hash = code::code_hash(&state.settings.code_key, purpose, &email, &code)?;
+    let hash = code::code_hash(&state.settings.code_key, purpose, email, &code)?;
     let id = state.ids.next_raw();
     let mut tx = state.db.begin().await?;
-    repo::invalidate_open_codes(&mut tx, &email, purpose.as_str(), now).await?;
+    repo::invalidate_open_codes(&mut tx, email, purpose.as_str(), now).await?;
     repo::insert_code(
         &mut tx,
         id,
-        &email,
+        email,
         purpose.as_str(),
         &hash,
         now,
         now + Duration::seconds(CODE_TTL_SECS),
-        &ip,
+        ip,
     )
     .await?;
     tx.commit().await?;
@@ -193,18 +209,48 @@ pub async fn send_code(
     // 事务提交后再发信（AGENTS.md 规则 6）。发信失败则作废这条码，不让它占用冷却窗口（CODE-006）。
     let content = code::mail_content(purpose, &code);
     let mail = OutgoingMail {
-        to: email.clone(),
+        to: email.to_owned(),
         subject: content.subject,
         text: content.text,
         html: None,
     };
     if let Err(error) = state.mailer.send(mail).await {
-        tracing::error!(%error, to = %mask_email(&email), purpose = purpose.as_str(), "验证码邮件发送失败");
+        tracing::error!(%error, to = %mask_email(email), purpose = purpose.as_str(), "验证码邮件发送失败");
         let mut conn = state.db.acquire().await?;
         repo::force_consume_code(&mut conn, id, Utc::now()).await?;
         return Err(mail_failed());
     }
-    Ok(accepted)
+    Ok(())
+}
+
+/// 需要登录的发码（绑定邮箱、注销）：每 IP 每小时上限与冷却都显式报错。
+async fn send_own_code(
+    state: &AuthState,
+    email: &str,
+    purpose: CodePurpose,
+    meta: &RequestMeta,
+) -> Result<SendCodeResponse, Problem> {
+    let now = Utc::now();
+    let ip = meta.ip.to_string();
+    let mut conn = state.db.acquire().await?;
+    if repo::count_codes_from_ip_since(&mut conn, &ip, now - Duration::hours(1)).await?
+        >= MAX_CODES_PER_IP_PER_HOUR
+    {
+        return Err(Problem::rate_limited());
+    }
+    if let Some(latest) = repo::latest_open_code(&mut conn, email, purpose.as_str()).await? {
+        let elapsed = (now - latest.sent_at).num_seconds();
+        if elapsed < SEND_COOLDOWN_SECS {
+            return Err(code_cooldown((SEND_COOLDOWN_SECS - elapsed).max(1)));
+        }
+    }
+    drop(conn);
+    deliver_code(state, email, purpose, &ip, now).await?;
+    Ok(SendCodeResponse {
+        sent: true,
+        expires_in_secs: CODE_TTL_SECS,
+        cooldown_secs: SEND_COOLDOWN_SECS,
+    })
 }
 
 /// 第一阶段：核对验证码（不消费）。错误尝试计数在独立的短事务里提交，
@@ -544,6 +590,213 @@ async fn insert_session(
         session: session_view(session, session_id),
         token: new_token.token,
     })
+}
+
+// ---------- 账号安全 ----------
+
+fn email_unchanged() -> Problem {
+    Problem::field("email", "UNCHANGED", "该邮箱已绑定当前账号")
+}
+
+pub fn account_changed() -> Problem {
+    Problem::conflict("ACCOUNT_CHANGED", "账号信息已变更，请重新验证")
+}
+
+async fn current_email(state: &AuthState, user_id: i64) -> Result<Option<String>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::me(&mut conn, user_id)
+        .await?
+        .ok_or_else(account_blocked)?
+        .email)
+}
+
+/// 给新邮箱发绑定验证码（DEL-002）：与当前邮箱相同 → 400；已被其他账号使用 → 409 `EMAIL_TAKEN`；
+/// 冷却 → 429 `CODE_COOLDOWN`。米游社首登的账号由此绑定第一个邮箱。
+pub async fn send_bind_email_code(
+    state: &AuthState,
+    principal: &Principal,
+    request: BindEmailCodeRequest,
+    meta: &RequestMeta,
+) -> Result<SendCodeResponse, Problem> {
+    let email = validate::normalize_email(&request.email)?;
+    if current_email(state, principal.user_id.get())
+        .await?
+        .as_deref()
+        == Some(email.as_str())
+    {
+        return Err(email_unchanged());
+    }
+    {
+        let mut conn = state.db.acquire().await?;
+        if repo::email_taken(&mut conn, &email).await? {
+            return Err(email_taken());
+        }
+    }
+    send_own_code(state, &email, CodePurpose::BindEmail, meta).await
+}
+
+/// 绑定 / 更换邮箱（DEL-002）。验证码在锁内原子消费；之后可以用这个邮箱登录、找回密码。
+pub async fn bind_email(
+    state: &AuthState,
+    principal: &Principal,
+    request: BindEmailRequest,
+) -> Result<MeView, Problem> {
+    let email = validate::normalize_email(&request.email)?;
+    let user_id = principal.user_id.get();
+    let code_id = check_code(state, &email, CodePurpose::BindEmail, &request.code).await?;
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    if repo::lock_active_user(&mut tx, user_id).await?.is_none() {
+        return Err(account_blocked());
+    }
+    let me = repo::me(&mut tx, user_id)
+        .await?
+        .ok_or_else(account_blocked)?;
+    if me.email.as_deref() == Some(email.as_str()) {
+        return Err(email_unchanged());
+    }
+    consume_code(&mut tx, code_id, now).await?;
+    match repo::set_email(&mut tx, user_id, &email, now).await {
+        Ok(()) => {}
+        Err(error) if is_unique_violation(&error, "users_email_uq") => return Err(email_taken()),
+        Err(error) => return Err(error.into()),
+    }
+    let me = repo::me(&mut tx, user_id)
+        .await?
+        .ok_or_else(Problem::internal)?;
+    tx.commit().await?;
+    Ok(me_view(me))
+}
+
+/// 修改密码（LOGIN-011）：校验当前密码，所有会话下线，再给当前设备签一个新会话。
+/// 没有密码的账号（米游社首登）用「重置密码」设置第一个密码。
+pub async fn change_password(
+    state: &AuthState,
+    principal: &Principal,
+    request: ChangePasswordRequest,
+    meta: &RequestMeta,
+) -> Result<Issued, Problem> {
+    let user_id = principal.user_id.get();
+    validate::validate_password("newPassword", &request.new_password)?;
+    let stored = {
+        let mut conn = state.db.acquire().await?;
+        repo::password_hash(&mut conn, user_id).await?
+    };
+    let Some(stored) = stored else {
+        return Err(Problem::new(
+            StatusCode::BAD_REQUEST,
+            "PASSWORD_NOT_SET",
+            "当前账号还没有设置密码，请通过重置密码设置",
+        ));
+    };
+    if !password::verify(request.current_password.clone(), stored.clone())
+        .await?
+        .ok
+    {
+        return Err(Problem::field(
+            "currentPassword",
+            "INVALID",
+            "当前密码不正确",
+        ));
+    }
+    if request.current_password == request.new_password {
+        return Err(Problem::field(
+            "newPassword",
+            "UNCHANGED",
+            "新密码不能与当前密码相同",
+        ));
+    }
+    let new_hash = password::hash(request.new_password).await?;
+
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    if repo::lock_active_user(&mut tx, user_id).await?.is_none() {
+        return Err(account_blocked());
+    }
+    // 校验之后密码被别处改过（并发的重置或修改）。
+    if repo::password_hash(&mut tx, user_id).await?.as_deref() != Some(stored.as_str()) {
+        return Err(account_changed());
+    }
+    repo::upsert_password(&mut tx, user_id, &new_hash, now).await?;
+    repo::revoke_user_sessions(&mut tx, user_id, None, now, "password_change").await?;
+    let issued = insert_session(
+        state,
+        &mut tx,
+        user_id,
+        "password_change",
+        meta,
+        now,
+        token::generate()?,
+    )
+    .await?;
+    tx.commit().await?;
+    announce_sessions_changed(state, user_id);
+    Ok(issued)
+}
+
+/// 账号安全概览要的凭证信息。
+#[derive(Debug, Clone)]
+pub struct Credentials {
+    pub email: Option<String>,
+    pub has_password: bool,
+}
+
+pub async fn credentials(state: &AuthState, user_id: i64) -> Result<Credentials, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let email = repo::me(&mut conn, user_id)
+        .await?
+        .ok_or_else(account_blocked)?
+        .email;
+    let has_password = repo::password_hash(&mut conn, user_id).await?.is_some();
+    Ok(Credentials {
+        email,
+        has_password,
+    })
+}
+
+fn no_email_for_deletion() -> Problem {
+    Problem::new(
+        StatusCode::BAD_REQUEST,
+        "DELETE_ACCOUNT_NO_EMAIL",
+        "当前账号未绑定邮箱，请通过米游社扫码注销",
+    )
+}
+
+/// 发注销验证码到自己绑定的邮箱（DEL-003）。
+pub async fn send_delete_code(
+    state: &AuthState,
+    principal: &Principal,
+    meta: &RequestMeta,
+) -> Result<SendCodeResponse, Problem> {
+    let email = current_email(state, principal.user_id.get())
+        .await?
+        .ok_or_else(no_email_for_deletion)?;
+    send_own_code(state, &email, CodePurpose::DeleteAccount, meta).await
+}
+
+/// 核对过、还没消费的注销验证码。在注销事务里交给 [`crate::interop::consume_delete_code`]。
+#[derive(Debug, Clone)]
+pub struct DeleteCode {
+    pub(crate) code_id: i64,
+    pub(crate) email: String,
+}
+
+/// 第一阶段：核对注销验证码（锁外，不消费，DEL-004）。
+pub async fn check_delete_code(
+    state: &AuthState,
+    principal: &Principal,
+    code: &str,
+) -> Result<DeleteCode, Problem> {
+    let email = current_email(state, principal.user_id.get())
+        .await?
+        .ok_or_else(no_email_for_deletion)?;
+    let code_id = check_code(state, &email, CodePurpose::DeleteAccount, code).await?;
+    Ok(DeleteCode { code_id, email })
+}
+
+/// 会话被吊销的内部事件（实时网关据此断开连接）。在调用方的事务提交后发布。
+pub fn sessions_changed_event(user_id: i64) -> Result<Event, Problem> {
+    Event::new(SESSIONS_CHANGED, Audience::User(user_id), &())
 }
 
 // ---------- 会话 ----------

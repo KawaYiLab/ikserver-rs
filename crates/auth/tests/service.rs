@@ -1,6 +1,6 @@
 //! 认证 service 层集成测试：真实 PostgreSQL，每个测试一个独立临时库（`#[sqlx::test]`）。
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
@@ -572,4 +572,175 @@ async fn revocations_announce_session_changes(db: PgPool) {
     .await
     .unwrap();
     assert_eq!(events.try_recv().unwrap().audience, Audience::User(user_id));
+}
+
+// ---------- 账号安全：绑定邮箱、修改密码 ----------
+
+impl Harness {
+    async fn principal(&self, token: &str) -> ik_auth::Principal {
+        match service::resolve(&self.state, token).await.unwrap() {
+            Resolution::Active(p) => p,
+            other => panic!("令牌应当有效：{other:?}"),
+        }
+    }
+
+    /// 没有邮箱、没有密码的账号（米游社首登）及其会话。
+    async fn emailless(&self, id: i64) -> ik_auth::Principal {
+        let mut tx = self.state.db.begin().await.unwrap();
+        assert!(
+            ik_auth::interop::insert_user_without_email(
+                &mut tx,
+                id,
+                &format!("扫码用户{id}"),
+                chrono::Utc::now()
+            )
+            .await
+            .unwrap()
+        );
+        let issued = service::issue_session_with_secret(
+            &self.state,
+            &mut tx,
+            id,
+            "mihoyo",
+            &[id as u8; 32],
+            &self.meta,
+            chrono::Utc::now(),
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        self.principal(&issued.token).await
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn bind_and_change_email(db: PgPool) {
+    use ik_auth::dto::{BindEmailCodeRequest, BindEmailRequest};
+    let h = harness(db);
+    let alice = h.register("alice@example.com", "secret-1").await;
+    h.register("bob@example.com", "secret-2").await;
+    let me = h.principal(&alice.token).await;
+    let code_for = |email: &str| BindEmailCodeRequest {
+        email: email.into(),
+    };
+
+    // 这两种用途不能经公开的发码接口申请。
+    assert!(
+        serde_json::from_value::<SendCodeRequest>(
+            serde_json::json!({ "email": "x@example.com", "purpose": "bind_email" })
+        )
+        .is_err()
+    );
+
+    let err = service::send_bind_email_code(&h.state, &me, code_for("Alice@Example.com"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "UNCHANGED");
+    let err = service::send_bind_email_code(&h.state, &me, code_for("bob@example.com"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "EMAIL_TAKEN");
+    service::send_bind_email_code(&h.state, &me, code_for("new@example.com"), &h.meta)
+        .await
+        .unwrap();
+    let err = service::send_bind_email_code(&h.state, &me, code_for("new@example.com"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CODE_COOLDOWN");
+
+    let bind = |code: String| BindEmailRequest {
+        email: "new@example.com".into(),
+        code,
+    };
+    let err = service::bind_email(&h.state, &me, bind("000000".into()))
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CODE_INVALID");
+    let code = h.mailer.last_code("new@example.com");
+    let view = service::bind_email(&h.state, &me, bind(code.clone()))
+        .await
+        .unwrap();
+    assert_eq!(view.email.as_deref(), Some("new@example.com"));
+    // 一码只用一次。
+    assert_eq!(
+        service::bind_email(&h.state, &me, bind(code))
+            .await
+            .unwrap_err()
+            .code(),
+        "CODE_INVALID"
+    );
+    // 新邮箱能登录，旧邮箱不能。
+    assert!(h.login("new@example.com", "secret-1").await.is_ok());
+    assert!(h.login("alice@example.com", "secret-1").await.is_err());
+
+    // 米游社首登的账号绑定第一个邮箱。
+    let qr_user = h.emailless(900).await;
+    service::send_bind_email_code(&h.state, &qr_user, code_for("first@example.com"), &h.meta)
+        .await
+        .unwrap();
+    let code = h.mailer.last_code("first@example.com");
+    let view = service::bind_email(
+        &h.state,
+        &qr_user,
+        BindEmailRequest {
+            email: "first@example.com".into(),
+            code,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(view.email.as_deref(), Some("first@example.com"));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn change_password_signs_out_everywhere_else(db: PgPool) {
+    use ik_auth::dto::ChangePasswordRequest;
+    let h = harness(db);
+    let first = h.register("carol@example.com", "secret-1").await;
+    let second = h.login("carol@example.com", "secret-1").await.unwrap();
+    let me = h.principal(&first.token).await;
+    let change = |current: &str, new: &str| ChangePasswordRequest {
+        current_password: current.into(),
+        new_password: new.into(),
+        client: ClientKind::App,
+    };
+
+    let err = service::change_password(&h.state, &me, change("wrong-1", "secret-2"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].field, "currentPassword");
+    let err = service::change_password(&h.state, &me, change("secret-1", "secret-1"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "UNCHANGED");
+    let err = service::change_password(&h.state, &me, change("secret-1", "123"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].field, "newPassword");
+
+    let mut events = h.bus.subscribe();
+    let issued = service::change_password(&h.state, &me, change("secret-1", "secret-2"), &h.meta)
+        .await
+        .unwrap();
+    assert_eq!(issued.session.login_method, "password_change");
+    assert_eq!(events.try_recv().unwrap().kind, service::SESSIONS_CHANGED);
+    for old in [&first.token, &second.token] {
+        assert!(matches!(
+            service::resolve(&h.state, old).await.unwrap(),
+            Resolution::Invalid
+        ));
+    }
+    assert!(matches!(
+        service::resolve(&h.state, &issued.token).await.unwrap(),
+        Resolution::Active(_)
+    ));
+    assert!(h.login("carol@example.com", "secret-1").await.is_err());
+    assert!(h.login("carol@example.com", "secret-2").await.is_ok());
+
+    // 没有密码的账号要走重置密码。
+    let qr_user = h.emailless(901).await;
+    let err = service::change_password(&h.state, &qr_user, change("x", "secret-3"), &h.meta)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "PASSWORD_NOT_SET");
 }

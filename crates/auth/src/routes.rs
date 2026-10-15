@@ -12,8 +12,9 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::dto::{
-    AuthResponse, ClientKind, CodeLoginRequest, MeView, PasswordLoginRequest, RegisterRequest,
-    ResetPasswordRequest, SendCodeRequest, SendCodeResponse, SessionView,
+    AuthResponse, BindEmailCodeRequest, BindEmailRequest, ChangePasswordRequest, ClientKind,
+    CodeLoginRequest, MeView, PasswordLoginRequest, RegisterRequest, ResetPasswordRequest,
+    SendCodeRequest, SendCodeResponse, SessionView,
 };
 use crate::extract::{AuthRateLimit, ClientMeta, CurrentUser};
 use crate::service::{self, Issued};
@@ -35,6 +36,9 @@ where
         .routes(routes!(list_sessions))
         .routes(routes!(revoke_session))
         .routes(routes!(revoke_other_sessions))
+        .routes(routes!(send_bind_email_code))
+        .routes(routes!(bind_email))
+        .routes(routes!(change_password))
 }
 
 fn session_cookie(settings: &AuthSettings, token: String, max_age_secs: i64) -> Cookie<'static> {
@@ -51,6 +55,11 @@ fn removal_cookie(settings: &AuthSettings) -> Cookie<'static> {
     Cookie::build(settings.cookie_name.clone())
         .path("/")
         .build()
+}
+
+/// 清掉会话 Cookie（登出、注销账号）。
+pub fn forget_session(settings: &AuthSettings, jar: CookieJar) -> CookieJar {
+    jar.remove(removal_cookie(settings))
 }
 
 /// 按客户端类型交付令牌：网页写 HttpOnly Cookie，App 放进响应体。其他登录方式（米游社扫码）也用它。
@@ -313,4 +322,88 @@ async fn revoke_other_sessions(
 ) -> Result<StatusCode, Problem> {
     service::revoke_other_sessions(&state, &principal).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 给要绑定的邮箱发验证码
+///
+/// 绑定第一个邮箱（米游社扫码注册的账号）或更换邮箱。与当前邮箱相同返回 400，已被其他账号使用返回 409。
+#[utoipa::path(
+    post,
+    path = "/v1/me/email/code",
+    tag = "me",
+    request_body = BindEmailCodeRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = SendCodeResponse),
+        (status = 400, description = "VALIDATION_FAILED（邮箱格式，或与当前邮箱相同）", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "EMAIL_TAKEN", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "CODE_COOLDOWN / RATE_LIMITED", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn send_bind_email_code(
+    _limit: AuthRateLimit,
+    State(state): State<AuthState>,
+    CurrentUser(principal): CurrentUser,
+    ClientMeta(meta): ClientMeta,
+    Json(request): Json<BindEmailCodeRequest>,
+) -> Result<Json<SendCodeResponse>, Problem> {
+    Ok(Json(
+        service::send_bind_email_code(&state, &principal, request, &meta).await?,
+    ))
+}
+
+/// 绑定 / 更换邮箱
+#[utoipa::path(
+    put,
+    path = "/v1/me/email",
+    tag = "me",
+    request_body = BindEmailRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = MeView),
+        (status = 400, description = "CODE_INVALID / VALIDATION_FAILED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "EMAIL_TAKEN", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "CODE_TOO_MANY_ATTEMPTS / RATE_LIMITED", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn bind_email(
+    _limit: AuthRateLimit,
+    State(state): State<AuthState>,
+    CurrentUser(principal): CurrentUser,
+    Json(request): Json<BindEmailRequest>,
+) -> Result<Json<MeView>, Problem> {
+    Ok(Json(
+        service::bind_email(&state, &principal, request).await?,
+    ))
+}
+
+/// 修改密码
+///
+/// 成功后所有设备下线，当前设备拿到新会话（网页端写 Cookie，App 端在 `token`）。
+/// 没有密码的账号请用重置密码设置。
+#[utoipa::path(
+    put,
+    path = "/v1/me/password",
+    tag = "me",
+    request_body = ChangePasswordRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AuthResponse),
+        (status = 400, description = "PASSWORD_NOT_SET / VALIDATION_FAILED（当前密码不正确、新旧相同、新密码不合规）", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "ACCOUNT_CHANGED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "RATE_LIMITED", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn change_password(
+    _limit: AuthRateLimit,
+    State(state): State<AuthState>,
+    CurrentUser(principal): CurrentUser,
+    ClientMeta(meta): ClientMeta,
+    jar: CookieJar,
+    Json(request): Json<ChangePasswordRequest>,
+) -> Result<(CookieJar, Json<AuthResponse>), Problem> {
+    let client = request.client;
+    let issued = service::change_password(&state, &principal, request, &meta).await?;
+    let (jar, body) = deliver(&state.settings, jar, issued, client);
+    Ok((jar, Json(body)))
 }

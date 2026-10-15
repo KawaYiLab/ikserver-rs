@@ -260,3 +260,10 @@
   米游社 ticket 只在服务端。`claimed_until` 是「已确认」的处理权，`result` 是可重放的处理结果
   （成功 5 分钟、失败 1 分钟）。每小时的定时任务清理过期行。
 - 米游社首登的账号 `users.email` 为 NULL（D-069 方案 A），没有 `user_passwords` 行。
+
+## 账号安全（`20261025000001_account_security.sql`）
+
+- `sessions.login_method` 加 `password_change`（修改密码后给当前设备签的会话）。
+- `mihoyo_qr_logins.mode` 加 `delete`（扫码注销核验），与 `bind` 一样必须有发起的 `user_id`。
+- 注销不删行：`users.status = 'deleted'`、用户名改为「已注销用户_<id>」、`email` 置 NULL、删 `user_passwords` 与
+  `mihoyo_bindings` 行、清 `user_profiles` 的签名与精选。

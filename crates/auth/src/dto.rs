@@ -73,6 +73,31 @@ pub struct ResetPasswordRequest {
     pub new_password: String,
 }
 
+/// 给要绑定的新邮箱发验证码。
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BindEmailCodeRequest {
+    pub email: String,
+}
+
+/// 绑定 / 更换邮箱。
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BindEmailRequest {
+    pub email: String,
+    pub code: String,
+}
+
+/// 修改密码。成功后其他设备全部下线，当前设备拿到新会话。
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+    #[serde(default)]
+    pub client: ClientKind,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthResponse {

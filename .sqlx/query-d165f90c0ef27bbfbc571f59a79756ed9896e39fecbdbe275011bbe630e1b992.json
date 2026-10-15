@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mihoyo_bindings (user_id, aid) VALUES ($1, 'aid-dora')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d165f90c0ef27bbfbc571f59a79756ed9896e39fecbdbe275011bbe630e1b992"
+}

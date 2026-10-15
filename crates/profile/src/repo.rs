@@ -88,3 +88,15 @@ pub(crate) async fn bios(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<V
     .fetch_all(conn)
     .await
 }
+
+/// 注销：清空签名与精选、隐藏主页（DEL-006）。没有资料行时什么都不做。
+pub(crate) async fn clear(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE user_profiles SET bio = '', hidden = TRUE, pinned_post_ids = NULL, updated_at = now()
+         WHERE user_id = $1",
+        user_id
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}

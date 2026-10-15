@@ -26,6 +26,7 @@ ik-search = { path = "crates/search" }
 ik-media = { path = "crates/media" }
 ik-cosmetics = { path = "crates/cosmetics" }
 ik-mihoyo = { path = "crates/mihoyo" }
+ik-account = { path = "crates/account" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }

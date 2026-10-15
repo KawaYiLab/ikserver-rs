@@ -78,7 +78,7 @@ fn bind_requires_auth() -> Problem {
     )
 }
 
-fn user_mismatch() -> Problem {
+pub(crate) fn user_mismatch() -> Problem {
     Problem::new(
         StatusCode::FORBIDDEN,
         "MIHOYO_BIND_USER_MISMATCH",
@@ -110,7 +110,7 @@ fn identity_conflict() -> Problem {
 /// 处理失败时保存下来、供重放的错误（MHY-008）。只保存已知的业务错误，其余一律按内部错误。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Failure {
+pub(crate) enum Failure {
     RegistrationClosed,
     AccountBlocked,
     IdentityAlreadyBound,
@@ -145,10 +145,22 @@ impl Failure {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-enum Outcome {
-    LoggedIn { user_id: i64, is_new_user: bool },
-    Bound { user_id: i64 },
-    Failed { failure: Failure },
+pub(crate) enum Outcome {
+    LoggedIn {
+        user_id: i64,
+        is_new_user: bool,
+    },
+    Bound {
+        user_id: i64,
+    },
+    /// 注销核验：扫码的米游社账号是否就是 `user_id` 绑定的那个（MHY-016）。
+    DeleteChecked {
+        user_id: i64,
+        matched: bool,
+    },
+    Failed {
+        failure: Failure,
+    },
 }
 
 // ---------- 扫码 ----------
@@ -161,7 +173,7 @@ fn check_rate(
     limiter.check_key(&ip).map_err(|_| rate_limited(what))
 }
 
-fn id_hash(qr_id: &str) -> Vec<u8> {
+pub(crate) fn id_hash(qr_id: &str) -> Vec<u8> {
     Sha256::digest(qr_id.as_bytes()).to_vec()
 }
 
@@ -178,7 +190,7 @@ pub async fn create_qr(
     check_rate(&state.limits.create, meta.ip, "二维码生成")?;
     let user_id = match request.mode {
         QrMode::Login => None,
-        QrMode::Bind => Some(viewer.ok_or_else(bind_requires_auth)?.user_id.get()),
+        QrMode::Bind | QrMode::Delete => Some(viewer.ok_or_else(bind_requires_auth)?.user_id.get()),
     };
     let device = new_device(meta.user_agent.as_deref())?;
     let code = state
@@ -227,6 +239,7 @@ pub struct Polled {
     pub mode: Option<QrMode>,
     pub is_new_user: Option<bool>,
     pub binding: Option<BindingView>,
+    pub matched: Option<bool>,
     pub issued: Option<Issued>,
 }
 
@@ -237,16 +250,17 @@ impl Polled {
             mode,
             is_new_user: None,
             binding: None,
+            matched: None,
             issued: None,
         }
     }
 }
 
-fn parse_mode(raw: &str) -> QrMode {
-    if raw == "bind" {
-        QrMode::Bind
-    } else {
-        QrMode::Login
+pub(crate) fn parse_mode(raw: &str) -> QrMode {
+    match raw {
+        "bind" => QrMode::Bind,
+        "delete" => QrMode::Delete,
+        _ => QrMode::Login,
     }
 }
 
@@ -273,7 +287,7 @@ pub async fn poll(
         return Ok(Polled::pending(QrStatus::Expired, None));
     };
     let mode = parse_mode(&row.mode);
-    if mode == QrMode::Bind && viewer.map(|p| p.user_id.get()) != row.user_id {
+    if mode != QrMode::Login && viewer.map(|p| p.user_id.get()) != row.user_id {
         return Err(user_mismatch());
     }
     if let (Some(result), Some(until)) = (row.result, row.result_expires_at) {
@@ -369,13 +383,24 @@ pub async fn poll(
     replay(state, mode, &hash, outcome, meta).await
 }
 
-/// 已确认：拉角色（失败不影响登录与绑定，只是没有角色资料），再建号 / 登录 / 绑定。
+/// 已确认：登录与绑定先拉角色（失败不影响登录与绑定，只是没有角色资料），再建号 / 登录 / 绑定；
+/// 注销核验只看身份归属，不拉角色、不改任何数据（MHY-016）。
 async fn process(
     state: &MihoyoState,
     mode: QrMode,
     user_id: Option<i64>,
     confirmed: Confirmed,
 ) -> Result<Outcome, Problem> {
+    let mid = confirmed.mid.as_deref();
+    if mode == QrMode::Delete {
+        let user_id = user_id.ok_or_else(Problem::internal)?;
+        let mut conn = state.auth.db.acquire().await?;
+        let owner = resolve(&mut conn, &confirmed.aid, mid).await?;
+        return Ok(Outcome::DeleteChecked {
+            user_id,
+            matched: owner == Some(user_id),
+        });
+    }
     let role = match state.api.game_roles(&confirmed.cookies).await {
         Ok(roles) => upstream::main_role(roles),
         Err(error) => {
@@ -384,7 +409,6 @@ async fn process(
         }
     };
     let now = Utc::now();
-    let mid = confirmed.mid.as_deref();
     match (mode, user_id) {
         (QrMode::Login, _) => {
             let (user_id, is_new_user) =
@@ -398,7 +422,7 @@ async fn process(
             bind(state, user_id, &confirmed.aid, mid, role.as_ref(), now).await?;
             Ok(Outcome::Bound { user_id })
         }
-        (QrMode::Bind, None) => Err(Problem::internal()),
+        (QrMode::Bind | QrMode::Delete, _) => Err(Problem::internal()),
     }
 }
 
@@ -411,6 +435,12 @@ async fn replay(
 ) -> Result<Polled, Problem> {
     let (user_id, is_new_user, issued) = match outcome {
         Outcome::Failed { failure } => return Err(failure.problem()),
+        Outcome::DeleteChecked { matched, .. } => {
+            return Ok(Polled {
+                matched: Some(matched),
+                ..Polled::pending(QrStatus::Confirmed, Some(mode))
+            });
+        }
         Outcome::Bound { user_id } => (user_id, None, None),
         Outcome::LoggedIn {
             user_id,
@@ -441,6 +471,7 @@ async fn replay(
         mode: Some(mode),
         is_new_user,
         binding,
+        matched: None,
         issued,
     })
 }

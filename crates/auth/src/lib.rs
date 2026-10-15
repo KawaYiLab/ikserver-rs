@@ -17,5 +17,5 @@ mod validate;
 pub use extract::{
     AuthRateLimit, ClientMeta, CurrentUser, MaybeUser, Principal, UserIfPresent, credential_from,
 };
-pub use routes::{deliver, router};
+pub use routes::{deliver, forget_session, router};
 pub use state::{AuthSettings, AuthState};

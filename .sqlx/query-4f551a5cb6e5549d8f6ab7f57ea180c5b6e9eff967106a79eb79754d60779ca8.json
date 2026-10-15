@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_profiles (user_id, bio, pinned_post_ids) VALUES ($1, '签名', '{}');\n         ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f551a5cb6e5549d8f6ab7f57ea180c5b6e9eff967106a79eb79754d60779ca8"
+}

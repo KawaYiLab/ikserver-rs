@@ -5,6 +5,7 @@
 //! 头像、名片（COSMETIC）随 media 模块加入。
 
 pub mod dto;
+pub mod interop;
 mod repo;
 mod routes;
 pub mod service;

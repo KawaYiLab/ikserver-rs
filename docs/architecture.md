@@ -43,7 +43,7 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
+- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
   `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
   `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
@@ -73,6 +73,9 @@ kernel ◄── auth ◄── content ◄── feed
   建号经 `ik_auth::interop::insert_user_without_email`，登录经 `ik_auth::service::issue_session_with_secret`
   （确定性会话）。上游协议在 `ik_mihoyo::upstream`（trait，测试用假实现；HTTP 实现另有本地桩服务器测试）。
   上游调用都在事务之外；米游社 Cookie 只在确认后的那次请求里用，不落库、不打日志。
+- `account → auth, mihoyo, profile`：账号安全概览与注销。注销在一个事务里消费核验（注销验证码或扫码核验，
+  扫码会话在数据库里，所以与注销同一事务，回滚时凭证还在）、删除米游社绑定、清空个人资料、账号脱敏并吊销会话；
+  提交后发布会话吊销事件（实时网关断开连接）与 `user.renamed`（搜索索引更新作者名）。
   对象存储的读写都在数据库事务之外；校验并发由进程内闸门（`ik_media::gate`）限制。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。

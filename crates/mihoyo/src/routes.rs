@@ -29,7 +29,7 @@ where
 /// 生成米游社扫码二维码
 ///
 /// `mode` 必填：`login` 扫码登录（没有账号时自动建号；带着登录态也按登录处理），`bind` 给当前账号绑定
-/// （需要登录）。每 IP 每分钟最多 30 次。
+/// （需要登录），`delete` 注销前核验（需要登录，用于没有邮箱的账号）。每 IP 每分钟最多 30 次。
 #[utoipa::path(
     post,
     path = "/v1/auth/mihoyo/qr",
@@ -56,8 +56,8 @@ async fn create_qr(
 /// 轮询扫码结果
 ///
 /// 返回 `waiting` / `scanned` / `expired` / `cancelled`，或 `confirmed`：登录模式带 `auth`（网页端令牌写进
-/// Cookie，App 端在 `auth.token`），绑定模式带 `binding`。确认后 5 分钟内重复轮询返回同一结果、同一个会话。
-/// 绑定模式只有发起绑定的账号能轮询。每 IP 每分钟最多 600 次，建议间隔 1.5 秒（扫码后 3 秒）。
+/// Cookie，App 端在 `auth.token`），绑定模式带 `binding`，注销核验模式带 `matched`。确认后 5 分钟内重复轮询返回同一结果、同一个会话。
+/// 绑定与注销核验模式只有发起的账号能轮询。每 IP 每分钟最多 600 次，建议间隔 1.5 秒（扫码后 3 秒）。
 #[utoipa::path(
     post,
     path = "/v1/auth/mihoyo/qr/poll",
@@ -93,6 +93,7 @@ async fn poll_qr(
             mode: polled.mode,
             is_new_user: polled.is_new_user,
             binding: polled.binding,
+            matched: polled.matched,
             auth,
         }),
     ))

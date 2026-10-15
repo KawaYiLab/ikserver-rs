@@ -263,7 +263,19 @@
   - 拉取绝区零角色失败不影响登录与绑定，只是没有角色资料（旧系统整次失败）。
   - 账号被封禁时返回 403 `ACCOUNT_BLOCKED`（旧系统 `USER_BLOCKED`，新系统 `USER_BLOCKED` 专指拉黑）。
   - Redis 键改为 `mihoyo_qr_logins` 表；限流（每 IP 每分钟生成 30 次、轮询 600 次）在进程内。
-  - 扫码注销核验（delete 模式，MHY-016～018）随账号注销功能一起做。
+  - 扫码注销核验：`mode = delete`，确认后只返回 `matched`（扫的是不是当前账号绑定的米游社账号），不拉角色、不改数据；
+    注销时以 `qrId` 交回，在注销事务里核对并消费（旧系统是 Redis 键，提交后才删，DEL-007）。
+- **账号安全（DEL-001～010、LOGIN-011，D-071 方案 A）**：
+  - `GET /v1/me/security`：邮箱、是否设置过密码、是否绑定米游社、注销用哪种核验（旧系统的 `provider` 字段取消）。
+  - 绑定 / 更换邮箱：`POST /v1/me/email/code` + `PUT /v1/me/email`；与当前相同 400、已被占用 409 `EMAIL_TAKEN`。
+    这两种用途（以及注销）不能经公开的 `/v1/auth/email-codes` 申请。不踢会话（与旧系统一致）。
+  - 修改密码：`PUT /v1/me/password`，所有会话下线后给当前设备签新会话（`password_change`）；没有密码的账号 400
+    `PASSWORD_NOT_SET`，用重置密码设置。
+  - 注销：`POST /v1/me/delete-account/code` + `POST /v1/me/delete-account { code | qrId }`。立即生效、不可撤回；
+    用户名改为「已注销用户_<id>」，邮箱置空（可以重新注册，旧系统改成 `deleted_<id>_<时间>@anonymized.local`）、删密码、
+    清头像与装扮、清签名与精选并隐藏主页、删米游社绑定、吊销全部会话；帖子、评论、私信、互动与流水保留（DEL-010）。
+  - 旧系统的 `accountCleanupPending` + 每分钟重试（DEL-008/009）不再需要：搜索索引经 `user.renamed` 事件与定期对账更新，
+    没有需要清的响应缓存。
 - **装扮（COSMETIC-001～009）**：`GET /v1/me/avatars`、`PUT /v1/me/avatars/equipped { avatarId|null }`、
   `GET /v1/me/cards?kind=&cursor=&limit=`、`PUT /v1/me/cards/equipped { cardId|null }`；免费，不要求通过考试。
   - 所有展示作者头像的地方统一「装备的系统头像优先，其次自定义头像」，关注列表也一样（D-056 方案 A）。

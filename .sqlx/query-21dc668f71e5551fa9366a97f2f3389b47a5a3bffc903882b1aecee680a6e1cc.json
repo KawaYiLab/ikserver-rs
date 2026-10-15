@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n             (SELECT count(*) FROM user_passwords WHERE user_id = $1) AS \"passwords!\",\n             (SELECT count(*) FROM mihoyo_bindings WHERE user_id = $1) AS \"bindings!\",\n             (SELECT count(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL) AS \"sessions!\",\n             (SELECT bio FROM user_profiles WHERE user_id = $1) AS \"bio!\",\n             (SELECT hidden FROM user_profiles WHERE user_id = $1) AS \"hidden!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "passwords!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "bindings!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "sessions!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "bio!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "hidden!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "21dc668f71e5551fa9366a97f2f3389b47a5a3bffc903882b1aecee680a6e1cc"
+}

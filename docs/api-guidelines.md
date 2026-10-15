@@ -85,6 +85,10 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CURSOR_INVALID | 400 | 分页游标无效 | |
 | IDEMPOTENCY_KEY_INVALID | 400 | 幂等键格式不正确 | 需为 UUID |
 | CODE_INVALID | 400 | 验证码错误或已过期 | 已使用的验证码同样返回此码 |
+| PASSWORD_NOT_SET | 400 | 当前账号还没有设置密码，请通过重置密码设置 | 修改密码时；米游社扫码注册的账号 |
+| DELETE_ACCOUNT_NO_EMAIL | 400 | 当前账号未绑定邮箱，请通过米游社扫码注销 | 发注销验证码时 |
+| MIHOYO_DELETE_TICKET_EXPIRED | 400 | 扫码验证已过期，请重新扫码 | 注销时：核验结果不存在或超过 5 分钟 |
+| MIHOYO_DELETE_TICKET_INVALID | 400 | 这不是注销用的扫码验证 | 注销时给了登录 / 绑定用的二维码 |
 | COMMENT_NOT_TOP_LEVEL | 400 | 只有一级评论可以置顶或采纳 | |
 | FOLLOW_SELF | 400 | 不能关注自己 | |
 | UPLOAD_TOKEN_INVALID | 400 | 上传凭证无效 | 格式或签名不对，或不是自己的凭证 |
@@ -114,12 +118,14 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
 | MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
 | MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |
+| MIHOYO_DELETE_ACCOUNT_MISMATCH | 403 | 扫码的米游社账号与当前账号不一致，请使用当前账号绑定的米游社扫码 | MHY-017 |
 | MIHOYO_UNBIND_FORBIDDEN | 403 | 当前账号只能通过米游社扫码登录，请先绑定邮箱 | 没有邮箱的账号解绑会把自己锁在外面（MHY-014） |
 | MIHOYO_NOT_BOUND | 404 | 当前账号未绑定米游社 | |
 | IDENTITY_ALREADY_BOUND | 409 | 该米游社账号已绑定其他绳网账号，请先在原账号解绑或注销 | 不接管任何账号（MHY-013） |
 | USER_ALREADY_BOUND | 409 | 当前账号已绑定其他米游社账号，请先解绑 | |
 | IDENTITY_CONFLICT | 409 | 这个米游社账号关联了多个绳网账号，请联系管理员 | aid 与 mid 指向不同账号（历史数据），运维处理 |
 | QR_SESSION_CONSUMED | 409 | 这次扫码登录已经失效，请重新扫码 | 同一个二维码登录的会话已登出或过期，不会另起新会话 |
+| ACCOUNT_CHANGED | 409 | 账号信息已变更，请重新验证 | 核验之后邮箱或密码被改过（修改密码、注销），DEL-005 |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |

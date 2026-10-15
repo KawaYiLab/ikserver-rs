@@ -2301,6 +2301,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-account"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "axum-extra",
+ "chrono",
+ "http",
+ "ik-auth",
+ "ik-kernel",
+ "ik-mihoyo",
+ "ik-profile",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
 name = "ik-auth"
 version = "0.1.0"
 dependencies = [
@@ -2686,6 +2708,7 @@ dependencies = [
  "graphile_worker",
  "http",
  "http-body-util",
+ "ik-account",
  "ik-auth",
  "ik-comments",
  "ik-content",

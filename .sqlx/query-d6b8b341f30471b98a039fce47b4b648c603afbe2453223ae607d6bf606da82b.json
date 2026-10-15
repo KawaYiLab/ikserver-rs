@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mode, user_id, result, result_expires_at FROM mihoyo_qr_logins\n         WHERE id_hash = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_qr_logins",
+            "name": "mode"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_qr_logins",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "result",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_qr_logins",
+            "name": "result"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "result_expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "mihoyo_qr_logins",
+            "name": "result_expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d6b8b341f30471b98a039fce47b4b648c603afbe2453223ae607d6bf606da82b"
+}

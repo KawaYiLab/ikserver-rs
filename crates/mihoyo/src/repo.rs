@@ -157,6 +157,27 @@ pub(crate) async fn qr(conn: &mut PgConnection, id_hash: &[u8]) -> sqlx::Result<
     .await
 }
 
+pub(crate) struct QrLockRow {
+    pub mode: String,
+    pub user_id: Option<i64>,
+    pub result: Option<serde_json::Value>,
+    pub result_expires_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) async fn lock_qr(
+    conn: &mut PgConnection,
+    id_hash: &[u8],
+) -> sqlx::Result<Option<QrLockRow>> {
+    sqlx::query_as!(
+        QrLockRow,
+        "SELECT mode, user_id, result, result_expires_at FROM mihoyo_qr_logins
+         WHERE id_hash = $1 FOR UPDATE",
+        id_hash
+    )
+    .fetch_optional(conn)
+    .await
+}
+
 pub(crate) async fn delete_qr(conn: &mut PgConnection, id_hash: &[u8]) -> sqlx::Result<()> {
     sqlx::query!("DELETE FROM mihoyo_qr_logins WHERE id_hash = $1", id_hash)
         .execute(conn)

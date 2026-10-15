@@ -22,6 +22,12 @@ pub enum CodePurpose {
     Register,
     Login,
     ResetPassword,
+    /// 绑定 / 更换邮箱，只能经 `POST /v1/me/email/code` 申请。
+    #[serde(skip)]
+    BindEmail,
+    /// 注销账号，只能经 `POST /v1/me/delete-account/code` 申请。
+    #[serde(skip)]
+    DeleteAccount,
 }
 
 impl CodePurpose {
@@ -30,6 +36,8 @@ impl CodePurpose {
             Self::Register => "register",
             Self::Login => "login",
             Self::ResetPassword => "reset_password",
+            Self::BindEmail => "bind_email",
+            Self::DeleteAccount => "delete_account",
         }
     }
 
@@ -39,6 +47,8 @@ impl CodePurpose {
             Self::Register => "注册",
             Self::Login => "登录",
             Self::ResetPassword => "重置密码",
+            Self::BindEmail => "绑定邮箱",
+            Self::DeleteAccount => "注销账号",
         }
     }
 }
@@ -101,7 +111,14 @@ pub fn mail_content(purpose: CodePurpose, code: &str) -> MailContent {
     let minutes = CODE_TTL_SECS / 60;
     MailContent {
         subject: format!("【{code}】{label}验证码 - 绳网"),
-        text: format!("您的{label}验证码是 {code}，{minutes} 分钟内有效。如非本人操作请忽略。"),
+        text: match purpose {
+            // 注销不可撤回，提示收到却不是本人操作时改密码（CODE-016）。
+            CodePurpose::DeleteAccount => format!(
+                "您的{label}验证码是 {code}，{minutes} 分钟内有效。此操作将不可撤回。\
+                 如果你没有请求注销账号，请立即修改密码并忽略此邮件，你的账号不会被注销。"
+            ),
+            _ => format!("您的{label}验证码是 {code}，{minutes} 分钟内有效。如非本人操作请忽略。"),
+        },
     }
 }
 

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users\n         SET username = $2, email = NULL, status = 'deleted', avatar_media_id = NULL,\n             equipped_avatar_id = NULL, equipped_avatar_media_id = NULL, equipped_card_id = NULL,\n             updated_at = $3\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c069a83c378ed6e1208a0c6456ae941cf5c3f5d4e866bc1798d6a176bd69991"
+}

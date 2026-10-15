@@ -11,6 +11,8 @@ pub enum QrMode {
     Login,
     /// 给当前账号绑定米游社，需要登录。
     Bind,
+    /// 注销前核验（没有邮箱的账号）：只核对扫码的米游社账号是不是当前账号绑定的那个，需要登录。
+    Delete,
 }
 
 impl QrMode {
@@ -18,6 +20,7 @@ impl QrMode {
         match self {
             Self::Login => "login",
             Self::Bind => "bind",
+            Self::Delete => "delete",
         }
     }
 }
@@ -76,6 +79,9 @@ pub struct QrPollResponse {
     pub is_new_user: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub binding: Option<BindingView>,
+    /// 注销核验模式：扫码的米游社账号是否就是当前账号绑定的那个。为 true 时可以拿 `qrId` 注销账号（5 分钟内）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched: Option<bool>,
     /// 登录模式确认后的登录结果（与密码登录的响应相同）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth: Option<AuthResponse>,

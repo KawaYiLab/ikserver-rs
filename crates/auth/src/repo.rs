@@ -893,3 +893,57 @@ pub(crate) async fn has_email(conn: &mut PgConnection, user_id: i64) -> sqlx::Re
     .fetch_one(conn)
     .await
 }
+
+pub(crate) async fn password_hash(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar!(
+        "SELECT hash FROM user_passwords WHERE user_id = $1",
+        user_id
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn set_email(
+    conn: &mut PgConnection,
+    user_id: i64,
+    email: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE users SET email = $2, updated_at = $3 WHERE id = $1",
+        user_id,
+        email,
+        now
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 注销的账号脱敏（DEL-006）：改名、清邮箱（邮箱可以再注册）、清头像与装扮、状态改为 deleted，删除密码。
+pub(crate) async fn anonymize(
+    conn: &mut PgConnection,
+    user_id: i64,
+    username: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE users
+         SET username = $2, email = NULL, status = 'deleted', avatar_media_id = NULL,
+             equipped_avatar_id = NULL, equipped_avatar_media_id = NULL, equipped_card_id = NULL,
+             updated_at = $3
+         WHERE id = $1",
+        user_id,
+        username,
+        now
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!("DELETE FROM user_passwords WHERE user_id = $1", user_id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}

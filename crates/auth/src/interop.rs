@@ -267,3 +267,38 @@ pub async fn insert_user_without_email(
 pub async fn has_email(conn: &mut PgConnection, user_id: i64) -> Result<bool, Problem> {
     Ok(repo::has_email(conn, user_id).await?)
 }
+
+/// 在注销事务里消费注销验证码（DEL-005）：邮箱在核对之后变了 → 409 `ACCOUNT_CHANGED`；
+/// 验证码被并发消费或过期 → 400 `CODE_INVALID`。调用方已锁住用户行。
+pub async fn consume_delete_code(
+    conn: &mut PgConnection,
+    user_id: i64,
+    code: &crate::service::DeleteCode,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    let email = repo::me(conn, user_id)
+        .await?
+        .ok_or_else(crate::service::account_blocked)?
+        .email;
+    if email.as_deref() != Some(code.email.as_str()) {
+        return Err(crate::service::account_changed());
+    }
+    if repo::consume_code(conn, code.code_id, now).await? {
+        Ok(())
+    } else {
+        Err(crate::code::code_invalid())
+    }
+}
+
+/// 注销账号的 auth 部分（DEL-006）：脱敏（用户名改为「已注销用户_<id>」、清邮箱、清头像与装扮、删密码）、
+/// 状态改为 deleted、吊销全部会话。调用方已锁住用户行，提交后发布
+/// [`crate::service::sessions_changed_event`]。帖子、评论等内容保留（DEL-010）。
+pub async fn anonymize_deleted(
+    conn: &mut PgConnection,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    repo::anonymize(conn, user_id, &format!("已注销用户_{user_id}"), now).await?;
+    repo::revoke_user_sessions(conn, user_id, None, now, "account_deleted").await?;
+    Ok(())
+}

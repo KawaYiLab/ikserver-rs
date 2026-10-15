@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_profiles SET bio = '', hidden = TRUE, pinned_post_ids = NULL, updated_at = now()\n         WHERE user_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "76e988e08f197ff30d680f7ed2d4ddeb33191956a26328594ca73e94d793d66f"
+}
