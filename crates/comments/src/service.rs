@@ -13,7 +13,7 @@ use ik_content::interop::{self, PostRef};
 use ik_economy::service::{Dedup, ExpAction, grant_exp};
 use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::cursor::{self, Page};
-use ik_kernel::{Id, Problem};
+use ik_kernel::{Id, Problem, Snowflake};
 use ik_notify::interop::{Kind, Notice, Target};
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
@@ -65,7 +65,7 @@ fn ensure_moderator_of(principal: &Principal, post: &PostRef) -> Result<(), Prob
     }
 }
 
-fn bumped_event(post_id: i64) -> Result<Event, Problem> {
+pub(crate) fn bumped_event(post_id: i64) -> Result<Event, Problem> {
     Event::new(
         "post.bumped",
         Audience::Broadcast,
@@ -134,20 +134,20 @@ fn check_rate(state: &CommentsState, principal: &Principal) -> Result<(), Proble
         })
 }
 
-struct NewCommentNotice<'a> {
-    post: &'a PostRef,
-    parent: Option<&'a CommentRow>,
-    comment_id: i64,
-    author_id: i64,
-    body: &'a str,
-    is_anonymous: bool,
+pub(crate) struct NewCommentNotice<'a> {
+    pub post: &'a PostRef,
+    pub parent: Option<&'a CommentRow>,
+    pub comment_id: i64,
+    pub author_id: i64,
+    pub body: &'a str,
+    pub is_anonymous: bool,
 }
 
 /// 新评论的通知：一级评论通知帖主（`comment`），回复通知被回复的一级评论作者（`reply`），
 /// 正文里 @ 到的人各一条（`mention`，最多 10 人，已经收到前两种通知的人不重复）。
 /// 评论、帖子、被回复的评论任一匿名就都不发（CMT-129）。自己、拉黑、收件人不可用由 notify 抑制。
-async fn notify_new_comment(
-    state: &CommentsState,
+pub(crate) async fn notify_new_comment(
+    ids: &Snowflake,
     conn: &mut PgConnection,
     c: &NewCommentNotice<'_>,
     now: DateTime<Utc>,
@@ -175,17 +175,11 @@ async fn notify_new_comment(
         post_title: Some(&c.post.title),
         excerpt: &excerpt,
     };
-    ik_notify::interop::send(conn, &state.ids, notice(primary, kind), now, effects).await?;
+    ik_notify::interop::send(conn, ids, notice(primary, kind), now, effects).await?;
     for target in text::mentioned_user_ids(c.body) {
         if target != primary {
-            ik_notify::interop::send(
-                conn,
-                &state.ids,
-                notice(target, Kind::Mention),
-                now,
-                effects,
-            )
-            .await?;
+            ik_notify::interop::send(conn, ids, notice(target, Kind::Mention), now, effects)
+                .await?;
         }
     }
     Ok(())
@@ -303,7 +297,7 @@ pub async fn create(
         .await?;
     }
     notify_new_comment(
-        state,
+        &state.ids,
         &mut tx,
         &NewCommentNotice {
             post: &post,
@@ -318,6 +312,25 @@ pub async fn create(
     )
     .await?;
     effects.publish(bumped_event(post.id)?);
+    if let Some(hooks) = state.hooks() {
+        let created = crate::CreatedComment {
+            id,
+            post_id: post.id,
+            post_author_id: post.author_id,
+            post_is_anonymous: post.is_anonymous,
+            parent: parent.as_ref().map(|p| crate::ParentRef {
+                id: p.id,
+                author_id: p.author_id,
+                is_anonymous: p.is_anonymous,
+            }),
+            author_id,
+            author_is_ai: principal.is_ai_agent,
+            body: body.clone(),
+            is_anonymous: request.is_anonymous,
+            created_at: now,
+        };
+        hooks.created(&mut tx, &created, &mut effects).await?;
+    }
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
 

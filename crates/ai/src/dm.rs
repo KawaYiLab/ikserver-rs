@@ -173,13 +173,13 @@ pub(crate) fn pick_model<'a>(
 }
 
 /// system prompt（LLM-003、GEN-071）：人格 + 输出格式要求 + 示例对话（few-shot 块，不伪装成历史）。
-pub(crate) fn system_prompt(card: &RoleCard) -> String {
+pub(crate) fn system_prompt(card: &RoleCard, mode: OutputMode) -> String {
     let mut prompt = if card.system_prompt.trim().is_empty() {
         format!("你是绳网论坛的 AI 角色「{}」。", card.display_name)
     } else {
         card.system_prompt.trim().to_owned()
     };
-    prompt.push_str(match card.output_mode {
+    prompt.push_str(match mode {
         OutputMode::Plain => {
             "\n\n【输出格式】只输出纯文本：不要使用 Markdown 标题、列表符号、加粗、代码块或 HTML。"
         }
@@ -209,7 +209,7 @@ pub(crate) fn build_messages(
     names: &HashMap<i64, String>,
 ) -> Vec<ChatMessage> {
     let mut messages = Vec::with_capacity(history.len() + 1);
-    messages.push(ChatMessage::system(system_prompt(card)));
+    messages.push(ChatMessage::system(system_prompt(card, card.output_mode)));
     for item in history {
         if item.sender_id == ai_user_id {
             messages.push(ChatMessage::assistant(item.content.clone()));
@@ -221,7 +221,7 @@ pub(crate) fn build_messages(
     messages
 }
 
-fn prompt_tokens_estimate(state: &AiState, messages: &[ChatMessage]) -> i64 {
+pub(crate) fn prompt_tokens_estimate(state: &AiState, messages: &[ChatMessage]) -> i64 {
     state.config.estimated_context_tokens
         + messages
             .iter()
@@ -486,7 +486,7 @@ async fn prepare(
 
 /// 生成阶段怎么结束的。
 #[derive(Debug)]
-enum End {
+pub(crate) enum End {
     Finished,
     Stopped,
     FirstDeltaTimeout,
@@ -496,38 +496,47 @@ enum End {
 
 /// 一次流式调用的产出。
 #[derive(Debug)]
-struct Streamed {
-    content: String,
-    received_chars: usize,
-    usage: Option<Usage>,
+pub(crate) struct Streamed {
+    pub content: String,
+    pub received_chars: usize,
+    pub usage: Option<Usage>,
     /// 上游已经接受请求（开始计费的可能）。
-    started: bool,
-    end: End,
+    pub started: bool,
+    pub end: End,
 }
 
-struct StreamCtx<'a> {
-    state: &'a AiState,
-    job_id: i64,
-    conversation_id: i64,
-    reply_id: i64,
-    ai_user_id: i64,
+/// 私信回复的实时推送目标。评论回复没有（GEN-030：一次性发出）。
+pub(crate) struct Live {
+    pub conversation_id: i64,
+    pub reply_id: i64,
+    pub ai_user_id: i64,
     /// 推送对象（会话里的人类成员）。
-    audience: Vec<i64>,
-    mode: OutputMode,
+    pub audience: Vec<i64>,
+}
+
+pub(crate) struct StreamCtx<'a> {
+    pub state: &'a AiState,
+    pub job_id: i64,
+    /// 有推送目标时推送累计正文与「正在输入」，并轮询停止信号。
+    pub live: Option<Live>,
+    pub mode: OutputMode,
 }
 
 impl StreamCtx<'_> {
     fn publish(&self, kind: &'static str, data: &serde_json::Value) {
-        if self.audience.is_empty() {
+        let Some(live) = self.live.as_ref().filter(|l| !l.audience.is_empty()) else {
             return;
-        }
-        match Event::new(kind, Audience::Users(self.audience.clone().into()), data) {
+        };
+        match Event::new(kind, Audience::Users(live.audience.clone().into()), data) {
             Ok(event) => self.state.bus.publish(event),
             Err(problem) => tracing::warn!(?problem, kind, "构造实时事件失败"),
         }
     }
 
     async fn stop_requested(&self) -> bool {
+        if self.live.is_none() {
+            return false;
+        }
         match self.state.db.acquire().await {
             Ok(mut conn) => repo::stop_requested(&mut conn, self.job_id)
                 .await
@@ -573,9 +582,13 @@ async fn stream_once(
     let mut got_content = false;
     let mut pushed_chars = 0usize;
     let min_chars = ctx.state.config.stream_min_chars;
+    let (conversation_id, reply_id, ai_user_id) = ctx
+        .live
+        .as_ref()
+        .map_or((0, 0, 0), |l| (l.conversation_id, l.reply_id, l.ai_user_id));
     let typing = serde_json::json!({
-        "conversationId": ctx.conversation_id.to_string(),
-        "userId": ctx.ai_user_id.to_string(),
+        "conversationId": conversation_id.to_string(),
+        "userId": ai_user_id.to_string(),
     });
     loop {
         let watchdog = async {
@@ -604,12 +617,12 @@ async fn stream_once(
                         out.received_chars += text.chars().count();
                         out.content.push_str(&text);
                         let total = out.content.chars().count();
-                        if total >= pushed_chars + min_chars {
+                        if ctx.live.is_some() && total >= pushed_chars + min_chars {
                             pushed_chars = total;
                             let shown = sanitize::sanitize(&out.content, ctx.mode, sanitize::DM_MAX_CHARS);
                             ctx.publish("dm.message.delta", &serde_json::json!({
-                                "conversationId": ctx.conversation_id.to_string(),
-                                "messageId": ctx.reply_id.to_string(),
+                                "conversationId": conversation_id.to_string(),
+                                "messageId": reply_id.to_string(),
                                 "content": shown,
                             }));
                         }
@@ -672,26 +685,65 @@ pub async fn run_job(
     let ctx = StreamCtx {
         state,
         job_id,
-        conversation_id,
-        reply_id: prepared.reply_id,
-        ai_user_id: prepared.job.ai_user_id,
-        audience,
+        live: Some(Live {
+            conversation_id,
+            reply_id: prepared.reply_id,
+            ai_user_id: prepared.job.ai_user_id,
+            audience,
+        }),
         mode: prepared.card.output_mode,
     };
+    let generated = generate(
+        &ctx,
+        &prepared.model,
+        prepared.default_model.as_ref(),
+        &prepared.messages,
+    )
+    .await;
+    finalize(
+        state,
+        &prepared,
+        &generated.model,
+        generated.streamed,
+        generated.earlier,
+        attempt,
+        last_attempt,
+    )
+    .await
+}
+
+/// 一次回复的生成结果。
+pub(crate) struct Generated {
+    /// 最终用的模型（首帧超时后可能是默认模型）。
+    pub model: Model,
+    pub streamed: Streamed,
+    /// 之前那次（被首帧超时打断的）调用的计费用量。
+    pub earlier: Usage,
+}
+
+/// 调用上游生成一条回复（LLM-007）：总预算内调用一次；首帧超时时，剩余预算够、且当前不是默认模型，
+/// 退回默认模型重试一次且不挂看门狗（GEN-020～022）。
+pub(crate) async fn generate(
+    ctx: &StreamCtx<'_>,
+    model: &Model,
+    default_model: Option<&Model>,
+    messages: &[ChatMessage],
+) -> Generated {
+    let state = ctx.state;
     let budget = Duration::from_secs(state.config.reply_timeout_secs);
     let deadline = Instant::now() + budget;
     let first_delta =
         Some(Duration::from_secs(state.config.first_delta_timeout_secs)).filter(|d| !d.is_zero());
 
-    let mut model = prepared.model.clone();
+    let mut model = model.clone();
     let mut streamed = match state.providers.get(&model.provider) {
         Ok(provider) => {
             let request = ChatRequest {
                 model: model.provider_model.clone(),
-                messages: prepared.messages.clone(),
+                messages: messages.to_vec(),
                 tools: Vec::new(),
             };
-            stream_once(&ctx, provider.as_ref(), &request, deadline, first_delta).await
+            stream_once(ctx, provider.as_ref(), &request, deadline, first_delta).await
         }
         Err(error) => Streamed {
             content: String::new(),
@@ -701,42 +753,37 @@ pub async fn run_job(
             end: End::Failed(error),
         },
     };
-    let mut prompt_charged = Usage::default();
-    // 首帧超时：剩余预算够、且当前不是默认模型时，退回默认模型重试一次且不挂看门狗（GEN-022）。
+    let mut earlier = Usage::default();
     if matches!(streamed.end, End::FirstDeltaTimeout)
-        && let Some(fallback) = prepared
-            .default_model
-            .as_ref()
-            .filter(|d| d.key != model.key)
+        && let Some(fallback) = default_model.filter(|d| d.key != model.key)
         && deadline.saturating_duration_since(Instant::now()) >= FALLBACK_MIN_REMAINING
         && let Ok(provider) = state.providers.get(&fallback.provider)
     {
-        tracing::warn!(job = job_id, from = %model.key, to = %fallback.key, "首帧超时，退回默认模型");
+        tracing::warn!(job = ctx.job_id, from = %model.key, to = %fallback.key, "首帧超时，退回默认模型");
         // 第一次调用已经开始，按估算计入（D-083 方案 C）。
-        prompt_charged = charge_usage(state, &prepared.messages, &streamed);
+        earlier = charge_usage(state, messages, &streamed);
         model = fallback.clone();
         let request = ChatRequest {
             model: model.provider_model.clone(),
-            messages: prepared.messages.clone(),
+            messages: messages.to_vec(),
             tools: Vec::new(),
         };
-        streamed = stream_once(&ctx, provider.as_ref(), &request, deadline, None).await;
+        streamed = stream_once(ctx, provider.as_ref(), &request, deadline, None).await;
     }
-    finalize(
-        state,
-        &prepared,
-        &model,
+    Generated {
+        model,
         streamed,
-        prompt_charged,
-        attempt,
-        last_attempt,
-    )
-    .await
+        earlier,
+    }
 }
 
 /// 计费用量（LLM-006、GEN-080/081、D-083 方案 C）：上游报了就用上游的；没报但调用已开始，按估算；
 /// 没开始记 0。
-fn charge_usage(state: &AiState, messages: &[ChatMessage], streamed: &Streamed) -> Usage {
+pub(crate) fn charge_usage(
+    state: &AiState,
+    messages: &[ChatMessage],
+    streamed: &Streamed,
+) -> Usage {
     if let Some(usage) = streamed.usage.filter(|u| !u.is_zero()) {
         return usage;
     }
@@ -918,7 +965,7 @@ mod tests {
 
     #[test]
     fn prompt_has_persona_format_and_fewshot_block() {
-        let prompt = system_prompt(&card());
+        let prompt = system_prompt(&card(), OutputMode::Plain);
         assert!(prompt.starts_with("你是 Fairy。"));
         assert!(prompt.contains("只输出纯文本"));
         assert!(prompt.contains("不是真实的对话历史"));

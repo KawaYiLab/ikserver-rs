@@ -225,3 +225,131 @@ pub async fn hidden_states(
         .map(|r| (r.id, r.hidden))
         .collect())
 }
+
+// ---------- AI 评论回复（ai） ----------
+
+/// AI 评论回复用的评论信息（TRIG-016、CTX-001）。
+#[derive(Debug, Clone)]
+pub struct AiComment {
+    pub id: i64,
+    pub post_id: i64,
+    pub parent_id: Option<i64>,
+    pub author_id: i64,
+    /// 原文（含提及与表情 token）。
+    pub body: String,
+    pub is_anonymous: bool,
+    /// 自身未隐藏。
+    pub visible: bool,
+}
+
+pub async fn ai_comment(conn: &mut PgConnection, id: i64) -> Result<Option<AiComment>, Problem> {
+    Ok(repo::get(conn, id).await?.map(|row| AiComment {
+        id: row.id,
+        post_id: row.post_id,
+        parent_id: row.parent_id,
+        author_id: row.author_id,
+        body: row.body,
+        is_anonymous: row.is_anonymous,
+        visible: row.hidden_at.is_none(),
+    }))
+}
+
+/// 可见评论（自身与父评论都未隐藏）的原文，按 id。不可见、已删除的不出现。
+pub async fn visible_bodies(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, String>, Problem> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    Ok(repo::listed_by_ids(conn, ids)
+        .await?
+        .into_iter()
+        .map(|row| (row.id, row.body))
+        .collect())
+}
+
+/// AI 的一条评论回复。
+#[derive(Debug, Clone)]
+pub struct AiReply<'a> {
+    /// 触发评论。
+    pub trigger_id: i64,
+    pub ai_user_id: i64,
+    /// 完整正文（调用方已在开头加好对触发者的提及 token，TRIG-017）。
+    pub body: &'a str,
+}
+
+/// 以 AI 的名义回复触发评论（TRIG-017、D-004 方案 A）：实名，挂在触发评论所在的一级评论下
+/// （触发评论本身是一级评论时就挂在它下面），不占楼层。锁住帖子后复核：帖子公开且不匿名、
+/// 触发评论与所在一级评论都可见且不匿名，不满足返回 None。评论数、顶帖、通知与普通回复一致；
+/// 不给经验、不限流（AI 账号）。
+pub async fn insert_ai_reply(
+    conn: &mut PgConnection,
+    ids: &ik_kernel::Snowflake,
+    reply: AiReply<'_>,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<Option<i64>, Problem> {
+    let Some(post_id) = repo::get(conn, reply.trigger_id).await?.map(|c| c.post_id) else {
+        return Ok(None);
+    };
+    let Some(post) = ik_content::interop::lock_post(conn, post_id)
+        .await?
+        .filter(|p| p.is_public && !p.is_anonymous)
+    else {
+        return Ok(None);
+    };
+    let usable =
+        |c: &repo::CommentRow| c.post_id == post.id && c.hidden_at.is_none() && !c.is_anonymous;
+    let Some(trigger) = repo::get(conn, reply.trigger_id).await?.filter(usable) else {
+        return Ok(None);
+    };
+    let thread_id = trigger.parent_id.unwrap_or(trigger.id);
+    let Some(thread) = repo::get(conn, thread_id)
+        .await?
+        .filter(|c| usable(c) && c.parent_id.is_none())
+    else {
+        return Ok(None);
+    };
+    let body: String = reply
+        .body
+        .trim()
+        .chars()
+        .take(crate::text::MAX_BODY_CHARS)
+        .collect();
+    let id = ids.next_raw();
+    repo::insert(
+        conn,
+        &repo::NewComment {
+            id,
+            post_id: post.id,
+            parent_id: Some(thread.id),
+            author_id: reply.ai_user_id,
+            floor: None,
+            body: &body,
+            is_anonymous: false,
+            anonymous_seed: None,
+            image_ids: &[],
+            now,
+        },
+    )
+    .await?;
+    ik_content::interop::comment_added(conn, post.id, reply.ai_user_id, now).await?;
+    crate::service::notify_new_comment(
+        ids,
+        conn,
+        &crate::service::NewCommentNotice {
+            post: &post,
+            parent: Some(&thread),
+            comment_id: id,
+            author_id: reply.ai_user_id,
+            body: &body,
+            is_anonymous: false,
+        },
+        now,
+        effects,
+    )
+    .await?;
+    effects.publish(crate::service::bumped_event(post.id)?);
+    Ok(Some(id))
+}

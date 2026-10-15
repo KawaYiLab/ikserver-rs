@@ -304,3 +304,14 @@
 - `ai_jobs`（ik-ai）：任务与审计合一（AI-008）。`execution_key` 唯一去重（`dm:<触发消息>`、`regenerate:<旧回复>`），
   `reply_message_id` 唯一（同一任务重试复用同一条占位），`stop_requested_at` 是停止信号（用户停止、重置、撤回触发消息），
   用量逐次累加。旧系统每次尝试一行审计（TRIG-035），这里只保留最后一次尝试的原因与累计用量。
+
+## AI 评论回复（`20261029000001_ai_comment_jobs.sql`）
+
+- 评论任务与私信任务共用 `ai_jobs`：`kind = 'comment'`，去重键 `comment:<触发评论 id>`（同一条评论只回复一次）。
+  新增 `post_id`、`trigger_comment_id`、`reply_comment_id`，都是 `ON DELETE SET NULL`：评论或帖子删除后审计行保留，
+  执行时复核触发评论仍可见（TRIG-016）。`reply_comment_id` 唯一（一个任务至多一条回复，重放直接结束）。
+- 评论记忆（CTX-003）按（帖子、评论者、AI）取之前已回复的问答：部分索引
+  `ai_jobs_comment_memory_idx (post_id, quota_user_id, ai_user_id, created_at) WHERE post_id IS NOT NULL`，
+  也兼作 `post_id` 外键索引。
+- AI 的回复就是一条普通的实名评论（`author_id` 是 AI 账号，`parent_id` 是触发评论所在的一级评论，D-004 方案 A）；
+  `comments` 表本身没有改动。

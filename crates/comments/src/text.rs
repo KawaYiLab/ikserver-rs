@@ -112,6 +112,21 @@ pub fn mentioned_user_ids(body: &str) -> Vec<i64> {
     ids
 }
 
+/// 提及 token `@[名字](用户id)`（TRIG-017）：名字去掉 `[`、`]` 与换行，截 40 字，空则为「用户」。
+pub fn mention_token(name: &str, user_id: i64) -> String {
+    let cleaned: String = name
+        .chars()
+        .filter(|c| !matches!(c, '[' | ']' | '\n' | '\r'))
+        .take(40)
+        .collect();
+    let cleaned = if cleaned.trim().is_empty() {
+        "用户".to_owned()
+    } else {
+        cleaned
+    };
+    format!("@[{cleaned}]({user_id})")
+}
+
 /// 通知预览用的纯文本：提及 token 变成 `@名字`，表情 token 变成 `[表情:名字]`（NOTIF 触发点表）。
 pub fn plain_text(body: &str) -> String {
     let Some(p) = patterns() else {
@@ -173,6 +188,16 @@ mod tests {
             .collect();
         let ids = mentioned_user_ids(&body);
         assert_eq!(ids, (1..=10).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn mention_token_is_parseable() {
+        let token = mention_token("a[b]\nc", 7);
+        assert_eq!(token, "@[abc](7)");
+        assert_eq!(mentioned_user_ids(&token), vec![7]);
+        assert_eq!(mention_token("[]", 8), "@[用户](8)");
+        let long = mention_token(&"名".repeat(50), 9);
+        assert_eq!(mentioned_user_ids(&long), vec![9]);
     }
 
     #[test]

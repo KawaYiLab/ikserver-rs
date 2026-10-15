@@ -120,7 +120,7 @@ impl AppState {
             media.clone(),
             config.moderation.auto_hide_threshold,
         );
-        let ai = AiState::from_config(messaging.clone(), &config.ai)?;
+        let ai = AiState::from_config(messaging.clone(), comments.clone(), &config.ai)?;
         ai.install_hooks();
         Ok(Self {
             ai,

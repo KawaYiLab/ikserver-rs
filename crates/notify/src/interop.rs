@@ -4,7 +4,9 @@
 //! 实时推送放进调用方的 `Effects`，提交后才发出（NOTIF-040）。
 //!
 //! 统一在这里强制的抑制规则：自己不通知自己（NOTIF-003）；双方存在拉黑时不发（NOTIF-002，
-//! 旧系统是抛错，新系统静默跳过，因为触发动作本身已经被拉黑拦截过）；收件人封禁或注销时不发。
+//! 旧系统是抛错，新系统静默跳过，因为触发动作本身已经被拉黑拦截过）；收件人封禁或注销时不发；
+//! 发送者是 AI 账号时不发（NOTIF-014：AI 不单独成组，旧系统存库但列表、未读、推送全部剔除，
+//! 用户看不到；这里直接不写）。
 //! 匿名相关的抑制由调用方判断（只有调用方知道帖子、评论、父评论是否匿名），匿名时不要调用。
 
 use chrono::{DateTime, Utc};
@@ -106,9 +108,12 @@ pub async fn send(
     if notice.kind == Kind::System || notice.recipient_id == notice.sender_id {
         return Ok(false);
     }
-    if ik_auth::interop::active_users(conn, &[notice.recipient_id])
-        .await?
-        .is_empty()
+    let users =
+        ik_auth::interop::active_users(conn, &[notice.recipient_id, notice.sender_id]).await?;
+    if !users.iter().any(|u| u.id == notice.recipient_id)
+        || users
+            .iter()
+            .any(|u| u.id == notice.sender_id && u.is_ai_agent)
     {
         return Ok(false);
     }

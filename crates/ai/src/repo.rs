@@ -446,6 +446,8 @@ pub(crate) struct NewJob<'a> {
     pub ai_user_id: i64,
     pub conversation_id: Option<i64>,
     pub trigger_message_id: Option<i64>,
+    pub post_id: Option<i64>,
+    pub trigger_comment_id: Option<i64>,
     pub generation_epoch: i32,
     pub model_override: Option<&'a str>,
     pub now: DateTime<Utc>,
@@ -458,9 +460,9 @@ pub(crate) async fn insert_job(
 ) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar!(
         "INSERT INTO ai_jobs (id, kind, execution_key, quota_user_id, ai_user_id, conversation_id,
-                              trigger_message_id, generation_epoch, model_override,
-                              created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+                              trigger_message_id, post_id, trigger_comment_id, generation_epoch,
+                              model_override, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
          ON CONFLICT (execution_key) DO NOTHING
          RETURNING id",
         j.id,
@@ -470,6 +472,8 @@ pub(crate) async fn insert_job(
         j.ai_user_id,
         j.conversation_id,
         j.trigger_message_id,
+        j.post_id,
+        j.trigger_comment_id,
         j.generation_epoch,
         j.model_override,
         j.now,
@@ -489,13 +493,18 @@ pub(crate) struct JobRow {
     pub model_override: Option<String>,
     pub reply_message_id: Option<i64>,
     pub stop_requested_at: Option<DateTime<Utc>>,
+    pub post_id: Option<i64>,
+    pub trigger_comment_id: Option<i64>,
+    pub reply_comment_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
 }
 
 pub(crate) async fn lock_job(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<JobRow>> {
     sqlx::query_as!(
         JobRow,
         "SELECT id, status, quota_user_id, ai_user_id, conversation_id, trigger_message_id,
-                generation_epoch, model_override, reply_message_id, stop_requested_at
+                generation_epoch, model_override, reply_message_id, stop_requested_at,
+                post_id, trigger_comment_id, reply_comment_id, created_at
          FROM ai_jobs WHERE id = $1 FOR UPDATE",
         id,
     )
@@ -510,7 +519,8 @@ pub(crate) async fn job_by_reply(
     sqlx::query_as!(
         JobRow,
         "SELECT id, status, quota_user_id, ai_user_id, conversation_id, trigger_message_id,
-                generation_epoch, model_override, reply_message_id, stop_requested_at
+                generation_epoch, model_override, reply_message_id, stop_requested_at,
+                post_id, trigger_comment_id, reply_comment_id, created_at
          FROM ai_jobs WHERE reply_message_id = $1",
         reply_message_id,
     )
@@ -549,6 +559,56 @@ pub(crate) async fn set_job_reply(
     .execute(conn)
     .await?;
     Ok(())
+}
+
+pub(crate) async fn set_job_reply_comment(
+    conn: &mut PgConnection,
+    id: i64,
+    reply_comment_id: i64,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_jobs SET reply_comment_id = $2 WHERE id = $1",
+        id,
+        reply_comment_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 评论记忆里的一轮问答。
+pub(crate) struct CommentTurn {
+    pub trigger_comment_id: i64,
+    pub reply_comment_id: i64,
+}
+
+/// 同一（帖子、评论者、AI）之前已经回复过的问答（CTX-003），最近的 `limit` 轮，按时间正序。
+pub(crate) async fn comment_memory(
+    conn: &mut PgConnection,
+    post_id: i64,
+    user_id: i64,
+    ai_user_id: i64,
+    before: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<CommentTurn>> {
+    let mut turns = sqlx::query_as!(
+        CommentTurn,
+        r#"SELECT trigger_comment_id AS "trigger_comment_id!", reply_comment_id AS "reply_comment_id!"
+           FROM ai_jobs
+           WHERE post_id = $1 AND quota_user_id = $2 AND ai_user_id = $3 AND created_at < $4
+             AND trigger_comment_id IS NOT NULL AND reply_comment_id IS NOT NULL
+           ORDER BY created_at DESC, id DESC
+           LIMIT $5"#,
+        post_id,
+        user_id,
+        ai_user_id,
+        before,
+        limit,
+    )
+    .fetch_all(conn)
+    .await?;
+    turns.reverse();
+    Ok(turns)
 }
 
 pub(crate) struct JobOutcome<'a> {

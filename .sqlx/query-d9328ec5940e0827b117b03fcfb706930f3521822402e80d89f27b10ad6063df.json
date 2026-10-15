@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, status, quota_user_id, ai_user_id, conversation_id, trigger_message_id,\n                generation_epoch, model_override, reply_message_id, stop_requested_at\n         FROM ai_jobs WHERE reply_message_id = $1",
+  "query": "SELECT id, status, quota_user_id, ai_user_id, conversation_id, trigger_message_id,\n                generation_epoch, model_override, reply_message_id, stop_requested_at,\n                post_id, trigger_comment_id, reply_comment_id, created_at\n         FROM ai_jobs WHERE id = $1 FOR UPDATE",
   "describe": {
     "columns": [
       {
@@ -112,6 +112,50 @@
             "name": "stop_requested_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "post_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_jobs",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "trigger_comment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_jobs",
+            "name": "trigger_comment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "reply_comment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_jobs",
+            "name": "reply_comment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_jobs",
+            "name": "created_at"
+          }
+        }
       }
     ],
     "parameters": {
@@ -129,8 +173,12 @@
       false,
       true,
       true,
-      true
+      true,
+      true,
+      true,
+      true,
+      false
     ]
   },
-  "hash": "b8f9126a8a876948de279f82ad788d635d1b460a52777f3b18b40d7c2bff70c6"
+  "hash": "d9328ec5940e0827b117b03fcfb706930f3521822402e80d89f27b10ad6063df"
 }

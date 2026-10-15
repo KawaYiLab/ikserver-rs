@@ -41,7 +41,8 @@ crates/
   account/   账号安全：安全概览、注销账号（编排 auth、mihoyo、profile）
   moderation/ 举报与审核：举报、多人举报自动隐藏、领取与结案、封禁与解封、审核日志
   ai/        AI 助手：模型与角色卡、每日加权额度（预占 / 结算）、OpenAI 兼容上游的流式客户端、
-             AI 私聊会话（触发、流式回复、停止 / 重新生成 / 重置记忆，经 messaging 的钩子与 interop）
+             AI 私聊会话（触发、流式回复、停止 / 重新生成 / 重置记忆，经 messaging 的钩子与 interop）、
+             AI 评论回复（@ 触发、按帖子与评论者的记忆、沉浸守卫，经 comments 的钩子与 interop）
   server/    二进制入口：组装路由、中间件、任务、CLI
   （后续按业务域新增：admin）
 docs/

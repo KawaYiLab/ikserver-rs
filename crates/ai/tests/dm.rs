@@ -4,18 +4,14 @@
 // clippy.toml 的测试豁免只覆盖 #[test] 函数本身，不覆盖集成测试里的辅助函数。
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
-use futures_util::StreamExt;
 use ik_ai::AiState;
 use ik_ai::dm::{self, RunOutcome};
 use ik_ai::dto::{CreateSessionRequest, ImportFile, RegenerateRequest, UpdateSessionRequest};
-use ik_ai::llm::{
-    ChatMessage, ChatProvider, ChatRequest, EventStream, LlmError, Providers, StreamEvent, Usage,
-};
+use ik_ai::llm::{ChatMessage, LlmError, Providers, StreamEvent};
 use ik_ai::quota;
 use ik_ai::{service, sessions};
 use ik_auth::Principal;
@@ -26,70 +22,13 @@ use ik_messaging::MessagingState;
 use ik_messaging::dto::{OpenDirectRequest, SendMessageRequest};
 use sqlx::PgPool;
 
+mod common;
+use common::{Scripted, Step, content, usage};
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 const HUMAN: i64 = 100;
 const FAIRY: i64 = 200;
-
-/// 一次调用的脚本。
-#[derive(Clone)]
-enum Step {
-    Emit(StreamEvent),
-    Fail(LlmError),
-    /// 永远不再出帧（模拟卡住的上游）。
-    Hang,
-}
-
-#[derive(Default)]
-struct Scripted {
-    scripts: Mutex<VecDeque<Vec<Step>>>,
-    requests: Mutex<Vec<ChatRequest>>,
-}
-
-impl Scripted {
-    fn push(&self, steps: Vec<Step>) {
-        self.scripts.lock().unwrap().push_back(steps);
-    }
-
-    fn requests(&self) -> Vec<ChatRequest> {
-        self.requests.lock().unwrap().clone()
-    }
-}
-
-#[async_trait::async_trait]
-impl ChatProvider for Scripted {
-    async fn stream(&self, request: &ChatRequest) -> Result<EventStream, LlmError> {
-        self.requests.lock().unwrap().push(request.clone());
-        let steps = self
-            .scripts
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("没有剩余脚本");
-        let stream = futures_util::stream::iter(steps).then(|step| async move {
-            match step {
-                Step::Emit(event) => Some(Ok(event)),
-                Step::Fail(error) => Some(Err(error)),
-                Step::Hang => {
-                    std::future::pending::<()>().await;
-                    None
-                }
-            }
-        });
-        Ok(Box::pin(stream.filter_map(|item| async move { item })))
-    }
-}
-
-fn content(text: &str) -> Step {
-    Step::Emit(StreamEvent::Content(text.to_owned()))
-}
-
-fn usage(prompt: i64, completion: i64) -> Step {
-    Step::Emit(StreamEvent::Usage(Usage {
-        prompt_tokens: prompt,
-        completion_tokens: completion,
-    }))
-}
 
 struct Harness {
     db: PgPool,
@@ -132,10 +71,11 @@ async fn harness_with(db: PgPool, config: Ai, per_user: i64) -> Harness {
     let ids = Arc::new(Snowflake::new(1).unwrap());
     let bus = Arc::new(LocalBus::new(1024));
     let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
-    let messaging = MessagingState::new(db.clone(), ids, bus.clone(), media);
+    let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+    let comments = ik_comments::CommentsState::new(db.clone(), ids, bus.clone(), media);
     let fake = Arc::new(Scripted::default());
     let providers = Providers::default().with("fake", fake.clone());
-    let state = AiState::new(messaging, config, providers);
+    let state = AiState::new(messaging, comments, config, providers);
     assert!(state.install_hooks());
     insert_user(&db, HUMAN, false).await;
     insert_user(&db, FAIRY, true).await;
