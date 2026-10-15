@@ -249,6 +249,23 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
         .unwrap();
     assert!(posts.items.is_empty());
 
+    // 装备系统头像与名片。
+    h.sql(&format!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (900, 'c/900.png', 'image/png', 1, '{}', 'r900');
+         INSERT INTO system_avatars (id, name, image_media_id) VALUES (1, '头像', 900);
+         INSERT INTO business_cards (id, name, image_media_id) VALUES (1, '名片', 900);
+         UPDATE users SET equipped_avatar_id = 1, equipped_avatar_media_id = 900, equipped_card_id = 1
+         WHERE id = 1;",
+        "f".repeat(64)
+    ))
+    .await;
+    let view = service::profile(&h.state, Some(&stranger), 1)
+        .await
+        .unwrap();
+    assert_eq!(view.equipped_avatar.unwrap().name, "头像");
+    assert_eq!(view.equipped_card.unwrap().name, "名片");
+
     service::update_profile(
         &h.state,
         &author,
@@ -263,6 +280,10 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
         .await
         .unwrap();
     assert!(view.is_hidden && view.bio.is_empty() && view.stats.is_none());
+    assert!(
+        view.equipped_avatar.is_none() && view.equipped_card.is_none(),
+        "隐藏主页不给装扮（PROFILE-022）"
+    );
     assert_eq!(view.follower_count, 1, "隐藏主页仍返回关注数");
     assert!(view.is_following);
     assert!(
@@ -276,9 +297,16 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
     let own = service::profile(&h.state, Some(&author), 1).await.unwrap();
     assert!(own.is_self && !own.is_hidden);
     assert_eq!(own.bio, "签名");
+    assert!(own.equipped_card.is_some());
     // 拉黑优先于隐藏。
     let view = service::profile(&h.state, Some(&blocker), 1).await.unwrap();
     assert!(!view.is_hidden && view.is_blocked_by_me);
+    assert!(
+        view.equipped_card.is_some(),
+        "拉黑时保留名片（PROFILE-021）"
+    );
+    let mine = service::my_profile(&h.state, &author).await.unwrap();
+    assert_eq!(mine.equipped_avatar.unwrap().name, "头像");
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

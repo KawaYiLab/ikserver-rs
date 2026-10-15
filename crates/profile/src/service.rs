@@ -169,8 +169,17 @@ pub async fn profile(
     };
 
     let avatar = avatar_view(state, t.user.avatar_media_id.filter(|_| !t.user.gone)).await?;
+    // 隐藏主页时不给装扮（PROFILE-022）；拉黑时保留（PROFILE-021）；已注销的不给（COSMETIC-008）。
+    let show_cosmetics = !t.user.gone && t.access != Access::Hidden;
+    let (equipped_avatar, equipped_card) = if show_cosmetics {
+        equipped(state, t.user.equipped_avatar_id, t.user.equipped_card_id).await?
+    } else {
+        (None, None)
+    };
     Ok(ProfileView {
         avatar,
+        equipped_avatar,
+        equipped_card,
         id: Id::new(t.user.id),
         username: t.user.username,
         level: t.user.level,
@@ -284,12 +293,30 @@ async fn avatar_view(
     Ok(state.media.views(&[id]).await?.remove(&id))
 }
 
-/// 自己当前的头像（媒体 id）。
-async fn my_avatar_id(state: &ProfileState, user_id: i64) -> Result<Option<i64>, Problem> {
-    let mut conn = state.db.acquire().await?;
-    Ok(ik_auth::interop::profile_user(&mut conn, user_id)
-        .await?
-        .and_then(|u| u.avatar_media_id))
+type Equipped = (
+    Option<ik_cosmetics::dto::AvatarView>,
+    Option<ik_cosmetics::dto::CardView>,
+);
+
+/// 装备的系统头像与名片的展示数据。
+async fn equipped(
+    state: &ProfileState,
+    avatar_id: Option<i64>,
+    card_id: Option<i64>,
+) -> Result<Equipped, Problem> {
+    let avatar = match avatar_id {
+        Some(id) => ik_cosmetics::service::avatars_by_ids(&state.cosmetics, &[id])
+            .await?
+            .remove(&id),
+        None => None,
+    };
+    let card = match card_id {
+        Some(id) => ik_cosmetics::service::cards_by_ids(&state.cosmetics, &[id])
+            .await?
+            .remove(&id),
+        None => None,
+    };
+    Ok((avatar, card))
 }
 
 async fn my_view(
@@ -297,9 +324,17 @@ async fn my_view(
     user_id: i64,
     row: ProfileRow,
 ) -> Result<MyProfileView, Problem> {
-    let avatar_id = my_avatar_id(state, user_id).await?;
+    let mut conn = state.db.acquire().await?;
+    let user = ik_auth::interop::profile_user(&mut conn, user_id)
+        .await?
+        .ok_or_else(Problem::not_found)?;
+    drop(conn);
+    let (equipped_avatar, equipped_card) =
+        equipped(state, user.equipped_avatar_id, user.equipped_card_id).await?;
     Ok(MyProfileView {
-        avatar: avatar_view(state, avatar_id).await?,
+        avatar: avatar_view(state, user.avatar_media_id).await?,
+        equipped_avatar,
+        equipped_card,
         bio: row.bio,
         hidden: row.hidden,
         pinned_post_ids: row
@@ -413,7 +448,7 @@ pub async fn rename(
     })
 }
 
-/// 设置自定义头像（AVA-001～003）：每次 10 丁尼；换成当前同一张图不扣费。只能用自己图库里的图
+/// 设置自定义头像（AVA-001～003）：每次 10 丁尼，同时卸下系统头像；换成当前同一张图不扣费。只能用自己图库里的图
 /// （D-012 方案 A）。不要求通过考试（AVA-005）。改资料与扣费同一事务，余额不足整体回滚。
 pub async fn set_avatar(
     state: &ProfileState,
@@ -441,10 +476,11 @@ pub async fn set_avatar(
     let current = ik_auth::interop::profile_user(&mut tx, user_id)
         .await?
         .and_then(|u| u.avatar_media_id);
+    // 换成当前同一张图不扣费，但照样卸下系统头像（COSMETIC-006）。
+    ik_auth::interop::set_avatar(&mut tx, user_id, Some(media_id)).await?;
     let balance = if current == Some(media_id) {
         ik_economy::service::balance_of(&mut tx, user_id).await?
     } else {
-        ik_auth::interop::set_avatar(&mut tx, user_id, Some(media_id)).await?;
         ik_economy::service::spend_denny(
             &mut tx,
             &state.ids,

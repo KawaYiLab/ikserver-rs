@@ -14,6 +14,7 @@ ik-economy.workspace = true
 ik-content.workspace = true
 ik-comments.workspace = true
 ik-media.workspace = true
+ik-cosmetics.workspace = true
 tokio.workspace = true
 axum.workspace = true
 http.workspace = true

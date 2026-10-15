@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, name, kind, description, story, image_media_id FROM business_cards\n         WHERE ($1::text IS NULL OR kind = $1)\n           AND ($2::text IS NULL OR (kind, id) > ($2, $3))\n         ORDER BY kind, id\n         LIMIT $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "story",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "story"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "image_media_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "image_media_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "dcac8bab8f41df6df47449cd54c8589a1987e4ed4a196645f16a74441bf6fa67"
+}

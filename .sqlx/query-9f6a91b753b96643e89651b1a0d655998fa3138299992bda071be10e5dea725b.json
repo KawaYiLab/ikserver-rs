@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, status, level, avatar_media_id FROM users WHERE id = ANY($1)",
+  "query": "SELECT id, username, status, level,\n                  COALESCE(equipped_avatar_media_id, avatar_media_id) AS avatar_media_id\n           FROM users WHERE id = ANY($1)",
   "describe": {
     "columns": [
       {
@@ -51,12 +51,7 @@
         "ordinal": 4,
         "name": "avatar_media_id",
         "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "users",
-            "name": "avatar_media_id"
-          }
-        }
+        "origin": "Expression"
       }
     ],
     "parameters": {
@@ -69,8 +64,8 @@
       false,
       false,
       false,
-      true
+      null
     ]
   },
-  "hash": "0c2a75622df74460fd622fbac72a0f733a9bbb1cb4df2ebb3cd51e6067a520c0"
+  "hash": "9f6a91b753b96643e89651b1a0d655998fa3138299992bda071be10e5dea725b"
 }

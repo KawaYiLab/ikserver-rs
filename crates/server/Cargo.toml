@@ -28,6 +28,7 @@ ik-profile.workspace = true
 ik-feed.workspace = true
 ik-search.workspace = true
 ik-media.workspace = true
+ik-cosmetics.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

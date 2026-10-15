@@ -647,7 +647,8 @@ pub struct Author {
     pub level: i16,
     /// 已注销或已合并的账号：调用方应显示为「已注销用户」，不链接主页。
     pub gone: bool,
-    /// 自定义头像（媒体 id）。已注销的账号恒为 None。
+    /// 展示用的头像（媒体 id）：装备的系统头像优先，其次自定义头像（COSMETIC-008）。
+    /// 已注销的账号恒为 None。
     pub avatar_media_id: Option<i64>,
 }
 

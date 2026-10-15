@@ -46,6 +46,24 @@ impl Urls {
             )
         }
     }
+
+    /// 原尺寸 WebP（论坛名片，COSMETIC-009、CDN-007）。没有 CDN 时返回原图地址。
+    pub fn webp_url(&self, key: &str, size_bytes: u64) -> String {
+        if self.cdn_base.is_empty() {
+            return self.public_url(key);
+        }
+        if size_bytes > ESA_SIZE_THRESHOLD {
+            format!(
+                "{}/cdn-cgi/image/format=webp,quality=80/{key}",
+                self.cdn_base
+            )
+        } else {
+            format!(
+                "{}/{key}?image_process=format,webp/quality,q_80",
+                self.cdn_base
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -67,7 +85,19 @@ mod tests {
             cdn.thumb_url("a.jpg", 20_000_000),
             "https://im.tiwat.cn/cdn-cgi/image/width=360,format=webp,quality=80/a.jpg"
         );
+        assert_eq!(
+            cdn.webp_url("a.jpg", 1000),
+            "https://im.tiwat.cn/a.jpg?image_process=format,webp/quality,q_80"
+        );
+        assert_eq!(
+            cdn.webp_url("a.jpg", 20_000_000),
+            "https://im.tiwat.cn/cdn-cgi/image/format=webp,quality=80/a.jpg"
+        );
         let origin = Urls::new("", "http://127.0.0.1:9000/", "media");
+        assert_eq!(
+            origin.webp_url("a.jpg", 1),
+            "http://127.0.0.1:9000/media/a.jpg"
+        );
         assert_eq!(
             origin.public_url("a.jpg"),
             "http://127.0.0.1:9000/media/a.jpg"

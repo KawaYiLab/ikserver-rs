@@ -52,6 +52,7 @@ use crate::{AppState, system};
         (name = "feed", description = "首页、热门榜、关注流、未看流与阅读记录"),
         (name = "search", description = "帖子与评论搜索、标题联想"),
         (name = "media", description = "直传上传与我的图库"),
+        (name = "cosmetics", description = "装扮：系统头像与论坛名片"),
     )
 )]
 pub struct ApiDoc;
@@ -98,6 +99,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_feed::router())
         .merge(ik_search::router())
         .merge(ik_media::router())
+        .merge(ik_cosmetics::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

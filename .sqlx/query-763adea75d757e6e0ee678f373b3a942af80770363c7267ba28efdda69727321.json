@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO business_cards (id, name, kind, description, story, image_media_id)\n         VALUES ($1, $2, $3, $4, $5, $6)\n         ON CONFLICT (name) DO UPDATE\n         SET kind = EXCLUDED.kind, description = EXCLUDED.description, story = EXCLUDED.story,\n             image_media_id = EXCLUDED.image_media_id, updated_at = now()\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "business_cards",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "763adea75d757e6e0ee678f373b3a942af80770363c7267ba28efdda69727321"
+}

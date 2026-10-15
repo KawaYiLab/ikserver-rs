@@ -352,6 +352,8 @@ pub(crate) struct ProfileUserRow {
     pub is_ai_agent: bool,
     pub created_at: DateTime<Utc>,
     pub avatar_media_id: Option<i64>,
+    pub equipped_avatar_id: Option<i64>,
+    pub equipped_card_id: Option<i64>,
 }
 
 pub(crate) async fn profile_user(
@@ -360,7 +362,8 @@ pub(crate) async fn profile_user(
 ) -> sqlx::Result<Option<ProfileUserRow>> {
     sqlx::query_as!(
         ProfileUserRow,
-        "SELECT id, username, level, status, is_ai_agent, created_at, avatar_media_id
+        "SELECT id, username, level, status, is_ai_agent, created_at, avatar_media_id,
+                equipped_avatar_id, equipped_card_id
          FROM users WHERE id = $1",
         id,
     )
@@ -705,7 +708,9 @@ pub(crate) struct AuthorRow {
 pub(crate) async fn authors(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<Vec<AuthorRow>> {
     sqlx::query_as!(
         AuthorRow,
-        "SELECT id, username, status, level, avatar_media_id FROM users WHERE id = ANY($1)",
+        r#"SELECT id, username, status, level,
+                  COALESCE(equipped_avatar_media_id, avatar_media_id) AS avatar_media_id
+           FROM users WHERE id = ANY($1)"#,
         ids,
     )
     .fetch_all(conn)
@@ -748,18 +753,79 @@ pub(crate) async fn active_users_by_usernames(
     .await
 }
 
-/// 设置 / 清除头像。只改状态正常的账号；返回是否命中。
+/// 设置自定义头像并卸下系统头像（COSMETIC-006）。只改状态正常的账号；返回是否命中。
 pub(crate) async fn set_avatar(
     conn: &mut PgConnection,
     user_id: i64,
-    media_id: Option<i64>,
+    media_id: i64,
 ) -> sqlx::Result<bool> {
     let result = sqlx::query!(
-        "UPDATE users SET avatar_media_id = $2 WHERE id = $1 AND status = 'active'",
+        "UPDATE users SET avatar_media_id = $2, equipped_avatar_id = NULL, equipped_avatar_media_id = NULL
+         WHERE id = $1 AND status = 'active'",
         user_id,
         media_id,
     )
     .execute(conn)
     .await?;
     Ok(result.rows_affected() > 0)
+}
+
+/// 清除自定义头像（装备的系统头像不动）。
+pub(crate) async fn clear_avatar(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET avatar_media_id = NULL WHERE id = $1 AND status = 'active'",
+        user_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn equip_avatar(
+    conn: &mut PgConnection,
+    user_id: i64,
+    avatar: Option<(i64, i64)>,
+) -> sqlx::Result<bool> {
+    let (avatar_id, media_id) = avatar.unzip();
+    let result = sqlx::query!(
+        "UPDATE users SET equipped_avatar_id = $2, equipped_avatar_media_id = $3
+         WHERE id = $1 AND status = 'active'",
+        user_id,
+        avatar_id,
+        media_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn equip_card(
+    conn: &mut PgConnection,
+    user_id: i64,
+    card_id: Option<i64>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET equipped_card_id = $2 WHERE id = $1 AND status = 'active'",
+        user_id,
+        card_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn refresh_equipped_avatar(
+    conn: &mut PgConnection,
+    avatar_id: i64,
+    media_id: i64,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "UPDATE users SET equipped_avatar_media_id = $2
+         WHERE equipped_avatar_id = $1 AND equipped_avatar_media_id <> $2",
+        avatar_id,
+        media_id,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
 }

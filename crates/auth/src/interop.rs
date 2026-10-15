@@ -100,6 +100,9 @@ pub struct ProfileUser {
     pub created_at: DateTime<Utc>,
     /// 自定义头像（媒体 id）。
     pub avatar_media_id: Option<i64>,
+    /// 装备的系统头像、论坛名片（装扮目录的 id）。
+    pub equipped_avatar_id: Option<i64>,
+    pub equipped_card_id: Option<i64>,
 }
 
 pub async fn profile_user(
@@ -116,6 +119,8 @@ pub async fn profile_user(
             is_ai_agent: row.is_ai_agent,
             created_at: row.created_at,
             avatar_media_id: row.avatar_media_id,
+            equipped_avatar_id: row.equipped_avatar_id,
+            equipped_card_id: row.equipped_card_id,
         }))
 }
 
@@ -198,16 +203,51 @@ pub async fn mark_exam_passed(
     Ok(repo::mark_exam_passed(conn, user_id, at).await?)
 }
 
-/// 设置 / 清除自定义头像。调用方负责校验媒体归属、扣费，并已锁住用户行。
-/// 账号不可用时返回 403 `ACCOUNT_BLOCKED`。
+fn hit(found: bool) -> Result<(), Problem> {
+    if found {
+        Ok(())
+    } else {
+        Err(crate::service::account_blocked())
+    }
+}
+
+/// 设置 / 清除自定义头像。设置时同时卸下系统头像（COSMETIC-006），清除时不动装备。
+/// 调用方负责校验媒体归属、扣费，并已锁住用户行。账号不可用时返回 403 `ACCOUNT_BLOCKED`。
 pub async fn set_avatar(
     conn: &mut PgConnection,
     user_id: i64,
     media_id: Option<i64>,
 ) -> Result<(), Problem> {
-    if repo::set_avatar(conn, user_id, media_id).await? {
-        Ok(())
-    } else {
-        Err(crate::service::account_blocked())
-    }
+    hit(match media_id {
+        Some(media_id) => repo::set_avatar(conn, user_id, media_id).await?,
+        None => repo::clear_avatar(conn, user_id).await?,
+    })
+}
+
+/// 装备系统头像 `(目录 id, 图片媒体 id)`，`None` 卸下。调用方负责确认目录项存在。
+/// 账号不可用时返回 403 `ACCOUNT_BLOCKED`。
+pub async fn equip_avatar(
+    conn: &mut PgConnection,
+    user_id: i64,
+    avatar: Option<(i64, i64)>,
+) -> Result<(), Problem> {
+    hit(repo::equip_avatar(conn, user_id, avatar).await?)
+}
+
+/// 装备论坛名片，`None` 卸下。调用方负责确认目录项存在。账号不可用时返回 403 `ACCOUNT_BLOCKED`。
+pub async fn equip_card(
+    conn: &mut PgConnection,
+    user_id: i64,
+    card_id: Option<i64>,
+) -> Result<(), Problem> {
+    hit(repo::equip_card(conn, user_id, card_id).await?)
+}
+
+/// 系统头像换了图：同步所有装备着它的账号上冗余的图片 id。返回更新的账号数。
+pub async fn refresh_equipped_avatar(
+    conn: &mut PgConnection,
+    avatar_id: i64,
+    media_id: i64,
+) -> Result<u64, Problem> {
+    Ok(repo::refresh_equipped_avatar(conn, avatar_id, media_id).await?)
 }

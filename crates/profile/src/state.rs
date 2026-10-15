@@ -27,6 +27,8 @@ pub struct ProfileState {
     pub content: ContentState,
     pub comments: CommentsState,
     pub media: MediaState,
+    /// 装备的系统头像与名片的展示数据。
+    pub cosmetics: ik_cosmetics::CosmeticsState,
     pub(crate) limits: Arc<SearchLimits>,
 }
 
@@ -44,6 +46,7 @@ impl ProfileState {
         media: MediaState,
     ) -> Self {
         Self {
+            cosmetics: ik_cosmetics::CosmeticsState::new(db.clone(), ids.clone(), media.clone()),
             db,
             ids,
             content,

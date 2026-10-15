@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, level, status, is_ai_agent, created_at, avatar_media_id\n         FROM users WHERE id = $1",
+  "query": "SELECT id, username, level, status, is_ai_agent, created_at, avatar_media_id,\n                equipped_avatar_id, equipped_card_id\n         FROM users WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -79,6 +79,28 @@
             "name": "avatar_media_id"
           }
         }
+      },
+      {
+        "ordinal": 7,
+        "name": "equipped_avatar_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_avatar_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "equipped_card_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_card_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -93,8 +115,10 @@
       false,
       false,
       false,
+      true,
+      true,
       true
     ]
   },
-  "hash": "67f012088d34154223300a966052b62b4416d9457556747bc9b2c420c7cd2142"
+  "hash": "202fbcc822a081e426b4956f501d01546ef7044629b2f18c983360ef4b7946ba"
 }

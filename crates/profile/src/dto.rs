@@ -49,9 +49,16 @@ pub struct ProfileView {
     pub following_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<ProfileStats>,
-    /// 自定义头像；没有设置时省略（客户端用默认头像）。
+    /// 自定义头像；没有设置时省略。展示时装备的系统头像优先（`equippedAvatar`），其次这个，
+    /// 都没有时用默认头像。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<MediaView>,
+    /// 装备的系统头像。对方隐藏主页时省略（PROFILE-022）；存在拉黑时照常返回（PROFILE-021）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped_avatar: Option<ik_cosmetics::dto::AvatarView>,
+    /// 装备的论坛名片。省略规则同 `equippedAvatar`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped_card: Option<ik_cosmetics::dto::CardView>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ToSchema)]
@@ -105,6 +112,10 @@ pub struct MyProfileView {
     pub pinned_post_ids: Option<Vec<Id<Post>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<MediaView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped_avatar: Option<ik_cosmetics::dto::AvatarView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped_card: Option<ik_cosmetics::dto::CardView>,
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]

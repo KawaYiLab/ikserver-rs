@@ -61,6 +61,7 @@ cargo run -p ik-server -- category create --slug guide --name 攻略 --order 1
 cargo run -p ik-server -- category create --slug notice --name 公告 --admin-only --allow-accept
 cargo run -p ik-server -- exam import questions.json                  # 导入入站考试题库
 cargo run -p ik-server -- search reindex                              # 推送搜索索引设置并全量重建
+cargo run -p ik-server -- cosmetics import cosmetics.json             # 导入系统头像与论坛名片
 ```
 
 题库文件是 JSON 数组，每题字段：
@@ -81,6 +82,15 @@ cargo run -p ik-server -- search reindex                              # 推送�
 
 `kind` 为 `single`（≥2 个选项、1 个答案）、`multiple`（≥3 个选项、≥2 个答案）或 `boolean`（恰好 2 个选项、1 个答案）；
 `explanation`、`weight`（默认 1）、`enabled`（默认 true）、`tag` 可省略。逐题校验写入，遇到不合格的题会停下并报出是第几题。
+
+装扮文件也是 JSON 数组，图片先用正常的上传流程传到图库，再引用媒体 id：
+
+```json
+[
+  { "type": "avatar", "name": "邦布", "kind": "character", "imageId": "7251234567890123456" },
+  { "type": "card", "name": "新艾利都", "kind": "city", "description": "……", "story": "Markdown 正文", "imageId": "7251234567890123457" }
+]
+```
 
 ### 数据库集成测试
 

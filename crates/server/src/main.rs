@@ -34,6 +34,19 @@ enum Command {
     /// 搜索索引运维
     #[command(subcommand)]
     Search(SearchCommand),
+    /// 装扮目录运维
+    #[command(subcommand)]
+    Cosmetics(CosmeticsCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum CosmeticsCommand {
+    /// 从 JSON 文件导入系统头像与论坛名片（按名字新增或更新；整份一个事务，有一项不合格就都不写入）
+    Import {
+        /// JSON 数组，每项 `{"type":"avatar","name","kind","imageId"}` 或
+        /// `{"type":"card","name","kind","description","story","imageId"}`
+        path: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -100,6 +113,30 @@ async fn main() -> anyhow::Result<()> {
         Command::User(cmd) => user_command(cmd).await,
         Command::Category(cmd) => category_command(cmd).await,
         Command::Exam(cmd) => exam_command(cmd).await,
+        Command::Cosmetics(CosmeticsCommand::Import { path }) => {
+            let state = connect_for_cli().await?;
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("读取 {} 失败", path.display()))?;
+            let items: Vec<ik_cosmetics::dto::CatalogItem> =
+                serde_json::from_str(&raw).context("装扮文件不是合法的 JSON 数组")?;
+            let report = ik_cosmetics::service::import(&state.cosmetics, items)
+                .await
+                .map_err(|p| {
+                    let fields: Vec<String> = p
+                        .field_errors()
+                        .iter()
+                        .map(|e| format!("{}：{}", e.field, e.detail))
+                        .collect();
+                    anyhow::anyhow!("{p} {}", fields.join("；"))
+                })?;
+            tracing::info!(
+                avatars = report.avatars,
+                cards = report.cards,
+                refreshed_users = report.refreshed_users,
+                "装扮目录已导入"
+            );
+            Ok(())
+        }
         Command::Search(SearchCommand::Reindex) => {
             let state = connect_for_cli().await?;
             state.search.reindex().await?;

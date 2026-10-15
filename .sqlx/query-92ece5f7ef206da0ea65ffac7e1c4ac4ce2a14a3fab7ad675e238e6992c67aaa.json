@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT image_media_id FROM system_avatars WHERE name = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "image_media_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "system_avatars",
+            "name": "image_media_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "92ece5f7ef206da0ea65ffac7e1c4ac4ce2a14a3fab7ad675e238e6992c67aaa"
+}

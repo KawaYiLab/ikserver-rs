@@ -43,7 +43,7 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
+- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`profile → …, cosmetics`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
   `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
   `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
@@ -66,6 +66,9 @@ kernel ◄── auth ◄── content ◄── feed
 - `media → auth`：直传上传、媒体文件与图库，位于业务域之下；引用媒体的域（profile 的头像、content 的封面、
   comments 的图片）经 `ik_media::interop::owned_media` 在自己的事务里校验归属，经 `MediaState::views` 取展示数据；
   content、comments、notify、messaging、profile 展示作者时经 `MediaState::avatar_urls` 把头像 id 换成缩略图地址。
+- `cosmetics → auth, media`：系统头像、论坛名片的目录。装备状态写在账号上（`ik_auth::interop::equip_*`），
+  系统头像的图片 id 也冗余在账号上，所以 `ik_auth::service::authors` 直接给出「装备头像优先，其次自定义头像」，
+  展示作者的各域不依赖 cosmetics。目录换图时 cosmetics 在同一事务里调用 `refresh_equipped_avatar` 同步。
   对象存储的读写都在数据库事务之外；校验并发由进程内闸门（`ik_media::gate`）限制。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。

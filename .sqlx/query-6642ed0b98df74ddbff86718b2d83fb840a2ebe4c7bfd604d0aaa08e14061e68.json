@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO system_avatars (id, name, kind, image_media_id) VALUES ($1, $2, $3, $4)\n         ON CONFLICT (name) DO UPDATE\n         SET kind = EXCLUDED.kind, image_media_id = EXCLUDED.image_media_id, updated_at = now()\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "system_avatars",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6642ed0b98df74ddbff86718b2d83fb840a2ebe4c7bfd604d0aaa08e14061e68"
+}

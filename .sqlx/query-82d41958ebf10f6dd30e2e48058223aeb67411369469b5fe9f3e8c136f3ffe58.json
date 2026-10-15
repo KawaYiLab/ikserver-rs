@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET equipped_avatar_media_id = $2\n         WHERE equipped_avatar_id = $1 AND equipped_avatar_media_id <> $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "82d41958ebf10f6dd30e2e48058223aeb67411369469b5fe9f3e8c136f3ffe58"
+}

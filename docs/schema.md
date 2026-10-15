@@ -242,3 +242,11 @@
 
 - `bus_outbox` 属于 `ik_kernel::cluster`：放不进 NOTIFY 载荷（约 8000 字节）的事件写在这里，通知只带 id。
   只是转运，发布方每 5 分钟删除 10 分钟前的行；没有外键，不归任何业务域。
+
+## 装扮（`20261023000001_cosmetics.sql`）
+
+- `system_avatars`、`business_cards` 归 ik-cosmetics；`kind ∈ {character, city, news}`，名字唯一（CLI 导入按名字新增或更新）。
+  列表按 `(kind, id)` 排序，雪花 id 即上架先后。
+- 装备是账号上的列（auth 的表）：`equipped_avatar_id`、`equipped_card_id`，以及冗余的 `equipped_avatar_media_id`
+  （作者展示经 auth 一次取到 `COALESCE(equipped_avatar_media_id, avatar_media_id)`）。CHECK 保证系统头像 id 与图片 id 同时有或同时无；
+  外键不级联，删除目录项前须先卸下。

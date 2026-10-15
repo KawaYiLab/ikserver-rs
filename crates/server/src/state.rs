@@ -4,6 +4,7 @@ use axum::extract::FromRef;
 use ik_auth::{AuthSettings, AuthState};
 use ik_comments::CommentsState;
 use ik_content::ContentState;
+use ik_cosmetics::CosmeticsState;
 use ik_economy::EconomyState;
 use ik_exam::ExamState;
 use ik_feed::FeedState;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub feed: FeedState,
     pub search: SearchState,
     pub media: MediaState,
+    pub cosmetics: CosmeticsState,
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
 }
 
@@ -103,7 +105,9 @@ impl AppState {
         // 索引同步由 `serve` 显式启动（CLI 子命令不需要）。
         let search = SearchState::new(content.clone(), comments.clone(), &config.search)?;
         let rate_limit = crate::rate_limit::GlobalLimiter::new(&config.rate_limit);
+        let cosmetics = CosmeticsState::new(db.clone(), ids.clone(), media.clone());
         Ok(Self {
+            cosmetics,
             rate_limit,
             config: Arc::new(config),
             db,
@@ -196,6 +200,12 @@ impl FromRef<AppState> for FeedState {
 impl FromRef<AppState> for SearchState {
     fn from_ref(state: &AppState) -> Self {
         state.search.clone()
+    }
+}
+
+impl FromRef<AppState> for CosmeticsState {
+    fn from_ref(state: &AppState) -> Self {
+        state.cosmetics.clone()
     }
 }
 

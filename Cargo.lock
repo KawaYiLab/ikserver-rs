@@ -2374,6 +2374,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-cosmetics"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "http",
+ "ik-auth",
+ "ik-kernel",
+ "ik-media",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
 name = "ik-economy"
 version = "0.1.0"
 dependencies = [
@@ -2549,6 +2567,7 @@ dependencies = [
  "ik-auth",
  "ik-comments",
  "ik-content",
+ "ik-cosmetics",
  "ik-economy",
  "ik-kernel",
  "ik-media",
@@ -2628,6 +2647,7 @@ dependencies = [
  "ik-auth",
  "ik-comments",
  "ik-content",
+ "ik-cosmetics",
  "ik-economy",
  "ik-exam",
  "ik-feed",

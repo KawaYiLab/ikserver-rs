@@ -97,6 +97,22 @@ impl MediaState {
             .collect())
     }
 
+    /// 原尺寸 WebP 地址（按媒体 id；不存在的 id 不出现）。
+    pub async fn webp_urls(&self, ids: &[i64]) -> Result<HashMap<i64, String>, Problem> {
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut conn = self.db.acquire().await?;
+        Ok(crate::repo::by_ids(&mut conn, ids)
+            .await?
+            .into_iter()
+            .map(|row| {
+                let size = u64::try_from(row.size_bytes).unwrap_or(0);
+                (row.id, self.urls.webp_url(&row.object_key, size))
+            })
+            .collect())
+    }
+
     /// 暂存前缀（`[root/]staging/`）。
     pub(crate) fn staging_prefix(backend: &Backend) -> String {
         if backend.root_prefix.is_empty() {
