@@ -2396,6 +2396,8 @@ dependencies = [
  "ik-auth",
  "ik-kernel",
  "ik-media",
+ "ik-messaging",
+ "ik-social",
  "moka",
  "regex",
  "reqwest 0.13.5",
@@ -2640,6 +2642,7 @@ dependencies = [
 name = "ik-messaging"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "chrono",
  "governor",

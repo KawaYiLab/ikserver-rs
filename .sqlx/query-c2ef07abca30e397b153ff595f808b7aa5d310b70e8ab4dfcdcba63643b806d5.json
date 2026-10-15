@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username, email, role, level, is_ai_agent, exam_passed_at)\n         VALUES ($1, $2, $3, 'user', 1, $4, now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c2ef07abca30e397b153ff595f808b7aa5d310b70e8ab4dfcdcba63643b806d5"
+}

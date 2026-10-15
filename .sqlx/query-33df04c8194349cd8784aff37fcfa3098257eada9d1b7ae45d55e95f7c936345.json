@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversations (id, kind, user_low, user_high, title, created_at)\n         VALUES ($1, 'ai', $2, $3, $4, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "33df04c8194349cd8784aff37fcfa3098257eada9d1b7ae45d55e95f7c936345"
+}

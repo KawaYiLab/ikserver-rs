@@ -344,3 +344,309 @@ pub(crate) async fn prune_counters(
             .rows_affected(),
     )
 }
+
+// ---------- AI 会话 ----------
+
+pub(crate) struct SessionRow {
+    pub conversation_id: i64,
+    pub user_id: i64,
+    pub ai_user_id: i64,
+    pub context_epoch: i32,
+    pub context_from: Option<DateTime<Utc>>,
+    pub model_key: Option<String>,
+}
+
+pub(crate) async fn insert_session(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    user_id: i64,
+    ai_user_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_sessions (conversation_id, user_id, ai_user_id, created_at)
+         VALUES ($1, $2, $3, $4)",
+        conversation_id,
+        user_id,
+        ai_user_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn session(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+) -> sqlx::Result<Option<SessionRow>> {
+    sqlx::query_as!(
+        SessionRow,
+        "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key
+         FROM ai_sessions WHERE conversation_id = $1",
+        conversation_id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 锁住会话行：代际变更与「创建占位 / 定稿」在这里串行（CTX-024、GEN-006）。
+pub(crate) async fn lock_session(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+) -> sqlx::Result<Option<SessionRow>> {
+    sqlx::query_as!(
+        SessionRow,
+        "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key
+         FROM ai_sessions WHERE conversation_id = $1 FOR UPDATE",
+        conversation_id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn set_session_model(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    model_key: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_sessions SET model_key = $2 WHERE conversation_id = $1",
+        conversation_id,
+        model_key,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 代际加一（CTX-021），返回新代际。
+pub(crate) async fn bump_epoch(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<i32> {
+    sqlx::query_scalar!(
+        "UPDATE ai_sessions SET context_epoch = context_epoch + 1, context_from = $2
+         WHERE conversation_id = $1 RETURNING context_epoch",
+        conversation_id,
+        now,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+// ---------- AI 任务 ----------
+
+pub(crate) struct NewJob<'a> {
+    pub id: i64,
+    pub kind: &'a str,
+    pub execution_key: &'a str,
+    pub quota_user_id: i64,
+    pub ai_user_id: i64,
+    pub conversation_id: Option<i64>,
+    pub trigger_message_id: Option<i64>,
+    pub generation_epoch: i32,
+    pub model_override: Option<&'a str>,
+    pub now: DateTime<Utc>,
+}
+
+/// 新建任务；去重键已存在时不写，返回 None（TRIG-030）。
+pub(crate) async fn insert_job(
+    conn: &mut PgConnection,
+    j: &NewJob<'_>,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "INSERT INTO ai_jobs (id, kind, execution_key, quota_user_id, ai_user_id, conversation_id,
+                              trigger_message_id, generation_epoch, model_override,
+                              created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)
+         ON CONFLICT (execution_key) DO NOTHING
+         RETURNING id",
+        j.id,
+        j.kind,
+        j.execution_key,
+        j.quota_user_id,
+        j.ai_user_id,
+        j.conversation_id,
+        j.trigger_message_id,
+        j.generation_epoch,
+        j.model_override,
+        j.now,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct JobRow {
+    pub id: i64,
+    pub status: String,
+    pub quota_user_id: i64,
+    pub ai_user_id: i64,
+    pub conversation_id: Option<i64>,
+    pub trigger_message_id: Option<i64>,
+    pub generation_epoch: i32,
+    pub model_override: Option<String>,
+    pub reply_message_id: Option<i64>,
+    pub stop_requested_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) async fn lock_job(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<JobRow>> {
+    sqlx::query_as!(
+        JobRow,
+        "SELECT id, status, quota_user_id, ai_user_id, conversation_id, trigger_message_id,
+                generation_epoch, model_override, reply_message_id, stop_requested_at
+         FROM ai_jobs WHERE id = $1 FOR UPDATE",
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn job_by_reply(
+    conn: &mut PgConnection,
+    reply_message_id: i64,
+) -> sqlx::Result<Option<JobRow>> {
+    sqlx::query_as!(
+        JobRow,
+        "SELECT id, status, quota_user_id, ai_user_id, conversation_id, trigger_message_id,
+                generation_epoch, model_override, reply_message_id, stop_requested_at
+         FROM ai_jobs WHERE reply_message_id = $1",
+        reply_message_id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 开始一次尝试。
+pub(crate) async fn start_attempt(
+    conn: &mut PgConnection,
+    id: i64,
+    attempt: i16,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_jobs SET status = 'processing', attempts = $2, updated_at = $3 WHERE id = $1",
+        id,
+        attempt,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_job_reply(
+    conn: &mut PgConnection,
+    id: i64,
+    reply_message_id: i64,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_jobs SET reply_message_id = $2 WHERE id = $1",
+        id,
+        reply_message_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) struct JobOutcome<'a> {
+    pub id: i64,
+    /// `processing`（还会重试）| `completed` | `failed` | `skipped`
+    pub status: &'a str,
+    pub reason: Option<&'a str>,
+    pub model_key: Option<&'a str>,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub now: DateTime<Utc>,
+}
+
+/// 记一次尝试的结果（TRIG-035：审计）。用量逐次累加。
+pub(crate) async fn record_outcome(
+    conn: &mut PgConnection,
+    o: &JobOutcome<'_>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_jobs SET status = $2, reason = left($3, 1000), model_key = COALESCE($4, model_key),
+             prompt_tokens = prompt_tokens + $5, completion_tokens = completion_tokens + $6,
+             updated_at = $7::timestamptz,
+             finished_at = CASE WHEN $2 = 'processing' THEN NULL ELSE $7::timestamptz END
+         WHERE id = $1",
+        o.id,
+        o.status,
+        o.reason,
+        o.model_key,
+        o.prompt_tokens,
+        o.completion_tokens,
+        o.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn stop_requested(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    Ok(
+        sqlx::query_scalar!("SELECT stop_requested_at FROM ai_jobs WHERE id = $1", id)
+            .fetch_optional(conn)
+            .await?
+            .flatten(),
+    )
+}
+
+/// 停止某条回复的生成（GEN-010）。返回是否有未结束的任务。
+pub(crate) async fn request_stop(
+    conn: &mut PgConnection,
+    id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE ai_jobs SET stop_requested_at = COALESCE(stop_requested_at, $2)
+         WHERE id = $1 AND finished_at IS NULL",
+        id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 撤回触发消息时停止它未结束的生成（CTX-026）。
+pub(crate) async fn stop_by_trigger(
+    conn: &mut PgConnection,
+    trigger_message_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "UPDATE ai_jobs SET stop_requested_at = COALESCE(stop_requested_at, $2)
+         WHERE trigger_message_id = $1 AND finished_at IS NULL",
+        trigger_message_id,
+        now,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 重置上下文时停止旧代际未结束的生成（CTX-022）。
+pub(crate) async fn stop_older_epochs(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    epoch: i32,
+    now: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "UPDATE ai_jobs SET stop_requested_at = COALESCE(stop_requested_at, $3)
+         WHERE conversation_id = $1 AND generation_epoch < $2 AND finished_at IS NULL",
+        conversation_id,
+        epoch,
+        now,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_jobs SET stop_requested_at = COALESCE(stop_requested_at, $2)\n         WHERE trigger_message_id = $1 AND finished_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5bd7090a5c7522191e23ffef7f695973221ade8a38c6dcf0c77578585e68074b"
+}

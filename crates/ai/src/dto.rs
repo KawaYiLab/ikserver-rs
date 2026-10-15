@@ -178,3 +178,66 @@ pub struct ImportReport {
     pub models: usize,
     pub characters: usize,
 }
+
+// ---------- AI 会话 ----------
+
+/// 新建 AI 会话（TRIG-024）。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateSessionRequest {
+    /// 角色（`/v1/ai/characters` 的 slug）。
+    pub character: String,
+    /// 标题，最多 64 字（超出截断）。
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+/// AI 会话的设置。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionView {
+    #[schema(value_type = String)]
+    pub conversation_id: Id<ik_kernel::id::marker::Conversation>,
+    /// 角色已下线时为 null。
+    pub character: Option<String>,
+    pub title: Option<String>,
+    /// 会话级模型选择；null 表示跟随角色卡默认。
+    pub model_key: Option<String>,
+}
+
+fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// 改 AI 会话（CTX-032、TRIG-025）。字段缺省表示不改；null 或空串表示清除。
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateSessionRequest {
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    pub title: Option<Option<String>>,
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
+    pub model_key: Option<Option<String>>,
+}
+
+/// 重新生成（GEN-013～015）。
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegenerateRequest {
+    /// 只对这一次生效的模型；不改会话级选择。
+    #[serde(default)]
+    pub model_key: Option<String>,
+}
+
+/// 重新生成已受理：旧回复已撤回，新回复随后以 `dm.message.created`（`ai.state = streaming`）到达。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RegenerateAccepted {
+    #[schema(value_type = String)]
+    pub replaced_message_id: Id<ik_kernel::id::marker::Message>,
+}

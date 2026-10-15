@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\"\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.conversation_id = $1\n             AND ($2::timestamptz IS NULL OR x.created_at < $2\n                  OR (x.created_at = $2 AND ($4 OR x.id < $3::bigint)))\n           ORDER BY x.created_at DESC, x.id DESC\n           LIMIT $5",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.id = $1\n           FOR NO KEY UPDATE OF x",
   "describe": {
     "columns": [
       {
@@ -145,14 +145,32 @@
             "name": "withdrawn_at"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "ai_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_state"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "ai_model_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_model_key"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Timestamptz",
-        "Int8",
-        "Bool",
         "Int8"
       ]
     },
@@ -169,8 +187,10 @@
       true,
       false,
       false,
+      true,
+      true,
       true
     ]
   },
-  "hash": "982f6983003af7e1daa9d26593b8380c747ac630fb3f37ad9a4362a90f4e1cb1"
+  "hash": "01591b16845a80eaff7636ed3b798fbf9e6a6d53a6a93d9829c4cd76133b2041"
 }

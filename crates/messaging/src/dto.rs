@@ -36,6 +36,17 @@ pub struct ReplyView {
     pub withdrawn: bool,
 }
 
+/// AI 回复的展示信息（AI-009：只下发状态与模型）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AiReplyMeta {
+    /// `streaming`（生成中，正文随 `dm.message.delta` 增长）| `done` | `failed` | `stopped`
+    pub state: String,
+    /// 本条回复所用模型（`/v1/ai/models` 的 key）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_key: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageView {
@@ -61,6 +72,9 @@ pub struct MessageView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub withdrawn_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    /// AI 回复才有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai: Option<AiReplyMeta>,
 }
 
 /// 会话列表里的最后一条消息。
@@ -81,8 +95,11 @@ pub struct LastMessageView {
 pub struct ConversationView {
     #[schema(value_type = String)]
     pub id: Id<Conversation>,
-    /// 目前只有 `direct`（一对一私聊）。
+    /// `direct`（一对一私聊）| `ai`（AI 会话，同一个 AI 可以有多条）。
     pub kind: String,
+    /// AI 会话的标题。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub peer: PeerView,
     /// 对方的用户 id（含已注销的账号）。不下发，供收件箱合并对方的通知分组。
     #[serde(skip)]

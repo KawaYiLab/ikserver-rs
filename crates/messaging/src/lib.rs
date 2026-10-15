@@ -4,6 +4,9 @@
 //! 位于 notify 之下：对方发来的通知要在通知的事务里推进私聊会话的排序（[`interop::touch_direct`]），
 //! 统一收件箱（私聊会话与通知分组混排、已读）由 notify 组合本 crate 的 [`interop`] 实现。
 //! 群聊（D-073）与图片消息（D-021）首版不实现。
+//!
+//! AI 私聊是 `kind = 'ai'` 的一对一会话（同一对用户可以有多条）：会话的建立、AI 回复的写入由 ik-ai
+//! 经 [`interop`] 完成；用户在 AI 会话里发消息、撤回消息时经 [`MessageHooks`] 通知 ik-ai。
 
 pub mod dto;
 pub mod interop;
@@ -13,4 +16,4 @@ pub mod service;
 mod state;
 
 pub use routes::router;
-pub use state::MessagingState;
+pub use state::{MessageHooks, MessagingState, SentMessage};

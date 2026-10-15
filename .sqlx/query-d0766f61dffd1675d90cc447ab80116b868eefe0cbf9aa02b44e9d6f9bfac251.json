@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_jobs SET stop_requested_at = COALESCE(stop_requested_at, $2)\n         WHERE id = $1 AND finished_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d0766f61dffd1675d90cc447ab80116b868eefe0cbf9aa02b44e9d6f9bfac251"
+}

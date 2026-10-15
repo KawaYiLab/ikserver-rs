@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\"\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.sender_id = $1 AND x.client_id = $2",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.conversation_id = $1\n             AND ($2::timestamptz IS NULL OR x.created_at < $2\n                  OR (x.created_at = $2 AND ($4 OR x.id < $3::bigint)))\n           ORDER BY x.created_at DESC, x.id DESC\n           LIMIT $5",
   "describe": {
     "columns": [
       {
@@ -145,12 +145,37 @@
             "name": "withdrawn_at"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "ai_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_state"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "ai_model_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_model_key"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
-        "Text"
+        "Timestamptz",
+        "Int8",
+        "Bool",
+        "Int8"
       ]
     },
     "nullable": [
@@ -164,10 +189,12 @@
       true,
       false,
       true,
+      false,
+      false,
       true,
       true,
       true
     ]
   },
-  "hash": "1e1d4af1e26a585839b935bcc4d7e6132e2d6994f59093603ae3841bc3270556"
+  "hash": "26627e7f9f862f969c3317b8739eca8d7710a4754690be65ae60a9aa371407f3"
 }

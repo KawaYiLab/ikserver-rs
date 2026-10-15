@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT reply_message_id FROM ai_jobs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "reply_message_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_jobs",
+            "name": "reply_message_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a5f48c574b727ab918331d5ec58e7c34da0683c3e0001ee75dfb07c125c8c000"
+}

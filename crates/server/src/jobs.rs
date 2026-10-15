@@ -33,6 +33,7 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<crate::idempotency::PruneIdempotencyKeys>()
         .define_job::<ik_mihoyo::jobs::PruneQrLogins>()
         .define_job::<ik_ai::jobs::ReclaimQuotaHolds>()
+        .define_job::<ik_ai::dm::DmReply>()
         .add_extension(state.mihoyo.clone())
         .add_extension(state.ai.clone())
         .add_extension(state.db.clone())

@@ -24,8 +24,7 @@ const HOLD_TTL: Duration = Duration::minutes(15);
 
 fn state(db: PgPool) -> AiState {
     let ids = Arc::new(Snowflake::new(1).unwrap());
-    let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
-    AiState::from_config(db, ids, Arc::new(LocalBus::new(16)), media, &Ai::default()).unwrap()
+    AiState::for_tests(db, ids, Arc::new(LocalBus::new(16)), Ai::default())
 }
 
 async fn user(db: &PgPool, id: i64) -> Principal {

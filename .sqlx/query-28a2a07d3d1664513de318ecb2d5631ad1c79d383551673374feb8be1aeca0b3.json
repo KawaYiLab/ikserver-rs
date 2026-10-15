@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\"\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.id = $1\n           FOR NO KEY UPDATE OF x",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.sender_id = $1 AND x.client_id = $2",
   "describe": {
     "columns": [
       {
@@ -145,11 +145,34 @@
             "name": "withdrawn_at"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "ai_state",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_state"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "ai_model_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_model_key"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -163,10 +186,12 @@
       true,
       false,
       true,
-      false,
-      false,
+      true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "1e4f6af68504757dfc1f013cb9eeabeaaa00faf1a8240220dfa14501905de9d5"
+  "hash": "28a2a07d3d1664513de318ecb2d5631ad1c79d383551673374feb8be1aeca0b3"
 }

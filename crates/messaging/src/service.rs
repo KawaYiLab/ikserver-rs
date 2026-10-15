@@ -17,7 +17,7 @@ use sqlx::PgPool;
 
 use crate::MessagingState;
 use crate::dto::{
-    ConversationView, EditMessageRequest, LastMessageView, MessageView, MessagesQuery,
+    AiReplyMeta, ConversationView, EditMessageRequest, LastMessageView, MessageView, MessagesQuery,
     OpenDirectRequest, PeerView, ReplyView, SendMessageRequest, UpdateConversationRequest,
 };
 use crate::repo::{self, MessageRow, NewMessage, SummaryRow};
@@ -81,6 +81,10 @@ pub(crate) fn message_view(row: MessageRow) -> MessageView {
         edited_at: row.edited_at,
         withdrawn_at: row.withdrawn_at,
         created_at: row.created_at,
+        ai: row.ai_state.map(|state| AiReplyMeta {
+            state,
+            model_key: row.ai_model_key,
+        }),
     }
 }
 
@@ -129,7 +133,8 @@ fn conversation_view(
     };
     ConversationView {
         id: Id::new(row.conversation_id),
-        kind: "direct".to_owned(),
+        kind: row.conv_kind,
+        title: row.title,
         peer: peer_view(row.peer_id, authors, avatars),
         peer_user_id: row.peer_id,
         muted: row.muted,
@@ -233,11 +238,19 @@ pub async fn open_direct(
         ));
     }
     let mut tx = state.db.begin().await?;
-    if ik_auth::interop::active_users(&mut tx, &[target])
+    let Some(target_user) = ik_auth::interop::active_users(&mut tx, &[target])
         .await?
-        .is_empty()
-    {
+        .into_iter()
+        .next()
+    else {
         return Err(Problem::not_found());
+    };
+    if target_user.is_ai_agent {
+        return Err(Problem::new(
+            StatusCode::BAD_REQUEST,
+            "DM_AI_SESSION_REQUIRED",
+            "与 AI 对话请新建 AI 会话",
+        ));
     }
     ik_social::interop::ensure_no_block(&mut tx, me, target).await?;
     let now = Utc::now();
@@ -442,8 +455,6 @@ pub async fn send(
     let row = repo::message(&mut tx, id)
         .await?
         .ok_or_else(Problem::internal)?;
-    tx.commit().await?;
-
     let view = message_view(row);
     let mut effects = Effects::new();
     effects.publish(event(
@@ -451,6 +462,22 @@ pub async fn send(
         Audience::Users(members.into()),
         &serde_json::json!({ "conversationId": view.conversation_id, "message": view }),
     )?);
+    if let Some(hooks) = state.hooks() {
+        let conversation_kind = repo::conversation_kind(&mut tx, conversation_id)
+            .await?
+            .ok_or_else(Problem::internal)?;
+        let sent = crate::SentMessage {
+            id,
+            conversation_id,
+            conversation_kind,
+            sender_id: me,
+            peer_id: peer,
+            content: content.clone(),
+            created_at: now,
+        };
+        hooks.sent(&mut tx, &sent, &mut effects).await?;
+    }
+    tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
     Ok((true, view))
 }
@@ -499,7 +526,7 @@ fn ensure_editable(row: &MessageRow, now: DateTime<Utc>) -> Result<(), Problem> 
     Ok(())
 }
 
-async fn publish_change(
+pub(crate) async fn publish_change(
     conn: &mut sqlx::PgConnection,
     kind: &'static str,
     view: &MessageView,
@@ -568,7 +595,12 @@ pub async fn withdraw(
             .await?
             .ok_or_else(Problem::internal)?,
     );
-    let effects = publish_change(&mut tx, "dm.message.withdrawn", &view).await?;
+    let mut effects = publish_change(&mut tx, "dm.message.withdrawn", &view).await?;
+    if let Some(hooks) = state.hooks() {
+        hooks
+            .withdrawn(&mut tx, id, row.conversation_id, &mut effects)
+            .await?;
+    }
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
     Ok(view)

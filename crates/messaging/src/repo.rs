@@ -20,7 +20,7 @@ pub(crate) async fn upsert_direct(
     sqlx::query!(
         "INSERT INTO conversations (id, kind, user_low, user_high, created_at)
          VALUES ($1, 'direct', $2, $3, $4)
-         ON CONFLICT (user_low, user_high) DO NOTHING",
+         ON CONFLICT (user_low, user_high) WHERE kind = 'direct' DO NOTHING",
         id,
         low,
         high,
@@ -29,11 +29,62 @@ pub(crate) async fn upsert_direct(
     .execute(&mut *conn)
     .await?;
     sqlx::query_scalar!(
-        "SELECT id FROM conversations WHERE user_low = $1 AND user_high = $2",
+        "SELECT id FROM conversations WHERE user_low = $1 AND user_high = $2 AND kind = 'direct'",
         low,
         high,
     )
     .fetch_one(conn)
+    .await
+}
+
+/// 建一条 AI 会话（每次新建，CONV-012）。
+pub(crate) async fn insert_ai_conversation(
+    conn: &mut PgConnection,
+    id: i64,
+    low: i64,
+    high: i64,
+    title: Option<&str>,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO conversations (id, kind, user_low, user_high, title, created_at)
+         VALUES ($1, 'ai', $2, $3, $4, $5)",
+        id,
+        low,
+        high,
+        title,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn set_title(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    title: Option<&str>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE conversations SET title = $2 WHERE id = $1 AND kind = 'ai'",
+        conversation_id,
+        title,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 会话类型（`direct` / `ai`）。
+pub(crate) async fn conversation_kind(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar!(
+        "SELECT kind FROM conversations WHERE id = $1",
+        conversation_id
+    )
+    .fetch_optional(conn)
     .await
 }
 
@@ -137,9 +188,11 @@ pub(crate) async fn touch_by_peer(
     at: DateTime<Utc>,
 ) -> sqlx::Result<Option<i64>> {
     sqlx::query_scalar!(
-        "UPDATE conversation_members SET activity_at = GREATEST(activity_at, $3)
-         WHERE user_id = $1 AND peer_id = $2 AND left_at IS NULL
-         RETURNING conversation_id",
+        "UPDATE conversation_members m SET activity_at = GREATEST(m.activity_at, $3)
+         FROM conversations c
+         WHERE m.user_id = $1 AND m.peer_id = $2 AND m.left_at IS NULL
+           AND c.id = m.conversation_id AND c.kind = 'direct'
+         RETURNING m.conversation_id",
         user_id,
         peer_id,
         at,
@@ -151,7 +204,9 @@ pub(crate) async fn touch_by_peer(
 /// 所有在场私聊的对方（含置顶）。
 pub(crate) async fn active_peers(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<Vec<i64>> {
     sqlx::query_scalar!(
-        "SELECT peer_id FROM conversation_members WHERE user_id = $1 AND left_at IS NULL",
+        "SELECT m.peer_id FROM conversation_members m
+         JOIN conversations c ON c.id = m.conversation_id AND c.kind = 'direct'
+         WHERE m.user_id = $1 AND m.left_at IS NULL",
         user_id,
     )
     .fetch_all(conn)
@@ -276,6 +331,8 @@ pub(crate) async fn leave(
 
 pub(crate) struct SummaryRow {
     pub conversation_id: i64,
+    pub conv_kind: String,
+    pub title: Option<String>,
     pub peer_id: i64,
     pub activity_at: DateTime<Utc>,
     pub last_read_at: Option<DateTime<Utc>>,
@@ -298,7 +355,7 @@ pub(crate) async fn summary(
 ) -> sqlx::Result<Option<SummaryRow>> {
     sqlx::query_as!(
         SummaryRow,
-        r#"SELECT m.conversation_id, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
+        r#"SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
                   (SELECT count(*) FROM messages x
                    WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id
                      AND x.withdrawn_at IS NULL
@@ -312,6 +369,7 @@ pub(crate) async fn summary(
                FROM messages x WHERE x.conversation_id = m.conversation_id
                ORDER BY x.created_at DESC, x.id DESC LIMIT 1
            ) l ON TRUE
+           JOIN conversations cv ON cv.id = m.conversation_id
            WHERE m.user_id = $1 AND m.conversation_id = $2 AND m.left_at IS NULL"#,
         user_id,
         conversation_id,
@@ -327,7 +385,7 @@ pub(crate) async fn pinned_summaries(
 ) -> sqlx::Result<Vec<SummaryRow>> {
     sqlx::query_as!(
         SummaryRow,
-        r#"SELECT m.conversation_id, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
+        r#"SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
                   (SELECT count(*) FROM messages x
                    WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id
                      AND x.withdrawn_at IS NULL
@@ -341,6 +399,7 @@ pub(crate) async fn pinned_summaries(
                FROM messages x WHERE x.conversation_id = m.conversation_id
                ORDER BY x.created_at DESC, x.id DESC LIMIT 1
            ) l ON TRUE
+           JOIN conversations cv ON cv.id = m.conversation_id
            WHERE m.user_id = $1 AND m.left_at IS NULL AND m.pinned_at IS NOT NULL
            ORDER BY m.pinned_at DESC, m.conversation_id DESC"#,
         user_id,
@@ -362,7 +421,7 @@ pub(crate) async fn stream_summaries(
     };
     sqlx::query_as!(
         SummaryRow,
-        r#"SELECT m.conversation_id, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
+        r#"SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
                   (SELECT count(*) FROM messages x
                    WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id
                      AND x.withdrawn_at IS NULL
@@ -383,6 +442,7 @@ pub(crate) async fn stream_summaries(
                FROM messages x WHERE x.conversation_id = m.conversation_id
                ORDER BY x.created_at DESC, x.id DESC LIMIT 1
            ) l ON TRUE
+           JOIN conversations cv ON cv.id = m.conversation_id
            ORDER BY m.activity_at DESC, m.conversation_id DESC"#,
         user_id,
         at,
@@ -458,6 +518,8 @@ pub(crate) struct MessageRow {
     pub reply_sender_id: Option<i64>,
     pub reply_content: Option<String>,
     pub reply_withdrawn_at: Option<DateTime<Utc>>,
+    pub ai_state: Option<String>,
+    pub ai_model_key: Option<String>,
 }
 
 pub(crate) async fn message(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<MessageRow>> {
@@ -466,7 +528,7 @@ pub(crate) async fn message(conn: &mut PgConnection, id: i64) -> sqlx::Result<Op
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?"
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.id = $1"#,
         id,
@@ -485,7 +547,7 @@ pub(crate) async fn lock_message(
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?"
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.id = $1
            FOR NO KEY UPDATE OF x"#,
@@ -505,7 +567,7 @@ pub(crate) async fn message_by_client_id(
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?"
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.sender_id = $1 AND x.client_id = $2"#,
         sender_id,
@@ -531,7 +593,7 @@ pub(crate) async fn messages(
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?"
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.conversation_id = $1
              AND ($2::timestamptz IS NULL OR x.created_at < $2
@@ -578,4 +640,113 @@ pub(crate) async fn withdraw_message(
     .execute(conn)
     .await?;
     Ok(())
+}
+
+// ---------- AI 消息（经 interop 由 ik-ai 写入） ----------
+
+pub(crate) struct NewAiMessage<'a> {
+    pub id: i64,
+    pub conversation_id: i64,
+    pub sender_id: i64,
+    /// `text` | `system`
+    pub kind: &'a str,
+    pub content: &'a str,
+    pub ai_state: Option<&'a str>,
+    pub ai_model_key: Option<&'a str>,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn insert_ai_message(
+    conn: &mut PgConnection,
+    m: &NewAiMessage<'_>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO messages (id, conversation_id, sender_id, kind, content, ai_state,
+                               ai_model_key, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        m.id,
+        m.conversation_id,
+        m.sender_id,
+        m.kind,
+        m.content,
+        m.ai_state,
+        m.ai_model_key,
+        m.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 改写 AI 回复的正文与状态（只改 AI 回复，已撤回的不动）。返回是否改了。
+pub(crate) async fn update_ai_message(
+    conn: &mut PgConnection,
+    id: i64,
+    content: &str,
+    ai_state: &str,
+    ai_model_key: Option<&str>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE messages SET content = $2, ai_state = $3, ai_model_key = $4
+         WHERE id = $1 AND ai_state IS NOT NULL AND withdrawn_at IS NULL",
+        id,
+        content,
+        ai_state,
+        ai_model_key,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) struct HistoryRow {
+    pub id: i64,
+    pub sender_id: i64,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// AI 上下文用的历史（LLM-001），新的在前：`(from, until]` 之间未撤回的文本消息；
+/// AI 回复只取已定稿或被停止的（停止的按用户看到的截断文本）。
+pub(crate) async fn history(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    from: Option<DateTime<Utc>>,
+    until: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<HistoryRow>> {
+    sqlx::query_as!(
+        HistoryRow,
+        "SELECT id, sender_id, content, created_at FROM messages
+         WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL
+           AND (ai_state IS NULL OR ai_state IN ('done', 'stopped'))
+           AND ($2::timestamptz IS NULL OR created_at > $2) AND created_at <= $3
+         ORDER BY created_at DESC, id DESC
+         LIMIT $4",
+        conversation_id,
+        from,
+        until,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 最近的若干条未撤回文本消息，新的在前（重新生成判定「最后一条 AI 回复」，GEN-013）。
+pub(crate) async fn recent_texts(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<HistoryRow>> {
+    sqlx::query_as!(
+        HistoryRow,
+        "SELECT id, sender_id, content, created_at FROM messages
+         WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2",
+        conversation_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
 }

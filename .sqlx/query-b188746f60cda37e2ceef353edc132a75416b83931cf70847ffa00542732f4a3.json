@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT peer_id FROM conversation_members WHERE user_id = $1 AND left_at IS NULL",
+  "query": "SELECT m.peer_id FROM conversation_members m\n         JOIN conversations c ON c.id = m.conversation_id AND c.kind = 'direct'\n         WHERE m.user_id = $1 AND m.left_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "1a9f86d889d10de0a190ef7a2a6da44d016d799671381679e07126386a5ad0d3"
+  "hash": "b188746f60cda37e2ceef353edc132a75416b83931cf70847ffa00542732f4a3"
 }

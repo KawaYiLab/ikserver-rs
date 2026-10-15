@@ -291,3 +291,16 @@
   04:00 切换的配额日；计数含在飞预占，并发请求在行锁上串行。`ai_quota_holds` 一份预占一行，删除即认领；
   过期的由每分钟的定时任务回收。`ai_quota_settlements` 是结算去重标记（键 `hold:<id>` 或 `exec:<执行 id>`，
   保留 48 小时）。计数器保留 90 天。
+
+## AI 私聊（`20261028000001_ai_sessions.sql`）
+
+- messaging 的表：`conversations.kind` 增加 `ai`（AI 会话，同一对用户可以有多条，CONV-012），`title` 只有 AI 会话有。
+  「同一对用户至多一个会话」改为只约束 direct 的部分唯一索引 `conversations_direct_pair_uq`；成员的
+  `(user_id, peer_id)` 唯一索引改为普通索引（direct 的唯一性由会话保证）。通知只合并进 direct 会话（AI-016）。
+- `messages.ai_state`（`streaming` / `done` / `failed` / `stopped`）与 `ai_model_key` 是 AI 回复的展示字段；
+  `streaming` 的占位正文可以为空（替换了原来的长度 CHECK）。
+- `ai_sessions`（ik-ai）：每条 AI 会话一行，`context_epoch` 与 `context_from`（最近一次重置的时刻，AI 只读之后的消息）、
+  会话级模型 `model_key`（存 key，停用或移出白名单时静默跳过）。
+- `ai_jobs`（ik-ai）：任务与审计合一（AI-008）。`execution_key` 唯一去重（`dm:<触发消息>`、`regenerate:<旧回复>`），
+  `reply_message_id` 唯一（同一任务重试复用同一条占位），`stop_requested_at` 是停止信号（用户停止、重置、撤回触发消息），
+  用量逐次累加。旧系统每次尝试一行审计（TRIG-035），这里只保留最后一次尝试的原因与累计用量。

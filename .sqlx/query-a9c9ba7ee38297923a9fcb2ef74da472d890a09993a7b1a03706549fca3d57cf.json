@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_jobs SET stop_requested_at = COALESCE(stop_requested_at, $3)\n         WHERE conversation_id = $1 AND generation_epoch < $2 AND finished_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9c9ba7ee38297923a9fcb2ef74da472d890a09993a7b1a03706549fca3d57cf"
+}

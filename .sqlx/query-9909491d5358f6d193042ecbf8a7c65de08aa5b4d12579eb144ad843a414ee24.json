@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversations (id, kind, user_low, user_high, created_at)\n         VALUES ($1, 'direct', $2, $3, $4)\n         ON CONFLICT (user_low, user_high) WHERE kind = 'direct' DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9909491d5358f6d193042ecbf8a7c65de08aa5b4d12579eb144ad843a414ee24"
+}

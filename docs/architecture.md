@@ -43,7 +43,7 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；`moderation → auth, content, comments, notify, media`；`ai → auth, media`（第一阶段）；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
+- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；`moderation → auth, content, comments, notify, media`；`ai → auth, media, social, messaging`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
   `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
   `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
@@ -85,6 +85,10 @@ kernel ◄── auth ◄── content ◄── feed
   提供方地址与密钥在部署配置（`IK_AI__PROVIDERS__<名字>__BASE_URL` / `__API_KEY`），模型、角色卡、上限在数据库，
   进程内缓存 60 秒。额度账本在 PostgreSQL：预占在调用模型之前（花钱的闸门 fail-closed），结算与回复定稿同一事务。
   加锁顺序固定为「先全站计数行、再个人计数行」。后台上线前用 `ik-server ai import <json>` 维护配置。
+  AI 私聊建在 messaging 之上：会话是 `kind = 'ai'` 的私聊，AI 回复是普通消息（带 `ai_state`）。messaging 不依赖 ai，
+  用户发消息、撤回消息时经 `ik_messaging::MessageHooks`（组装时由 `AiState::install_hooks` 注册）在同一事务里通知 ai
+  建任务或置停止信号；回复由后台任务 `ai.dm_reply` 生成：准备（锁会话行、复核、预占、建占位）→ 事务外流式调用
+  → 定稿（锁会话行、写正文、结算、审计），三段各自是短事务，实时事件都在提交后发出。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。

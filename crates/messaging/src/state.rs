@@ -1,5 +1,10 @@
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+use chrono::{DateTime, Utc};
+use ik_kernel::Problem;
+use ik_kernel::bus::Effects;
+use sqlx::PgConnection;
 
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::Snowflake;
@@ -25,6 +30,43 @@ pub struct MessagingState {
     /// 对方头像。
     pub media: MediaState,
     pub(crate) send_limits: Arc<SendLimits>,
+    /// 上层（ik-ai）注册的钩子；组装时注册一次，所有克隆共享。
+    hooks: Arc<OnceLock<Arc<dyn MessageHooks>>>,
+}
+
+/// 一条刚写入的用户消息（还在发送的事务里）。
+#[derive(Debug, Clone)]
+pub struct SentMessage {
+    pub id: i64,
+    pub conversation_id: i64,
+    /// `direct` | `ai`
+    pub conversation_kind: String,
+    pub sender_id: i64,
+    pub peer_id: i64,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 消息写入时的钩子（AI 私聊触发，TRIG-020；撤回触发消息时停止生成，CTX-026）。
+///
+/// 在发送 / 撤回的事务里调用：钩子的写入（任务入队）与消息同生共死（TRIG-010）；
+/// 实时事件放进 `effects`，提交后发出。钩子不能调用外部服务。
+#[async_trait::async_trait]
+pub trait MessageHooks: Send + Sync {
+    async fn sent(
+        &self,
+        conn: &mut PgConnection,
+        message: &SentMessage,
+        effects: &mut Effects,
+    ) -> Result<(), Problem>;
+
+    async fn withdrawn(
+        &self,
+        conn: &mut PgConnection,
+        message_id: i64,
+        conversation_id: i64,
+        effects: &mut Effects,
+    ) -> Result<(), Problem>;
 }
 
 pub(crate) struct SendLimits {
@@ -43,6 +85,16 @@ impl MessagingState {
                 per_second: RateLimiter::keyed(Quota::per_second(SENDS_PER_SECOND)),
                 per_minute: RateLimiter::keyed(Quota::per_minute(SENDS_PER_MINUTE)),
             }),
+            hooks: Arc::new(OnceLock::new()),
         }
+    }
+
+    /// 注册钩子（只能一次；重复注册返回 false）。
+    pub fn set_hooks(&self, hooks: Arc<dyn MessageHooks>) -> bool {
+        self.hooks.set(hooks).is_ok()
+    }
+
+    pub(crate) fn hooks(&self) -> Option<&Arc<dyn MessageHooks>> {
+        self.hooks.get()
     }
 }

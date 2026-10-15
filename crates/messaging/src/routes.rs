@@ -45,7 +45,7 @@ where
     security(("session_cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, body = ConversationView),
-        (status = 400, description = "DM_SELF / VALIDATION_FAILED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 400, description = "DM_SELF / DM_AI_SESSION_REQUIRED（对方是 AI，请用 /v1/ai/sessions）/ VALIDATION_FAILED", body = ProblemBody, content_type = "application/problem+json"),
         (status = 403, description = "EXAM_REQUIRED / USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
         (status = 404, description = "用户不存在、已封禁或已注销", body = ProblemBody, content_type = "application/problem+json"),
     )

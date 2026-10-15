@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT m.conversation_id, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,\n                  (SELECT count(*) FROM messages x\n                   WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id\n                     AND x.withdrawn_at IS NULL\n                     AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS \"unread!\",\n                  l.id AS \"last_id?\", l.sender_id AS \"last_sender_id?\", l.kind AS \"last_kind?\",\n                  l.content AS \"last_content?\", l.withdrawn_at AS \"last_withdrawn_at?\",\n                  l.created_at AS \"last_created_at?\"\n           FROM conversation_members m\n           LEFT JOIN LATERAL (\n               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at\n               FROM messages x WHERE x.conversation_id = m.conversation_id\n               ORDER BY x.created_at DESC, x.id DESC LIMIT 1\n           ) l ON TRUE\n           WHERE m.user_id = $1 AND m.left_at IS NULL AND m.pinned_at IS NOT NULL\n           ORDER BY m.pinned_at DESC, m.conversation_id DESC",
+  "query": "SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,\n                  (SELECT count(*) FROM messages x\n                   WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id\n                     AND x.withdrawn_at IS NULL\n                     AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS \"unread!\",\n                  l.id AS \"last_id?\", l.sender_id AS \"last_sender_id?\", l.kind AS \"last_kind?\",\n                  l.content AS \"last_content?\", l.withdrawn_at AS \"last_withdrawn_at?\",\n                  l.created_at AS \"last_created_at?\"\n           FROM (\n               SELECT * FROM conversation_members c\n               WHERE c.user_id = $1 AND c.left_at IS NULL AND c.pinned_at IS NULL\n                 AND ($2::timestamptz IS NULL OR c.activity_at < $2\n                      OR (c.activity_at = $2 AND ($4 OR c.conversation_id < $3::bigint)))\n               ORDER BY c.activity_at DESC, c.conversation_id DESC\n               LIMIT $5\n           ) m\n           LEFT JOIN LATERAL (\n               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at\n               FROM messages x WHERE x.conversation_id = m.conversation_id\n               ORDER BY x.created_at DESC, x.id DESC LIMIT 1\n           ) l ON TRUE\n           JOIN conversations cv ON cv.id = m.conversation_id\n           ORDER BY m.activity_at DESC, m.conversation_id DESC",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,28 @@
       },
       {
         "ordinal": 1,
+        "name": "conv_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "conversations",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "peer_id",
         "type_info": "Int8",
         "origin": {
@@ -26,7 +48,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 4,
         "name": "activity_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -37,7 +59,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "last_read_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -48,7 +70,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "muted",
         "type_info": "Bool",
         "origin": {
@@ -59,7 +81,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "pinned_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -70,13 +92,13 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "unread!",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "last_id?",
         "type_info": "Int8",
         "origin": {
@@ -87,7 +109,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "last_sender_id?",
         "type_info": "Int8",
         "origin": {
@@ -98,7 +120,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "last_kind?",
         "type_info": "Text",
         "origin": {
@@ -109,7 +131,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "last_content?",
         "type_info": "Text",
         "origin": {
@@ -120,7 +142,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "last_withdrawn_at?",
         "type_info": "Timestamptz",
         "origin": {
@@ -131,7 +153,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "last_created_at?",
         "type_info": "Timestamptz",
         "origin": {
@@ -144,11 +166,17 @@
     ],
     "parameters": {
       "Left": [
+        "Int8",
+        "Timestamptz",
+        "Int8",
+        "Bool",
         "Int8"
       ]
     },
     "nullable": [
       false,
+      false,
+      true,
       false,
       false,
       true,
@@ -163,5 +191,5 @@
       false
     ]
   },
-  "hash": "0a0c16ddbae1c5a413cf21c23f99c3dc40281984ad7b5d4cdb784c8a3ad2f71d"
+  "hash": "f7002d6c693cad06b2f3387a71c626652f89c93d693c838dd58a08fe89d5d35a"
 }

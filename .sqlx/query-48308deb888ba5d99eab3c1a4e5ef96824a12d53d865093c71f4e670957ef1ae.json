@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_sessions SET context_epoch = context_epoch + 1, context_from = $2\n         WHERE conversation_id = $1 RETURNING context_epoch",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "context_epoch",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_sessions",
+            "name": "context_epoch"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "48308deb888ba5d99eab3c1a4e5ef96824a12d53d865093c71f4e670957ef1ae"
+}
