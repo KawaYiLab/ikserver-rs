@@ -61,6 +61,7 @@ struct Harness {
     state: AuthState,
     mailer: Arc<CapturingMailer>,
     meta: RequestMeta,
+    bus: Arc<ik_kernel::bus::LocalBus>,
 }
 
 fn harness(db: PgPool) -> Harness {
@@ -74,15 +75,18 @@ fn harness(db: PgPool) -> Harness {
         trusted_proxy_hops: 0,
         code_key: vec![7u8; 32],
     };
+    let bus = Arc::new(ik_kernel::bus::LocalBus::new(16));
     let state = AuthState::new(
         db,
         Arc::new(Snowflake::new(1).unwrap()),
         mailer.clone(),
         settings,
+        bus.clone(),
     );
     Harness {
         state,
         mailer,
+        bus,
         meta: RequestMeta {
             ip: IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7)),
             user_agent: Some("tests".into()),
@@ -504,4 +508,68 @@ async fn revoke_single_and_other_sessions(db: PgPool) {
     );
     assert!(!h.is_active(&b.token).await);
     assert!(h.is_active(&c.token).await);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn revocations_announce_session_changes(db: PgPool) {
+    use ik_kernel::bus::Audience;
+
+    let h = harness(db);
+    let mut events = h.bus.subscribe();
+    let first = h.register("henry@example.com", "hunter22").await;
+    let second = h.login("henry@example.com", "hunter22").await.unwrap();
+    let principal = |token: &str| {
+        let state = h.state.clone();
+        let token = token.to_owned();
+        async move {
+            match service::resolve(&state, &token).await.unwrap() {
+                Resolution::Active(p) => p,
+                _ => panic!("会话应当有效"),
+            }
+        }
+    };
+    let p1 = principal(&first.token).await;
+    let p2 = principal(&second.token).await;
+    let user_id = p1.user_id.get();
+    assert!(events.try_recv().is_err(), "登录不发吊销事件");
+    assert!(
+        service::session_active(&h.state, user_id, p1.session_id.get())
+            .await
+            .unwrap()
+    );
+
+    // 下线其他设备：有会话被吊销才发。
+    assert_eq!(
+        service::revoke_other_sessions(&h.state, &p2).await.unwrap(),
+        1
+    );
+    let event = events.try_recv().unwrap();
+    assert_eq!(event.kind, service::SESSIONS_CHANGED);
+    assert_eq!(event.audience, Audience::User(user_id));
+    assert!(
+        !service::session_active(&h.state, user_id, p1.session_id.get())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        service::revoke_other_sessions(&h.state, &p2).await.unwrap(),
+        0
+    );
+    assert!(events.try_recv().is_err());
+
+    service::logout(&h.state, &p2).await.unwrap();
+    assert_eq!(events.try_recv().unwrap().kind, service::SESSIONS_CHANGED);
+
+    h.send("henry@example.com", "reset_password").await.unwrap();
+    service::reset_password(
+        &h.state,
+        ResetPasswordRequest {
+            email: "henry@example.com".into(),
+            code: h.mailer.last_code("henry@example.com"),
+            new_password: "newpass99".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(events.try_recv().unwrap().audience, Audience::User(user_id));
 }

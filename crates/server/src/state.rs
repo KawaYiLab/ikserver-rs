@@ -11,6 +11,7 @@ use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
 use ik_notify::NotifyState;
+use ik_realtime::RealtimeState;
 use ik_social::SocialState;
 use sqlx::PgPool;
 
@@ -28,6 +29,7 @@ pub struct AppState {
     pub exam: ExamState,
     pub social: SocialState,
     pub notify: NotifyState,
+    pub realtime: RealtimeState,
 }
 
 impl AppState {
@@ -36,19 +38,21 @@ impl AppState {
         let mailer: Arc<dyn Mailer> = match config.mail.provider {
             MailProvider::DevLog => Arc::new(DevLogMailer),
         };
+        let bus = Arc::new(LocalBus::new(4096));
         let auth = AuthState::new(
             db.clone(),
             ids.clone(),
             mailer,
             AuthSettings::from_config(&config)?,
+            bus.clone(),
         );
-        let bus = Arc::new(LocalBus::new(4096));
         let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
         let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
         let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
         let social = SocialState::new(db.clone());
         let notify = NotifyState::new(db.clone(), bus.clone());
+        let realtime = RealtimeState::start(&bus, config.http.allowed_origins.clone())?;
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -61,6 +65,7 @@ impl AppState {
             exam,
             social,
             notify,
+            realtime,
         })
     }
 }
@@ -104,5 +109,11 @@ impl FromRef<AppState> for SocialState {
 impl FromRef<AppState> for NotifyState {
     fn from_ref(state: &AppState) -> Self {
         state.notify.clone()
+    }
+}
+
+impl FromRef<AppState> for RealtimeState {
+    fn from_ref(state: &AppState) -> Self {
+        state.realtime.clone()
     }
 }

@@ -30,8 +30,9 @@ crates/
   exam/      入站考试：题库、开考、判分、冷却、首次通过奖励
   social/    关注、拉黑（位于 content 之下，供各域做拉黑判断与过滤）
   notify/    通知（敲敲）：写入、撤回、新帖扇出、列表、按发送者分组、已读
+  realtime/  WebSocket 网关 /v1/realtime：连接表、按用户 / 会话 / 频道分发、心跳、吊销断开
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：feed messaging realtime media search
+  （后续按业务域新增：feed messaging media search
     moderation ai admin）
 docs/
   architecture.md     架构与模块边界
@@ -118,8 +119,9 @@ cargo run -p ik-server -- openapi > openapi.json
 
 - 任务：在 `jobs/` 定义 `TaskHandler`，payload 用 serde 结构体；入队必须在业务事务内
   （`graphile_worker::WorkerUtilsWithExecutor`）。失败策略（重试次数/退避/死信）写在任务定义旁。
-- 实时事件：在 `realtime/events.rs` 登记事件类型与 payload（`ToSchema`），
-  提交后通过 `EventBus` trait 发布；发布方不假设订阅方在线。
+- 实时事件：由业务域自己构造（`ik_kernel::bus::Event`），在 `docs/api-guidelines.md` 实时章节登记
+  事件名、受众与载荷；放进 `Effects`，事务提交后发布；发布方不假设订阅方在线。
+  网关（realtime）只按受众转发，不依赖任何业务域。
 
 ## 测试规则
 

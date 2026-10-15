@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use chrono::{DateTime, Duration, Utc};
 use http::StatusCode;
 use ik_kernel::Id;
+use ik_kernel::bus::{Audience, Event};
 use ik_kernel::db::is_unique_violation;
 use ik_kernel::id::marker::User;
 use ik_kernel::mail::{OutgoingMail, mask_email};
@@ -427,6 +428,7 @@ pub async fn reset_password(
     repo::upsert_password(&mut tx, user_id, &password_hash, now).await?;
     repo::revoke_user_sessions(&mut tx, user_id, None, now, "password_reset").await?;
     tx.commit().await?;
+    announce_sessions_changed(state, user_id);
     Ok(())
 }
 
@@ -519,6 +521,28 @@ pub async fn resolve(state: &AuthState, raw_token: &str) -> Result<Resolution, P
     }))
 }
 
+/// 内部事件：某个用户的会话被吊销（登出、踢设备、重置密码）。实时网关收到后复查该用户的连接，
+/// 断开已失效的；不会推给客户端。
+pub const SESSIONS_CHANGED: &str = "auth.sessions_changed";
+
+/// 吊销已提交后调用。
+fn announce_sessions_changed(state: &AuthState, user_id: i64) {
+    match Event::new(SESSIONS_CHANGED, Audience::User(user_id), &()) {
+        Ok(event) => state.bus.publish(event),
+        Err(error) => tracing::error!(?error, "构造会话吊销事件失败"),
+    }
+}
+
+/// 会话仍然有效（未吊销、未过期、账号正常）。实时网关定期复查长连接时使用。
+pub async fn session_active(
+    state: &AuthState,
+    user_id: i64,
+    session_id: i64,
+) -> Result<bool, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::session_active(&mut conn, user_id, session_id, Utc::now()).await?)
+}
+
 pub async fn logout(state: &AuthState, principal: &Principal) -> Result<(), Problem> {
     let mut conn = state.db.acquire().await?;
     repo::revoke_session(
@@ -529,6 +553,7 @@ pub async fn logout(state: &AuthState, principal: &Principal) -> Result<(), Prob
         "logout",
     )
     .await?;
+    announce_sessions_changed(state, principal.user_id.get());
     Ok(())
 }
 
@@ -570,6 +595,7 @@ pub async fn revoke_session(
     if !revoked {
         return Err(Problem::not_found());
     }
+    announce_sessions_changed(state, principal.user_id.get());
     Ok(session_id == principal.session_id.get())
 }
 
@@ -578,14 +604,18 @@ pub async fn revoke_other_sessions(
     principal: &Principal,
 ) -> Result<u64, Problem> {
     let mut conn = state.db.acquire().await?;
-    Ok(repo::revoke_user_sessions(
+    let revoked = repo::revoke_user_sessions(
         &mut conn,
         principal.user_id.get(),
         Some(principal.session_id.get()),
         Utc::now(),
         "user_revoked_others",
     )
-    .await?)
+    .await?;
+    if revoked > 0 {
+        announce_sessions_changed(state, principal.user_id.get());
+    }
+    Ok(revoked)
 }
 
 /// 仅供测试与运维脚本：按 id 读取会话。

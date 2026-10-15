@@ -109,6 +109,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REVISION_CONFLICT | 412 | 内容已在别处被修改，请刷新后重试 | If-Match 失败或格式不对 |
 | PAYLOAD_TOO_LARGE | 413 | 请求体过大 | |
 | UNSUPPORTED_MEDIA_TYPE | 415 | 请求体必须是 application/json | |
+| WEBSOCKET_REQUIRED | 426 | 请使用 WebSocket 连接 | `/v1/realtime` 收到普通 HTTP 请求 |
 | RATE_LIMITED | 429 | 操作过于频繁，请稍后再试 | 带 `Retry-After`（秒） |
 | CODE_COOLDOWN | 429 | 验证码发送过于频繁，请 N 秒后再试 | 仅注册用途；带 `Retry-After` |
 | CODE_TOO_MANY_ATTEMPTS | 429 | 验证码错误次数过多，请重新获取 | 同一验证码错 5 次作废 |
@@ -129,26 +130,51 @@ GET /v1/posts?cursor=eyJ...&limit=20
 ## 实时（WebSocket `/v1/realtime`）
 
 握手：网页同站 Cookie；App 用 `Authorization` 头（WS 握手允许带 Authorization）。
+不带凭据时以**游客**连接，只收广播与公开频道（全站游客连接上限 5000，满了返回 503 + `Retry-After: 30`）。
+
+- 带了凭据但已失效：401 `SESSION_EXPIRED`，不会静默降级成游客；账号封禁：403 `ACCOUNT_BLOCKED`。
+- 非 Bearer 的连接（Cookie 或游客）带了 `Origin` 时必须在白名单里，否则 403 `CSRF_REJECTED`
+  （握手是 GET，CSRF 中间件不拦，这里单独防跨站 WebSocket 劫持）。
+- 不是 WebSocket 握手：426 `WEBSOCKET_REQUIRED`。
 
 ```
-客户端 → { "op": "subscribe",   "seq": 1, "t": "dm",        "d": { "conversationId": "..." } }
-客户端 → { "op": "unsubscribe", "seq": 2, "t": "dm",        "d": { "conversationId": "..." } }
+客户端 → { "op": "subscribe",   "seq": 1, "t": "post", "d": { "postId": "..." } }
+客户端 → { "op": "unsubscribe", "seq": 2, "t": "post", "d": { "postId": "..." } }
 客户端 → { "op": "ping",        "seq": 3 }
-客户端 → { "op": "typing",      "t": "dm", "d": { "conversationId": "..." } }
+客户端 → { "op": "typing",      "t": "dm", "d": { "conversationId": "..." } }   // 私信上线后支持
 
-服务端 → { "op": "hello", "d": { "heartbeatSec": 30, "resumeHint": "..." } }
+服务端 → { "op": "hello", "d": { "heartbeatSec": 30, "userId": "...", "serverTime": "..." } }
 服务端 → { "op": "ack",   "seq": 1 }
-服务端 → { "op": "event", "t": "dm.message.created", "d": { ... } }
+服务端 → { "op": "event", "t": "notification.created", "d": { ... } }
 服务端 → { "op": "error", "seq": 1, "d": { "code": "...", "detail": "..." } }
 ```
 
-- 事件类型注册进 OpenAPI components（SDK 一并生成类型）。
-- 已定义的事件（网关上线前只在进程内总线上发布）：`post.published`、`post.removed`、`post.bumped`（广播）；
+- 带 `seq` 的 `ping` / `subscribe` / `unsubscribe` 成功时回 `ack`，不带 `seq` 时成功不回帧。
+- 频道：目前只有公开帖子 `t = "post"`；私信会话 `t = "dm"` 随 messaging 模块加入（订阅时校验成员）。
+- 帧格式与事件信封的类型登记在 OpenAPI components（`ClientFrame`、`ServerFrame`）。
+- 已定义的事件：`post.published`、`post.removed`、`post.bumped`（广播）；
   `notification.created { id?, bucket }`、`notification.removed { bucket }`、`notification.read { bucket?, count }`
   （只发给收件人本人）。
-- 限制：每用户最多 5 连接（挤掉最旧）；单帧 ≤ 64KB；订阅数上限 100；慢消费者断开。
-- 心跳：服务端 30s 不活跃则发 ping 帧，客户端 2 个周期无响应视为断线。
+- 限制：每用户最多 5 连接（挤掉最旧）；客户端单帧 ≤ 64KB；订阅数上限 100；待发队列（256 帧）写满即断开。
+- 心跳：连接 30s 没有收到客户端任何帧时服务端发 ping 帧，60s 没有任何帧则断开（D-008：60s 容忍度与旧系统一致）。
+- 吊销：登出、踢设备、重置密码后立即断开对应连接；另外已登录连接每 30s 回库复查一次，复查失败按失效处理。
 - 断线补齐：`GET /v1/...?since=<cursor>`，WS 不保证不丢事件，REST 为准。
+
+| WS 错误码（`error` 帧） | 含义 |
+|---|---|
+| INVALID_FRAME | 不是合法 JSON，或超过 64KB |
+| UNKNOWN_OP | 未知的 `op` |
+| CHANNEL_INVALID | 频道不存在或无权订阅 |
+| TOO_MANY_SUBSCRIPTIONS | 订阅超过 100 个频道 |
+| UNSUPPORTED | 协议里有、但当前版本未开放的操作（如 `typing`） |
+
+| 关闭码 | 原因 | 客户端应当 |
+|---|---|---|
+| 1001 | 服务端停机 | 退避后重连 |
+| 4000 | 同一用户连接超过 5 条，被挤掉 | 不要自动重连 |
+| 4001 | 会话已吊销、过期或账号被封禁 | 回到登录，不要自动重连 |
+| 4002 | 空闲超时 | 重连 |
+| 4003 | 读得太慢，待发队列满 | 重连后用 REST 补齐 |
 
 ## 上传
 

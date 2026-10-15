@@ -497,6 +497,26 @@ pub(crate) async fn resolve_session(
     .await
 }
 
+/// 会话仍然有效：未吊销、未过期，且账号状态正常。
+pub(crate) async fn session_active(
+    conn: &mut PgConnection,
+    user_id: i64,
+    session_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM sessions s JOIN users u ON u.id = s.user_id
+               WHERE s.id = $2 AND s.user_id = $1 AND s.revoked_at IS NULL
+                 AND s.expires_at > $3 AND u.status = 'active'
+           ) AS "active!""#,
+        user_id,
+        session_id,
+        now,
+    )
+    .fetch_one(conn)
+    .await
+}
 /// 滑动续期：过期时间推到 `new_expires_at`，但不超过绝对上限。
 pub(crate) async fn touch_session(
     conn: &mut PgConnection,

@@ -5,6 +5,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::Snowflake;
+use ik_kernel::bus::EventBus;
 use ik_kernel::config::Config;
 use ik_kernel::mail::Mailer;
 use sqlx::PgPool;
@@ -21,6 +22,8 @@ pub struct AuthState {
     pub ids: Arc<Snowflake>,
     pub mailer: Arc<dyn Mailer>,
     pub settings: Arc<AuthSettings>,
+    /// 会话被吊销时发布内部事件（实时网关据此断开连接）。
+    pub bus: Arc<dyn EventBus>,
     pub(crate) limiter: Arc<DefaultKeyedRateLimiter<String>>,
 }
 
@@ -30,12 +33,14 @@ impl AuthState {
         ids: Arc<Snowflake>,
         mailer: Arc<dyn Mailer>,
         settings: AuthSettings,
+        bus: Arc<dyn EventBus>,
     ) -> Self {
         Self {
             db,
             ids,
             mailer,
             settings: Arc::new(settings),
+            bus,
             limiter: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 AUTH_REQUESTS_PER_MINUTE,
             ))),

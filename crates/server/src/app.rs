@@ -28,7 +28,12 @@ use crate::{AppState, system};
         version = "1",
         description = "绳网论坛后端接口。错误统一为 RFC 9457 Problem Details（application/problem+json）。"
     ),
-    components(schemas(ik_kernel::error::ProblemBody, ik_kernel::error::FieldError)),
+    components(schemas(
+        ik_kernel::error::ProblemBody,
+        ik_kernel::error::FieldError,
+        ik_realtime::protocol::ClientFrame,
+        ik_realtime::protocol::ServerFrame,
+    )),
     modifiers(&SecuritySchemes),
     tags(
         (name = "system", description = "运维探针"),
@@ -40,6 +45,7 @@ use crate::{AppState, system};
         (name = "exam", description = "入站考试：开考、交卷、回顾"),
         (name = "social", description = "关注与拉黑"),
         (name = "notify", description = "通知（敲敲）与已读"),
+        (name = "realtime", description = "实时通道（WebSocket）"),
     )
 )]
 pub struct ApiDoc;
@@ -80,6 +86,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_exam::router())
         .merge(ik_social::router())
         .merge(ik_notify::router())
+        .merge(ik_realtime::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

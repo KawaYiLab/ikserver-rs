@@ -14,6 +14,6 @@ mod state;
 mod token;
 mod validate;
 
-pub use extract::{AuthRateLimit, ClientMeta, CurrentUser, MaybeUser, Principal};
+pub use extract::{AuthRateLimit, ClientMeta, CurrentUser, MaybeUser, Principal, UserIfPresent};
 pub use routes::router;
 pub use state::{AuthSettings, AuthState};

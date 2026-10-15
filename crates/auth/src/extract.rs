@@ -125,6 +125,29 @@ where
     }
 }
 
+/// 允许匿名、但带了凭据就必须有效：没带凭据 → `None`；凭据失效 → 401 `SESSION_EXPIRED`；
+/// 账号被封禁 → 403 `ACCOUNT_BLOCKED`。用于实时网关握手：静默降级成游客会让客户端以为自己已登录。
+#[derive(Debug, Clone)]
+pub struct UserIfPresent(pub Option<Principal>);
+
+impl<S> FromRequestParts<S> for UserIfPresent
+where
+    S: Send + Sync,
+    AuthState: FromRef<S>,
+{
+    type Rejection = Problem;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let auth = AuthState::from_ref(state);
+        if credential(parts, &auth.settings.cookie_name).is_none() {
+            return Ok(Self(None));
+        }
+        CurrentUser::from_request_parts(parts, state)
+            .await
+            .map(|CurrentUser(principal)| Self(Some(principal)))
+    }
+}
+
 /// 客户端真实 IP 与 User-Agent。
 #[derive(Debug, Clone)]
 pub struct ClientMeta(pub RequestMeta);

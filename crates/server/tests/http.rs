@@ -144,6 +144,8 @@ async fn openapi_document_is_served() {
     assert!(body["paths"]["/v1/me/favorites"]["get"].is_object());
     assert!(body["paths"]["/v1/notifications/buckets/{key}"]["get"].is_object());
     assert!(body["paths"]["/v1/notifications/{id}/read"]["put"].is_object());
+    assert!(body["paths"]["/v1/realtime"]["get"].is_object());
+    assert!(body["components"]["schemas"]["ServerFrame"].is_object());
     let schemes = &body["components"]["securitySchemes"];
     assert_eq!(schemes["session_cookie"]["in"], "cookie");
     assert_eq!(schemes["bearer"]["scheme"], "bearer");
@@ -170,6 +172,21 @@ async fn exam_requires_login() {
     let (status, _, body) = send(get("/v1/exam")).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["code"], "UNAUTHORIZED");
+}
+
+#[tokio::test]
+async fn realtime_requires_websocket_handshake() {
+    let (status, _, body) = send(get("/v1/realtime")).await;
+    assert_eq!(status, StatusCode::UPGRADE_REQUIRED);
+    assert_eq!(body["code"], "WEBSOCKET_REQUIRED");
+
+    let request = Request::get("/v1/realtime")
+        .header(header::ORIGIN, "https://evil.example")
+        .body(Body::empty())
+        .unwrap();
+    let (status, _, body) = send(request).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "CSRF_REJECTED");
 }
 
 #[tokio::test]

@@ -199,7 +199,9 @@ async fn serve() -> anyhow::Result<()> {
         .await
         .context("连接数据库失败")?;
     let addr = config.http.addr;
-    let app = build_app(AppState::new(config, db)?)?;
+    let state = AppState::new(config, db)?;
+    let hub = state.realtime.hub.clone();
+    let app = build_app(state)?;
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -209,7 +211,11 @@ async fn serve() -> anyhow::Result<()> {
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
-    .with_graceful_shutdown(shutdown_signal())
+    .with_graceful_shutdown(async move {
+        shutdown_signal().await;
+        // WebSocket 是长连接，不主动关掉的话优雅停机会一直等下去。
+        hub.shutdown();
+    })
     .await?;
     tracing::info!("ik-server 已退出");
     Ok(())
