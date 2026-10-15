@@ -647,6 +647,8 @@ pub struct Author {
     pub level: i16,
     /// 已注销或已合并的账号：调用方应显示为「已注销用户」，不链接主页。
     pub gone: bool,
+    /// 自定义头像（媒体 id）。已注销的账号恒为 None。
+    pub avatar_media_id: Option<i64>,
 }
 
 /// 批量读取作者资料；不存在的 id 不出现在结果里。
@@ -659,11 +661,13 @@ pub async fn authors(db: &PgPool, ids: &[i64]) -> Result<HashMap<i64, Author>, P
     Ok(rows
         .into_iter()
         .map(|row| {
+            let gone = matches!(row.status.as_str(), "deleted" | "merged");
             let author = Author {
                 id: Id::new(row.id),
-                gone: matches!(row.status.as_str(), "deleted" | "merged"),
+                gone,
                 username: row.username,
                 level: row.level,
+                avatar_media_id: row.avatar_media_id.filter(|_| !gone),
             };
             (row.id, author)
         })

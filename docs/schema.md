@@ -215,7 +215,12 @@
 - 文件 ↔ 上传者，多对多。永不对外暴露（防匿名内容溯源，UPL-056）。「我的图库」就是这张表；从图库移除只删这一行。
 - `(user_id, created_at DESC, media_id DESC)` 支撑图库分页。
 
-## 自定义头像（`20261020000002_profile_avatar.sql`）
+## 媒体引用（`20261020000002_profile_avatar.sql`、`20261021000001_media_references.sql`）
 
-- `user_profiles.avatar_media_id` 引用 `media_files`（profile 域的列，跨域外键只做兜底，`ON DELETE SET NULL`）。
-  设置时经 `ik_media::interop::owned_media` 校验是自己图库里的文件（D-012 方案 A），与扣费同一事务。
+- 头像：`users.avatar_media_id`（auth 域的列）。最初放在 `user_profiles`（20261020000002），因为帖子卡片、评论、通知、
+  私信里的作者展示都要带头像，而这些域只能经 auth 的作者资料读用户，所以挪到 `users`；旧列没有上线过，迁移里直接删除。
+  设置由 profile 经 `ik_auth::interop::set_avatar` 写入，事先经 `ik_media::interop::owned_media` 校验归属，与扣费同一事务。
+- 帖子封面：`posts.cover_ids` / `post_drafts.cover_ids`（`BIGINT[]`，有序，≤ 40）；评论图片：`comments.image_ids`（≤ 18）。
+  文件从不物理删除，所以用数组而不是关系表，也不需要外键；数量上限随等级在服务端校验，DDL 只兜底最高档。
+  卡片查询直接取 `cover_ids[1]`。
+- `media_files.thumbhash`：完成上传时在阻塞线程里解码（限制 16384 像素、256 MiB）并缩到 100×100 计算。

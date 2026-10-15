@@ -36,6 +36,7 @@ pub(crate) struct Backend {
     pub root_prefix: String,
     pub sign_expires: Duration,
     pub sign_limit: DefaultKeyedRateLimiter<i64>,
+    pub staging_ttl: Duration,
 }
 
 impl MediaState {
@@ -58,6 +59,7 @@ impl MediaState {
                 root_prefix: config.root_prefix.clone(),
                 sign_expires: Duration::from_secs(config.sign_expires_secs),
                 sign_limit: RateLimiter::keyed(Quota::per_minute(SIGNS_PER_MINUTE)),
+                staging_ttl: Duration::from_secs(config.staging_ttl_hours * 3600),
             })
         });
         Self {
@@ -72,6 +74,16 @@ impl MediaState {
         }
     }
 
+    /// 测试用：没有对象存储（上传不可用），地址前缀为 `https://cdn.test`。
+    #[doc(hidden)]
+    pub fn for_tests(db: PgPool, ids: Arc<Snowflake>) -> Self {
+        let config = StorageConfig {
+            public_base_url: "https://cdn.test".to_owned(),
+            ..StorageConfig::default()
+        };
+        Self::new(db, ids, &config, b"test")
+    }
+
     /// 批量取媒体视图（不存在的 id 不出现）。供引用媒体的业务域展示用。
     pub async fn views(&self, ids: &[i64]) -> Result<HashMap<i64, MediaView>, Problem> {
         if ids.is_empty() {
@@ -82,6 +94,81 @@ impl MediaState {
             .await?
             .into_iter()
             .map(|row| (row.id, crate::service::view(&self.urls, row)))
+            .collect())
+    }
+
+    /// 暂存前缀（`[root/]staging/`）。
+    pub(crate) fn staging_prefix(backend: &Backend) -> String {
+        if backend.root_prefix.is_empty() {
+            "staging/".to_owned()
+        } else {
+            format!("{}/staging/", backend.root_prefix)
+        }
+    }
+
+    /// 清理一次过期的暂存对象（没有完成的上传，UPL-060）。返回删除数。
+    pub async fn sweep_staging(&self) -> anyhow::Result<usize> {
+        let Some(backend) = &self.backend else {
+            return Ok(0);
+        };
+        let ttl = chrono::Duration::from_std(backend.staging_ttl)?;
+        self.delete_staging_before(chrono::Utc::now() - ttl).await
+    }
+
+    /// 删除最后修改时间早于 `before` 的暂存对象。返回删除数。
+    pub async fn delete_staging_before(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<usize> {
+        let Some(backend) = &self.backend else {
+            return Ok(0);
+        };
+        Ok(backend
+            .storage
+            .delete_older_than(&Self::staging_prefix(backend), before)
+            .await?)
+    }
+
+    /// 启动后台清理（每小时一次）。没有配置对象存储时什么都不做。
+    pub fn start_janitor(&self) -> anyhow::Result<()> {
+        if self.backend.is_none() {
+            return Ok(());
+        }
+        let runtime = tokio::runtime::Handle::try_current()
+            .map_err(|e| anyhow::anyhow!("媒体清理任务需要在 tokio 运行时里启动：{e}"))?;
+        let state = self.clone();
+        runtime.spawn(async move {
+            let mut tick = tokio::time::interval(Duration::from_secs(3600));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                match state.sweep_staging().await {
+                    Ok(0) => {}
+                    Ok(deleted) => tracing::info!(deleted, "清理了过期的上传暂存对象"),
+                    Err(error) => tracing::warn!(?error, "清理上传暂存对象失败"),
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// 这些作者的头像缩略图地址（按用户 id）。没有头像、已注销的不出现。
+    pub async fn avatar_urls<'a>(
+        &self,
+        authors: impl IntoIterator<Item = &'a ik_auth::service::Author>,
+    ) -> Result<HashMap<i64, String>, Problem> {
+        let pairs: Vec<(i64, i64)> = authors
+            .into_iter()
+            .filter(|a| !a.gone)
+            .filter_map(|a| a.avatar_media_id.map(|m| (a.id.get(), m)))
+            .collect();
+        let mut media_ids: Vec<i64> = pairs.iter().map(|(_, m)| *m).collect();
+        media_ids.sort_unstable();
+        media_ids.dedup();
+        let views = self.views(&media_ids).await?;
+        Ok(pairs
+            .into_iter()
+            .filter_map(|(user, media)| views.get(&media).map(|v| (user, v.thumb_url.clone())))
             .collect())
     }
 

@@ -26,8 +26,18 @@ fn harness(db: PgPool) -> Harness {
     let bus = Arc::new(LocalBus::new(1024));
     let ids = Arc::new(Snowflake::new(1).unwrap());
     Harness {
-        comments: CommentsState::new(db.clone(), ids.clone(), bus.clone()),
-        content: ContentState::new(db.clone(), ids, bus),
+        comments: CommentsState::new(
+            db.clone(),
+            ids.clone(),
+            bus.clone(),
+            ik_media::MediaState::for_tests(db.clone(), ids.clone()),
+        ),
+        content: ContentState::new(
+            db.clone(),
+            ids.clone(),
+            bus,
+            ik_media::MediaState::for_tests(db.clone(), ids),
+        ),
         db,
     }
 }
@@ -87,6 +97,7 @@ impl Harness {
             is_anonymous: false,
             external_videos: Vec::new(),
             editor_state: None,
+            cover_ids: Vec::new(),
         };
         ik_content::service::create(&self.content, author, input, true)
             .await
@@ -114,6 +125,7 @@ impl Harness {
                 body: body.into(),
                 parent_id: parent.map(Id::new),
                 is_anonymous: false,
+                image_ids: Vec::new(),
             },
         )
         .await
@@ -209,6 +221,7 @@ async fn concurrent_comments_get_unique_floors(db: PgPool) {
                     body: format!("#{i}"),
                     parent_id: None,
                     is_anonymous: false,
+                    image_ids: Vec::new(),
                 },
             )
             .await
@@ -395,6 +408,7 @@ async fn anonymous_comments_hide_author(db: PgPool) {
                 body: "匿名".into(),
                 parent_id: None,
                 is_anonymous: true,
+                image_ids: Vec::new(),
             },
         )
         .await
@@ -799,6 +813,7 @@ async fn lists_hide_blocked_authors_but_not_anonymous_comments(db: PgPool) {
             body: "匿名".into(),
             parent_id: None,
             is_anonymous: false,
+            image_ids: Vec::new(),
         },
     )
     .await
@@ -1038,6 +1053,7 @@ async fn anonymous_comments_send_no_notifications(db: PgPool) {
             body: "匿名 @bob".into(),
             parent_id: None,
             is_anonymous: true,
+            image_ids: Vec::new(),
         },
     )
     .await
@@ -1050,4 +1066,138 @@ async fn anonymous_comments_send_no_notifications(db: PgPool) {
     h.comment(&op, post, Some(anonymous), "回复").await;
     service::like(&h.comments, &op, anonymous).await.unwrap();
     assert!(notifications(&h.db, 2).await.is_empty());
+}
+
+// ---------- 图片与头像 ----------
+
+impl Harness {
+    async fn media(&self, id: i64, owner: i64) {
+        sqlx::query!(
+            "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+             VALUES ($1, $2, 'image/png', 100, $3, $4)",
+            id,
+            format!("c/{id}.png"),
+            "b".repeat(64),
+            format!("r{id}"),
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO media_uploaders (media_id, user_id) VALUES ($1, $2)",
+            id,
+            owner
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+    }
+
+    async fn with_images(
+        &self,
+        who: &Principal,
+        post: i64,
+        body: &str,
+        images: &[i64],
+    ) -> Result<ik_comments::dto::CommentView, ik_kernel::Problem> {
+        service::create(
+            &self.comments,
+            who,
+            post,
+            CreateCommentRequest {
+                body: body.into(),
+                parent_id: None,
+                is_anonymous: false,
+                image_ids: images.iter().map(|id| Id::new(*id)).collect(),
+            },
+        )
+        .await
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comment_images_are_owned_capped_and_allow_empty_body(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let post = h.post(&op, false).await;
+    let me = h.user(2).await;
+    for id in 501..=505 {
+        h.media(id, 2).await;
+    }
+    h.media(600, 1).await;
+
+    // Lv1 最多 3 张（CMT-020/021）。
+    let err = h
+        .with_images(&me, post, "", &[501, 502, 503, 504])
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].field, "imageIds");
+    assert_eq!(err.field_errors()[0].code, "TOO_MANY");
+    // 别人的图不行（D-012 方案 A）。
+    let err = h.with_images(&me, post, "看图", &[600]).await.unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "NOT_FOUND");
+    // 正文和图片不能都为空（CMT-006）。
+    let err = h.with_images(&me, post, "  ", &[]).await.unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "REQUIRED");
+
+    // 纯图片评论。
+    let only = h.with_images(&me, post, "  ", &[502, 501]).await.unwrap();
+    assert_eq!(only.body, "");
+    let ids: Vec<i64> = only.images.iter().map(|m| m.id.get()).collect();
+    assert_eq!(ids, [502, 501]);
+    let page = service::list(
+        &h.comments,
+        None,
+        post,
+        PageQuery {
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(page.items[0].comment.images.len(), 2);
+    // 通知预览统一为「[图片]」。
+    let excerpt = sqlx::query_scalar!(
+        "SELECT excerpt FROM notifications WHERE recipient_id = 1 AND kind = 'comment'"
+    )
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(excerpt, "[图片]");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comment_authors_carry_avatars(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let post = h.post(&op, false).await;
+    let me = h.user(2).await;
+    h.media(700, 2).await;
+    sqlx::query!("UPDATE users SET avatar_media_id = 700 WHERE id = 2")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    let created = h.with_images(&me, post, "有头像", &[]).await.unwrap();
+    assert!(
+        created
+            .author
+            .avatar_url
+            .unwrap()
+            .starts_with("https://cdn.test/c/700.png")
+    );
+    let anon = service::create(
+        &h.comments,
+        &me,
+        post,
+        CreateCommentRequest {
+            body: "匿名".into(),
+            parent_id: None,
+            is_anonymous: true,
+            image_ids: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(anon.author.avatar_url.is_none());
 }

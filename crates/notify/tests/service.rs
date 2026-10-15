@@ -24,7 +24,11 @@ struct Harness {
 
 fn harness(db: PgPool) -> Harness {
     Harness {
-        state: NotifyState::new(db.clone(), Arc::new(LocalBus::new(64))),
+        state: NotifyState::new(
+            db.clone(),
+            Arc::new(LocalBus::new(64)),
+            ik_media::MediaState::for_tests(db.clone(), Arc::new(Snowflake::new(1).unwrap())),
+        ),
         ids: Snowflake::new(1).unwrap(),
         db,
     }
@@ -325,4 +329,37 @@ async fn fanout_skips_blocked_ai_and_inactive_followers_and_is_idempotent(db: Pg
     for skipped in [4, 5, 6] {
         assert_eq!(h.count(skipped).await, 0, "用户 {skipped}");
     }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn senders_carry_avatars(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1).await;
+    h.user(2).await;
+    h.post(10, 1).await;
+    sqlx::query!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (900, 'a/900.png', 'image/png', 1, $1, 'r900');
+         ",
+        "c".repeat(64)
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    sqlx::query!("UPDATE users SET avatar_media_id = 900 WHERE id = 2")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    h.send(1, 2, Kind::Like, 10, 0).await;
+    let list = service::list(&h.state, &me, all()).await.unwrap();
+    let sender = list.items[0].sender.as_ref().unwrap();
+    assert!(
+        sender
+            .avatar_url
+            .as_deref()
+            .unwrap()
+            .starts_with("https://cdn.test/a/900.png")
+    );
+    let buckets = service::buckets(&h.state, &me, page()).await.unwrap();
+    assert!(buckets.items[0].peer.avatar_url.is_some());
 }

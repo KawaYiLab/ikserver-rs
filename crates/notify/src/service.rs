@@ -55,17 +55,25 @@ pub(crate) fn summary(kind: &str, comment_id: Option<i64>, excerpt: &str) -> Str
     .to_owned()
 }
 
-pub(crate) fn sender_view(sender_id: i64, authors: &HashMap<i64, Author>) -> SenderView {
-    match authors.get(&sender_id) {
+/// 发送者资料与头像。
+pub(crate) struct Senders {
+    authors: HashMap<i64, Author>,
+    avatars: HashMap<i64, String>,
+}
+
+pub(crate) fn sender_view(sender_id: i64, senders: &Senders) -> SenderView {
+    match senders.authors.get(&sender_id) {
         Some(a) if !a.gone => SenderView {
             id: Some(a.id),
             name: a.username.clone(),
             level: Some(a.level),
+            avatar_url: senders.avatars.get(&sender_id).cloned(),
         },
         _ => SenderView {
             id: None,
             name: GONE_USER_NAME.to_owned(),
             level: None,
+            avatar_url: None,
         },
     }
 }
@@ -75,20 +83,23 @@ pub(crate) fn system_peer() -> SenderView {
         id: None,
         name: SYSTEM_PEER_NAME.to_owned(),
         level: None,
+        avatar_url: None,
     }
 }
 
 pub(crate) async fn sender_map(
     state: &NotifyState,
     ids: impl Iterator<Item = i64>,
-) -> Result<HashMap<i64, Author>, Problem> {
+) -> Result<Senders, Problem> {
     let mut ids: Vec<i64> = ids.collect();
     ids.sort_unstable();
     ids.dedup();
-    ik_auth::service::authors(&state.db, &ids).await
+    let authors = ik_auth::service::authors(&state.db, &ids).await?;
+    let avatars = state.media.avatar_urls(authors.values()).await?;
+    Ok(Senders { authors, avatars })
 }
 
-pub(crate) fn view(row: NotificationRow, authors: &HashMap<i64, Author>) -> NotificationView {
+pub(crate) fn view(row: NotificationRow, authors: &Senders) -> NotificationView {
     NotificationView {
         id: Id::new(row.id),
         summary: summary(&row.kind, row.comment_id, &row.excerpt),

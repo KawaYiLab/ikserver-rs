@@ -258,6 +258,8 @@ pub struct PostMeta {
     pub author_id: i64,
     pub is_anonymous: bool,
     pub title: String,
+    /// 第一张封面（媒体 id）。
+    pub cover_id: Option<i64>,
 }
 
 pub async fn public_post_meta(
@@ -277,6 +279,7 @@ pub async fn public_post_meta(
                     author_id: row.author_id,
                     is_anonymous: row.is_anonymous,
                     title: row.title,
+                    cover_id: row.cover_id,
                 },
             )
         })

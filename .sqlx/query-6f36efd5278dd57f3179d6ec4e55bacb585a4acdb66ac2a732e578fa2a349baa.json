@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET avatar_media_id = 900 WHERE id = 2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6f36efd5278dd57f3179d6ec4e55bacb585a4acdb66ac2a732e578fa2a349baa"
+}

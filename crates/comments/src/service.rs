@@ -9,7 +9,6 @@ use chrono::{DateTime, Utc};
 use governor::clock::{Clock, DefaultClock};
 use http::StatusCode;
 use ik_auth::Principal;
-use ik_auth::service::Author;
 use ik_content::interop::{self, PostRef};
 use ik_economy::service::{Dedup, ExpAction, grant_exp};
 use ik_kernel::bus::{Audience, Effects, Event};
@@ -77,10 +76,22 @@ fn bumped_event(post_id: i64) -> Result<Event, Problem> {
 // ---------- 发表 ----------
 
 /// 校验正文并展开裸 @。展开后再查一次长度（D-033 方案 A）。
-async fn prepare_body(state: &CommentsState, raw: &str) -> Result<String, Problem> {
+async fn prepare_body(
+    state: &CommentsState,
+    raw: &str,
+    has_images: bool,
+) -> Result<String, Problem> {
     let body = raw.trim();
     if body.is_empty() {
-        return Err(Problem::field("body", "REQUIRED", "评论内容不能为空"));
+        // 纯图片评论可以没有正文（CMT-006）。
+        if has_images {
+            return Ok(String::new());
+        }
+        return Err(Problem::field(
+            "body",
+            "REQUIRED",
+            "评论内容和图片不能都为空",
+        ));
     }
     let too_long = || {
         Problem::field(
@@ -145,7 +156,12 @@ async fn notify_new_comment(
     if c.is_anonymous || c.post.is_anonymous || c.parent.is_some_and(|p| p.is_anonymous) {
         return Ok(());
     }
-    let excerpt = text::plain_text(c.body);
+    // 纯图片评论的预览统一为「[图片]」（Q-08）。
+    let excerpt = if c.body.is_empty() {
+        "[图片]".to_owned()
+    } else {
+        text::plain_text(c.body)
+    };
     let (primary, kind) = match c.parent {
         None => (c.post.author_id, Kind::Comment),
         Some(parent) => (parent.author_id, Kind::Reply),
@@ -184,7 +200,24 @@ pub async fn create(
 ) -> Result<CommentView, Problem> {
     principal.require_write()?;
     check_rate(state, principal)?;
-    let body = prepare_body(state, &request.body).await?;
+    // 按原始条数拦截（不查库，CMT-021），通过后去重保序。
+    let limit = usize::from(
+        ik_economy::benefits::for_level(principal.benefit_level().max(1)).comment_max_images,
+    );
+    if request.image_ids.len() > limit {
+        return Err(Problem::field(
+            "imageIds",
+            "TOO_MANY",
+            format!("当前等级评论图片最多 {limit} 张"),
+        ));
+    }
+    let mut image_ids: Vec<i64> = Vec::with_capacity(request.image_ids.len());
+    for id in &request.image_ids {
+        if !image_ids.contains(&id.get()) {
+            image_ids.push(id.get());
+        }
+    }
+    let body = prepare_body(state, &request.body, !image_ids.is_empty()).await?;
     let seed = if request.is_anonymous {
         Some(ik_content::anonymous::new_seed()?)
     } else {
@@ -200,6 +233,17 @@ pub async fn create(
         .await?
         .filter(|p| p.is_public)
         .ok_or_else(post_not_found)?;
+    // 图片必须是自己图库里的（D-012 方案 A）。
+    if !image_ids.is_empty() {
+        let owned = ik_media::interop::owned_media(&mut tx, author_id, &image_ids).await?;
+        if !image_ids.iter().all(|id| owned.contains(id)) {
+            return Err(Problem::field(
+                "imageIds",
+                "NOT_FOUND",
+                "图片不存在或不在你的图库里",
+            ));
+        }
+    }
     // 拉黑拦截只看被评论 / 被回复的内容是否匿名（BLOCK-015），匿名内容不拦，防止反推作者。
     if !post.is_anonymous {
         ik_social::interop::ensure_no_block(&mut tx, author_id, post.author_id).await?;
@@ -239,6 +283,7 @@ pub async fn create(
             body: &body,
             is_anonymous: request.is_anonymous,
             anonymous_seed: seed.as_deref(),
+            image_ids: &image_ids,
             now,
         },
     )
@@ -276,11 +321,6 @@ pub async fn create(
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
 
-    let authors = if request.is_anonymous {
-        HashMap::new()
-    } else {
-        ik_auth::service::authors(&state.db, &[author_id]).await?
-    };
     let row = CommentRow {
         id,
         post_id: post.id,
@@ -295,8 +335,10 @@ pub async fn create(
         accepted_at: None,
         hidden_at: None,
         created_at: now,
+        image_ids,
     };
-    Ok(view(&row, &authors, Some(author_id), &HashSet::new()))
+    let lookup = lookup_with(state, &[&row], HashSet::new()).await?;
+    Ok(view(&row, &lookup, Some(author_id)))
 }
 
 // ---------- 删除 ----------
@@ -593,30 +635,73 @@ pub async fn unlike(
 }
 
 // ---------- 读取 ----------
-fn view(
-    row: &CommentRow,
-    authors: &HashMap<i64, Author>,
+/// 渲染评论需要的批量数据：作者（含头像）、图片、读者点过的赞。
+struct Lookup {
+    authors: ik_content::service::Authors,
+    media: HashMap<i64, ik_media::dto::MediaView>,
+    liked: HashSet<i64>,
+}
+
+impl Lookup {
+    fn images(&self, row: &CommentRow) -> Vec<ik_media::dto::MediaView> {
+        row.image_ids
+            .iter()
+            .filter_map(|id| self.media.get(id).cloned())
+            .collect()
+    }
+}
+
+async fn lookup(
+    state: &CommentsState,
+    conn: &mut PgConnection,
     viewer_id: Option<i64>,
-    liked: &HashSet<i64>,
-) -> CommentView {
+    rows: &[&CommentRow],
+) -> Result<Lookup, Problem> {
+    let liked = liked_set(conn, viewer_id, rows).await?;
+    lookup_with(state, rows, liked).await
+}
+
+/// 不需要查点赞时（刚发表的评论）用这个，不占额外的连接。
+async fn lookup_with(
+    state: &CommentsState,
+    rows: &[&CommentRow],
+    liked: HashSet<i64>,
+) -> Result<Lookup, Problem> {
+    let authors = author_map(state, rows).await?;
+    let mut media_ids: Vec<i64> = rows
+        .iter()
+        .flat_map(|r| r.image_ids.iter().copied())
+        .collect();
+    media_ids.sort_unstable();
+    media_ids.dedup();
+    let media = state.media.views(&media_ids).await?;
+    Ok(Lookup {
+        authors,
+        media,
+        liked,
+    })
+}
+
+fn view(row: &CommentRow, lookup: &Lookup, viewer_id: Option<i64>) -> CommentView {
     CommentView {
         id: Id::new(row.id),
         post_id: Id::new(row.post_id),
         parent_id: row.parent_id.map(Id::new),
         floor: row.floor,
         body: row.body.clone(),
+        images: lookup.images(row),
         author: ik_content::service::author_view(
             row.author_id,
             row.is_anonymous,
             row.anonymous_seed.as_deref(),
-            authors,
+            &lookup.authors,
         ),
         is_anonymous: row.is_anonymous,
         like_count: row.like_count,
         is_pinned: row.pinned_at.is_some(),
         is_accepted: row.accepted_at.is_some(),
         is_mine: viewer_id == Some(row.author_id),
-        liked: liked.contains(&row.id),
+        liked: lookup.liked.contains(&row.id),
         created_at: row.created_at,
     }
 }
@@ -641,7 +726,7 @@ async fn liked_set(
 async fn author_map(
     state: &CommentsState,
     rows: &[&CommentRow],
-) -> Result<HashMap<i64, Author>, Problem> {
+) -> Result<ik_content::service::Authors, Problem> {
     let mut ids: Vec<i64> = rows
         .iter()
         .filter(|r| !r.is_anonymous)
@@ -649,7 +734,7 @@ async fn author_map(
         .collect();
     ids.sort_unstable();
     ids.dedup();
-    ik_auth::service::authors(&state.db, &ids).await
+    ik_content::service::load_authors(&state.db, &state.media, &ids).await
 }
 
 #[derive(Serialize, Deserialize)]
@@ -719,18 +804,17 @@ pub async fn list(
         .map(|c| (c.parent_id, c.n))
         .collect();
     let everyone: Vec<&CommentRow> = tops.iter().copied().chain(replies.iter()).collect();
-    let authors = author_map(state, &everyone).await?;
-    let liked = liked_set(&mut conn, viewer_id, &everyone).await?;
+    let lookup = lookup(state, &mut conn, viewer_id, &everyone).await?;
 
     let thread = |row: &CommentRow| {
         let replies: Vec<CommentView> = replies
             .iter()
             .filter(|r| r.parent_id == Some(row.id))
-            .map(|r| view(r, &authors, viewer_id, &liked))
+            .map(|r| view(r, &lookup, viewer_id))
             .collect();
         let reply_count = counts.get(&row.id).copied().unwrap_or(0);
         ThreadView {
-            comment: view(row, &authors, viewer_id, &liked),
+            comment: view(row, &lookup, viewer_id),
             replies_has_more: reply_count > i64::try_from(replies.len()).unwrap_or(i64::MAX),
             replies,
             reply_count,
@@ -774,12 +858,8 @@ pub async fn replies(
 
     let rows = repo::replies_page(&mut conn, parent.id, &excluded, after, limit + 1).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
-    let authors = author_map(state, &refs).await?;
-    let liked = liked_set(&mut conn, viewer_id, &refs).await?;
-    let items: Vec<CommentView> = rows
-        .iter()
-        .map(|r| view(r, &authors, viewer_id, &liked))
-        .collect();
+    let lookup = lookup(state, &mut conn, viewer_id, &refs).await?;
+    let items: Vec<CommentView> = rows.iter().map(|r| view(r, &lookup, viewer_id)).collect();
     Page::from_rows(
         items,
         usize::try_from(limit).unwrap_or(20),
@@ -828,7 +908,7 @@ pub async fn author_comments(
         .iter()
         .filter(|r| titles.contains_key(&r.post_id))
         .collect();
-    let liked = liked_set(&mut conn, viewer_id, &visible).await?;
+    let lookup = lookup(state, &mut conn, viewer_id, &visible).await?;
     let items = visible
         .into_iter()
         .filter_map(|row| {
@@ -837,8 +917,9 @@ pub async fn author_comments(
                 post_id: Id::new(row.post_id),
                 post_title: title.clone(),
                 body: row.body.clone(),
+                images: lookup.images(row),
                 like_count: row.like_count,
-                liked: liked.contains(&row.id),
+                liked: lookup.liked.contains(&row.id),
                 created_at: row.created_at,
             })
         })
@@ -901,9 +982,10 @@ pub async fn search_views(
     let mut conn = state.db.acquire().await?;
     let (rows, posts) = visible_rows(&mut conn, viewer_id, ids).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
-    let liked = liked_set(&mut conn, viewer_id, &refs).await?;
+    let lookup = lookup(state, &mut conn, viewer_id, &refs).await?;
     drop(conn);
-    let authors = author_map(state, &refs).await?;
+    let cover_ids: Vec<i64> = posts.values().filter_map(|p| p.cover_id).collect();
+    let covers = state.media.views(&cover_ids).await?;
     Ok(rows
         .iter()
         .filter_map(|row| {
@@ -911,16 +993,18 @@ pub async fn search_views(
                 id: Id::new(row.id),
                 post_id: Id::new(row.post_id),
                 post_title: post.title.clone(),
+                post_cover: post.cover_id.and_then(|id| covers.get(&id).cloned()),
                 body: row.body.clone(),
+                images: lookup.images(row),
                 author: ik_content::service::author_view(
                     row.author_id,
                     row.is_anonymous,
                     row.anonymous_seed.as_deref(),
-                    &authors,
+                    &lookup.authors,
                 ),
                 is_anonymous: row.is_anonymous,
                 like_count: row.like_count,
-                liked: liked.contains(&row.id),
+                liked: lookup.liked.contains(&row.id),
                 created_at: row.created_at,
             })
         })

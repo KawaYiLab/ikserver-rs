@@ -22,11 +22,9 @@ struct Harness {
 
 fn harness(db: PgPool) -> Harness {
     let bus = Arc::new(LocalBus::new(1024));
-    let state = ContentState::new(
-        db.clone(),
-        Arc::new(Snowflake::new(1).unwrap()),
-        bus.clone(),
-    );
+    let ids = Arc::new(Snowflake::new(1).unwrap());
+    let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
+    let state = ContentState::new(db.clone(), ids, bus.clone(), media);
     Harness { state, bus, db }
 }
 
@@ -85,6 +83,7 @@ fn input(title: &str) -> PostInput {
         is_anonymous: false,
         external_videos: Vec::new(),
         editor_state: None,
+        cover_ids: Vec::new(),
     }
 }
 
@@ -1263,4 +1262,188 @@ async fn first_publish_notifies_followers_once(db: PgPool) {
     publish(&h, &author, "匿名", true).await;
     publish(&h, &author, "直接发布", false).await;
     assert_eq!(notifications(&h.db, 2).await, vec!["system", "system"]);
+}
+
+// ---------- 封面与作者头像 ----------
+
+impl Harness {
+    /// 写一个媒体文件，`owner` 为上传者。
+    async fn media(&self, id: i64, owner: i64) {
+        sqlx::query!(
+            "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+             VALUES ($1, $2, 'image/png', 100, $3, $4)",
+            id,
+            format!("2026/10/{id}.png"),
+            "a".repeat(64),
+            format!("r{id}"),
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO media_uploaders (media_id, user_id) VALUES ($1, $2)",
+            id,
+            owner
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+    }
+}
+
+fn with_covers(title: &str, covers: &[i64]) -> PostInput {
+    PostInput {
+        cover_ids: covers.iter().map(|id| Id::new(*id)).collect(),
+        ..input(title)
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn covers_are_owned_ordered_and_capped_by_level(db: PgPool) {
+    let h = harness(db);
+    let me = h.writer(1).await;
+    h.writer(2).await;
+    for id in 101..=111 {
+        h.media(id, 1).await;
+    }
+    h.media(200, 2).await;
+
+    // 别人的图不能用作封面（D-012 方案 A）。
+    let err = service::create(&h.state, &me, with_covers("t", &[101, 200]), false)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].field, "coverIds");
+    assert_eq!(err.field_errors()[0].code, "NOT_FOUND");
+
+    // Lv1 最多 9 张：按原始条数拦截（重复的也算），去重后保序保存。
+    let ten: Vec<i64> = (101..=110).collect();
+    let err = service::create(&h.state, &me, with_covers("t", &ten), false)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "TOO_MANY");
+    let post = service::create(
+        &h.state,
+        &me,
+        with_covers("封面帖", &[103, 101, 103, 102]),
+        true,
+    )
+    .await
+    .unwrap();
+    let ids: Vec<i64> = post.covers.iter().map(|m| m.id.get()).collect();
+    assert_eq!(ids, [103, 101, 102]);
+    assert_eq!(post.covers[0].url, "https://cdn.test/2026/10/103.png");
+
+    // 卡片只带第一张；详情带全部。
+    let feed = service::feed(
+        &h.state,
+        None,
+        FeedQuery {
+            category: None,
+            tag: None,
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(feed.items[0].cover.as_ref().unwrap().id.get(), 103);
+    let detail = service::detail(&h.state, None, post.id.get())
+        .await
+        .unwrap();
+    assert_eq!(detail.covers.len(), 3);
+
+    // 作者之后把图从图库移除：已经用上的封面照样可以保留（编辑时不再校验旧的）。
+    sqlx::query!("DELETE FROM media_uploaders WHERE media_id = 101")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    service::save_draft(
+        &h.state,
+        &me,
+        post.id.get(),
+        with_covers("封面帖", &[101, 104]),
+        None,
+    )
+    .await
+    .unwrap();
+    let err = service::save_draft(
+        &h.state,
+        &me,
+        post.id.get(),
+        with_covers("封面帖", &[200]),
+        None,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "NOT_FOUND");
+
+    // 正文插图同样按等级封顶（POST-014）。
+    let body = "![a](https://x/a.png)".repeat(10);
+    let err = service::create(
+        &h.state,
+        &me,
+        PostInput {
+            body,
+            ..input("插图")
+        },
+        false,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "TOO_MANY_IMAGES");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn authors_show_avatars_except_when_anonymous(db: PgPool) {
+    let h = harness(db);
+    let me = h.writer(1).await;
+    h.media(300, 1).await;
+    sqlx::query!("UPDATE users SET avatar_media_id = 300 WHERE id = 1")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    let named = service::create(&h.state, &me, input("实名"), true)
+        .await
+        .unwrap();
+    let anon = service::create(
+        &h.state,
+        &me,
+        PostInput {
+            is_anonymous: true,
+            ..input("匿名")
+        },
+        true,
+    )
+    .await
+    .unwrap();
+    let detail = service::detail(&h.state, None, named.id.get())
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.author.avatar_url.as_deref(),
+        Some(
+            "https://cdn.test/2026/10/300.png?image_process=resize,w_360/format,webp/quality,q_80"
+        )
+    );
+    let detail = service::detail(&h.state, None, anon.id.get())
+        .await
+        .unwrap();
+    assert!(
+        detail.author.avatar_url.is_none(),
+        "匿名帖不带头像（防反推）"
+    );
+    let feed = service::feed(
+        &h.state,
+        None,
+        FeedQuery {
+            category: None,
+            tag: None,
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    let card = feed.items.iter().find(|c| c.id == named.id).unwrap();
+    assert!(card.author.avatar_url.is_some());
 }

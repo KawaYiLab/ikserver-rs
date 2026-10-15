@@ -30,15 +30,16 @@ struct Harness {
 fn harness(db: PgPool) -> Harness {
     let bus = Arc::new(LocalBus::new(256));
     let ids = Arc::new(Snowflake::new(1).unwrap());
-    let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
-    let comments = CommentsState::new(db.clone(), ids.clone(), bus);
+    let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
+    let content = ContentState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+    let comments = CommentsState::new(db.clone(), ids.clone(), bus, media);
     Harness {
         state: ProfileState::new(
             db.clone(),
             ids.clone(),
             content,
             comments,
-            ik_media::MediaState::new(db.clone(), ids, &Default::default(), b"test"),
+            ik_media::MediaState::for_tests(db.clone(), ids),
         ),
         db,
     }
@@ -75,6 +76,7 @@ impl Harness {
             is_anonymous: anonymous,
             external_videos: Vec::new(),
             editor_state: None,
+            cover_ids: Vec::new(),
         };
         ik_content::service::create(&self.state.content, author, input, true)
             .await
@@ -92,6 +94,7 @@ impl Harness {
                 body: "评论".into(),
                 parent_id: None,
                 is_anonymous: anonymous,
+                image_ids: Vec::new(),
             },
         )
         .await
@@ -629,6 +632,18 @@ async fn custom_avatar_costs_10_denny_and_must_be_own_upload(db: PgPool) {
     assert_eq!(mine.avatar.unwrap().id.get(), 501);
     let public = service::profile(&h.state, None, 1).await.unwrap();
     assert_eq!(public.avatar.unwrap().id.get(), 501);
+
+    // 用户搜索结果带头像。
+    let found = service::search(&h.state, None, IP, search("avatarer"))
+        .await
+        .unwrap();
+    assert!(
+        found[0]
+            .avatar_url
+            .as_deref()
+            .unwrap()
+            .starts_with("https://cdn.test/k/501.png")
+    );
 
     let cleared = service::clear_avatar(&h.state, &me).await.unwrap();
     assert!(cleared.avatar.is_none());

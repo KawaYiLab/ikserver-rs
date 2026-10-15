@@ -31,6 +31,7 @@ fn harness(db: PgPool) -> Harness {
             db.clone(),
             Arc::new(Snowflake::new(1).unwrap()),
             bus.clone(),
+            ik_media::MediaState::for_tests(db.clone(), Arc::new(Snowflake::new(1).unwrap())),
         ),
         bus,
         db,
@@ -110,7 +111,7 @@ impl Harness {
     }
 
     async fn inbox_ids(&self, user: i64) -> Vec<i64> {
-        interop::page(&self.db, user, None, 100)
+        interop::page(&self.db, &self.state.media, user, None, 100)
             .await
             .unwrap()
             .into_iter()
@@ -550,10 +551,14 @@ async fn pinning_is_capped_even_under_concurrency(db: PgPool) {
         "DM_PIN_LIMIT",
         "超出上限"
     );
-    let pinned = interop::pinned(&h.db, 1).await.unwrap();
+    let pinned = interop::pinned(&h.db, &h.state.media, 1).await.unwrap();
     assert_eq!(pinned.len(), 50);
     assert!(
-        interop::page(&h.db, 1, None, 100).await.unwrap().len() == 1,
+        interop::page(&h.db, &h.state.media, 1, None, 100)
+            .await
+            .unwrap()
+            .len()
+            == 1,
         "置顶的不进分页流"
     );
 
@@ -621,4 +626,38 @@ async fn events_reach_present_members_after_commit(db: PgPool) {
     assert_eq!(event.kind, "dm.message.withdrawn");
     assert!(event.data["message"].get("content").is_none());
     let _ = bob;
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn peers_carry_avatars(db: PgPool) {
+    let h = harness(db);
+    let alice = h.user(1).await;
+    h.user(2).await;
+    sqlx::query!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (900, 'a/900.png', 'image/png', 1, $1, 'r900')",
+        "d".repeat(64)
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    sqlx::query!("UPDATE users SET avatar_media_id = 900 WHERE id = 2")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    let view = service::open_direct(
+        &h.state,
+        &alice,
+        OpenDirectRequest {
+            user_id: Id::new(2),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        view.peer
+            .avatar_url
+            .unwrap()
+            .starts_with("https://cdn.test/a/900.png")
+    );
 }

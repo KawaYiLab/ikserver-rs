@@ -351,6 +351,7 @@ pub(crate) struct ProfileUserRow {
     pub status: String,
     pub is_ai_agent: bool,
     pub created_at: DateTime<Utc>,
+    pub avatar_media_id: Option<i64>,
 }
 
 pub(crate) async fn profile_user(
@@ -359,7 +360,8 @@ pub(crate) async fn profile_user(
 ) -> sqlx::Result<Option<ProfileUserRow>> {
     sqlx::query_as!(
         ProfileUserRow,
-        "SELECT id, username, level, status, is_ai_agent, created_at FROM users WHERE id = $1",
+        "SELECT id, username, level, status, is_ai_agent, created_at, avatar_media_id
+         FROM users WHERE id = $1",
         id,
     )
     .fetch_optional(conn)
@@ -697,12 +699,13 @@ pub(crate) struct AuthorRow {
     pub username: String,
     pub status: String,
     pub level: i16,
+    pub avatar_media_id: Option<i64>,
 }
 
 pub(crate) async fn authors(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<Vec<AuthorRow>> {
     sqlx::query_as!(
         AuthorRow,
-        "SELECT id, username, status, level FROM users WHERE id = ANY($1)",
+        "SELECT id, username, status, level, avatar_media_id FROM users WHERE id = ANY($1)",
         ids,
     )
     .fetch_all(conn)
@@ -743,4 +746,20 @@ pub(crate) async fn active_users_by_usernames(
     )
     .fetch_all(conn)
     .await
+}
+
+/// 设置 / 清除头像。只改状态正常的账号；返回是否命中。
+pub(crate) async fn set_avatar(
+    conn: &mut PgConnection,
+    user_id: i64,
+    media_id: Option<i64>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET avatar_media_id = $2 WHERE id = $1 AND status = 'active'",
+        user_id,
+        media_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }

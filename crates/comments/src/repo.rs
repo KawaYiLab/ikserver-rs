@@ -17,13 +17,14 @@ pub(crate) struct CommentRow {
     pub accepted_at: Option<DateTime<Utc>>,
     pub hidden_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    pub image_ids: Vec<i64>,
 }
 
 pub(crate) async fn get(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments WHERE id = $1",
         id,
     )
@@ -35,7 +36,7 @@ pub(crate) async fn lock(conn: &mut PgConnection, id: i64) -> sqlx::Result<Optio
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments WHERE id = $1 FOR UPDATE",
         id,
     )
@@ -62,14 +63,15 @@ pub(crate) struct NewComment<'a> {
     pub body: &'a str,
     pub is_anonymous: bool,
     pub anonymous_seed: Option<&'a str>,
+    pub image_ids: &'a [i64],
     pub now: DateTime<Utc>,
 }
 
 pub(crate) async fn insert(conn: &mut PgConnection, c: &NewComment<'_>) -> sqlx::Result<()> {
     sqlx::query!(
         "INSERT INTO comments (id, post_id, parent_id, author_id, floor, body, is_anonymous,
-                               anonymous_seed, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                               anonymous_seed, created_at, image_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         c.id,
         c.post_id,
         c.parent_id,
@@ -79,6 +81,7 @@ pub(crate) async fn insert(conn: &mut PgConnection, c: &NewComment<'_>) -> sqlx:
         c.is_anonymous,
         c.anonymous_seed,
         c.now,
+        c.image_ids,
     )
     .execute(conn)
     .await?;
@@ -199,7 +202,7 @@ pub(crate) async fn top_level_page(
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
          WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
            AND pinned_at IS NULL AND accepted_at IS NULL
@@ -225,7 +228,7 @@ pub(crate) async fn accepted(
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
          WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL
            AND (is_anonymous OR NOT (author_id = ANY($2)))",
@@ -244,7 +247,7 @@ pub(crate) async fn pinned(
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
          WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
            AND pinned_at IS NOT NULL AND accepted_at IS NULL
@@ -268,7 +271,7 @@ pub(crate) async fn inline_replies(
         r#"SELECT r.id AS "id!", r.post_id AS "post_id!", r.parent_id, r.author_id AS "author_id!",
                   r.floor, r.body AS "body!", r.is_anonymous AS "is_anonymous!", r.anonymous_seed,
                   r.like_count AS "like_count!", r.pinned_at, r.accepted_at, r.hidden_at,
-                  r.created_at AS "created_at!"
+                  r.created_at AS "created_at!", r.image_ids AS "image_ids!"
            FROM unnest($1::bigint[]) AS p(id)
            CROSS JOIN LATERAL (
                SELECT * FROM comments c
@@ -322,7 +325,7 @@ pub(crate) async fn replies_page(
     sqlx::query_as!(
         CommentRow,
         "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
          WHERE parent_id = $1 AND hidden_at IS NULL
            AND (is_anonymous OR NOT (author_id = ANY($5)))
@@ -423,7 +426,8 @@ pub(crate) async fn author_comments(
     sqlx::query_as!(
         CommentRow,
         "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
-                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at
+                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at,
+                c.image_ids
          FROM comments c
          LEFT JOIN comments parent ON parent.id = c.parent_id
          WHERE c.author_id = $1 AND NOT c.is_anonymous AND c.hidden_at IS NULL
@@ -494,7 +498,8 @@ pub(crate) async fn listed_by_ids(
     sqlx::query_as!(
         CommentRow,
         "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
-                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at
+                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at,
+                c.image_ids
          FROM comments c
          LEFT JOIN comments parent ON parent.id = c.parent_id
          WHERE c.id = ANY($1) AND c.hidden_at IS NULL
@@ -514,7 +519,8 @@ pub(crate) async fn listed_after(
     sqlx::query_as!(
         CommentRow,
         "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
-                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at
+                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at,
+                c.image_ids
          FROM comments c
          LEFT JOIN comments parent ON parent.id = c.parent_id
          WHERE c.id > $1 AND c.hidden_at IS NULL

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)\n             VALUES ($1, $2, 'image/png', 100, $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0a1f6c32fc48ecb35ba2d9d5c170bc4e8d12a90db01cd43acf4f523a42e9f0b0"
+}

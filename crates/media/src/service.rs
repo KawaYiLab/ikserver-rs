@@ -42,6 +42,7 @@ pub(crate) fn view(urls: &Urls, row: MediaRow) -> MediaView {
         width: row.width,
         height: row.height,
         name: row.name,
+        thumbhash: row.thumbhash,
         created_at: row.created_at,
     }
 }
@@ -357,6 +358,14 @@ async fn verify_and_publish(
     }
     drop(tx);
 
+    // ThumbHash 是 CPU 密集的解码，放到阻塞线程；失败只是没有占位。
+    let (bytes, thumbhash) = tokio::task::spawn_blocking(move || {
+        let hash = crate::thumb::compute(&bytes, mime);
+        (bytes, hash)
+    })
+    .await
+    .map_err(|e| Problem::internal_from(&e))?;
+
     // 发布到客户端不可写的新 key（UPL-052），写的是校验过的那份字节。
     let final_key = object_key(&backend.root_prefix, None, now, sniff::canonical_ext(mime))?;
     let size_bytes = i64::try_from(bytes.len()).unwrap_or(i64::MAX);
@@ -379,6 +388,7 @@ async fn verify_and_publish(
             sha256: &sha,
             receipt: &receipt,
             name: &claims.name,
+            thumbhash: thumbhash.as_deref(),
             now,
         },
     )
@@ -447,6 +457,7 @@ pub async fn gallery(
                     width: r.width,
                     height: r.height,
                     name: r.name,
+                    thumbhash: r.thumbhash,
                     created_at: r.created_at,
                 },
             )

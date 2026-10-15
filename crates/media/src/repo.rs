@@ -11,6 +11,7 @@ pub(crate) struct MediaRow {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub name: String,
+    pub thumbhash: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -20,7 +21,7 @@ pub(crate) async fn by_receipt(
 ) -> sqlx::Result<Option<MediaRow>> {
     sqlx::query_as!(
         MediaRow,
-        "SELECT id, object_key, mime, size_bytes, width, height, name, created_at
+        "SELECT id, object_key, mime, size_bytes, width, height, name, thumbhash, created_at
          FROM media_files WHERE receipt = $1",
         receipt,
     )
@@ -36,7 +37,7 @@ pub(crate) async fn by_sha256(
 ) -> sqlx::Result<Option<MediaRow>> {
     sqlx::query_as!(
         MediaRow,
-        "SELECT f.id, f.object_key, f.mime, f.size_bytes, f.width, f.height, f.name, f.created_at
+        "SELECT f.id, f.object_key, f.mime, f.size_bytes, f.width, f.height, f.name, f.thumbhash, f.created_at
          FROM media_files f
          WHERE f.sha256 = $1
            AND ($2::bigint IS NULL OR EXISTS (
@@ -60,6 +61,7 @@ pub(crate) struct NewMedia<'a> {
     pub sha256: &'a str,
     pub receipt: &'a str,
     pub name: &'a str,
+    pub thumbhash: Option<&'a str>,
     pub now: DateTime<Utc>,
 }
 
@@ -67,8 +69,8 @@ pub(crate) struct NewMedia<'a> {
 pub(crate) async fn insert(conn: &mut PgConnection, m: &NewMedia<'_>) -> sqlx::Result<bool> {
     let result = sqlx::query!(
         "INSERT INTO media_files (id, object_key, mime, size_bytes, width, height, sha256,
-                                  receipt, name, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                  receipt, name, created_at, thumbhash)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          ON CONFLICT (receipt) DO NOTHING",
         m.id,
         m.object_key,
@@ -80,6 +82,7 @@ pub(crate) async fn insert(conn: &mut PgConnection, m: &NewMedia<'_>) -> sqlx::R
         m.receipt,
         m.name,
         m.now,
+        m.thumbhash,
     )
     .execute(conn)
     .await?;
@@ -128,6 +131,7 @@ pub(crate) struct GalleryRow {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub name: String,
+    pub thumbhash: Option<String>,
     pub created_at: DateTime<Utc>,
     pub added_at: DateTime<Utc>,
 }
@@ -142,8 +146,8 @@ pub(crate) async fn gallery(
     let (after_at, after_id) = after.unzip();
     sqlx::query_as!(
         GalleryRow,
-        "SELECT f.id, f.object_key, f.mime, f.size_bytes, f.width, f.height, f.name, f.created_at,
-                u.created_at AS added_at
+        "SELECT f.id, f.object_key, f.mime, f.size_bytes, f.width, f.height, f.name, f.thumbhash,
+                f.created_at, u.created_at AS added_at
          FROM media_uploaders u JOIN media_files f ON f.id = u.media_id
          WHERE u.user_id = $1
            AND ($2::timestamptz IS NULL OR (u.created_at, u.media_id) < ($2, $3::bigint))
@@ -166,7 +170,7 @@ pub(crate) async fn owned_among(
 ) -> sqlx::Result<Vec<MediaRow>> {
     sqlx::query_as!(
         MediaRow,
-        "SELECT f.id, f.object_key, f.mime, f.size_bytes, f.width, f.height, f.name, f.created_at
+        "SELECT f.id, f.object_key, f.mime, f.size_bytes, f.width, f.height, f.name, f.thumbhash, f.created_at
          FROM media_files f JOIN media_uploaders u ON u.media_id = f.id AND u.user_id = $1
          WHERE f.id = ANY($2)",
         user_id,
@@ -179,7 +183,7 @@ pub(crate) async fn owned_among(
 pub(crate) async fn by_ids(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<Vec<MediaRow>> {
     sqlx::query_as!(
         MediaRow,
-        "SELECT id, object_key, mime, size_bytes, width, height, name, created_at
+        "SELECT id, object_key, mime, size_bytes, width, height, name, thumbhash, created_at
          FROM media_files WHERE id = ANY($1)",
         ids,
     )

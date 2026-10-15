@@ -92,6 +92,46 @@ struct Prepared {
     /// (归一化名称, slug)，已按 slug 去重、保序。
     tags: Vec<(String, String)>,
     is_anonymous: bool,
+    /// 去重、保序后的封面。
+    cover_ids: Vec<i64>,
+}
+
+/// 等级允许的图片数（封面、正文插图各自不超过它，POST-012/014）。
+fn image_limit(principal: &Principal) -> usize {
+    usize::from(benefits::for_level(principal.benefit_level().max(1)).post_max_images)
+}
+
+/// Markdown 正文里的图片数（`![...](...)`）。
+fn body_image_count(body: &str) -> usize {
+    static IMAGE: std::sync::OnceLock<Option<regex::Regex>> = std::sync::OnceLock::new();
+    IMAGE
+        .get_or_init(|| regex::Regex::new(r"!\[[^\]]*\]\([^)]*\)").ok())
+        .as_ref()
+        .map_or(0, |re| re.find_iter(body).count())
+}
+
+/// 封面数与正文插图数（发布时按当前等级再校验一次，POST-013/057）。
+fn check_images(
+    principal: &Principal,
+    cover_ids: &[i64],
+    body: &str,
+    errors: &mut Vec<FieldError>,
+) {
+    let limit = image_limit(principal);
+    if cover_ids.len() > limit {
+        errors.push(field(
+            "coverIds",
+            "TOO_MANY",
+            format!("当前等级图片最多只能上传 {limit} 张"),
+        ));
+    }
+    if body_image_count(body) > limit {
+        errors.push(field(
+            "body",
+            "TOO_MANY_IMAGES",
+            format!("当前等级正文图片最多只能上传 {limit} 张"),
+        ));
+    }
 }
 
 fn body_limit(principal: &Principal) -> usize {
@@ -192,11 +232,22 @@ fn prepare(principal: &Principal, input: PostInput) -> Result<Prepared, Problem>
         }
     }
 
+    // 按原始条数拦截（不查库，POST-019）；通过后再去重。
+    let raw_covers: Vec<i64> = input.cover_ids.iter().map(|id| id.get()).collect();
+    check_images(principal, &raw_covers, &input.body, &mut errors);
+    let mut cover_ids: Vec<i64> = Vec::with_capacity(raw_covers.len());
+    for id in raw_covers {
+        if !cover_ids.contains(&id) {
+            cover_ids.push(id);
+        }
+    }
+
     if !errors.is_empty() {
         return Err(Problem::validation(errors));
     }
     let external_videos = serde_json::to_value(&videos).map_err(|e| Problem::internal_from(&e))?;
     Ok(Prepared {
+        cover_ids,
         title,
         body: input.body,
         editor_state: input.editor_state,
@@ -283,15 +334,46 @@ async fn resolve_tags(
         .collect()
 }
 
+/// 新引用的封面必须是自己图库里的图片（D-012 方案 A）。帖子里原本就有的不再校验
+/// （作者之后从图库移除了也不影响已经用上的封面）。
+async fn check_cover_owner(
+    conn: &mut PgConnection,
+    principal: &Principal,
+    cover_ids: &[i64],
+    existing: &[i64],
+) -> Result<(), Problem> {
+    let new: Vec<i64> = cover_ids
+        .iter()
+        .copied()
+        .filter(|id| !existing.contains(id))
+        .collect();
+    if new.is_empty() {
+        return Ok(());
+    }
+    let owned = ik_media::interop::owned_media(conn, principal.user_id.get(), &new).await?;
+    if new.iter().all(|id| owned.contains(id)) {
+        Ok(())
+    } else {
+        Err(Problem::field(
+            "coverIds",
+            "NOT_FOUND",
+            "图片不存在或不在你的图库里",
+        ))
+    }
+}
+
 async fn resolve(
     state: &ContentState,
     conn: &mut PgConnection,
     principal: &Principal,
     prepared: Prepared,
+    existing_covers: &[i64],
 ) -> Result<Content, Problem> {
     check_category(conn, principal, prepared.category_id).await?;
+    check_cover_owner(conn, principal, &prepared.cover_ids, existing_covers).await?;
     let tag_ids = resolve_tags(state, conn, &prepared.tags).await?;
     Ok(Content {
+        cover_ids: prepared.cover_ids,
         title: prepared.title,
         body: prepared.body,
         editor_state: prepared.editor_state,
@@ -422,7 +504,7 @@ pub async fn create(
     let mut effects = Effects::new();
 
     let mut tx = state.db.begin().await?;
-    let content = resolve(state, &mut tx, principal, prepared).await?;
+    let content = resolve(state, &mut tx, principal, prepared, &[]).await?;
     let seed = seed_for(content.is_anonymous, None)?;
     repo::insert_post(&mut tx, post_id, author_id, &content, seed.as_deref(), now).await?;
     repo::set_post_tags(&mut tx, post_id, &content.tag_ids).await?;
@@ -471,7 +553,8 @@ pub async fn save_draft(
             "发布后不能切换匿名",
         ));
     }
-    let content = resolve(state, &mut tx, principal, prepared).await?;
+    let existing = existing_covers(&mut tx, &row).await?;
+    let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
     if row.status == "published" {
         repo::upsert_draft(&mut tx, post_id, &content, now).await?;
         repo::bump_revision(&mut tx, post_id, now).await?;
@@ -505,10 +588,20 @@ fn draft_content(row: &PostRow, draft: DraftRow) -> Content {
         body: draft.body,
         editor_state: draft.editor_state,
         external_videos: draft.external_videos,
+        cover_ids: draft.cover_ids,
         category_id: draft.category_id,
         tag_ids: draft.tag_ids,
         is_anonymous: row.is_anonymous,
     }
+}
+
+/// 帖子里已经用上的封面（线上版本 + 待发布修改）。
+async fn existing_covers(conn: &mut PgConnection, row: &PostRow) -> Result<Vec<i64>, Problem> {
+    let mut ids = row.cover_ids.clone();
+    if let Some(draft) = repo::pending_draft(conn, row.id).await? {
+        ids.extend(draft.cover_ids);
+    }
+    Ok(ids)
 }
 
 /// 发布。可同时提交最新的工作副本（省一次保存请求）。
@@ -547,7 +640,8 @@ pub async fn publish(
     let mut category_id = row.category_id;
     let mut title = row.title.clone();
     if let Some(prepared) = prepared {
-        let content = resolve(state, &mut tx, principal, prepared).await?;
+        let existing = existing_covers(&mut tx, &row).await?;
+        let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
         category_id = content.category_id;
         title.clone_from(&content.title);
         apply_content(&mut tx, &row, &content, now).await?;
@@ -557,6 +651,7 @@ pub async fn publish(
         let content = draft_content(&row, draft);
         let mut errors = Vec::new();
         check_body(principal, &content.body, &mut errors);
+        check_images(principal, &content.cover_ids, &content.body, &mut errors);
         if !errors.is_empty() {
             return Err(Problem::validation(errors));
         }
@@ -568,6 +663,7 @@ pub async fn publish(
     } else if !was_published {
         let mut errors = Vec::new();
         check_body(principal, &row.body, &mut errors);
+        check_images(principal, &row.cover_ids, &row.body, &mut errors);
         if !errors.is_empty() {
             return Err(Problem::validation(errors));
         }
@@ -803,11 +899,29 @@ pub async fn record_view(
 // ---------- 读取 ----------
 
 /// 作者展示：匿名内容只给派生的假名；已注销账号显示「已注销用户」。评论等其他域共用。
+/// 作者资料与头像缩略图地址（按用户 id）。
+#[derive(Debug, Default)]
+pub struct Authors {
+    map: HashMap<i64, Author>,
+    avatars: HashMap<i64, String>,
+}
+
+/// 批量读取作者资料与头像。匿名内容的作者不要传进来。
+pub async fn load_authors(
+    db: &sqlx::PgPool,
+    media: &ik_media::MediaState,
+    ids: &[i64],
+) -> Result<Authors, Problem> {
+    let map = ik_auth::service::authors(db, ids).await?;
+    let avatars = media.avatar_urls(map.values()).await?;
+    Ok(Authors { map, avatars })
+}
+
 pub fn author_view(
     author_id: i64,
     is_anonymous: bool,
     seed: Option<&str>,
-    authors: &HashMap<i64, Author>,
+    authors: &Authors,
 ) -> AuthorView {
     if is_anonymous {
         return AuthorView {
@@ -815,20 +929,23 @@ pub fn author_view(
             name: anonymous::display_name(seed.unwrap_or(ANONYMOUS_FALLBACK_SEED)),
             level: None,
             anonymous: true,
+            avatar_url: None,
         };
     }
-    match authors.get(&author_id) {
+    match authors.map.get(&author_id) {
         Some(author) if !author.gone => AuthorView {
             id: Some(author.id),
             name: author.username.clone(),
             level: Some(author.level),
             anonymous: false,
+            avatar_url: authors.avatars.get(&author_id).cloned(),
         },
         _ => AuthorView {
             id: None,
             name: GONE_USER_NAME.to_owned(),
             level: None,
             anonymous: false,
+            avatar_url: None,
         },
     }
 }
@@ -857,10 +974,7 @@ async fn tag_map(
 }
 
 /// 只查非匿名帖的作者：匿名帖的真实作者不进入任何后续流程。
-async fn author_map(
-    state: &ContentState,
-    rows: &[&CardRow],
-) -> Result<HashMap<i64, Author>, Problem> {
+async fn author_map(state: &ContentState, rows: &[&CardRow]) -> Result<Authors, Problem> {
     let mut ids: Vec<i64> = rows
         .iter()
         .filter(|r| !r.is_anonymous)
@@ -868,7 +982,7 @@ async fn author_map(
         .collect();
     ids.sort_unstable();
     ids.dedup();
-    ik_auth::service::authors(&state.db, &ids).await
+    load_authors(&state.db, &state.media, &ids).await
 }
 
 async fn cards(
@@ -880,6 +994,8 @@ async fn cards(
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let mut tags = tag_map(conn, &ids).await?;
     let authors = author_map(state, &rows.iter().collect::<Vec<_>>()).await?;
+    let cover_ids: Vec<i64> = rows.iter().filter_map(|r| r.cover_id).collect();
+    let mut covers = state.media.views(&cover_ids).await?;
     let viewer_id = viewer.map(|p| p.user_id.get());
     // 游客不查阅读记录（CACHE-008）。
     let read: std::collections::HashSet<i64> = match viewer_id {
@@ -900,6 +1016,7 @@ async fn cards(
                 &authors,
             ),
             excerpt: excerpt(&row.excerpt_source),
+            cover: row.cover_id.and_then(|id| covers.remove(&id)),
             title: row.title,
             category: match (row.category_id, row.category_slug, row.category_name) {
                 (Some(id), Some(slug), Some(name)) => Some(CategoryRef {
@@ -1260,10 +1377,11 @@ pub async fn detail(
         .remove(&row.id)
         .unwrap_or_default();
     let authors = if row.is_anonymous {
-        HashMap::new()
+        Authors::default()
     } else {
-        ik_auth::service::authors(&state.db, &[row.author_id]).await?
+        load_authors(&state.db, &state.media, &[row.author_id]).await?
     };
+    let covers = media_in_order(state, &row.cover_ids).await?;
     let external_videos: Vec<ExternalVideo> =
         serde_json::from_value(row.external_videos.clone()).unwrap_or_default();
     let denny_given = match viewer {
@@ -1287,6 +1405,7 @@ pub async fn detail(
         ),
         title: row.title,
         body: row.body,
+        covers,
         allow_comment_accept: category.as_ref().is_some_and(|c| c.allow_comment_accept),
         category: category.map(|c| CategoryRef {
             id: Id::new(c.id),
@@ -1328,7 +1447,7 @@ pub async fn edit_view(
         .ok_or_else(post_not_found)?;
     ensure_owner(principal, &row)?;
     ensure_editable(&row)?;
-    build_edit_view(&mut conn, row).await
+    build_edit_view(state, &mut conn, row).await
 }
 
 async fn edit_view_by_id(state: &ContentState, post_id: i64) -> Result<PostEditView, Problem> {
@@ -1336,10 +1455,23 @@ async fn edit_view_by_id(state: &ContentState, post_id: i64) -> Result<PostEditV
     let row = repo::get_post(&mut conn, post_id)
         .await?
         .ok_or_else(post_not_found)?;
-    build_edit_view(&mut conn, row).await
+    build_edit_view(state, &mut conn, row).await
 }
 
-async fn build_edit_view(conn: &mut PgConnection, row: PostRow) -> Result<PostEditView, Problem> {
+/// 按给定顺序取媒体视图（不存在的跳过）。
+async fn media_in_order(
+    state: &ContentState,
+    ids: &[i64],
+) -> Result<Vec<ik_media::dto::MediaView>, Problem> {
+    let mut views = state.media.views(ids).await?;
+    Ok(ids.iter().filter_map(|id| views.remove(id)).collect())
+}
+
+async fn build_edit_view(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    row: PostRow,
+) -> Result<PostEditView, Problem> {
     let draft = repo::pending_draft(conn, row.id).await?;
     let has_pending_changes = draft.is_some();
     let status = if row.status == "published" {
@@ -1347,29 +1479,33 @@ async fn build_edit_view(conn: &mut PgConnection, row: PostRow) -> Result<PostEd
     } else {
         PostStatus::Draft
     };
-    let (title, body, editor_state, videos, category_id, tag_ids, updated_at) = match draft {
-        Some(d) => (
-            d.title,
-            d.body,
-            d.editor_state,
-            d.external_videos,
-            d.category_id,
-            d.tag_ids,
-            d.updated_at.max(row.updated_at),
-        ),
-        None => {
-            let ids = repo::post_tag_ids(conn, row.id).await?;
-            (
-                row.title,
-                row.body,
-                row.editor_state,
-                row.external_videos,
-                row.category_id,
-                ids,
-                row.updated_at,
-            )
-        }
-    };
+    let (title, body, editor_state, videos, category_id, tag_ids, cover_ids, updated_at) =
+        match draft {
+            Some(d) => (
+                d.title,
+                d.body,
+                d.editor_state,
+                d.external_videos,
+                d.category_id,
+                d.tag_ids,
+                d.cover_ids,
+                d.updated_at.max(row.updated_at),
+            ),
+            None => {
+                let ids = repo::post_tag_ids(conn, row.id).await?;
+                (
+                    row.title,
+                    row.body,
+                    row.editor_state,
+                    row.external_videos,
+                    row.category_id,
+                    ids,
+                    row.cover_ids,
+                    row.updated_at,
+                )
+            }
+        };
+    let covers = media_in_order(state, &cover_ids).await?;
     let tag_rows = repo::tags_by_ids(conn, &tag_ids).await?;
     let tags = tag_ids
         .iter()
@@ -1393,6 +1529,7 @@ async fn build_edit_view(conn: &mut PgConnection, row: PostRow) -> Result<PostEd
         tags,
         is_anonymous: row.is_anonymous,
         external_videos,
+        covers,
         editor_state,
         revision: row.revision,
         has_pending_changes,

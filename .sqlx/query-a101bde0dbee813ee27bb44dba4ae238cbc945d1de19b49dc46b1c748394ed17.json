@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT bio, hidden, pinned_post_ids FROM user_profiles WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bio",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "bio"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hidden",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "hidden"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "pinned_post_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "pinned_post_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a101bde0dbee813ee27bb44dba4ae238cbc945d1de19b49dc46b1c748394ed17"
+}

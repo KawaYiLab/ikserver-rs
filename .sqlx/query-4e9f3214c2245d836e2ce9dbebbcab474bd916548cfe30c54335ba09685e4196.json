@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT excerpt FROM notifications WHERE recipient_id = 1 AND kind = 'comment'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "excerpt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "excerpt"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4e9f3214c2245d836e2ce9dbebbcab474bd916548cfe30c54335ba09685e4196"
+}

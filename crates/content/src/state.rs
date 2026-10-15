@@ -5,6 +5,7 @@ use std::time::Duration;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
+use ik_media::MediaState;
 use moka::future::Cache;
 use sqlx::PgPool;
 
@@ -22,15 +23,18 @@ pub struct ContentState {
     pub db: PgPool,
     pub ids: Arc<Snowflake>,
     pub bus: Arc<dyn EventBus>,
+    /// 封面、头像的展示数据与归属校验。
+    pub media: MediaState,
     pub(crate) views: Arc<ViewGuard>,
 }
 
 impl ContentState {
-    pub fn new(db: PgPool, ids: Arc<Snowflake>, bus: Arc<dyn EventBus>) -> Self {
+    pub fn new(db: PgPool, ids: Arc<Snowflake>, bus: Arc<dyn EventBus>, media: MediaState) -> Self {
         Self {
             db,
             ids,
             bus,
+            media,
             views: Arc::new(ViewGuard {
                 cooldown: Cache::builder()
                     .max_capacity(VIEW_COOLDOWN_CAPACITY)

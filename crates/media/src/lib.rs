@@ -13,6 +13,7 @@ pub mod service;
 pub mod sniff;
 mod state;
 pub mod storage;
+pub mod thumb;
 pub mod token;
 
 pub use routes::router;

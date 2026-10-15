@@ -56,13 +56,19 @@ impl AppState {
             AuthSettings::from_config(&config)?,
             bus.clone(),
         );
-        let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
-        let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone());
+        let media = MediaState::new(
+            db.clone(),
+            ids.clone(),
+            &config.storage,
+            config.secrets.code_hmac_key.expose().as_bytes(),
+        );
+        let content = ContentState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+        let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
         let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
         let social = SocialState::new(db.clone());
-        let notify = NotifyState::new(db.clone(), bus.clone());
-        let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone());
+        let notify = NotifyState::new(db.clone(), bus.clone(), media.clone());
+        let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
         let typing: TypingHandler = {
             let messaging = messaging.clone();
             Arc::new(move |user_id, conversation_id| {
@@ -74,12 +80,6 @@ impl AppState {
         };
         let realtime =
             RealtimeState::start(&bus, config.http.allowed_origins.clone())?.with_typing(typing);
-        let media = MediaState::new(
-            db.clone(),
-            ids.clone(),
-            &config.storage,
-            config.secrets.code_hmac_key.expose().as_bytes(),
-        );
         let profile = ProfileState::new(
             db.clone(),
             ids.clone(),

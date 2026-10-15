@@ -86,6 +86,7 @@ fn peer_as_sender(peer: PeerView) -> SenderView {
         id: peer.id,
         name: peer.name,
         level: peer.level,
+        avatar_url: peer.avatar_url,
     }
 }
 
@@ -199,9 +200,9 @@ pub async fn list(
         Some(id) => Before::Item { at: c.t, id },
         None => Before::UpTo(c.t),
     });
-    let conversations = dm::page(&state.db, me, dm_before, limit + 1).await?;
+    let conversations = dm::page(&state.db, &state.media, me, dm_before, limit + 1).await?;
     let pinned = if first_page {
-        dm::pinned(&state.db, me).await?
+        dm::pinned(&state.db, &state.media, me).await?
     } else {
         Vec::new()
     };

@@ -24,6 +24,9 @@ pub struct MediaView {
     pub height: Option<i32>,
     /// 上传时的文件名（只用于展示）。
     pub name: String,
+    /// ThumbHash（base64），图片加载前的模糊占位。AVIF 或解码失败时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumbhash: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 

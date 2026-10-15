@@ -58,7 +58,6 @@ fn defaults() -> ProfileRow {
         bio: String::new(),
         hidden: false,
         pinned_post_ids: None,
-        avatar_media_id: None,
     }
 }
 
@@ -169,7 +168,7 @@ pub async fn profile(
         (None, None)
     };
 
-    let avatar = avatar_view(state, t.profile.avatar_media_id).await?;
+    let avatar = avatar_view(state, t.user.avatar_media_id.filter(|_| !t.user.gone)).await?;
     Ok(ProfileView {
         avatar,
         id: Id::new(t.user.id),
@@ -285,9 +284,22 @@ async fn avatar_view(
     Ok(state.media.views(&[id]).await?.remove(&id))
 }
 
-async fn my_view(state: &ProfileState, row: ProfileRow) -> Result<MyProfileView, Problem> {
+/// 自己当前的头像（媒体 id）。
+async fn my_avatar_id(state: &ProfileState, user_id: i64) -> Result<Option<i64>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(ik_auth::interop::profile_user(&mut conn, user_id)
+        .await?
+        .and_then(|u| u.avatar_media_id))
+}
+
+async fn my_view(
+    state: &ProfileState,
+    user_id: i64,
+    row: ProfileRow,
+) -> Result<MyProfileView, Problem> {
+    let avatar_id = my_avatar_id(state, user_id).await?;
     Ok(MyProfileView {
-        avatar: avatar_view(state, row.avatar_media_id).await?,
+        avatar: avatar_view(state, avatar_id).await?,
         bio: row.bio,
         hidden: row.hidden,
         pinned_post_ids: row
@@ -303,7 +315,7 @@ pub async fn my_profile(
     let mut conn = state.db.acquire().await?;
     let row = profile_row(&mut conn, principal.user_id.get()).await?;
     drop(conn);
-    my_view(state, row).await
+    my_view(state, principal.user_id.get(), row).await
 }
 
 /// 修改签名、隐藏主页。不收费、不要求通过考试（PROFILE-007/008）。
@@ -329,7 +341,7 @@ pub async fn update_profile(
         Utc::now(),
     )
     .await?;
-    my_view(state, row).await
+    my_view(state, principal.user_id.get(), row).await
 }
 
 /// 用户名校验（D-018：区分大小写；字符集维持旧系统的宽松规则，只额外拒绝 `@` 与控制字符）。
@@ -426,11 +438,13 @@ pub async fn set_avatar(
             "图片不存在或不在你的图库里",
         ));
     }
-    let current = profile_row(&mut tx, user_id).await?;
-    let balance = if current.avatar_media_id == Some(media_id) {
+    let current = ik_auth::interop::profile_user(&mut tx, user_id)
+        .await?
+        .and_then(|u| u.avatar_media_id);
+    let balance = if current == Some(media_id) {
         ik_economy::service::balance_of(&mut tx, user_id).await?
     } else {
-        repo::set_avatar(&mut tx, user_id, Some(media_id), now).await?;
+        ik_auth::interop::set_avatar(&mut tx, user_id, Some(media_id)).await?;
         ik_economy::service::spend_denny(
             &mut tx,
             &state.ids,
@@ -457,7 +471,7 @@ pub async fn clear_avatar(
 ) -> Result<AvatarResult, Problem> {
     let user_id = principal.user_id.get();
     let mut tx = state.db.begin().await?;
-    repo::set_avatar(&mut tx, user_id, None, Utc::now()).await?;
+    ik_auth::interop::set_avatar(&mut tx, user_id, None).await?;
     let balance = ik_economy::service::balance_of(&mut tx, user_id).await?;
     tx.commit().await?;
     Ok(AvatarResult {
@@ -508,7 +522,7 @@ pub async fn set_pinned(
     };
     let mut conn = state.db.acquire().await?;
     let row = repo::set_pinned(&mut conn, user_id, pinned.as_deref(), Utc::now()).await?;
-    my_view(state, row).await
+    my_view(state, principal.user_id.get(), row).await
 }
 
 // ---------- 用户搜索 ----------
@@ -571,9 +585,12 @@ pub async fn search(
             .collect(),
         None => HashSet::new(),
     };
+    drop(conn);
+    let avatars = avatar_urls(state, &ids).await?;
     Ok(found
         .into_iter()
         .map(|u| UserSearchItem {
+            avatar_url: avatars.get(&u.id).cloned(),
             id: Id::new(u.id),
             bio: bios
                 .get(&u.id)
@@ -585,6 +602,15 @@ pub async fn search(
             level: u.level,
         })
         .collect())
+}
+
+/// 这些用户的头像缩略图地址。
+async fn avatar_urls(
+    state: &ProfileState,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, String>, Problem> {
+    let authors = ik_auth::service::authors(&state.db, ids).await?;
+    state.media.avatar_urls(authors.values()).await
 }
 
 /// @ 提及候选（需要登录，PROFILE-023）。关键词必须是 1–32 字。
@@ -604,17 +630,19 @@ pub async fn mention_candidates(
     let limit =
         usize::try_from(query.limit.unwrap_or(MENTION_DEFAULT).clamp(1, MENTION_MAX)).unwrap_or(8);
     let mut conn = state.db.acquire().await?;
-    Ok(
-        search_candidates(&mut conn, Some(principal.user_id.get()), q, limit)
-            .await?
-            .into_iter()
-            .map(|u| MentionCandidate {
-                id: Id::new(u.id),
-                username: u.username,
-                level: u.level,
-            })
-            .collect(),
-    )
+    let found = search_candidates(&mut conn, Some(principal.user_id.get()), q, limit).await?;
+    drop(conn);
+    let ids: Vec<i64> = found.iter().map(|u| u.id).collect();
+    let avatars = avatar_urls(state, &ids).await?;
+    Ok(found
+        .into_iter()
+        .map(|u| MentionCandidate {
+            avatar_url: avatars.get(&u.id).cloned(),
+            id: Id::new(u.id),
+            username: u.username,
+            level: u.level,
+        })
+        .collect())
 }
 
 #[cfg(test)]

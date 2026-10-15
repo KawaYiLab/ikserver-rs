@@ -98,6 +98,8 @@ pub struct ProfileUser {
     /// 已注销或已合并。
     pub gone: bool,
     pub created_at: DateTime<Utc>,
+    /// 自定义头像（媒体 id）。
+    pub avatar_media_id: Option<i64>,
 }
 
 pub async fn profile_user(
@@ -113,6 +115,7 @@ pub async fn profile_user(
             level: row.level,
             is_ai_agent: row.is_ai_agent,
             created_at: row.created_at,
+            avatar_media_id: row.avatar_media_id,
         }))
 }
 
@@ -193,4 +196,18 @@ pub async fn mark_exam_passed(
     at: DateTime<Utc>,
 ) -> Result<bool, Problem> {
     Ok(repo::mark_exam_passed(conn, user_id, at).await?)
+}
+
+/// 设置 / 清除自定义头像。调用方负责校验媒体归属、扣费，并已锁住用户行。
+/// 账号不可用时返回 403 `ACCOUNT_BLOCKED`。
+pub async fn set_avatar(
+    conn: &mut PgConnection,
+    user_id: i64,
+    media_id: Option<i64>,
+) -> Result<(), Problem> {
+    if repo::set_avatar(conn, user_id, media_id).await? {
+        Ok(())
+    } else {
+        Err(crate::service::account_blocked())
+    }
 }

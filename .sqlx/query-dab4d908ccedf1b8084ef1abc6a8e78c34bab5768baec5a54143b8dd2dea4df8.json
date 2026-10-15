@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT title, body, editor_state, external_videos, cover_ids, category_id, tag_ids,\n                updated_at\n         FROM post_drafts WHERE post_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "editor_state",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "editor_state"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "external_videos",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "external_videos"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "cover_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "cover_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "category_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "category_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "tag_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "tag_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "dab4d908ccedf1b8084ef1abc6a8e78c34bab5768baec5a54143b8dd2dea4df8"
+}

@@ -24,6 +24,7 @@ chrono.workspace = true
 anyhow.workspace = true
 
 [dev-dependencies]
+ik-media.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 proptest.workspace = true
 

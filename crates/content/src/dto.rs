@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use ik_kernel::Id;
-use ik_kernel::id::marker::{Category, Post, User};
+use ik_kernel::id::marker::{Category, Media, Post, User};
+use ik_media::dto::MediaView;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -77,6 +78,10 @@ pub struct PostInput {
     #[serde(default)]
     #[schema(value_type = Option<Object>)]
     pub editor_state: Option<serde_json::Value>,
+    /// 封面图（自己图库里的媒体 id，有序，重复的去掉）。数量上限随等级（Lv1 9 张 … Lv7 40 张）。
+    #[serde(default)]
+    #[schema(value_type = Vec<String>)]
+    pub cover_ids: Vec<Id<Media>>,
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -106,6 +111,9 @@ pub struct AuthorView {
     pub name: String,
     pub level: Option<i16>,
     pub anonymous: bool,
+    /// 自定义头像（360 宽缩略图）。匿名、已注销、没有设置时省略（客户端用默认头像）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 /// 信息流卡片。
@@ -117,6 +125,9 @@ pub struct PostCard {
     pub title: String,
     /// 正文开头（最多 120 字，空白折叠）。
     pub excerpt: String,
+    /// 第一张封面（卡片只展示一张）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover: Option<MediaView>,
     pub author: AuthorView,
     pub category: Option<CategoryRef>,
     pub tags: Vec<TagRef>,
@@ -167,6 +178,8 @@ pub struct PostDetail {
     pub id: Id<Post>,
     pub title: String,
     pub body: String,
+    /// 全部封面（有序）。
+    pub covers: Vec<MediaView>,
     pub author: AuthorView,
     pub category: Option<CategoryRef>,
     pub tags: Vec<TagRef>,
@@ -219,6 +232,8 @@ pub struct PostEditView {
     pub is_anonymous: bool,
     /// 作者原始输入的视频链接，编辑时原样回填。
     pub external_videos: Vec<String>,
+    /// 封面（有序）。编辑时把 `id` 原样回填到 `coverIds`。
+    pub covers: Vec<MediaView>,
     #[schema(value_type = Option<Object>)]
     pub editor_state: Option<serde_json::Value>,
     /// 乐观并发版本号，同时以 `ETag: "rev:<n>"` 返回；保存时带 `If-Match` 防止覆盖。

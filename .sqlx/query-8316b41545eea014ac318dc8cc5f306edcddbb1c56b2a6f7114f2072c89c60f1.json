@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM media_uploaders WHERE media_id = 101",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "8316b41545eea014ac318dc8cc5f306edcddbb1c56b2a6f7114f2072c89c60f1"
+}

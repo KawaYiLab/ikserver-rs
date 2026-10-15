@@ -202,6 +202,40 @@ impl Storage {
         Ok(())
     }
 
+    /// 删除 `prefix` 下最后修改时间早于 `before` 的对象，返回删除数。分页列举，逐批删除。
+    pub async fn delete_older_than(
+        &self,
+        prefix: &str,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> Result<usize, StorageError> {
+        let cutoff = before.timestamp();
+        let mut deleted = 0;
+        let mut token: Option<String> = None;
+        loop {
+            let page = self
+                .client
+                .list_objects_v2()
+                .bucket(&self.bucket)
+                .prefix(prefix)
+                .set_continuation_token(token.take())
+                .send()
+                .await
+                .map_err(unavailable)?;
+            for object in page.contents() {
+                let old = object.last_modified().is_some_and(|t| t.secs() < cutoff);
+                if let (true, Some(key)) = (old, object.key()) {
+                    self.delete(key).await?;
+                    deleted += 1;
+                }
+            }
+            match page.next_continuation_token() {
+                Some(next) if page.is_truncated().unwrap_or(false) => token = Some(next.to_owned()),
+                _ => break,
+            }
+        }
+        Ok(deleted)
+    }
+
     /// 测试用：建桶（已存在时忽略错误）。
     #[doc(hidden)]
     pub async fn ensure_bucket(&self) -> Result<(), StorageError> {

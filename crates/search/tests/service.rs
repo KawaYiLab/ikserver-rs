@@ -51,8 +51,9 @@ struct Harness {
 fn state(db: &PgPool, config: &SearchConfig) -> SearchState {
     let bus = Arc::new(LocalBus::new(64));
     let ids = Arc::new(Snowflake::new(1).unwrap());
-    let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
-    let comments = CommentsState::new(db.clone(), ids, bus);
+    let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
+    let content = ContentState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+    let comments = CommentsState::new(db.clone(), ids, bus, media);
     SearchState::new(content, comments, config).unwrap()
 }
 

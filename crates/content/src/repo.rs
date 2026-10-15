@@ -198,6 +198,7 @@ pub(crate) struct PostRow {
     pub body: String,
     pub editor_state: Option<serde_json::Value>,
     pub external_videos: serde_json::Value,
+    pub cover_ids: Vec<i64>,
     pub is_anonymous: bool,
     pub anonymous_seed: Option<String>,
     pub revision: i32,
@@ -219,7 +220,7 @@ pub(crate) struct PostRow {
 pub(crate) async fn get_post(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<PostRow>> {
     sqlx::query_as!(
         PostRow,
-        "SELECT id, author_id, category_id, status, title, body, editor_state, external_videos,
+        "SELECT id, author_id, category_id, status, title, body, editor_state, external_videos, cover_ids,
                 is_anonymous, anonymous_seed, revision, first_published_at, published_at, edited_at,
                 bumped_at, pinned_at, solved_at, hidden_at, view_count, like_count, comment_count,
                 favorite_count, denny_count, updated_at
@@ -234,7 +235,7 @@ pub(crate) async fn get_post(conn: &mut PgConnection, id: i64) -> sqlx::Result<O
 pub(crate) async fn lock_post(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<PostRow>> {
     sqlx::query_as!(
         PostRow,
-        "SELECT id, author_id, category_id, status, title, body, editor_state, external_videos,
+        "SELECT id, author_id, category_id, status, title, body, editor_state, external_videos, cover_ids,
                 is_anonymous, anonymous_seed, revision, first_published_at, published_at, edited_at,
                 bumped_at, pinned_at, solved_at, hidden_at, view_count, like_count, comment_count,
                 favorite_count, denny_count, updated_at
@@ -251,6 +252,7 @@ pub(crate) struct Content {
     pub body: String,
     pub editor_state: Option<serde_json::Value>,
     pub external_videos: serde_json::Value,
+    pub cover_ids: Vec<i64>,
     pub category_id: Option<i64>,
     pub tag_ids: Vec<i64>,
     pub is_anonymous: bool,
@@ -266,8 +268,8 @@ pub(crate) async fn insert_post(
 ) -> sqlx::Result<()> {
     sqlx::query!(
         "INSERT INTO posts (id, author_id, category_id, title, body, editor_state, external_videos,
-                            is_anonymous, anonymous_seed, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10)",
+                            is_anonymous, anonymous_seed, created_at, updated_at, cover_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11)",
         id,
         author_id,
         content.category_id,
@@ -278,6 +280,7 @@ pub(crate) async fn insert_post(
         content.is_anonymous,
         anonymous_seed,
         now,
+        &content.cover_ids,
     )
     .execute(conn)
     .await?;
@@ -295,7 +298,7 @@ pub(crate) async fn update_post_content(
     sqlx::query!(
         "UPDATE posts SET category_id = $2, title = $3, body = $4, editor_state = $5,
                 external_videos = $6, is_anonymous = $7, anonymous_seed = $8,
-                revision = revision + 1, updated_at = $9
+                revision = revision + 1, updated_at = $9, cover_ids = $10
          WHERE id = $1",
         id,
         content.category_id,
@@ -306,6 +309,7 @@ pub(crate) async fn update_post_content(
         content.is_anonymous,
         anonymous_seed,
         now,
+        &content.cover_ids,
     )
     .execute(conn)
     .await?;
@@ -438,6 +442,7 @@ pub(crate) struct DraftRow {
     pub body: String,
     pub editor_state: Option<serde_json::Value>,
     pub external_videos: serde_json::Value,
+    pub cover_ids: Vec<i64>,
     pub category_id: Option<i64>,
     pub tag_ids: Vec<i64>,
     pub updated_at: DateTime<Utc>,
@@ -449,7 +454,8 @@ pub(crate) async fn pending_draft(
 ) -> sqlx::Result<Option<DraftRow>> {
     sqlx::query_as!(
         DraftRow,
-        "SELECT title, body, editor_state, external_videos, category_id, tag_ids, updated_at
+        "SELECT title, body, editor_state, external_videos, cover_ids, category_id, tag_ids,
+                updated_at
          FROM post_drafts WHERE post_id = $1",
         post_id,
     )
@@ -465,12 +471,13 @@ pub(crate) async fn upsert_draft(
 ) -> sqlx::Result<()> {
     sqlx::query!(
         "INSERT INTO post_drafts (post_id, title, body, editor_state, external_videos, category_id,
-                                  tag_ids, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                  tag_ids, updated_at, cover_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (post_id) DO UPDATE SET
              title = EXCLUDED.title, body = EXCLUDED.body, editor_state = EXCLUDED.editor_state,
              external_videos = EXCLUDED.external_videos, category_id = EXCLUDED.category_id,
-             tag_ids = EXCLUDED.tag_ids, updated_at = EXCLUDED.updated_at",
+             tag_ids = EXCLUDED.tag_ids, updated_at = EXCLUDED.updated_at,
+             cover_ids = EXCLUDED.cover_ids",
         post_id,
         content.title,
         content.body,
@@ -479,6 +486,7 @@ pub(crate) async fn upsert_draft(
         content.category_id,
         &content.tag_ids,
         now,
+        &content.cover_ids,
     )
     .execute(conn)
     .await?;
@@ -510,6 +518,8 @@ pub(crate) struct CardRow {
     pub bumped_at: DateTime<Utc>,
     pub edited_at: Option<DateTime<Utc>>,
     pub last_bumped_by: Option<i64>,
+    /// 第一张封面（卡片只展示一张，OPS-004）。
+    pub cover_id: Option<i64>,
     pub category_id: Option<i64>,
     pub category_slug: Option<String>,
     pub category_name: Option<String>,
@@ -543,7 +553,7 @@ pub(crate) async fn feed(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.status = 'published' AND p.hidden_at IS NULL
@@ -585,7 +595,7 @@ pub(crate) async fn pinned_cards(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.pinned_at IS NOT NULL AND p.status = 'published' AND p.hidden_at IS NULL
@@ -938,6 +948,8 @@ pub(crate) struct SavedCardRow {
     pub bumped_at: DateTime<Utc>,
     pub edited_at: Option<DateTime<Utc>>,
     pub last_bumped_by: Option<i64>,
+    /// 第一张封面（卡片只展示一张，OPS-004）。
+    pub cover_id: Option<i64>,
     pub category_id: Option<i64>,
     pub category_slug: Option<String>,
     pub category_name: Option<String>,
@@ -963,6 +975,7 @@ impl SavedCardRow {
                 bumped_at: self.bumped_at,
                 edited_at: self.edited_at,
                 last_bumped_by: self.last_bumped_by,
+                cover_id: self.cover_id,
                 category_id: self.category_id,
                 category_slug: self.category_slug,
                 category_name: self.category_name,
@@ -988,7 +1001,7 @@ pub(crate) async fn liked_cards(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM post_likes s
            JOIN posts p ON p.id = s.post_id
@@ -1024,7 +1037,7 @@ pub(crate) async fn favorite_cards(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM post_favorites s
            JOIN posts p ON p.id = s.post_id
@@ -1092,7 +1105,7 @@ pub(crate) async fn author_cards(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.author_id = $1 AND p.status = 'published' AND NOT p.is_anonymous
@@ -1123,7 +1136,7 @@ pub(crate) async fn author_cards_by_ids(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.id = ANY($2) AND p.author_id = $1 AND p.status = 'published'
@@ -1265,7 +1278,7 @@ pub(crate) async fn public_cards_by_ids(
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
-                  p.edited_at, p.last_bumped_by,
+                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS "cover_id?",
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.id = ANY($1) AND p.status = 'published' AND p.hidden_at IS NULL
@@ -1461,6 +1474,7 @@ pub(crate) struct PostMetaRow {
     pub author_id: i64,
     pub is_anonymous: bool,
     pub title: String,
+    pub cover_id: Option<i64>,
 }
 
 /// `ids` 中公开的帖子：作者、是否匿名、标题。
@@ -1470,8 +1484,8 @@ pub(crate) async fn public_post_meta(
 ) -> sqlx::Result<Vec<PostMetaRow>> {
     sqlx::query_as!(
         PostMetaRow,
-        "SELECT id, author_id, is_anonymous, title FROM posts
-         WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL",
+        r#"SELECT id, author_id, is_anonymous, title, cover_ids[1] AS "cover_id?" FROM posts
+           WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL"#,
         ids,
     )
     .fetch_all(conn)

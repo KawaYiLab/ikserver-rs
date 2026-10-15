@@ -217,10 +217,16 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 - 限制：≤ 30 MiB；类型只认 image/jpeg|png|gif|webp|avif（以嗅探为准，不信任客户端声明）；签名每人每分钟 60 次；
   同时校验 2 个（可配置），排队最多 64 个，满了或超时返回 429。
-- 媒体对象统一含 `{ id, url, thumbUrl, mime, size, width?, height?, name, createdAt }`；`thumbUrl` 为 360 宽 WebP
-  （配置了 CDN 时按大小选阿里云 ESA 或 R2 图片变换，没有 CDN 时与原图相同）。缩略哈希（thumbhash）尚未实现。
+- 媒体对象统一含 `{ id, url, thumbUrl, mime, size, width?, height?, name, thumbhash?, createdAt }`；`thumbUrl` 为 360 宽 WebP
+  （配置了 CDN 时按大小选阿里云 ESA 或 R2 图片变换，没有 CDN 时与原图相同）；`thumbhash` 是 base64 的 ThumbHash 模糊占位
+  （JPEG/PNG/GIF/WebP 在完成上传时计算，AVIF 与解码失败的图片没有）。
 - 我的图库：`GET /v1/me/uploads`、`DELETE /v1/me/uploads/{id}`（只从图库移除，文件不删）。
-- 引用媒体（头像，以后的帖子封面、评论图片）只能用自己图库里的文件（D-012 方案 A）。
+- 引用媒体只能用自己图库里的文件（D-012 方案 A）：头像 `PUT /v1/me/avatar { mediaId }`、帖子封面 `PostInput.coverIds`
+  （卡片 `cover` 只带第一张，详情 `covers` 全部）、评论图片 `CreateCommentRequest.imageIds`（`CommentView.images`）。
+  编辑帖子时，原本就在帖子里的封面不再校验归属（作者之后从图库移除也不影响）。
+- 作者展示（`AuthorView`、通知发送者、私信对方、用户搜索、@ 候选）带 `avatarUrl`（360 宽缩略图）；匿名、已注销、
+  没有设置头像时省略。
+- 没有完成的上传留在暂存前缀 `[root/]staging/` 下，后台每小时删除超过 `IK_STORAGE__STAGING_TTL_HOURS`（默认 24）的对象。
 
 ## 缓存
 

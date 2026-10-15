@@ -28,8 +28,9 @@ struct Harness {
 fn harness(db: PgPool) -> Harness {
     let bus = Arc::new(LocalBus::new(1024));
     let ids = Arc::new(Snowflake::new(1).unwrap());
-    let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
-    let comments = CommentsState::new(db.clone(), ids, bus);
+    let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
+    let content = ContentState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+    let comments = CommentsState::new(db.clone(), ids, bus, media);
     Harness {
         feed: FeedState::new(content.clone(), Hot::default()),
         content,
@@ -69,6 +70,7 @@ impl Harness {
             is_anonymous: anonymous,
             external_videos: Vec::new(),
             editor_state: None,
+            cover_ids: Vec::new(),
         };
         ik_content::service::create(&self.content, author, input, true)
             .await
@@ -92,6 +94,7 @@ impl Harness {
                 body: "评论".into(),
                 parent_id: None,
                 is_anonymous: false,
+                image_ids: Vec::new(),
             },
         )
         .await

@@ -84,22 +84,32 @@ pub(crate) fn message_view(row: MessageRow) -> MessageView {
     }
 }
 
-pub(crate) fn peer_view(peer_id: i64, authors: &HashMap<i64, Author>) -> PeerView {
+pub(crate) fn peer_view(
+    peer_id: i64,
+    authors: &HashMap<i64, Author>,
+    avatars: &HashMap<i64, String>,
+) -> PeerView {
     match authors.get(&peer_id) {
         Some(a) if !a.gone => PeerView {
             id: Some(a.id),
             name: a.username.clone(),
             level: Some(a.level),
+            avatar_url: avatars.get(&peer_id).cloned(),
         },
         _ => PeerView {
             id: None,
             name: GONE_USER_NAME.to_owned(),
             level: None,
+            avatar_url: None,
         },
     }
 }
 
-fn conversation_view(row: SummaryRow, authors: &HashMap<i64, Author>) -> ConversationView {
+fn conversation_view(
+    row: SummaryRow,
+    authors: &HashMap<i64, Author>,
+    avatars: &HashMap<i64, String>,
+) -> ConversationView {
     let last_message = match (
         row.last_id,
         row.last_sender_id,
@@ -120,7 +130,7 @@ fn conversation_view(row: SummaryRow, authors: &HashMap<i64, Author>) -> Convers
     ConversationView {
         id: Id::new(row.conversation_id),
         kind: "direct".to_owned(),
-        peer: peer_view(row.peer_id, authors),
+        peer: peer_view(row.peer_id, authors, avatars),
         peer_user_id: row.peer_id,
         muted: row.muted,
         pinned: row.pinned_at.is_some(),
@@ -134,15 +144,17 @@ fn conversation_view(row: SummaryRow, authors: &HashMap<i64, Author>) -> Convers
 /// 把摘要行转成视图（批量取对方资料）。
 pub(crate) async fn conversation_views(
     db: &PgPool,
+    media: &ik_media::MediaState,
     rows: Vec<SummaryRow>,
 ) -> Result<Vec<ConversationView>, Problem> {
     let mut peers: Vec<i64> = rows.iter().map(|r| r.peer_id).collect();
     peers.sort_unstable();
     peers.dedup();
     let authors = ik_auth::service::authors(db, &peers).await?;
+    let avatars = media.avatar_urls(authors.values()).await?;
     Ok(rows
         .into_iter()
-        .map(|row| conversation_view(row, &authors))
+        .map(|row| conversation_view(row, &authors, &avatars))
         .collect())
 }
 
@@ -255,7 +267,7 @@ pub async fn conversation(
         .await?
         .ok_or_else(Problem::not_found)?;
     drop(conn);
-    conversation_views(&state.db, vec![row])
+    conversation_views(&state.db, &state.media, vec![row])
         .await?
         .pop()
         .ok_or_else(Problem::internal)

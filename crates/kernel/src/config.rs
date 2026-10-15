@@ -95,6 +95,8 @@ pub struct Storage {
     pub task_timeout_secs: u64,
     /// 单个 S3 请求的超时（UPL-042）。
     pub request_timeout_secs: u64,
+    /// 暂存对象（签名后没完成的上传）保留多久后由后台任务清理（UPL-060）。
+    pub staging_ttl_hours: u64,
 }
 
 impl Default for Storage {
@@ -113,6 +115,7 @@ impl Default for Storage {
             queue_timeout_secs: 60,
             task_timeout_secs: 90,
             request_timeout_secs: 15,
+            staging_ttl_hours: 24,
         }
     }
 }
@@ -455,12 +458,13 @@ impl Config {
             || !(1..=600).contains(&storage.queue_timeout_secs)
             || !(1..=600).contains(&storage.task_timeout_secs)
             || !(1..=300).contains(&storage.request_timeout_secs)
+            || !(1..=720).contains(&storage.staging_ttl_hours)
             || (!storage.bucket.is_empty()
                 && !(storage.endpoint.starts_with("http://")
                     || storage.endpoint.starts_with("https://")))
         {
             return Err(ConfigError::Invalid(
-                "storage 配置不合法：设置 bucket 时 endpoint 须为 http(s)://；root_prefix 只能是由字母、数字、_、- 组成的路径段；sign_expires_secs 60–3600，verify_slots 1–32，queue/task_timeout_secs 1–600，request_timeout_secs 1–300"
+                "storage 配置不合法：设置 bucket 时 endpoint 须为 http(s)://；root_prefix 只能是由字母、数字、_、- 组成的路径段；sign_expires_secs 60–3600，verify_slots 1–32，queue/task_timeout_secs 1–600，request_timeout_secs 1–300，staging_ttl_hours 1–720"
                     .to_owned(),
             ));
         }

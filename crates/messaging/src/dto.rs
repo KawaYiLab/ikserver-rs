@@ -16,6 +16,9 @@ pub struct PeerView {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<i16>,
+    /// 头像（360 宽缩略图）。已注销、没有设置时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 /// 被回复的消息（摘要）。

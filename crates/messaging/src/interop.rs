@@ -55,16 +55,21 @@ pub async fn active_peer(
 }
 
 /// 全部置顶会话（置顶时间倒序）。
-pub async fn pinned(db: &PgPool, user_id: i64) -> Result<Vec<ConversationView>, Problem> {
+pub async fn pinned(
+    db: &PgPool,
+    media: &ik_media::MediaState,
+    user_id: i64,
+) -> Result<Vec<ConversationView>, Problem> {
     let mut conn = db.acquire().await?;
     let rows = repo::pinned_summaries(&mut conn, user_id).await?;
     drop(conn);
-    conversation_views(db, rows).await
+    conversation_views(db, media, rows).await
 }
 
 /// 未置顶的在场会话，按 `(activityAt, id)` 倒序，严格早于 `before`。
 pub async fn page(
     db: &PgPool,
+    media: &ik_media::MediaState,
     user_id: i64,
     before: Option<Before>,
     limit: i64,
@@ -72,7 +77,7 @@ pub async fn page(
     let mut conn = db.acquire().await?;
     let rows = repo::stream_summaries(&mut conn, user_id, before.map(Before::bound), limit).await?;
     drop(conn);
-    conversation_views(db, rows).await
+    conversation_views(db, media, rows).await
 }
 
 /// 全部在场会话的未读消息合计。

@@ -29,8 +29,17 @@ fn harness(db: PgPool) -> Harness {
     let bus = Arc::new(LocalBus::new(256));
     let ids = Arc::new(Snowflake::new(1).unwrap());
     Harness {
-        notify: NotifyState::new(db.clone(), bus.clone()),
-        dm: MessagingState::new(db.clone(), ids.clone(), bus),
+        notify: NotifyState::new(
+            db.clone(),
+            bus.clone(),
+            ik_media::MediaState::for_tests(db.clone(), ids.clone()),
+        ),
+        dm: MessagingState::new(
+            db.clone(),
+            ids.clone(),
+            bus,
+            ik_media::MediaState::for_tests(db.clone(), ids.clone()),
+        ),
         ids,
         db,
     }

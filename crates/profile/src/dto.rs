@@ -157,6 +157,9 @@ pub struct UserSearchItem {
     pub id: Id<User>,
     pub username: String,
     pub level: i16,
+    /// 头像（360 宽缩略图），没有设置时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
     /// 签名（最多 120 字）。
     pub bio: String,
     pub follower_count: i64,
@@ -172,6 +175,9 @@ pub struct MentionCandidate {
     pub id: Id<User>,
     pub username: String,
     pub level: i16,
+    /// 头像（360 宽缩略图），没有设置时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

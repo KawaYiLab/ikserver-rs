@@ -435,3 +435,57 @@ async fn without_storage_uploads_are_unavailable(db: PgPool) {
     .unwrap_err();
     assert_eq!(err.code(), "SERVICE_UNAVAILABLE");
 }
+
+fn real_png() -> Vec<u8> {
+    let img = image::RgbaImage::from_fn(200, 120, |x, y| {
+        image::Rgba([(x % 255) as u8, (y % 255) as u8, 90, 255])
+    });
+    let mut out = Vec::new();
+    image::DynamicImage::ImageRgba8(img)
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .unwrap();
+    out
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn real_images_get_a_thumbhash(db: PgPool) {
+    let Some(h) = harness(db).await else { return };
+    let media = h.upload(1, &real_png()).await;
+    assert!(media.thumbhash.is_some(), "真实图片算出 ThumbHash");
+    // 只有文件头的「图片」解码失败：照样上传成功，只是没有占位。
+    let fake = h.upload(1, &png(30)).await;
+    assert!(fake.thumbhash.is_none());
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn stale_staging_objects_are_swept(db: PgPool) {
+    let Some(h) = harness(db).await else { return };
+    let bytes = png(31);
+    let ticket = h.sign(1, &bytes, None).await;
+    h.put(&ticket, &bytes).await;
+    let claims = ik_media::token::TokenKey::derive(b"test-secret")
+        .verify(ticket.upload_id.as_deref().unwrap())
+        .unwrap();
+    // 还没过保留期：不删。
+    assert_eq!(h.state.sweep_staging().await.unwrap(), 0);
+    assert!(h.storage.head(&claims.key).await.is_ok());
+    // 截止时间放到将来，模拟已经过期。
+    let deleted = h
+        .state
+        .delete_staging_before(chrono::Utc::now() + chrono::Duration::minutes(1))
+        .await
+        .unwrap();
+    assert_eq!(deleted, 1);
+    assert!(matches!(
+        h.storage.head(&claims.key).await,
+        Err(ik_media::storage::StorageError::NotFound)
+    ));
+    // 发布后的对象不在暂存前缀下，不受影响。
+    let kept = h.upload(1, &png(32)).await;
+    h.state
+        .delete_staging_before(chrono::Utc::now() + chrono::Duration::minutes(1))
+        .await
+        .unwrap();
+    let key = kept.url.strip_prefix(&h.bucket_url).unwrap();
+    assert!(h.storage.head(key).await.is_ok());
+}
