@@ -22,6 +22,7 @@ ik-economy.workspace = true
 ik-exam.workspace = true
 ik-social.workspace = true
 ik-notify.workspace = true
+ik-messaging.workspace = true
 ik-realtime.workspace = true
 ik-profile.workspace = true
 ik-feed.workspace = true

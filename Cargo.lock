@@ -1503,6 +1503,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-messaging"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "governor",
+ "http",
+ "ik-auth",
+ "ik-kernel",
+ "ik-social",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
 name = "ik-notify"
 version = "0.1.0"
 dependencies = [
@@ -1511,6 +1531,7 @@ dependencies = [
  "http",
  "ik-auth",
  "ik-kernel",
+ "ik-messaging",
  "ik-social",
  "serde",
  "serde_json",
@@ -1584,6 +1605,7 @@ dependencies = [
  "ik-exam",
  "ik-feed",
  "ik-kernel",
+ "ik-messaging",
  "ik-notify",
  "ik-profile",
  "ik-realtime",

@@ -81,12 +81,18 @@ pub struct Notice<'a> {
     pub excerpt: &'a str,
 }
 
-fn created_event(recipient_id: i64, id: i64, bucket_key: &str) -> Result<Event, Problem> {
-    Event::new(
-        "notification.created",
-        Audience::User(recipient_id),
-        &serde_json::json!({ "id": id.to_string(), "bucket": bucket_key }),
-    )
+/// `conversation_id`：收件人与发送者之间有在场私聊时，收件箱把这条通知合并进那个会话。
+fn created_event(
+    recipient_id: i64,
+    id: i64,
+    bucket_key: &str,
+    conversation_id: Option<i64>,
+) -> Result<Event, Problem> {
+    let mut data = serde_json::json!({ "id": id.to_string(), "bucket": bucket_key });
+    if let Some(conversation_id) = conversation_id {
+        data["conversationId"] = conversation_id.to_string().into();
+    }
+    Event::new("notification.created", Audience::User(recipient_id), &data)
 }
 
 /// 发一条互动通知。返回是否真的写入（被抑制时为 false）。
@@ -129,7 +135,16 @@ pub async fn send(
         },
     )
     .await?;
-    effects.publish(created_event(notice.recipient_id, id, &bucket_key)?);
+    // 收件箱里与发送者的私聊会话随这条通知排到前面（CONV-005）。
+    let conversation_id =
+        ik_messaging::interop::touch_direct(conn, notice.recipient_id, notice.sender_id, now)
+            .await?;
+    effects.publish(created_event(
+        notice.recipient_id,
+        id,
+        &bucket_key,
+        conversation_id,
+    )?);
     Ok(true)
 }
 

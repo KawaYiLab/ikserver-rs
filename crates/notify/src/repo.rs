@@ -111,15 +111,18 @@ pub(crate) struct NotificationRow {
 }
 
 /// 我的通知（或某个分组内的通知），新的在前。`unread_only` 时只取未读。
+/// 游标 `(时间, id)` 严格更小；id 为 None 时取严格早于该时间的（游标落在收件箱时间线的私信消息上，
+/// 同一时刻的通知排在消息前面，已经出过了）。
 pub(crate) async fn list(
     conn: &mut PgConnection,
     recipient_id: i64,
     bucket_key: Option<&str>,
     unread_only: bool,
-    after: Option<(DateTime<Utc>, i64)>,
+    after: Option<(DateTime<Utc>, Option<i64>)>,
     limit: i64,
 ) -> sqlx::Result<Vec<NotificationRow>> {
     let (after_at, after_id) = after.unzip();
+    let after_id = after_id.flatten();
     sqlx::query_as!(
         NotificationRow,
         "SELECT id, sender_id, kind, bucket_key, post_id, comment_id, post_title, excerpt,
@@ -128,7 +131,8 @@ pub(crate) async fn list(
          WHERE recipient_id = $1
            AND ($2::text IS NULL OR bucket_key = $2)
            AND (NOT $3 OR NOT is_read)
-           AND ($4::timestamptz IS NULL OR (created_at, id) < ($4, $5::bigint))
+           AND ($4::timestamptz IS NULL OR created_at < $4
+                OR (created_at = $4 AND $5::bigint IS NOT NULL AND id < $5))
          ORDER BY created_at DESC, id DESC
          LIMIT $6",
         recipient_id,
@@ -231,19 +235,102 @@ pub(crate) async fn mark_read(
     Ok(row)
 }
 
-/// 全部（或某个分组内）标为已读，返回更新条数。
+/// 全部（或某个分组内）标为已读，返回更新条数。`up_to` 给定时只标这个时刻及之前的，
+/// 不误标并发到达的新通知（CONV-035）。
 pub(crate) async fn mark_all_read(
     conn: &mut PgConnection,
     recipient_id: i64,
     bucket_key: Option<&str>,
+    up_to: Option<DateTime<Utc>>,
 ) -> sqlx::Result<u64> {
     let result = sqlx::query!(
         "UPDATE notifications SET is_read = TRUE
-         WHERE recipient_id = $1 AND NOT is_read AND ($2::text IS NULL OR bucket_key = $2)",
+         WHERE recipient_id = $1 AND NOT is_read AND ($2::text IS NULL OR bucket_key = $2)
+           AND ($3::timestamptz IS NULL OR created_at <= $3)",
         recipient_id,
         bucket_key,
+        up_to,
     )
     .execute(conn)
     .await?;
     Ok(result.rows_affected())
+}
+
+// ---------- 统一收件箱 ----------
+
+/// 收件箱里的通知分组：排除 `excluded`（与之有在场私聊的人，他们的通知合并进私聊会话），
+/// 按 `(最后一条时间, 分组键)` 倒序，严格早于游标。游标的分组键为 None 时取严格早于该时间的
+/// （游标落在私聊会话上，同一时刻的分组排在会话前面，已经出过了）。
+pub(crate) async fn inbox_buckets(
+    conn: &mut PgConnection,
+    recipient_id: i64,
+    excluded: &[String],
+    after: Option<(DateTime<Utc>, Option<String>)>,
+    limit: i64,
+) -> sqlx::Result<Vec<BucketRow>> {
+    let (after_at, after_key) = after.unzip();
+    let after_key = after_key.flatten();
+    sqlx::query_as!(
+        BucketRow,
+        r#"WITH RECURSIVE keys(bucket_key) AS (
+               (SELECT n.bucket_key FROM notifications n
+                WHERE n.recipient_id = $1 ORDER BY n.bucket_key LIMIT 1)
+               UNION ALL
+               SELECT (SELECT n.bucket_key FROM notifications n
+                       WHERE n.recipient_id = $1 AND n.bucket_key > k.bucket_key
+                       ORDER BY n.bucket_key LIMIT 1)
+               FROM keys k WHERE k.bucket_key IS NOT NULL
+           )
+           SELECT k.bucket_key AS "bucket_key!", l.created_at AS "last_at!", l.kind AS "kind!",
+                  l.comment_id AS "comment_id?", l.excerpt AS "excerpt!",
+                  (SELECT count(*) FROM notifications u
+                   WHERE u.recipient_id = $1 AND u.bucket_key = k.bucket_key AND NOT u.is_read) AS "unread!"
+           FROM keys k
+           CROSS JOIN LATERAL (
+               SELECT n.created_at, n.kind, n.comment_id, n.excerpt
+               FROM notifications n
+               WHERE n.recipient_id = $1 AND n.bucket_key = k.bucket_key
+               ORDER BY n.created_at DESC, n.id DESC
+               LIMIT 1
+           ) l
+           WHERE k.bucket_key IS NOT NULL AND k.bucket_key <> ALL($2)
+             AND ($3::timestamptz IS NULL OR l.created_at < $3
+                  OR (l.created_at = $3 AND $4::text IS NOT NULL AND k.bucket_key < $4))
+           ORDER BY l.created_at DESC, k.bucket_key DESC
+           LIMIT $5"#,
+        recipient_id,
+        excluded,
+        after_at,
+        after_key,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 指定分组的最后一条与未读数（没有通知的分组不出现）。用于合并进私聊会话。
+pub(crate) async fn bucket_stats(
+    conn: &mut PgConnection,
+    recipient_id: i64,
+    keys: &[String],
+) -> sqlx::Result<Vec<BucketRow>> {
+    sqlx::query_as!(
+        BucketRow,
+        r#"SELECT k.bucket_key AS "bucket_key!", l.created_at AS "last_at!", l.kind AS "kind!",
+                  l.comment_id AS "comment_id?", l.excerpt AS "excerpt!",
+                  (SELECT count(*) FROM notifications u
+                   WHERE u.recipient_id = $1 AND u.bucket_key = k.bucket_key AND NOT u.is_read) AS "unread!"
+           FROM unnest($2::text[]) AS k(bucket_key)
+           CROSS JOIN LATERAL (
+               SELECT n.created_at, n.kind, n.comment_id, n.excerpt
+               FROM notifications n
+               WHERE n.recipient_id = $1 AND n.bucket_key = k.bucket_key
+               ORDER BY n.created_at DESC, n.id DESC
+               LIMIT 1
+           ) l"#,
+        recipient_id,
+        keys,
+    )
+    .fetch_all(conn)
+    .await
 }

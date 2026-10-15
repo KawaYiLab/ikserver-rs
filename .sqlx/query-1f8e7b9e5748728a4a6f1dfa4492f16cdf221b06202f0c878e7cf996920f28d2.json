@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversation_members (conversation_id, user_id, peer_id, activity_at,\n                                          left_at, created_at)\n         VALUES ($1, $2, $3, $4::timestamptz, CASE WHEN $5 THEN $4::timestamptz END, $4::timestamptz)\n         ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f8e7b9e5748728a4a6f1dfa4492f16cdf221b06202f0c878e7cf996920f28d2"
+}

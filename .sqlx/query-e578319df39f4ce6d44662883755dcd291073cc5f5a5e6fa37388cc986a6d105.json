@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE notifications SET is_read = TRUE\n         WHERE recipient_id = $1 AND NOT is_read AND ($2::text IS NULL OR bucket_key = $2)\n           AND ($3::timestamptz IS NULL OR created_at <= $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e578319df39f4ce6d44662883755dcd291073cc5f5a5e6fa37388cc986a6d105"
+}

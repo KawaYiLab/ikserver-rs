@@ -10,6 +10,7 @@ publish.workspace = true
 ik-kernel.workspace = true
 ik-auth.workspace = true
 ik-social.workspace = true
+ik-messaging.workspace = true
 tokio.workspace = true
 axum.workspace = true
 http.workspace = true

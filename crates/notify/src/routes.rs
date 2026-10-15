@@ -1,4 +1,4 @@
-//! HTTP 接口：`/v1/notifications*`。
+//! HTTP 接口：`/v1/notifications*`、`/v1/inbox*`。
 
 use axum::extract::{FromRef, State};
 use ik_auth::{AuthState, CurrentUser};
@@ -11,8 +11,11 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::NotifyState;
-use crate::dto::{BucketView, ListQuery, NotificationView, PageQuery, ReadResult, UnreadCount};
-use crate::service;
+use crate::dto::{
+    BucketView, InboxItem, InboxPage, InboxReadResult, ListQuery, NotificationView, PageQuery,
+    ReadResult, UnreadCount,
+};
+use crate::{inbox, service};
 
 pub fn router<S>() -> OpenApiRouter<S>
 where
@@ -28,6 +31,11 @@ where
         .routes(routes!(buckets))
         .routes(routes!(bucket_items))
         .routes(routes!(mark_bucket_read))
+        .routes(routes!(inbox_list))
+        .routes(routes!(inbox_unread_count))
+        .routes(routes!(inbox_read_all))
+        .routes(routes!(inbox_items))
+        .routes(routes!(inbox_read))
 }
 
 /// 我的通知（新的在前）
@@ -177,4 +185,116 @@ async fn mark_bucket_read(
     Ok(Json(
         service::mark_bucket_read(&state, &principal, &key).await?,
     ))
+}
+
+// ---------- 统一收件箱 ----------
+
+/// 统一收件箱
+///
+/// 私聊会话与通知分组（按发送者，系统通知一组）按最后活动时间混排。与某人有私聊会话时，
+/// 他发来的通知合并进那个会话（未读相加）。第一页先列出全部置顶会话并给出未读合计。
+#[utoipa::path(
+    get,
+    path = "/v1/inbox",
+    tag = "inbox",
+    params(PageQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = InboxPage),
+        (status = 400, description = "CURSOR_INVALID", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn inbox_list(
+    State(state): State<NotifyState>,
+    CurrentUser(principal): CurrentUser,
+    Query(query): Query<PageQuery>,
+) -> Result<Json<InboxPage>, Problem> {
+    Ok(Json(inbox::list(&state, &principal, query).await?))
+}
+
+/// 收件箱未读合计
+///
+/// 未读私信 + 未读通知。
+#[utoipa::path(
+    get,
+    path = "/v1/inbox/unread-count",
+    tag = "inbox",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = UnreadCount),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn inbox_unread_count(
+    State(state): State<NotifyState>,
+    CurrentUser(principal): CurrentUser,
+) -> Result<Json<UnreadCount>, Problem> {
+    Ok(Json(inbox::unread_count(&state, &principal).await?))
+}
+
+/// 收件箱全部标为已读
+///
+/// 所有私聊会话与所有通知。
+#[utoipa::path(
+    post,
+    path = "/v1/inbox/read-all",
+    tag = "inbox",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = InboxReadResult),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn inbox_read_all(
+    State(state): State<NotifyState>,
+    CurrentUser(principal): CurrentUser,
+) -> Result<Json<InboxReadResult>, Problem> {
+    Ok(Json(inbox::mark_all_read(&state, &principal).await?))
+}
+
+/// 收件箱条目的时间线（新的在前）
+///
+/// `dm-<会话 id>`：私信消息混排对方发来的通知（同一时刻通知在前）；`user-<id>` / `system`：只有通知。
+#[utoipa::path(
+    get,
+    path = "/v1/inbox/{key}/items",
+    tag = "inbox",
+    params(("key" = String, Path, description = "`dm-<会话 id>`、`user-<id>` 或 `system`"), PageQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Page<InboxItem>),
+        (status = 400, description = "CURSOR_INVALID", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "键格式不对，或不是自己的会话", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn inbox_items(
+    State(state): State<NotifyState>,
+    CurrentUser(principal): CurrentUser,
+    Path(key): Path<String>,
+    Query(query): Query<PageQuery>,
+) -> Result<Json<Page<InboxItem>>, Problem> {
+    Ok(Json(inbox::items(&state, &principal, &key, query).await?))
+}
+
+/// 收件箱条目标为已读
+///
+/// 私聊会话：推进已读水位，并把对方发来的通知一并标为已读。只标调用时刻及之前的。
+#[utoipa::path(
+    post,
+    path = "/v1/inbox/{key}/read",
+    tag = "inbox",
+    params(("key" = String, Path, description = "`dm-<会话 id>`、`user-<id>` 或 `system`")),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = InboxReadResult),
+        (status = 404, description = "键格式不对，或不是自己的会话", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn inbox_read(
+    State(state): State<NotifyState>,
+    CurrentUser(principal): CurrentUser,
+    Path(key): Path<String>,
+) -> Result<Json<InboxReadResult>, Problem> {
+    Ok(Json(inbox::mark_read(&state, &principal, &key).await?))
 }

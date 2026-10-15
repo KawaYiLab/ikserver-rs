@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT peer_id FROM conversation_members WHERE user_id = $1 AND left_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "peer_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "peer_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1a9f86d889d10de0a190ef7a2a6da44d016d799671381679e07126386a5ad0d3"
+}

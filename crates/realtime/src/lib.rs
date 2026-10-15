@@ -12,4 +12,4 @@ mod state;
 
 pub use hub::Hub;
 pub use routes::router;
-pub use state::RealtimeState;
+pub use state::{RealtimeState, TypingFuture, TypingHandler};

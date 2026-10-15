@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE conversation_members SET muted = $3\n         WHERE conversation_id = $1 AND user_id = $2 AND left_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d2a9f401e67676d1324aa1523336a03103731a1a57f0faeb90626b3ef6e36f60"
+}

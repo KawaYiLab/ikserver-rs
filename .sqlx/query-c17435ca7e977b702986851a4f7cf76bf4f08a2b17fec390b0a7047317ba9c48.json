@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, sender_id, kind, bucket_key, post_id, comment_id, post_title, excerpt,\n                is_read, created_at\n         FROM notifications\n         WHERE recipient_id = $1\n           AND ($2::text IS NULL OR bucket_key = $2)\n           AND (NOT $3 OR NOT is_read)\n           AND ($4::timestamptz IS NULL OR (created_at, id) < ($4, $5::bigint))\n         ORDER BY created_at DESC, id DESC\n         LIMIT $6",
+  "query": "SELECT id, sender_id, kind, bucket_key, post_id, comment_id, post_title, excerpt,\n                is_read, created_at\n         FROM notifications\n         WHERE recipient_id = $1\n           AND ($2::text IS NULL OR bucket_key = $2)\n           AND (NOT $3 OR NOT is_read)\n           AND ($4::timestamptz IS NULL OR created_at < $4\n                OR (created_at = $4 AND $5::bigint IS NOT NULL AND id < $5))\n         ORDER BY created_at DESC, id DESC\n         LIMIT $6",
   "describe": {
     "columns": [
       {
@@ -137,5 +137,5 @@
       false
     ]
   },
-  "hash": "ace6131e7356ab7d9442179595eee1c3536bdae4c7a934562da6c207e98eee3e"
+  "hash": "c17435ca7e977b702986851a4f7cf76bf4f08a2b17fec390b0a7047317ba9c48"
 }

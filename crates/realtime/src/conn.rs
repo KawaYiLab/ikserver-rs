@@ -8,10 +8,11 @@ use futures_util::SinkExt;
 use ik_auth::{AuthState, Principal};
 use tokio::time::{Instant, MissedTickBehavior};
 
+use crate::TypingHandler;
 use crate::hub::{Hub, Outbound, Registration, SubscribeError};
 use crate::protocol::{
     CLOSE_IDLE, CLOSE_SESSION_ENDED, ClientFrame, CloseReason, HEARTBEAT_SECS, HelloData,
-    MAX_FRAME_BYTES, ServerFrame, channel_of,
+    MAX_FRAME_BYTES, ServerFrame, channel_of, typing_target,
 };
 
 /// 已登录连接定期回数据库复查会话（吊销事件丢失时的兜底，WS-008）。
@@ -20,12 +21,16 @@ const RECHECK_EVERY: Duration = Duration::from_secs(30);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 /// 复查会话的超时；超时按失效处理（fail-closed）。
 const RECHECK_TIMEOUT: Duration = Duration::from_secs(10);
+/// 每条连接 1 秒内最多处理一个 `typing` 帧，多余的静默丢弃（WS-010）。
+const TYPING_EVERY: Duration = Duration::from_secs(1);
 
 pub(crate) struct Connection {
     pub hub: Arc<Hub>,
     pub auth: AuthState,
     pub principal: Option<Principal>,
     pub registration: Registration,
+    pub typing: Option<TypingHandler>,
+    pub last_typing: Option<Instant>,
 }
 
 enum Flow {
@@ -156,6 +161,36 @@ impl Connection {
         }
     }
 
+    /// `typing`：只有登录用户能发；按连接节流，节流内的帧不处理也不报错。
+    async fn on_typing(&mut self, seq: Option<u64>, frame: &ClientFrame) -> Option<ServerFrame> {
+        let (Some(handler), Some(principal)) = (self.typing.clone(), self.principal.as_ref())
+        else {
+            return Some(ServerFrame::error(seq, "UNSUPPORTED", "暂不支持该操作"));
+        };
+        let Some(conversation_id) = typing_target(frame.t.as_deref(), frame.d.as_ref()) else {
+            return Some(ServerFrame::error(
+                seq,
+                "INVALID_FRAME",
+                "typing 需要 d.conversationId",
+            ));
+        };
+        if self
+            .last_typing
+            .is_some_and(|last| last.elapsed() < TYPING_EVERY)
+        {
+            return seq.map(|seq| ServerFrame::Ack { seq });
+        }
+        self.last_typing = Some(Instant::now());
+        match handler(principal.user_id.get(), conversation_id).await {
+            Ok(()) => seq.map(|seq| ServerFrame::Ack { seq }),
+            Err(_) => Some(ServerFrame::error(
+                seq,
+                "NOT_ALLOWED",
+                "会话不存在或无权操作",
+            )),
+        }
+    }
+
     async fn recheck(&self) -> Flow {
         match &self.principal {
             Some(principal) if !session_still_active(&self.auth, principal).await => {
@@ -165,7 +200,7 @@ impl Connection {
         }
     }
 
-    async fn on_message(&self, socket: &mut WebSocket, message: Message) -> Flow {
+    async fn on_message(&mut self, socket: &mut WebSocket, message: Message) -> Flow {
         let text = match message {
             Message::Text(text) => text,
             Message::Close(_) => return Flow::PeerClosed,
@@ -210,8 +245,7 @@ impl Connection {
                 }
                 seq.map(|seq| ServerFrame::Ack { seq })
             }
-            // 私信模块上线后支持。
-            "typing" => Some(ServerFrame::error(seq, "UNSUPPORTED", "暂不支持该操作")),
+            "typing" => self.on_typing(seq, &frame).await,
             _ => Some(ServerFrame::error(seq, "UNKNOWN_OP", "未知的操作")),
         };
         match reply {

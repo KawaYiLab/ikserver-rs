@@ -48,7 +48,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 ## 幂等与并发控制
 
 - 创建类接口（发帖、评论、私信、举报等）接受 `Idempotency-Key: <uuid>` 头：
-  同一用户 24h 内重放返回首次结果（含状态码），不重复创建。
+  同一用户 24h 内重放返回首次结果（含状态码），不重复创建（计划中，尚未实现）。
+  发私信目前用请求体里的 `clientId` 去重：同一发送者重复提交返回第一次的消息（200 而非 201）。
 - 互动类接口用幂等动词，不用 toggle：
   `PUT /v1/posts/{id}/like`（重复调用无副作用）、`DELETE /v1/posts/{id}/like`。
 - 编辑类接口返回 `ETag: "rev:<n>"`；更新需带 `If-Match`，不匹配返回 412 `REVISION_CONFLICT`。
@@ -80,6 +81,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CODE_INVALID | 400 | 验证码错误或已过期 | 已使用的验证码同样返回此码 |
 | COMMENT_NOT_TOP_LEVEL | 400 | 只有一级评论可以置顶或采纳 | |
 | FOLLOW_SELF | 400 | 不能关注自己 | |
+| DM_SELF | 400 | 不能给自己发私信 | |
+| REPLY_TARGET_INVALID | 400 | 被回复的消息不存在或已撤回 | 也包括别的会话里的消息 |
 | BLOCK_SELF | 400 | 不能拉黑自己 | |
 | BLOCK_SYSTEM_ACCOUNT | 400 | 不能拉黑系统账号 | AI 账号不能被拉黑 |
 | UNAUTHORIZED | 401 | 请先登录 | 没带凭据 |
@@ -102,6 +105,9 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
 | NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
+| DM_PIN_LIMIT | 409 | 最多置顶 50 个会话 | CONV-023 |
+| MESSAGE_TOO_OLD | 409 | 消息发出超过 5 分钟，不能再修改或撤回 | MSG-015、MSG-016 |
+| MESSAGE_WITHDRAWN | 409 | 消息已撤回 | 编辑已撤回的消息 |
 | CHECK_IN_ALREADY_TODAY | 409 | 今天已经签到过了，明天 4 点后再来吧 | 签到日按北京时间 04:00 切日 |
 | DENNY_ALREADY_GIVEN | 409 | 你已经给这篇委托投过丁尼了 | 每人每帖终身一次 |
 | EXAM_ALREADY_PASSED | 409 | 你已通过入站考试 | 开考时 |
@@ -142,7 +148,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 客户端 → { "op": "subscribe",   "seq": 1, "t": "post", "d": { "postId": "..." } }
 客户端 → { "op": "unsubscribe", "seq": 2, "t": "post", "d": { "postId": "..." } }
 客户端 → { "op": "ping",        "seq": 3 }
-客户端 → { "op": "typing",      "t": "dm", "d": { "conversationId": "..." } }   // 私信上线后支持
+客户端 → { "op": "typing",      "seq": 4, "t": "dm", "d": { "conversationId": "..." } }
 
 服务端 → { "op": "hello", "d": { "heartbeatSec": 30, "userId": "...", "serverTime": "..." } }
 服务端 → { "op": "ack",   "seq": 1 }
@@ -151,11 +157,18 @@ GET /v1/posts?cursor=eyJ...&limit=20
 ```
 
 - 带 `seq` 的 `ping` / `subscribe` / `unsubscribe` 成功时回 `ack`，不带 `seq` 时成功不回帧。
-- 频道：目前只有公开帖子 `t = "post"`；私信会话 `t = "dm"` 随 messaging 模块加入（订阅时校验成员）。
+- 频道：目前只有公开帖子 `t = "post"`。私信事件按用户投递给会话成员，不需要订阅。
+- `typing`：只有登录连接能发（游客回 `UNSUPPORTED`）；每条连接每秒最多处理 1 帧，多出来的直接 `ack` 不处理；
+  不是会话成员或与对方有拉黑关系时回 `NOT_ALLOWED`。服务端只推给会话里在场的对方。
 - 帧格式与事件信封的类型登记在 OpenAPI components（`ClientFrame`、`ServerFrame`）。
 - 已定义的事件：`post.published`、`post.removed`、`post.bumped`（广播）；
-  `notification.created { id?, bucket }`、`notification.removed { bucket }`、`notification.read { bucket?, count }`
-  （只发给收件人本人）。
+  `notification.created { id?, bucket, conversationId? }`（与发送者有在场私聊时带会话 id，收件箱据此把它并进会话）、
+  `notification.removed { bucket }`、`notification.read { bucket?, count }`（只发给收件人本人）。
+- 私信事件（发给会话里在场的成员，含发送者本人的其他端）：`dm.message.created { conversationId, message }`、
+  `dm.message.edited { conversationId, message }`、`dm.message.withdrawn { conversationId, message }`（`message` 不含正文）；
+  `dm.typing { conversationId, userId }`（只发给对方）；`dm.conversation.updated { conversationId, muted, pinned }`、
+  `dm.conversation.left { conversationId }`（只发给本人，多端同步）。
+- 收件箱：`inbox.read { key, lastReadAt?, notificationsUpdated }`、`inbox.read.all { at }`（只发给本人）。
 - 限制：每用户最多 5 连接（挤掉最旧）；客户端单帧 ≤ 64KB；订阅数上限 100；待发队列（256 帧）写满即断开。
 - 心跳：连接 30s 没有收到客户端任何帧时服务端发 ping 帧，60s 没有任何帧则断开（D-008：60s 容忍度与旧系统一致）。
 - 吊销：登出、踢设备、重置密码后立即断开对应连接；另外已登录连接每 30s 回库复查一次，复查失败按失效处理。
@@ -167,7 +180,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | UNKNOWN_OP | 未知的 `op` |
 | CHANNEL_INVALID | 频道不存在或无权订阅 |
 | TOO_MANY_SUBSCRIPTIONS | 订阅超过 100 个频道 |
-| UNSUPPORTED | 协议里有、但当前版本未开放的操作（如 `typing`） |
+| UNSUPPORTED | 协议里有、但当前连接不能用的操作（如游客发 `typing`） |
+| NOT_ALLOWED | 会话不存在或无权操作（`typing` 的目标会话不是自己的，或与对方有拉黑关系） |
 
 | 关闭码 | 原因 | 客户端应当 |
 |---|---|---|

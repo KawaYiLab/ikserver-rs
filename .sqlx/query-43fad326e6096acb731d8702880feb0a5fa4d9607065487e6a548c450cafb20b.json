@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO messages (id, conversation_id, sender_id, content) VALUES ($1, $2, 1, 'x')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43fad326e6096acb731d8702880feb0a5fa4d9607065487e6a548c450cafb20b"
+}

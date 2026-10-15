@@ -45,6 +45,8 @@ use crate::{AppState, system};
         (name = "exam", description = "入站考试：开考、交卷、回顾"),
         (name = "social", description = "关注与拉黑"),
         (name = "notify", description = "通知（敲敲）与已读"),
+        (name = "messaging", description = "私信：会话、消息、编辑与撤回"),
+        (name = "inbox", description = "统一收件箱：私信会话与通知分组混排、已读"),
         (name = "realtime", description = "实时通道（WebSocket）"),
         (name = "profile", description = "个人资料、作者主页与用户搜索"),
         (name = "feed", description = "首页、热门榜、关注流、未看流与阅读记录"),
@@ -88,6 +90,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_exam::router())
         .merge(ik_social::router())
         .merge(ik_notify::router())
+        .merge(ik_messaging::router())
         .merge(ik_realtime::router())
         .merge(ik_profile::router())
         .merge(ik_feed::router())

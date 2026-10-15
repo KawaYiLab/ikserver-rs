@@ -11,9 +11,10 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
+use ik_messaging::MessagingState;
 use ik_notify::NotifyState;
 use ik_profile::ProfileState;
-use ik_realtime::RealtimeState;
+use ik_realtime::{RealtimeState, TypingHandler};
 use ik_social::SocialState;
 use sqlx::PgPool;
 
@@ -31,6 +32,7 @@ pub struct AppState {
     pub exam: ExamState,
     pub social: SocialState,
     pub notify: NotifyState,
+    pub messaging: MessagingState,
     pub realtime: RealtimeState,
     pub profile: ProfileState,
     pub feed: FeedState,
@@ -56,7 +58,18 @@ impl AppState {
         let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
         let social = SocialState::new(db.clone());
         let notify = NotifyState::new(db.clone(), bus.clone());
-        let realtime = RealtimeState::start(&bus, config.http.allowed_origins.clone())?;
+        let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone());
+        let typing: TypingHandler = {
+            let messaging = messaging.clone();
+            Arc::new(move |user_id, conversation_id| {
+                let messaging = messaging.clone();
+                Box::pin(async move {
+                    ik_messaging::service::typing(&messaging, user_id, conversation_id).await
+                })
+            })
+        };
+        let realtime =
+            RealtimeState::start(&bus, config.http.allowed_origins.clone())?.with_typing(typing);
         let profile = ProfileState::new(db.clone(), ids.clone(), content.clone(), comments.clone());
         let feed = FeedState::start(content.clone(), config.hot.clone())?;
         Ok(Self {
@@ -71,6 +84,7 @@ impl AppState {
             exam,
             social,
             notify,
+            messaging,
             realtime,
             profile,
             feed,
@@ -117,6 +131,12 @@ impl FromRef<AppState> for SocialState {
 impl FromRef<AppState> for NotifyState {
     fn from_ref(state: &AppState) -> Self {
         state.notify.clone()
+    }
+}
+
+impl FromRef<AppState> for MessagingState {
+    fn from_ref(state: &AppState) -> Self {
+        state.messaging.clone()
     }
 }
 

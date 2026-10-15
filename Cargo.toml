@@ -18,6 +18,7 @@ ik-economy = { path = "crates/economy" }
 ik-exam = { path = "crates/exam" }
 ik-social = { path = "crates/social" }
 ik-notify = { path = "crates/notify" }
+ik-messaging = { path = "crates/messaging" }
 ik-realtime = { path = "crates/realtime" }
 ik-profile = { path = "crates/profile" }
 ik-feed = { path = "crates/feed" }

@@ -172,3 +172,29 @@
 - 已读水位按 D-024 建议默认首版不实现。
 - `post_likes (created_at)`、`comments (created_at)`：热榜按时间窗口扫描近期活动（HOT-005）。
 - 热榜本身不落库：每个进程定时计算（默认 10 分钟）后放在内存里，计算失败保留上一份；多实例时各自计算，结果一致。
+## 私信域（`20261019000001_messaging.sql`）
+
+### `conversations`
+
+- 只有 `direct`（D-073 群聊不实现）。`(user_low, user_high)` 唯一，较小的 id 在前，保证同一对用户至多一个会话（CONV-002）；
+  并发发起靠 `ON CONFLICT DO NOTHING` 收敛。
+- 没有 `last_message_id` / `last_message_at`：最后一条消息用 `messages_conversation_idx` 现查（一行 LIMIT 1），不维护指针。
+
+### `conversation_members`
+
+- 每个会话两行，`peer_id` 反范式记录对方，`(user_id, peer_id)` 唯一：通知到达时按对方找会话推进排序、收件箱按对方合并通知分组，
+  都不必关联 `conversations`。
+- `activity_at` 是收件箱排序键，按成员各自维护、只前进（`GREATEST`）：新消息推进双方，对方的通知只推进收件人。
+- `left_at` 非空 = 从自己的列表移除；新消息会清空它（对方重新看到会话），通知不会。新建会话时对方那一行先带 `left_at`（隐藏），
+  第一条消息到达时出现。
+- `pinned_at` 非空 = 置顶，每人最多 50 个（写入时锁用户行再计数；历史超限照样全部返回）。
+- 未读 = 晚于 `last_read_at`、别人发的、未撤回的消息，读取时现算，不维护计数器（旧系统的经验：入口多，计数器必漂）。
+- `conversation_members_inbox_idx` 是部分索引（在场且未置顶），对应收件箱的分页流；置顶的单独取。
+
+### `messages`
+
+- `kind` 只有 `text`（D-021 图片消息不实现）与预留给 AI 会话分界的 `system`。正文 1～4000 字由 CHECK 兜底。
+- 撤回只写 `withdrawn_at`，行与正文保留（举报复核需要），接口层对所有人隐藏正文。
+- `(sender_id, client_id)` 部分唯一索引实现发送去重。
+- 收件箱时间线（`/v1/inbox/dm-<id>/items`）把这里的消息与 `notifications` 里对方发来的通知按 `(created_at, id)` 归并，
+  同一时刻通知在前；两边各自走自己的索引，不跨表 JOIN。

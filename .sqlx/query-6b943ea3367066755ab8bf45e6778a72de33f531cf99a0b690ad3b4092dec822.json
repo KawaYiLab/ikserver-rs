@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\"\n           FROM conversation_members m\n           JOIN messages x ON x.conversation_id = m.conversation_id\n           WHERE m.user_id = $1 AND m.left_at IS NULL\n             AND x.sender_id <> m.user_id AND x.withdrawn_at IS NULL\n             AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6b943ea3367066755ab8bf45e6778a72de33f531cf99a0b690ad3b4092dec822"
+}

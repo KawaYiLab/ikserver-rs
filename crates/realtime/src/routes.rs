@@ -86,6 +86,8 @@ async fn realtime(
         auth,
         principal,
         registration,
+        typing: state.typing.clone(),
+        last_typing: None,
     };
     Ok(upgrade
         .max_message_size(MAX_FRAME_BYTES)

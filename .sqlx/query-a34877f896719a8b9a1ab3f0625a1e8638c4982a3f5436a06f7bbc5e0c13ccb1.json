@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH RECURSIVE keys(bucket_key) AS (\n               (SELECT n.bucket_key FROM notifications n\n                WHERE n.recipient_id = $1 ORDER BY n.bucket_key LIMIT 1)\n               UNION ALL\n               SELECT (SELECT n.bucket_key FROM notifications n\n                       WHERE n.recipient_id = $1 AND n.bucket_key > k.bucket_key\n                       ORDER BY n.bucket_key LIMIT 1)\n               FROM keys k WHERE k.bucket_key IS NOT NULL\n           )\n           SELECT k.bucket_key AS \"bucket_key!\", l.created_at AS \"last_at!\", l.kind AS \"kind!\",\n                  l.comment_id AS \"comment_id?\", l.excerpt AS \"excerpt!\",\n                  (SELECT count(*) FROM notifications u\n                   WHERE u.recipient_id = $1 AND u.bucket_key = k.bucket_key AND NOT u.is_read) AS \"unread!\"\n           FROM keys k\n           CROSS JOIN LATERAL (\n               SELECT n.created_at, n.kind, n.comment_id, n.excerpt\n               FROM notifications n\n               WHERE n.recipient_id = $1 AND n.bucket_key = k.bucket_key\n               ORDER BY n.created_at DESC, n.id DESC\n               LIMIT 1\n           ) l\n           WHERE k.bucket_key IS NOT NULL AND k.bucket_key <> ALL($2)\n             AND ($3::timestamptz IS NULL OR l.created_at < $3\n                  OR (l.created_at = $3 AND $4::text IS NOT NULL AND k.bucket_key < $4))\n           ORDER BY l.created_at DESC, k.bucket_key DESC\n           LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket_key!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "last_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "comment_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "comment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "excerpt!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "excerpt"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "unread!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray",
+        "Timestamptz",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      true,
+      false,
+      null
+    ]
+  },
+  "hash": "a34877f896719a8b9a1ab3f0625a1e8638c4982a3f5436a06f7bbc5e0c13ccb1"
+}

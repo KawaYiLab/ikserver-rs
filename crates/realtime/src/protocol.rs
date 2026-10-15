@@ -62,7 +62,7 @@ pub struct HelloData {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorData {
-    /// `INVALID_FRAME` | `UNKNOWN_OP` | `CHANNEL_INVALID` | `TOO_MANY_SUBSCRIPTIONS` | `UNSUPPORTED`
+    /// `INVALID_FRAME` | `UNKNOWN_OP` | `CHANNEL_INVALID` | `TOO_MANY_SUBSCRIPTIONS` | `UNSUPPORTED` | `NOT_ALLOWED`
     pub code: &'static str,
     pub detail: &'static str,
 }
@@ -109,15 +109,28 @@ pub const CLOSE_GOING_AWAY: CloseReason = CloseReason {
     reason: "server shutting down",
 };
 
-/// 订阅频道。目前开放的只有公开帖子（`t = "post"`，`d = { postId }`），
-/// 私信会话频道（`t = "dm"`）随 messaging 模块加入，需要成员校验。
+fn decimal_id(value: &serde_json::Value) -> Option<&str> {
+    let id = value.as_str()?;
+    let valid = !id.is_empty() && id.len() <= 19 && id.bytes().all(|b| b.is_ascii_digit());
+    valid.then_some(id)
+}
+
+/// `typing` 帧的目标会话：`t` 省略或为 `dm`，`d = { conversationId }`。
+pub(crate) fn typing_target(t: Option<&str>, d: Option<&serde_json::Value>) -> Option<i64> {
+    if !matches!(t, None | Some("dm")) {
+        return None;
+    }
+    decimal_id(d?.get("conversationId")?)?
+        .parse()
+        .ok()
+        .filter(|id| *id > 0)
+}
+
+/// 订阅频道。目前开放的只有公开帖子（`t = "post"`，`d = { postId }`）。
+/// 私信事件按用户投递给会话成员，不需要订阅。
 pub(crate) fn channel_of(t: Option<&str>, d: Option<&serde_json::Value>) -> Option<String> {
     match t? {
-        "post" => {
-            let id = d?.get("postId")?.as_str()?;
-            let valid = !id.is_empty() && id.len() <= 19 && id.bytes().all(|b| b.is_ascii_digit());
-            valid.then(|| format!("post:{id}"))
-        }
+        "post" => decimal_id(d?.get("postId")?).map(|id| format!("post:{id}")),
         _ => None,
     }
 }
@@ -148,5 +161,22 @@ mod tests {
         assert!(channel_of(Some("post"), Some(&serde_json::json!({ "postId": "1x" }))).is_none());
         assert!(channel_of(Some("dm"), Some(&d)).is_none());
         assert!(channel_of(None, Some(&d)).is_none());
+    }
+
+    #[test]
+    fn typing_targets() {
+        let d = serde_json::json!({ "conversationId": "42" });
+        assert_eq!(typing_target(None, Some(&d)), Some(42));
+        assert_eq!(typing_target(Some("dm"), Some(&d)), Some(42));
+        assert_eq!(typing_target(Some("post"), Some(&d)), None);
+        assert_eq!(
+            typing_target(None, Some(&serde_json::json!({ "conversationId": 42 }))),
+            None
+        );
+        assert_eq!(
+            typing_target(None, Some(&serde_json::json!({ "conversationId": "0" }))),
+            None
+        );
+        assert_eq!(typing_target(None, None), None);
     }
 }

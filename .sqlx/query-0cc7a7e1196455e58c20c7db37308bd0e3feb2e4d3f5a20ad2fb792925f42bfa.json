@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE conversation_members SET activity_at = GREATEST(activity_at, $3)\n         WHERE user_id = $1 AND peer_id = $2 AND left_at IS NULL\n         RETURNING conversation_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "conversation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "conversation_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0cc7a7e1196455e58c20c7db37308bd0e3feb2e4d3f5a20ad2fb792925f42bfa"
+}

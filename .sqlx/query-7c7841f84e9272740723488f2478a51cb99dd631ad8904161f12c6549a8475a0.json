@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE conversation_members\n         SET last_read_at = GREATEST(COALESCE(last_read_at, $3), $3)\n         WHERE conversation_id = $1 AND user_id = $2 AND left_at IS NULL\n         RETURNING peer_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "peer_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "peer_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7c7841f84e9272740723488f2478a51cb99dd631ad8904161f12c6549a8475a0"
+}

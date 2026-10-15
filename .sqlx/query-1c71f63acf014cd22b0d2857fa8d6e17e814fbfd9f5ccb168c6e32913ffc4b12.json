@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE messages SET withdrawn_at = $2 WHERE id = $1 AND withdrawn_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1c71f63acf014cd22b0d2857fa8d6e17e814fbfd9f5ccb168c6e32913ffc4b12"
+}

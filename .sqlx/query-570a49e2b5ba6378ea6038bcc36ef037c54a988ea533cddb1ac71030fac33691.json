@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE conversation_members\n         SET left_at = NULL, activity_at = GREATEST(activity_at, $3)\n         WHERE conversation_id = $1 AND user_id = $2 AND left_at IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "570a49e2b5ba6378ea6038bcc36ef037c54a988ea533cddb1ac71030fac33691"
+}

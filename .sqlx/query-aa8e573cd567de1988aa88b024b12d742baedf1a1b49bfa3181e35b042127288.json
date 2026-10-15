@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM conversation_members\n           WHERE user_id = $1 AND left_at IS NULL AND pinned_at IS NOT NULL\n             AND conversation_id <> $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "aa8e573cd567de1988aa88b024b12d742baedf1a1b49bfa3181e35b042127288"
+}
