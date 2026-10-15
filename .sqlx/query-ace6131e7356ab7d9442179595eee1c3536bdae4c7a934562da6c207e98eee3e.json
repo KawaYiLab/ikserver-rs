@@ -1,0 +1,141 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, sender_id, kind, bucket_key, post_id, comment_id, post_title, excerpt,\n                is_read, created_at\n         FROM notifications\n         WHERE recipient_id = $1\n           AND ($2::text IS NULL OR bucket_key = $2)\n           AND (NOT $3 OR NOT is_read)\n           AND ($4::timestamptz IS NULL OR (created_at, id) < ($4, $5::bigint))\n         ORDER BY created_at DESC, id DESC\n         LIMIT $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "sender_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "sender_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "bucket_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "bucket_key"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "post_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "comment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "comment_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "post_title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "post_title"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "excerpt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "excerpt"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "is_read",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "is_read"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ace6131e7356ab7d9442179595eee1c3536bdae4c7a934562da6c207e98eee3e"
+}

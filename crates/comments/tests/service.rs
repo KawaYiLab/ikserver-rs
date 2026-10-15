@@ -965,3 +965,89 @@ async fn deleting_a_comment_removes_its_likes(db: PgPool) {
         .unwrap();
     assert_eq!(left, 0, "D-029：不留孤儿点赞行");
 }
+
+// ---------- 通知 ----------
+
+async fn notifications(db: &PgPool, recipient: i64) -> Vec<(String, String)> {
+    sqlx::query!(
+        "SELECT kind, excerpt FROM notifications WHERE recipient_id = $1 ORDER BY created_at, id",
+        recipient
+    )
+    .fetch_all(db)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|r| (r.kind, r.excerpt))
+    .collect()
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comments_replies_and_mentions_notify(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let alice = h.user_named(2, "alice", Role::User, true).await;
+    let bob = h.user_named(3, "bob", Role::User, true).await;
+    let post = h.post(&op, true).await;
+
+    let top = h.comment(&alice, post, None, "一楼 @bob :ik-smile:").await;
+    assert_eq!(
+        notifications(&h.db, 1).await,
+        vec![("comment".into(), "一楼 @bob [表情:smile]".into())]
+    );
+    assert_eq!(notifications(&h.db, 3).await[0].0, "mention");
+
+    // 回复：通知被回复的一级评论作者；@ 到同一个人不重复通知。
+    h.comment(&bob, post, Some(top), "@alice 同意").await;
+    let to_alice: Vec<String> = notifications(&h.db, 2)
+        .await
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(to_alice, vec!["reply"]);
+    assert_eq!(notifications(&h.db, 1).await.len(), 1, "回复不通知帖主");
+
+    // 采纳、评论点赞；取消点赞撤回。
+    service::accept(&h.comments, &op, top).await.unwrap();
+    service::like(&h.comments, &bob, top).await.unwrap();
+    let kinds: Vec<String> = notifications(&h.db, 2)
+        .await
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(kinds, vec!["reply", "accepted", "like"]);
+    service::unlike(&h.comments, &bob, top).await.unwrap();
+    assert_eq!(notifications(&h.db, 2).await.len(), 2);
+
+    // 删除评论时，挂在它上面的通知随之删除。
+    service::delete(&h.comments, &alice, top).await.unwrap();
+    assert!(notifications(&h.db, 1).await.is_empty());
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn anonymous_comments_send_no_notifications(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let alice = h.user_named(2, "alice", Role::User, true).await;
+    h.user_named(3, "bob", Role::User, true).await;
+    let post = h.post(&op, false).await;
+    let anonymous = service::create(
+        &h.comments,
+        &alice,
+        post,
+        CreateCommentRequest {
+            body: "匿名 @bob".into(),
+            parent_id: None,
+            is_anonymous: true,
+        },
+    )
+    .await
+    .unwrap()
+    .id
+    .get();
+    assert!(notifications(&h.db, 1).await.is_empty());
+    assert!(notifications(&h.db, 3).await.is_empty());
+    // 回复匿名评论、赞匿名评论也不通知（会暴露匿名作者）。
+    h.comment(&op, post, Some(anonymous), "回复").await;
+    service::like(&h.comments, &op, anonymous).await.unwrap();
+    assert!(notifications(&h.db, 2).await.is_empty());
+}

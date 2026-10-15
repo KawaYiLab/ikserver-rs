@@ -15,6 +15,7 @@ use ik_economy::service::{Dedup, ExpAction, grant_exp};
 use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::cursor::{self, Page};
 use ik_kernel::{Id, Problem};
+use ik_notify::interop::{Kind, Notice, Target};
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
@@ -121,6 +122,58 @@ fn check_rate(state: &CommentsState, principal: &Principal) -> Result<(), Proble
         })
 }
 
+struct NewCommentNotice<'a> {
+    post: &'a PostRef,
+    parent: Option<&'a CommentRow>,
+    comment_id: i64,
+    author_id: i64,
+    body: &'a str,
+    is_anonymous: bool,
+}
+
+/// 新评论的通知：一级评论通知帖主（`comment`），回复通知被回复的一级评论作者（`reply`），
+/// 正文里 @ 到的人各一条（`mention`，最多 10 人，已经收到前两种通知的人不重复）。
+/// 评论、帖子、被回复的评论任一匿名就都不发（CMT-129）。自己、拉黑、收件人不可用由 notify 抑制。
+async fn notify_new_comment(
+    state: &CommentsState,
+    conn: &mut PgConnection,
+    c: &NewCommentNotice<'_>,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<(), Problem> {
+    if c.is_anonymous || c.post.is_anonymous || c.parent.is_some_and(|p| p.is_anonymous) {
+        return Ok(());
+    }
+    let excerpt = text::plain_text(c.body);
+    let (primary, kind) = match c.parent {
+        None => (c.post.author_id, Kind::Comment),
+        Some(parent) => (parent.author_id, Kind::Reply),
+    };
+    let notice = |recipient_id, kind| Notice {
+        recipient_id,
+        sender_id: c.author_id,
+        kind,
+        post_id: Some(c.post.id),
+        comment_id: Some(c.comment_id),
+        post_title: Some(&c.post.title),
+        excerpt: &excerpt,
+    };
+    ik_notify::interop::send(conn, &state.ids, notice(primary, kind), now, effects).await?;
+    for target in text::mentioned_user_ids(c.body) {
+        if target != primary {
+            ik_notify::interop::send(
+                conn,
+                &state.ids,
+                notice(target, Kind::Mention),
+                now,
+                effects,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 /// 发表评论或回复。需要通过入站考试；帖子必须公开（作者本人也不能评论自己被隐藏的帖子，CMT-030）。
 pub async fn create(
     state: &CommentsState,
@@ -151,21 +204,25 @@ pub async fn create(
         ik_social::interop::ensure_no_block(&mut tx, author_id, post.author_id).await?;
     }
     let parent_id = request.parent_id.map(Id::get);
-    if let Some(parent_id) = parent_id {
-        let parent = repo::get(&mut tx, parent_id)
-            .await?
-            .filter(|p| p.post_id == post.id && p.parent_id.is_none() && p.hidden_at.is_none());
-        let Some(parent) = parent else {
-            return Err(Problem::field(
-                "parentId",
-                "INVALID",
-                "只能回复本帖下未隐藏的一级评论",
-            ));
-        };
-        if !parent.is_anonymous {
-            ik_social::interop::ensure_no_block(&mut tx, author_id, parent.author_id).await?;
+    let parent = match parent_id {
+        None => None,
+        Some(parent_id) => {
+            let parent = repo::get(&mut tx, parent_id)
+                .await?
+                .filter(|p| p.post_id == post.id && p.parent_id.is_none() && p.hidden_at.is_none());
+            let Some(parent) = parent else {
+                return Err(Problem::field(
+                    "parentId",
+                    "INVALID",
+                    "只能回复本帖下未隐藏的一级评论",
+                ));
+            };
+            if !parent.is_anonymous {
+                ik_social::interop::ensure_no_block(&mut tx, author_id, parent.author_id).await?;
+            }
+            Some(parent)
         }
-    }
+    };
     let floor = match parent_id {
         None => Some(repo::next_floor(&mut tx, post.id).await?),
         Some(_) => None,
@@ -199,6 +256,21 @@ pub async fn create(
         )
         .await?;
     }
+    notify_new_comment(
+        state,
+        &mut tx,
+        &NewCommentNotice {
+            post: &post,
+            parent: parent.as_ref(),
+            comment_id: id,
+            author_id,
+            body: &body,
+            is_anonymous: request.is_anonymous,
+        },
+        now,
+        &mut effects,
+    )
+    .await?;
     effects.publish(bumped_event(post.id)?);
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
@@ -329,6 +401,7 @@ pub async fn accept(
     comment_id: i64,
 ) -> Result<(), Problem> {
     principal.require_write()?;
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
     let (post, comment) = lock_for_moderation(&mut tx, comment_id).await?;
     if !post.allow_comment_accept {
@@ -359,8 +432,29 @@ pub async fn accept(
             )
             .await?;
         }
+        // 采纳通知：评论或帖子匿名时不发；采纳自己的评论由 notify 抑制。
+        if !comment.is_anonymous && !post.is_anonymous {
+            let excerpt = text::plain_text(&comment.body);
+            ik_notify::interop::send(
+                &mut tx,
+                &state.ids,
+                Notice {
+                    recipient_id: comment.author_id,
+                    sender_id: principal.user_id.get(),
+                    kind: Kind::Accepted,
+                    post_id: Some(post.id),
+                    comment_id: Some(comment.id),
+                    post_title: Some(&post.title),
+                    excerpt: &excerpt,
+                },
+                now,
+                &mut effects,
+            )
+            .await?;
+        }
     }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(())
 }
 
@@ -387,7 +481,7 @@ pub async fn unaccept(
 /// 点赞（幂等）。需要通过入站考试。评论必须可见：未隐藏、帖子公开、回复的一级评论也未隐藏
 /// （COMMON-007）；非匿名评论还要求双方没有拉黑（LIKE-007）。
 /// 每个业务日第一次点赞（帖子与评论合计）+1 经验，赞自己的评论不给（LIKE-015）。
-// TODO(notify)：点赞通知（LIKE-013：匿名评论、自己赞自己不发）。
+/// 通知评论作者；匿名评论不发（LIKE-013）。
 pub async fn like(
     state: &CommentsState,
     principal: &Principal,
@@ -396,6 +490,7 @@ pub async fn like(
     principal.require_write()?;
     let me = principal.user_id.get();
     let now = Utc::now();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
     let comment = repo::get(&mut tx, comment_id)
         .await?
@@ -407,7 +502,7 @@ pub async fn like(
             .filter(|p| p.hidden_at.is_none())
             .ok_or_else(comment_not_found)?;
     }
-    interop::post(&mut tx, comment.post_id)
+    let post = interop::post(&mut tx, comment.post_id)
         .await?
         .filter(|p| p.is_public)
         .ok_or_else(comment_not_found)?;
@@ -430,25 +525,58 @@ pub async fn like(
         )
         .await?;
     }
+    if added && !comment.is_anonymous {
+        let excerpt = text::plain_text(&comment.body);
+        ik_notify::interop::send(
+            &mut tx,
+            &state.ids,
+            Notice {
+                recipient_id: comment.author_id,
+                sender_id: me,
+                kind: Kind::Like,
+                post_id: Some(post.id),
+                comment_id: Some(comment.id),
+                post_title: Some(&post.title),
+                excerpt: &excerpt,
+            },
+            now,
+            &mut effects,
+        )
+        .await?;
+    }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(CommentLikeResult {
         liked: true,
         like_count,
     })
 }
 
-/// 取消点赞（幂等）。不要求通过考试；评论已经不可见时也能取消（LIKE-018）。
+/// 取消点赞（幂等）。不要求通过考试；评论已经不可见时也能取消（LIKE-018）。点赞通知撤回（D-011）。
 pub async fn unlike(
     state: &CommentsState,
     principal: &Principal,
     comment_id: i64,
 ) -> Result<CommentLikeResult, Problem> {
+    let me = principal.user_id.get();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
-    let removed = repo::delete_like(&mut tx, comment_id, principal.user_id.get()).await?;
+    let removed = repo::delete_like(&mut tx, comment_id, me).await?;
     let like_count = repo::add_like_count(&mut tx, comment_id, -i32::from(removed))
         .await?
         .ok_or_else(comment_not_found)?;
+    if removed {
+        ik_notify::interop::retract(
+            &mut tx,
+            me,
+            Kind::Like,
+            Target::Comment(comment_id),
+            &mut effects,
+        )
+        .await?;
+    }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(CommentLikeResult {
         liked: false,
         like_count,

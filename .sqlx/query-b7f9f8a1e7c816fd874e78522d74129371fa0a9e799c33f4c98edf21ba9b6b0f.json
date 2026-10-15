@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (1, 4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b7f9f8a1e7c816fd874e78522d74129371fa0a9e799c33f4c98edf21ba9b6b0f"
+}

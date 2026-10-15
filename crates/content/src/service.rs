@@ -22,6 +22,7 @@ use crate::video::{self, ExternalVideo, MAX_EXTERNAL_VIDEOS};
 use crate::{ContentState, anonymous, tags};
 use ik_economy::benefits;
 use ik_economy::service::{Dedup, ExpAction};
+use ik_notify::interop::{Kind, Notice, Target};
 
 const TITLE_MAX_CHARS: usize = 50;
 const EDITOR_STATE_MAX_BYTES: usize = 256 * 1024;
@@ -367,6 +368,21 @@ fn removed_event(post_id: i64) -> Result<Event, Problem> {
     )
 }
 
+/// 首次发布时通知作者的粉丝（FOLLOW-009）。匿名帖不要调用（FOLLOW-016）。
+async fn fanout_first_publish(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    author_id: i64,
+    post_id: i64,
+    title: &str,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<(), Problem> {
+    ik_notify::interop::fanout_new_post(conn, &state.ids, author_id, post_id, title, now, effects)
+        .await?;
+    Ok(())
+}
+
 /// 首次发布的发帖经验：+4，每个业务日只有第一篇（POST-073）。
 /// 「是否首次发布」看帖子自己的 `first_published_at`，不看经验流水（D-025 方案 A）。
 async fn grant_first_publish_exp(
@@ -412,6 +428,18 @@ pub async fn create(
     if publish {
         repo::mark_published(&mut tx, post_id, author_id, now).await?;
         grant_first_publish_exp(state, &mut tx, author_id, now).await?;
+        if !content.is_anonymous {
+            fanout_first_publish(
+                state,
+                &mut tx,
+                author_id,
+                post_id,
+                &content.title,
+                now,
+                &mut effects,
+            )
+            .await?;
+        }
         effects.publish(published_event(post_id, content.category_id, true)?);
     }
     tx.commit().await?;
@@ -516,9 +544,11 @@ pub async fn publish(
 
     let mut changed = false;
     let mut category_id = row.category_id;
+    let mut title = row.title.clone();
     if let Some(prepared) = prepared {
         let content = resolve(state, &mut tx, principal, prepared).await?;
         category_id = content.category_id;
+        title.clone_from(&content.title);
         apply_content(&mut tx, &row, &content, now).await?;
         changed = true;
     } else if let Some(draft) = repo::pending_draft(&mut tx, post_id).await? {
@@ -531,6 +561,7 @@ pub async fn publish(
         }
         check_category(&mut tx, principal, content.category_id).await?;
         category_id = content.category_id;
+        title.clone_from(&content.title);
         apply_content(&mut tx, &row, &content, now).await?;
         changed = true;
     } else if !was_published {
@@ -547,6 +578,18 @@ pub async fn publish(
         repo::mark_published(&mut tx, post_id, author_id, now).await?;
         if first {
             grant_first_publish_exp(state, &mut tx, author_id, now).await?;
+            if !row.is_anonymous {
+                fanout_first_publish(
+                    state,
+                    &mut tx,
+                    author_id,
+                    post_id,
+                    &title,
+                    now,
+                    &mut effects,
+                )
+                .await?;
+            }
         }
         effects.publish(published_event(post_id, category_id, first)?);
     } else if changed {
@@ -702,7 +745,20 @@ pub async fn gift_denny(
     )
     .await?;
     let denny_count = repo::increment_denny_count(&mut tx, post.id).await?;
+    // 投币通知与扣款同一事务写入，推送在提交后（NOTIF-040）。
+    let mut effects = Effects::new();
+    notify_author(
+        state,
+        &mut tx,
+        &post,
+        giver_id,
+        Kind::Denny,
+        now,
+        &mut effects,
+    )
+    .await?;
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(GiftResult {
         balance: outcome.balance,
         denny_count,
@@ -1351,8 +1407,40 @@ async fn grant_like_exp(
     Ok(())
 }
 
-/// 点赞（幂等）。需要通过入站考试。
-// TODO(notify)：点赞通知（LIKE-013：匿名帖、自己赞自己不发）。
+/// 帖子被赞、被收藏、被投币时通知作者。匿名帖不发（LIKE-013、FAV-009）；
+/// 自己给自己、拉黑、收件人不可用等由 notify 统一抑制。
+async fn notify_author(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    post: &repo::PostRefRow,
+    sender_id: i64,
+    kind: Kind,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<(), Problem> {
+    if post.is_anonymous {
+        return Ok(());
+    }
+    ik_notify::interop::send(
+        conn,
+        &state.ids,
+        Notice {
+            recipient_id: post.author_id,
+            sender_id,
+            kind,
+            post_id: Some(post.id),
+            comment_id: None,
+            post_title: Some(&post.title),
+            excerpt: "",
+        },
+        now,
+        effects,
+    )
+    .await?;
+    Ok(())
+}
+
+/// 点赞（幂等）。需要通过入站考试。重复点赞不重复通知。
 pub async fn like(
     state: &ContentState,
     principal: &Principal,
@@ -1361,6 +1449,7 @@ pub async fn like(
     principal.require_write()?;
     let me = principal.user_id.get();
     let now = Utc::now();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
     let post = reactable_post(&mut tx, me, post_id).await?;
     let added = repo::insert_like(&mut tx, post.id, me, now).await?;
@@ -1369,8 +1458,10 @@ pub async fn like(
         .ok_or_else(post_not_found)?;
     if added {
         grant_like_exp(state, &mut tx, me, post.author_id, now).await?;
+        notify_author(state, &mut tx, &post, me, Kind::Like, now, &mut effects).await?;
     }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(LikeResult {
         liked: true,
         like_count: counts.like_count,
@@ -1378,18 +1469,25 @@ pub async fn like(
 }
 
 /// 取消点赞（幂等）。不要求通过考试；帖子已经不可见（隐藏、下线、拉黑）时也能取消（LIKE-018）。
-/// 当天的点赞经验不收回。
+/// 当天的点赞经验不收回；发出的点赞通知撤回（D-011 方案 A）。
 pub async fn unlike(
     state: &ContentState,
     principal: &Principal,
     post_id: i64,
 ) -> Result<LikeResult, Problem> {
+    let me = principal.user_id.get();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
-    let removed = repo::delete_like(&mut tx, post_id, principal.user_id.get()).await?;
+    let removed = repo::delete_like(&mut tx, post_id, me).await?;
     let counts = repo::add_reaction_counts(&mut tx, post_id, -i32::from(removed), 0)
         .await?
         .ok_or_else(post_not_found)?;
+    if removed {
+        ik_notify::interop::retract(&mut tx, me, Kind::Like, Target::Post(post_id), &mut effects)
+            .await?;
+    }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(LikeResult {
         liked: false,
         like_count: counts.like_count,
@@ -1397,7 +1495,6 @@ pub async fn unlike(
 }
 
 /// 收藏（幂等）。需要通过入站考试；收藏没有经验（FAV-010）。
-// TODO(notify)：收藏通知（FAV-009：匿名帖、自己收藏自己不发）。
 pub async fn favorite(
     state: &ContentState,
     principal: &Principal,
@@ -1405,31 +1502,50 @@ pub async fn favorite(
 ) -> Result<FavoriteResult, Problem> {
     principal.require_write()?;
     let me = principal.user_id.get();
+    let now = Utc::now();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
     let post = reactable_post(&mut tx, me, post_id).await?;
-    let added = repo::insert_favorite(&mut tx, post.id, me, Utc::now()).await?;
+    let added = repo::insert_favorite(&mut tx, post.id, me, now).await?;
     let counts = repo::add_reaction_counts(&mut tx, post.id, 0, i32::from(added))
         .await?
         .ok_or_else(post_not_found)?;
+    if added {
+        notify_author(state, &mut tx, &post, me, Kind::Favorite, now, &mut effects).await?;
+    }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(FavoriteResult {
         favorited: true,
         favorite_count: counts.favorite_count,
     })
 }
 
-/// 取消收藏（幂等）。不要求通过考试，帖子不可见时也能取消。
+/// 取消收藏（幂等）。不要求通过考试，帖子不可见时也能取消。收藏通知一并撤回（D-011 方案 A）。
 pub async fn unfavorite(
     state: &ContentState,
     principal: &Principal,
     post_id: i64,
 ) -> Result<FavoriteResult, Problem> {
+    let me = principal.user_id.get();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
-    let removed = repo::delete_favorite(&mut tx, post_id, principal.user_id.get()).await?;
+    let removed = repo::delete_favorite(&mut tx, post_id, me).await?;
     let counts = repo::add_reaction_counts(&mut tx, post_id, 0, -i32::from(removed))
         .await?
         .ok_or_else(post_not_found)?;
+    if removed {
+        ik_notify::interop::retract(
+            &mut tx,
+            me,
+            Kind::Favorite,
+            Target::Post(post_id),
+            &mut effects,
+        )
+        .await?;
+    }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     Ok(FavoriteResult {
         favorited: false,
         favorite_count: counts.favorite_count,
@@ -1449,6 +1565,7 @@ pub async fn triple(
     principal.require_write()?;
     let me = principal.user_id.get();
     let now = Utc::now();
+    let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
     let post = reactable_post(&mut tx, me, post_id).await?;
     let liked = repo::insert_like(&mut tx, post.id, me, now).await?;
@@ -1459,8 +1576,13 @@ pub async fn triple(
             .ok_or_else(post_not_found)?;
     if liked {
         grant_like_exp(state, &mut tx, me, post.author_id, now).await?;
+        notify_author(state, &mut tx, &post, me, Kind::Like, now, &mut effects).await?;
+    }
+    if favorited {
+        notify_author(state, &mut tx, &post, me, Kind::Favorite, now, &mut effects).await?;
     }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
 
     let (denny_given, denny_error, denny_count, balance) =
         match gift_denny(state, principal, post.id, GiftRequest::default()).await {

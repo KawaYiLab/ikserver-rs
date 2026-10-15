@@ -10,6 +10,7 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
+use ik_notify::NotifyState;
 use ik_social::SocialState;
 use sqlx::PgPool;
 
@@ -26,6 +27,7 @@ pub struct AppState {
     pub economy: EconomyState,
     pub exam: ExamState,
     pub social: SocialState,
+    pub notify: NotifyState,
 }
 
 impl AppState {
@@ -46,6 +48,7 @@ impl AppState {
         let economy = EconomyState::new(db.clone(), ids.clone());
         let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
         let social = SocialState::new(db.clone());
+        let notify = NotifyState::new(db.clone(), bus.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -57,6 +60,7 @@ impl AppState {
             economy,
             exam,
             social,
+            notify,
         })
     }
 }
@@ -94,5 +98,11 @@ impl FromRef<AppState> for ExamState {
 impl FromRef<AppState> for SocialState {
     fn from_ref(state: &AppState) -> Self {
         state.social.clone()
+    }
+}
+
+impl FromRef<AppState> for NotifyState {
+    fn from_ref(state: &AppState) -> Self {
+        state.notify.clone()
     }
 }

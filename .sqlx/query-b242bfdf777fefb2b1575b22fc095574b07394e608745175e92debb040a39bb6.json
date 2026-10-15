@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET is_ai_agent = TRUE WHERE id = 5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b242bfdf777fefb2b1575b22fc095574b07394e608745175e92debb040a39bb6"
+}

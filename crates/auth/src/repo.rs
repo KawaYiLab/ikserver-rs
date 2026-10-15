@@ -325,6 +325,25 @@ pub(crate) async fn user_ref(conn: &mut PgConnection, id: i64) -> sqlx::Result<O
     .await
 }
 
+pub(crate) struct ActiveUserRow {
+    pub id: i64,
+    pub username: String,
+    pub is_ai_agent: bool,
+}
+
+pub(crate) async fn active_users(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<ActiveUserRow>> {
+    sqlx::query_as!(
+        ActiveUserRow,
+        "SELECT id, username, is_ai_agent FROM users WHERE id = ANY($1) AND status = 'active'",
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
 pub(crate) async fn exam_passed_at(
     conn: &mut PgConnection,
     id: i64,

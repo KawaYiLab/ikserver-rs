@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO posts (id, author_id, title, body) VALUES ($1, $2, '帖子标题', '')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "65e41b369ce0ba2ac96637295a0599281cfd54f308b1d8ab46ef06e13bb46a5a"
+}

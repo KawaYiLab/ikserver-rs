@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT p.id, p.author_id, p.is_anonymous,\n                  (p.status = 'published' AND p.hidden_at IS NULL) AS \"is_public!\",\n                  COALESCE(c.allow_comment_accept, FALSE) AS \"allow_comment_accept!\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.id = $1",
+  "query": "SELECT p.id, p.author_id, p.title, p.is_anonymous,\n                  (p.status = 'published' AND p.hidden_at IS NULL) AS \"is_public!\",\n                  COALESCE(c.allow_comment_accept, FALSE) AS \"allow_comment_accept!\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.id = $1",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "is_anonymous",
         "type_info": "Bool",
         "origin": {
@@ -37,13 +48,13 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "is_public!",
         "type_info": "Bool",
         "origin": "Expression"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "allow_comment_accept!",
         "type_info": "Bool",
         "origin": "Expression"
@@ -58,9 +69,10 @@
       false,
       false,
       false,
+      false,
       null,
       null
     ]
   },
-  "hash": "865837bf94784d9147ac1b9b4713b8391c1fac87c4550ee70ccdce6f0b074ef4"
+  "hash": "4b09f43eac1708e7d456cd03c3edb59e0d2f5932db800ef45777cdc069d2f12a"
 }

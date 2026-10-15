@@ -61,6 +61,33 @@ pub async fn user_ref(conn: &mut PgConnection, user_id: i64) -> Result<Option<Us
     }))
 }
 
+/// 状态正常（未封禁、未注销）的账号。
+#[derive(Debug, Clone)]
+pub struct ActiveUser {
+    pub id: i64,
+    pub username: String,
+    pub is_ai_agent: bool,
+}
+
+/// `ids` 中状态正常的账号（顺序不保证）。用于通知收件人过滤、通知文案里的名字。
+pub async fn active_users(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<Vec<ActiveUser>, Problem> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(repo::active_users(conn, ids)
+        .await?
+        .into_iter()
+        .map(|row| ActiveUser {
+            id: row.id,
+            username: row.username,
+            is_ai_agent: row.is_ai_agent,
+        })
+        .collect())
+}
+
 /// 入站考试通过时间（不加锁）。用户不存在时返回 None，未通过时返回 `Some(None)`。
 pub async fn exam_passed_at(
     conn: &mut PgConnection,

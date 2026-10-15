@@ -1,4 +1,5 @@
-//! HTTP 接口：`/v1/categories`、`/v1/tags/*`、`/v1/posts*`、`/v1/me/posts`。
+//! HTTP 接口：`/v1/categories`、`/v1/tags/*`、`/v1/posts*`（含赞、藏、投币、三连）、
+//! `/v1/me/posts`、`/v1/me/likes`、`/v1/me/favorites`。
 
 use axum::extract::{FromRef, State};
 use axum::response::{IntoResponse, Response};

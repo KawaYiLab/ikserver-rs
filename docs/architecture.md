@@ -43,12 +43,15 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`content → economy, social`（发帖经验、投币、拉黑判断）；
-  `comments → content, economy, social`；`exam → economy`（通过奖励）。economy 不能依赖 content，
+- 实际依赖：`economy → auth`；`social → auth`；`notify → auth, social`；
+  `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
+  `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
 - 拉黑几乎在每个读写路径上生效，所以 `social` 只放用户之间的关系（关注、拉黑），位于 content 之下，
   由 `ik_social::interop` 提供「任一方向拉黑」判断与列表过滤的排除集合。点赞、收藏、三连是帖子和评论
   上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
+- `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
+  实时推送随调用方的 `Effects` 在提交后发出。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。
 
 ## 请求处理流

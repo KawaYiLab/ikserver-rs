@@ -1187,3 +1187,80 @@ async fn blocked_triple_writes_nothing(db: PgPool) {
         (0, 0, 0)
     );
 }
+
+// ---------- 通知 ----------
+
+async fn notifications(db: &PgPool, recipient: i64) -> Vec<String> {
+    sqlx::query_scalar!(
+        "SELECT kind FROM notifications WHERE recipient_id = $1 ORDER BY created_at, id",
+        recipient
+    )
+    .fetch_all(db)
+    .await
+    .unwrap()
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn reactions_notify_the_author_and_unlike_retracts(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    let fan = h.writer(2).await;
+    let post = publish(&h, &author, "帖子", false).await;
+    let anonymous = publish(&h, &author, "匿名", true).await;
+
+    service::like(&h.state, &fan, post).await.unwrap();
+    service::like(&h.state, &fan, post).await.unwrap();
+    service::favorite(&h.state, &fan, post).await.unwrap();
+    service::gift_denny(&h.state, &fan, post, gift())
+        .await
+        .unwrap();
+    assert_eq!(
+        notifications(&h.db, 1).await,
+        vec!["like", "favorite", "denny"]
+    );
+
+    service::unlike(&h.state, &fan, post).await.unwrap();
+    service::unfavorite(&h.state, &fan, post).await.unwrap();
+    assert_eq!(
+        notifications(&h.db, 1).await,
+        vec!["denny"],
+        "D-011：取消即撤回"
+    );
+
+    // 匿名帖、自己的帖子不通知。
+    service::triple(&h.state, &fan, anonymous).await.unwrap();
+    service::like(&h.state, &author, post).await.unwrap();
+    assert_eq!(notifications(&h.db, 1).await, vec!["denny"]);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn first_publish_notifies_followers_once(db: PgPool) {
+    let h = harness(db);
+    let author = h.writer(1).await;
+    h.writer(2).await;
+    sqlx::query!("INSERT INTO follows (follower_id, followee_id) VALUES (2, 1)")
+        .execute(&h.db)
+        .await
+        .unwrap();
+
+    let draft = service::create(&h.state, &author, input("草稿"), false)
+        .await
+        .unwrap()
+        .id
+        .get();
+    assert!(notifications(&h.db, 2).await.is_empty(), "草稿不扇出");
+    service::publish(&h.state, &author, draft, None, None)
+        .await
+        .unwrap();
+    assert_eq!(notifications(&h.db, 2).await, vec!["system"]);
+    // 下线后重新发布不再通知。
+    service::unpublish(&h.state, &author, draft, false)
+        .await
+        .unwrap();
+    service::publish(&h.state, &author, draft, None, None)
+        .await
+        .unwrap();
+    publish(&h, &author, "匿名", true).await;
+    publish(&h, &author, "直接发布", false).await;
+    assert_eq!(notifications(&h.db, 2).await, vec!["system", "system"]);
+}

@@ -39,6 +39,7 @@ use crate::{AppState, system};
         (name = "economy", description = "经验、等级、丁尼、签到与等级权益"),
         (name = "exam", description = "入站考试：开考、交卷、回顾"),
         (name = "social", description = "关注与拉黑"),
+        (name = "notify", description = "通知（敲敲）与已读"),
     )
 )]
 pub struct ApiDoc;
@@ -78,6 +79,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_economy::router())
         .merge(ik_exam::router())
         .merge(ik_social::router())
+        .merge(ik_notify::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

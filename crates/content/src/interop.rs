@@ -14,6 +14,8 @@ use crate::repo;
 pub struct PostRef {
     pub id: i64,
     pub author_id: i64,
+    /// 当前标题（通知快照用）。
+    pub title: String,
     pub is_anonymous: bool,
     /// 已发布且未隐藏。
     pub is_public: bool,
@@ -26,6 +28,7 @@ impl From<repo::PostRefRow> for PostRef {
         Self {
             id: row.id,
             author_id: row.author_id,
+            title: row.title,
             is_anonymous: row.is_anonymous,
             is_public: row.is_public,
             allow_comment_accept: row.allow_comment_accept,

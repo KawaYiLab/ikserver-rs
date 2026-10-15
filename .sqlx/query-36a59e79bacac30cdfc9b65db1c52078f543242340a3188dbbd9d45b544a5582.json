@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET status = 'blocked' WHERE id = 4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "36a59e79bacac30cdfc9b65db1c52078f543242340a3188dbbd9d45b544a5582"
+}

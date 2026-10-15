@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH target AS (\n               SELECT id, is_read FROM notifications WHERE id = $2 AND recipient_id = $1\n           ), updated AS (\n               UPDATE notifications n SET is_read = TRUE\n               FROM target t WHERE n.id = t.id AND NOT t.is_read\n               RETURNING n.id\n           )\n           SELECT EXISTS (SELECT 1 FROM updated) AS \"changed!\" FROM target",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "changed!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e50d81b2c3605d1259f0eec2b00028f6191af0c4715750ef484e41daf98ca15a"
+}

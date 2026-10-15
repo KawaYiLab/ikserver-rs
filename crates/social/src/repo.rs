@@ -126,6 +126,24 @@ pub(crate) async fn following_page(
     .await
 }
 
+pub(crate) async fn followers_without_blocks(
+    conn: &mut PgConnection,
+    user: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT f.follower_id FROM follows f
+         WHERE f.followee_id = $1
+           AND NOT EXISTS (
+               SELECT 1 FROM user_blocks b
+               WHERE (b.blocker_id = $1 AND b.blocked_id = f.follower_id)
+                  OR (b.blocker_id = f.follower_id AND b.blocked_id = $1))
+         ORDER BY f.follower_id",
+        user,
+    )
+    .fetch_all(conn)
+    .await
+}
+
 /// `targets` 中我关注了的人。
 pub(crate) async fn following_among(
     conn: &mut PgConnection,

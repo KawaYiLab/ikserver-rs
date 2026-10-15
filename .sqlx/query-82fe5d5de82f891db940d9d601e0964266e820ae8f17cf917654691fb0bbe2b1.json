@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO follows (follower_id, followee_id) VALUES (2, 1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "82fe5d5de82f891db940d9d601e0964266e820ae8f17cf917654691fb0bbe2b1"
+}

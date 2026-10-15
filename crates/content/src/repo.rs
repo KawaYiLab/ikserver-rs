@@ -669,6 +669,7 @@ pub(crate) async fn insert_category(
 pub(crate) struct PostRefRow {
     pub id: i64,
     pub author_id: i64,
+    pub title: String,
     pub is_anonymous: bool,
     pub is_public: bool,
     pub allow_comment_accept: bool,
@@ -677,7 +678,7 @@ pub(crate) struct PostRefRow {
 pub(crate) async fn post_ref(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<PostRefRow>> {
     sqlx::query_as!(
         PostRefRow,
-        r#"SELECT p.id, p.author_id, p.is_anonymous,
+        r#"SELECT p.id, p.author_id, p.title, p.is_anonymous,
                   (p.status = 'published' AND p.hidden_at IS NULL) AS "is_public!",
                   COALESCE(c.allow_comment_accept, FALSE) AS "allow_comment_accept!"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
@@ -694,7 +695,7 @@ pub(crate) async fn lock_post_ref(
 ) -> sqlx::Result<Option<PostRefRow>> {
     sqlx::query_as!(
         PostRefRow,
-        r#"SELECT p.id, p.author_id, p.is_anonymous,
+        r#"SELECT p.id, p.author_id, p.title, p.is_anonymous,
                   (p.status = 'published' AND p.hidden_at IS NULL) AS "is_public!",
                   COALESCE(c.allow_comment_accept, FALSE) AS "allow_comment_accept!"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id

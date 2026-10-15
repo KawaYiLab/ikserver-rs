@@ -11,6 +11,7 @@ ik-kernel.workspace = true
 ik-auth.workspace = true
 ik-economy.workspace = true
 ik-social.workspace = true
+ik-notify.workspace = true
 ik-content.workspace = true
 tokio.workspace = true
 axum.workspace = true

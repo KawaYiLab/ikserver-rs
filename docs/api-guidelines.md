@@ -143,6 +143,9 @@ GET /v1/posts?cursor=eyJ...&limit=20
 ```
 
 - 事件类型注册进 OpenAPI components（SDK 一并生成类型）。
+- 已定义的事件（网关上线前只在进程内总线上发布）：`post.published`、`post.removed`、`post.bumped`（广播）；
+  `notification.created { id?, bucket }`、`notification.removed { bucket }`、`notification.read { bucket?, count }`
+  （只发给收件人本人）。
 - 限制：每用户最多 5 连接（挤掉最旧）；单帧 ≤ 64KB；订阅数上限 100；慢消费者断开。
 - 心跳：服务端 30s 不活跃则发 ping 帧，客户端 2 个周期无响应视为断线。
 - 断线补齐：`GET /v1/...?since=<cursor>`，WS 不保证不丢事件，REST 为准。

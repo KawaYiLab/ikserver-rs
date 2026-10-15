@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notifications (id, recipient_id, kind, bucket_key, post_id, post_title,\n                                    excerpt, dedup_key, created_at)\n         SELECT t.id, t.recipient_id, 'system', 'system', $3, $4, $5, $6, $7\n         FROM unnest($1::bigint[], $2::bigint[]) AS t(id, recipient_id)\n         ON CONFLICT (recipient_id, dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING\n         RETURNING recipient_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "recipient_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "recipient_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Int8Array",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a88cf9d564b9f339620f10adb8fdbf77539e5311f4abd8efc8afaf75b7cec858"
+}

@@ -112,9 +112,31 @@ pub fn mentioned_user_ids(body: &str) -> Vec<i64> {
     ids
 }
 
+/// 通知预览用的纯文本：提及 token 变成 `@名字`，表情 token 变成 `[表情:名字]`（NOTIF 触发点表）。
+pub fn plain_text(body: &str) -> String {
+    let Some(p) = patterns() else {
+        return body.to_owned();
+    };
+    let mentions = p.mention.replace_all(body, "@$1");
+    p.emote
+        .replace_all(&mentions, |caps: &regex::Captures<'_>| {
+            let name = caps.get(1).map_or("", |m| m.as_str());
+            format!("[表情:{}]", name.trim_start_matches("ik-"))
+        })
+        .into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plain_text_renders_tokens() {
+        assert_eq!(
+            plain_text("@[小明](42) 你好 :ik-smile::ik-cry-2:"),
+            "@小明 你好 [表情:smile][表情:cry-2]"
+        );
+    }
 
     #[test]
     fn patterns_compile() {

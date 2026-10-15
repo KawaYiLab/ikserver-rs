@@ -38,6 +38,15 @@ pub async fn ensure_no_block(conn: &mut PgConnection, a: i64, b: i64) -> Result<
     }
 }
 
+/// 新帖扇出的候选收件人：`user_id` 的粉丝，去掉与其有任一方向拉黑的人（FOLLOW-017）。
+/// 拉黑本来就会删除关注，这里是兜底。
+pub async fn followers_for_fanout(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Vec<i64>, Problem> {
+    Ok(repo::followers_without_blocks(conn, user_id).await?)
+}
+
 /// 列表过滤用的排除集合：「我拉黑的人 ∪ 拉黑我的人」（COMMON-008）。未登录时为空。
 /// 调用方在 SQL 里写成 `(is_anonymous OR NOT (author_id = ANY($excluded)))`。
 pub async fn excluded_authors(

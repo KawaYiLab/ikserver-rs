@@ -187,7 +187,7 @@ pub(crate) async fn unaccept(conn: &mut PgConnection, id: i64) -> sqlx::Result<(
 
 /// 普通一级评论：可见、未置顶、未采纳，新的在前。
 ///
-/// 本节所有读取都带 excluded_authors：与读者有拉黑关系的人的非匿名评论不出现（BLOCK-014）。
+/// 本节所有读取都带 `excluded_authors`：与读者有拉黑关系的人的非匿名评论不出现（BLOCK-014）。
 pub(crate) async fn top_level_page(
     conn: &mut PgConnection,
     post_id: i64,
