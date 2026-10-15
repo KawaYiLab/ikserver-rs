@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO idempotency_keys (user_id, key, fingerprint, locked_until)\n                  VALUES (1, $1::text::uuid,\n                          sha256(convert_to('POST', 'UTF8') || '\\x00'::bytea\n                                 || convert_to('/v1/posts', 'UTF8') || '\\x00'::bytea\n                                 || convert_to($2, 'UTF8')),\n                          now() + make_interval(secs => $3))\n                  ON CONFLICT (user_id, key) DO UPDATE SET locked_until = EXCLUDED.locked_until",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1d9210918979e4df9c3ff41efcd2ec2a7bd50e2851009638bfbccf60b296466d"
+}

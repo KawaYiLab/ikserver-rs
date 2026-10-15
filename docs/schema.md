@@ -229,3 +229,11 @@
 
 - schema `graphile_worker` 由 graphile_worker 自己迁移（执行器启动、`ik-server migrate`），不进 `migrations/`，
   也不归任何业务域；业务代码只经 `ik_kernel::jobs::Jobs::enqueue` 在自己的事务里写入。
+
+## 幂等键（`20261022000001_idempotency_keys.sql`）
+
+- `idempotency_keys` 属于 ik-server 的横切中间件（`crates/server/src/idempotency.rs`），不属于任何业务域。
+  主键 `(user_id, key)`；`fingerprint` 是请求的 SHA-256；处理中 `locked_until` 非空，完成后存状态码、
+  需要重放的响应头与响应体（CHECK 约束保证两种状态互斥，只存 2xx）。
+- 占用的身份是 `created_at`（截断到微秒），完成与释放都按它比对，避免失效后被别的请求接手时误改。
+- 每日定时任务删除超过 24 小时的键（`created_at` 索引）。

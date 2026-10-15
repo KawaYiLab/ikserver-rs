@@ -134,6 +134,11 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
     // 逐层调用（而不是一个 ServiceBuilder）让 axum 在每层之间统一响应体类型。
     Ok(router
         .fallback(|| async { Problem::not_found() })
+        // 幂等层在超时层之内：超时只丢弃等待，处理任务照样完成并记下结果。
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::idempotency::layer,
+        ))
         .with_state(state)
         .layer(axum::middleware::from_fn(middleware::timeout(
             Duration::from_secs(config.http.request_timeout_secs),
@@ -194,6 +199,8 @@ fn cors(origins: &[String]) -> anyhow::Result<CorsLayer> {
         ])
         .expose_headers([
             header::ETAG,
+            header::LOCATION,
+            HeaderName::from_static(crate::idempotency::REPLAYED_HEADER),
             header::RETRY_AFTER,
             HeaderName::from_static(middleware::REQUEST_ID_HEADER),
             HeaderName::from_static("ratelimit-limit"),

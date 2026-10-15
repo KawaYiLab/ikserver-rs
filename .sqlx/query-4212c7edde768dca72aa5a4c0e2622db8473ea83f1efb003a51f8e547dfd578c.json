@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE idempotency_keys SET locked_until = NULL, status = $4, headers = $5, body = $6\n             WHERE user_id = $1 AND key = $2::text::uuid AND created_at = $3\n               AND locked_until IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Int2",
+        "Jsonb",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4212c7edde768dca72aa5a4c0e2622db8473ea83f1efb003a51f8e547dfd578c"
+}

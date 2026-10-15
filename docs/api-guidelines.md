@@ -47,9 +47,15 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 ## 幂等与并发控制
 
-- 创建类接口（发帖、评论、私信、举报等）接受 `Idempotency-Key: <uuid>` 头：
-  同一用户 24h 内重放返回首次结果（含状态码），不重复创建（计划中，尚未实现）。
-  发私信目前用请求体里的 `clientId` 去重：同一发送者重复提交返回第一次的消息（200 而非 201）。
+- 已登录用户的 `POST` 请求可以带 `Idempotency-Key: <uuid>` 头（创建类接口：发帖、评论、私信、举报等应当带）：
+  同一用户同一个键 24h 内只处理一次，重放返回第一次的状态码、响应体和 `Content-Type` / `ETag` / `Location`，
+  并带 `Idempotent-Replayed: true`。
+  - 只保存成功（2xx）的结果；失败的请求没有副作用，不占用这个键，改正后可以用同一个键重试。
+  - 同一个键用在不同的请求上（方法、路径、查询、请求体任一不同）→ 422 `IDEMPOTENCY_KEY_REUSED`；
+    第一次还在处理 → 409 `IDEMPOTENCY_IN_PROGRESS`（`Retry-After: 1`）；键不是 UUID → 400 `IDEMPOTENCY_KEY_INVALID`。
+  - 未登录的请求忽略这个头。客户端断开或请求超时不会中断处理，结果照样记下。
+  - 已知限制：实例在业务提交之后、记下结果之前崩溃时，占用在请求超时 + 30 秒后失效，之后的重试会再处理一次。
+- 发私信另有请求体里的 `clientId` 去重：同一发送者重复提交返回第一次的消息（200 而非 201），不限 24h。
 - 互动类接口用幂等动词，不用 toggle：
   `PUT /v1/posts/{id}/like`（重复调用无副作用）、`DELETE /v1/posts/{id}/like`。
 - 编辑类接口返回 `ETag: "rev:<n>"`；更新需带 `If-Match`，不匹配返回 412 `REVISION_CONFLICT`。
@@ -110,6 +116,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
+| IDEMPOTENCY_IN_PROGRESS | 409 | 相同的请求正在处理，请稍后再试 | 带 `Retry-After: 1` |
 | NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
 | DM_PIN_LIMIT | 409 | 最多置顶 50 个会话 | CONV-023 |
 | MESSAGE_TOO_OLD | 409 | 消息发出超过 5 分钟，不能再修改或撤回 | MSG-015、MSG-016 |
@@ -122,6 +129,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REVISION_CONFLICT | 412 | 内容已在别处被修改，请刷新后重试 | If-Match 失败或格式不对 |
 | PAYLOAD_TOO_LARGE | 413 | 请求体过大 | |
 | UNSUPPORTED_MEDIA_TYPE | 415 | 请求体必须是 application/json | |
+| IDEMPOTENCY_KEY_REUSED | 422 | 这个幂等键已经用在了另一个请求上 | 方法、路径、查询或请求体与第一次不同 |
 | WEBSOCKET_REQUIRED | 426 | 请使用 WebSocket 连接 | `/v1/realtime` 收到普通 HTTP 请求 |
 | RATE_LIMITED | 429 | 操作过于频繁，请稍后再试 | 带 `Retry-After`（秒） |
 | UPLOAD_VERIFICATION_BUSY | 429 | 上传校验繁忙，请稍后重试 | 排队已满；带 `Retry-After` |
