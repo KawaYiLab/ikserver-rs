@@ -14,9 +14,9 @@ use sqlx::PgConnection;
 
 use crate::dto::{
     AuthorView, CategoryRef, CategoryView, FavoriteResult, FeedPage, FeedQuery, GiftRequest,
-    GiftResult, LikeResult, MyPostItem, MyPostsQuery, MyPostsState, PinCandidate,
-    PinCandidatesQuery, PostCard, PostDetail, PostEditView, PostInput, PostStatus, SavedPost,
-    SavedQuery, TagRef, TripleResult, ViewResult,
+    GiftResult, HomeFeedPage, LikeResult, MarkReadRequest, MarkReadResult, MyPostItem,
+    MyPostsQuery, MyPostsState, PinCandidate, PinCandidatesQuery, PostCard, PostDetail,
+    PostEditView, PostInput, PostStatus, SavedPost, SavedQuery, TagRef, TripleResult, ViewResult,
 };
 use crate::repo::{self, CardRow, Content, DraftRow, FeedFilter, PostRow};
 use crate::video::{self, ExternalVideo, MAX_EXTERNAL_VIDEOS};
@@ -881,6 +881,14 @@ async fn cards(
     let mut tags = tag_map(conn, &ids).await?;
     let authors = author_map(state, &rows.iter().collect::<Vec<_>>()).await?;
     let viewer_id = viewer.map(|p| p.user_id.get());
+    // 游客不查阅读记录（CACHE-008）。
+    let read: std::collections::HashSet<i64> = match viewer_id {
+        Some(viewer_id) if !ids.is_empty() => repo::read_among(conn, viewer_id, &ids)
+            .await?
+            .into_iter()
+            .collect(),
+        _ => std::collections::HashSet::new(),
+    };
     Ok(rows
         .into_iter()
         .map(|row| PostCard {
@@ -912,6 +920,7 @@ async fn cards(
             bumped_at: row.bumped_at,
             edited_at: row.edited_at,
             bumped_by_self: viewer_id.is_some() && row.last_bumped_by == viewer_id,
+            is_read: read.contains(&row.id),
         })
         .collect())
 }
@@ -926,24 +935,23 @@ fn page_limit(limit: Option<u32>) -> i64 {
     i64::from(limit.unwrap_or(DEFAULT_PAGE).clamp(1, MAX_PAGE))
 }
 
-/// 公开信息流：按最近活跃倒序。未按标签筛选时，置顶帖单独放在 `pinned`（只在第一页），
-/// 并且在所有分区页都显示（D-010 方案 A：全站公告）。
-pub async fn feed(
-    state: &ContentState,
-    viewer: Option<&Principal>,
-    query: FeedQuery,
-) -> Result<FeedPage, Problem> {
-    let limit = page_limit(query.limit);
+/// 解析后的信息流参数。
+struct FeedScope {
+    category_id: Option<i64>,
+    tag_id: Option<i64>,
+    after: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+}
+
+async fn feed_scope(conn: &mut PgConnection, query: &FeedQuery) -> Result<FeedScope, Problem> {
     let after = query
         .cursor
         .as_deref()
         .map(cursor::decode::<FeedCursor>)
         .transpose()?
         .map(|c| (c.b, c.i));
-
-    let mut conn = state.db.acquire().await?;
     let category_id = match query.category.as_deref() {
-        Some(slug) => match repo::category_by_slug(&mut conn, slug).await? {
+        Some(slug) => match repo::category_by_slug(conn, slug).await? {
             Some(c) if c.is_active => Some(c.id),
             _ => {
                 return Err(Problem::new(
@@ -956,7 +964,7 @@ pub async fn feed(
         None => None,
     };
     let tag_id = match query.tag.as_deref() {
-        Some(slug) => match repo::tag_by_slug(&mut conn, slug).await? {
+        Some(slug) => match repo::tag_by_slug(conn, slug).await? {
             Some(t) if !t.is_blocked => Some(t.id),
             _ => {
                 return Err(Problem::new(
@@ -968,44 +976,249 @@ pub async fn feed(
         },
         None => None,
     };
+    Ok(FeedScope {
+        category_id,
+        tag_id,
+        after,
+        limit: page_limit(query.limit),
+    })
+}
 
-    // 与读者有拉黑关系的作者的非匿名帖不出现（BLOCK-013），置顶帖也一样。
+fn feed_page(items: Vec<PostCard>, limit: i64) -> Result<Page<PostCard>, Problem> {
+    Page::from_rows(items, usize::try_from(limit).unwrap_or(20), |card| {
+        FeedCursor {
+            b: card.bumped_at,
+            i: card.id.get(),
+        }
+    })
+}
+
+/// 置顶位 + 热门位 + 普通流。
+struct Composed {
+    pinned: Vec<PostCard>,
+    hot: Vec<PostCard>,
+    page: Page<PostCard>,
+}
+
+/// 组合信息流（FEED-140～149）：
+/// - 置顶：没有按标签筛选时出现在第一页（分区页也显示，D-010 方案 A）；
+/// - 热门：`hot_ids` 非空且既没按分区也没按标签筛选时出现在第一页，去掉已置顶的，被过滤的位置不补位（D-045）；
+/// - 普通流：始终排除置顶与**原始**热门 id（翻页时也排除，避免第一页展示过的帖子再出现，FEED-143）。
+async fn compose(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    query: &FeedQuery,
+    with_pinned: bool,
+    hot_ids: &[i64],
+) -> Result<Composed, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let scope = feed_scope(&mut conn, query).await?;
+    // 与读者有拉黑关系的作者的非匿名帖不出现（BLOCK-013），置顶、热门也一样。
     let excluded_authors =
         ik_social::interop::excluded_authors(&mut conn, viewer.map(|p| p.user_id.get())).await?;
-    let show_pinned = tag_id.is_none();
-    let pinned_rows = if show_pinned && after.is_none() {
+    let show_pinned = with_pinned && scope.tag_id.is_none();
+    let show_hot = !hot_ids.is_empty() && scope.category_id.is_none() && scope.tag_id.is_none();
+    let first_page = scope.after.is_none();
+
+    let pinned_rows = if show_pinned && first_page {
         repo::pinned_cards(&mut conn, &excluded_authors, MAX_PINNED).await?
     } else {
         Vec::new()
     };
+    let mut hot_rows = if show_hot && first_page {
+        repo::public_cards_by_ids(&mut conn, hot_ids, &excluded_authors).await?
+    } else {
+        Vec::new()
+    };
+    if show_pinned {
+        hot_rows.retain(|row| row.pinned_at.is_none());
+    }
+    hot_rows.sort_by_key(|row| hot_ids.iter().position(|id| *id == row.id));
+
     let rows = repo::feed(
         &mut conn,
         &FeedFilter {
-            category_id,
-            tag_id,
+            category_id: scope.category_id,
+            tag_id: scope.tag_id,
             exclude_pinned: show_pinned,
-            after,
-            limit: limit + 1,
+            after: scope.after,
+            limit: scope.limit + 1,
             excluded_authors,
+            exclude_ids: if show_hot {
+                hot_ids.to_vec()
+            } else {
+                Vec::new()
+            },
+            author_ids: None,
+            unread_for: None,
         },
     )
     .await?;
 
     let pinned = cards(state, &mut conn, viewer, pinned_rows).await?;
+    let hot = cards(state, &mut conn, viewer, hot_rows).await?;
     let items = cards(state, &mut conn, viewer, rows).await?;
-    let page = Page::from_rows(items, usize::try_from(limit).unwrap_or(20), |card| {
-        FeedCursor {
-            b: card.bumped_at,
-            i: card.id.get(),
-        }
-    })?;
-    Ok(FeedPage {
+    Ok(Composed {
         pinned,
-        items: page.items,
-        next_cursor: page.next_cursor,
+        hot,
+        page: feed_page(items, scope.limit)?,
     })
 }
 
+/// 最新信息流（`GET /v1/posts`）：按最近活跃倒序，第一页带置顶，不注入热门。
+pub async fn feed(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    query: FeedQuery,
+) -> Result<FeedPage, Problem> {
+    let composed = compose(state, viewer, &query, true, &[]).await?;
+    Ok(FeedPage {
+        pinned: composed.pinned,
+        items: composed.page.items,
+        next_cursor: composed.page.next_cursor,
+    })
+}
+
+/// 首页信息流：最新流 + 置顶 + 热门位（`hot_ids` 由 feed 域的热榜给出，已按展示位规则限流）。
+pub async fn home_feed(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    query: FeedQuery,
+    hot_ids: &[i64],
+) -> Result<HomeFeedPage, Problem> {
+    let composed = compose(state, viewer, &query, true, hot_ids).await?;
+    Ok(HomeFeedPage {
+        pinned: composed.pinned,
+        hot: composed.hot,
+        items: composed.page.items,
+        next_cursor: composed.page.next_cursor,
+    })
+}
+
+/// 关注流：关注的人的**非匿名**帖子，按最近活跃倒序，不注入置顶与热门（FEED-130）。
+/// 关注人数不设上限（D-041 方案 A）。
+pub async fn following_feed(
+    state: &ContentState,
+    principal: &Principal,
+    query: FeedQuery,
+) -> Result<Page<PostCard>, Problem> {
+    let me = principal.user_id.get();
+    let mut conn = state.db.acquire().await?;
+    let scope = feed_scope(&mut conn, &query).await?;
+    let followees = ik_social::interop::following_ids(&mut conn, me).await?;
+    if followees.is_empty() {
+        return Ok(Page {
+            items: Vec::new(),
+            next_cursor: None,
+        });
+    }
+    let excluded_authors = ik_social::interop::excluded_authors(&mut conn, Some(me)).await?;
+    let rows = repo::feed(
+        &mut conn,
+        &FeedFilter {
+            category_id: scope.category_id,
+            tag_id: scope.tag_id,
+            exclude_pinned: false,
+            after: scope.after,
+            limit: scope.limit + 1,
+            excluded_authors,
+            exclude_ids: Vec::new(),
+            author_ids: Some(followees),
+            unread_for: None,
+        },
+    )
+    .await?;
+    let items = cards(state, &mut conn, Some(principal), rows).await?;
+    feed_page(items, scope.limit)
+}
+
+/// 未看流：最新流去掉自己读过的帖子，不注入置顶与热门（UNRD-001～006）。
+pub async fn unread_feed(
+    state: &ContentState,
+    principal: &Principal,
+    query: FeedQuery,
+) -> Result<Page<PostCard>, Problem> {
+    let me = principal.user_id.get();
+    let mut conn = state.db.acquire().await?;
+    let scope = feed_scope(&mut conn, &query).await?;
+    let excluded_authors = ik_social::interop::excluded_authors(&mut conn, Some(me)).await?;
+    let rows = repo::feed(
+        &mut conn,
+        &FeedFilter {
+            category_id: scope.category_id,
+            tag_id: scope.tag_id,
+            exclude_pinned: false,
+            after: scope.after,
+            limit: scope.limit + 1,
+            excluded_authors,
+            exclude_ids: Vec::new(),
+            author_ids: None,
+            unread_for: Some(me),
+        },
+    )
+    .await?;
+    let items = cards(state, &mut conn, Some(principal), rows).await?;
+    feed_page(items, scope.limit)
+}
+
+/// 按给定顺序取公开、且不被拉黑过滤的帖子卡片；不可见的跳过（热门榜：先过滤再分页，EDGE-006）。
+pub async fn public_cards_in_order(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    ids: &[i64],
+) -> Result<Vec<PostCard>, Problem> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut conn = state.db.acquire().await?;
+    let excluded_authors =
+        ik_social::interop::excluded_authors(&mut conn, viewer.map(|p| p.user_id.get())).await?;
+    let mut rows = repo::public_cards_by_ids(&mut conn, ids, &excluded_authors).await?;
+    rows.sort_by_key(|row| ids.iter().position(|id| *id == row.id));
+    cards(state, &mut conn, viewer, rows).await
+}
+
+/// 最多一次标记 100 篇（READ-002）。
+const MAX_READ_BATCH: usize = 100;
+
+/// 批量标为已读（READ-002）：去空白、去重，最多 100 篇；有不存在的帖子时整批拒绝（404），不写入。
+pub async fn mark_read(
+    state: &ContentState,
+    principal: &Principal,
+    request: MarkReadRequest,
+) -> Result<MarkReadResult, Problem> {
+    let mut ids: Vec<i64> = Vec::new();
+    for raw in request
+        .post_ids
+        .iter()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        let id = raw
+            .parse::<Id<()>>()
+            .map_err(|_| Problem::field("postIds", "INVALID", "帖子 id 格式不正确"))?
+            .get();
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    if ids.len() > MAX_READ_BATCH {
+        return Err(Problem::field(
+            "postIds",
+            "TOO_MANY",
+            format!("一次最多标记 {MAX_READ_BATCH} 篇"),
+        ));
+    }
+    if ids.is_empty() {
+        return Ok(MarkReadResult { marked: 0 });
+    }
+    let mut conn = state.db.acquire().await?;
+    if repo::existing_post_ids(&mut conn, &ids).await?.len() != ids.len() {
+        return Err(post_not_found());
+    }
+    let marked = repo::mark_read(&mut conn, principal.user_id.get(), &ids, Utc::now()).await?;
+    Ok(MarkReadResult { marked })
+}
 fn blocked_post() -> Problem {
     Problem::new(StatusCode::FORBIDDEN, "USER_BLOCKED", "无法查看该委托")
 }

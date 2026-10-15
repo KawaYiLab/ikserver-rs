@@ -64,6 +64,42 @@ pub struct Config {
     pub secrets: Secrets,
     pub log: Log,
     pub exam: Exam,
+    pub hot: Hot,
+}
+
+/// 热榜参数（HOT-001）。启动时校验，不接受 0 或非法值（EDGE-017）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Hot {
+    pub enabled: bool,
+    /// 首页注入的热门帖数（展示位）。
+    pub count: usize,
+    /// 热门浏览流（/v1/feed/hot）的最大条数。
+    pub feed_size: usize,
+    pub refresh_secs: u64,
+    /// 时间衰减指数。
+    pub gravity: f64,
+    /// 统计近期活动的天数窗口。
+    pub recent_days: u32,
+    /// 按最近活跃取的候选帖数。
+    pub candidates: i64,
+    /// 展示位里同一作者最多几篇；0 表示不限。匿名帖不参与限流。
+    pub max_per_author: usize,
+}
+
+impl Default for Hot {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            count: 4,
+            feed_size: 200,
+            refresh_secs: 600,
+            gravity: 1.2,
+            recent_days: 7,
+            candidates: 1000,
+            max_per_author: 1,
+        }
+    }
 }
 
 /// 入站考试参数（EXAM-004）。
@@ -109,6 +145,7 @@ impl Default for Config {
             secrets: Secrets::default(),
             log: Log::default(),
             exam: Exam::default(),
+            hot: Hot::default(),
         }
     }
 }
@@ -290,6 +327,19 @@ impl Config {
                     .to_owned(),
             ));
         }
+        let hot = &self.hot;
+        if !(1..=100).contains(&hot.count)
+            || !(1..=2000).contains(&hot.feed_size)
+            || !(1..=3600).contains(&hot.refresh_secs)
+            || !(hot.gravity.is_finite() && hot.gravity > 0.0)
+            || !(1..=90).contains(&hot.recent_days)
+            || !(1..=10_000).contains(&hot.candidates)
+        {
+            return Err(ConfigError::Invalid(
+                "hot 配置不合法：count 1–100、feed_size 1–2000、refresh_secs 1–3600、gravity > 0、recent_days 1–90、candidates 1–10000"
+                    .to_owned(),
+            ));
+        }
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
@@ -348,6 +398,30 @@ mod tests {
             err,
             ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY")
         ));
+    }
+
+    #[test]
+    fn hot_config_is_validated_at_startup() {
+        // 旧系统里 HOT_COUNT=0 会悄悄回落默认值（EDGE-017）；这里直接拒绝启动。
+        let base = || with(&[("database.url", "postgres://x")]);
+        for (key, value) in [
+            ("hot.count", 0_i64),
+            ("hot.feed_size", 0),
+            ("hot.refresh_secs", 0),
+            ("hot.recent_days", 91),
+            ("hot.candidates", 0),
+        ] {
+            let err =
+                Config::from_figment(base().merge(Serialized::default(key, value))).unwrap_err();
+            assert!(matches!(err, ConfigError::Invalid(_)), "{key}={value}");
+        }
+        let err = Config::from_figment(base().merge(Serialized::default("hot.gravity", 0.0)))
+            .unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)), "gravity=0");
+        let config =
+            Config::from_figment(base().merge(Serialized::default("hot.max_per_author", 0)))
+                .unwrap();
+        assert_eq!(config.hot.max_per_author, 0, "0 表示不限，是合法值");
     }
 
     #[test]

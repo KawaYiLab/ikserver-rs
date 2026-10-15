@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_reads (user_id, post_id, created_at)\n         SELECT $1, id, $3 FROM unnest($2::bigint[]) AS t(id)\n         ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8658edd9daf3a2aa2d7e12f540f0c0e09382a1b080228a0277eca83345e1f6ef"
+}

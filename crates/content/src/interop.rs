@@ -103,3 +103,79 @@ pub async fn public_post_titles(
         .map(|row| (row.id, row.title))
         .collect())
 }
+
+// ---------- 热榜数据（feed 域计算热度用）----------
+
+/// 热度计算需要的帖子字段。
+#[derive(Debug, Clone)]
+pub struct HotPost {
+    pub id: i64,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    /// 首次发布时间（编辑重发不重置衰减，EDGE-016）。
+    pub created_at: DateTime<Utc>,
+    pub bumped_at: DateTime<Utc>,
+    pub like_count: i32,
+}
+
+impl From<repo::HotPostRow> for HotPost {
+    fn from(row: repo::HotPostRow) -> Self {
+        Self {
+            id: row.id,
+            author_id: row.author_id,
+            is_anonymous: row.is_anonymous,
+            created_at: row.created_at,
+            bumped_at: row.bumped_at,
+            like_count: row.like_count,
+        }
+    }
+}
+
+/// 窗口内的一次行为：某人第一次在某帖上点赞 / 评论的时间。
+#[derive(Debug, Clone, Copy)]
+pub struct Activity {
+    pub post_id: i64,
+    pub user_id: i64,
+    pub first_at: DateTime<Utc>,
+}
+
+/// 最近活跃的公开帖子，最多 `limit` 篇（HOT-004）。
+pub async fn hot_recent_posts(
+    conn: &mut PgConnection,
+    limit: i64,
+) -> Result<Vec<HotPost>, Problem> {
+    Ok(repo::hot_recent(conn, limit)
+        .await?
+        .into_iter()
+        .map(HotPost::from)
+        .collect())
+}
+
+/// 指定 id 中公开的帖子。
+pub async fn hot_posts(conn: &mut PgConnection, ids: &[i64]) -> Result<Vec<HotPost>, Problem> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(repo::hot_by_ids(conn, ids)
+        .await?
+        .into_iter()
+        .map(HotPost::from)
+        .collect())
+}
+
+/// 窗口内对帖子的点赞（每个帖子、每人取最早一次）。行为人是否有效、是不是作者本人由调用方过滤。
+pub async fn like_activity(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> Result<Vec<Activity>, Problem> {
+    Ok(repo::like_activity(conn, since, until)
+        .await?
+        .into_iter()
+        .map(|row| Activity {
+            post_id: row.post_id,
+            user_id: row.user_id,
+            first_at: row.first_at,
+        })
+        .collect())
+}

@@ -32,8 +32,9 @@ crates/
   notify/    通知（敲敲）：写入、撤回、新帖扇出、列表、按发送者分组、已读
   realtime/  WebSocket 网关 /v1/realtime：连接表、按用户 / 会话 / 频道分发、心跳、吊销断开
   profile/   个人资料与作者主页：签名、隐藏主页、改名、主页精选、用户搜索（最上层，依赖各域 service）
+  feed/      信息流：首页（置顶 + 热门位 + 最新）、热榜计算与刷新、关注流、未看流、阅读记录
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：feed messaging media search
+  （后续按业务域新增：messaging media search
     moderation ai admin）
 docs/
   architecture.md     架构与模块边界

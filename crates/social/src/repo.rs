@@ -321,3 +321,12 @@ pub(crate) async fn follower_counts(
     .fetch_all(conn)
     .await
 }
+
+pub(crate) async fn followee_ids(conn: &mut PgConnection, follower: i64) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT followee_id FROM follows WHERE follower_id = $1",
+        follower,
+    )
+    .fetch_all(conn)
+    .await
+}

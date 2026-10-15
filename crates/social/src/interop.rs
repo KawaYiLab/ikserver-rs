@@ -88,6 +88,11 @@ pub async fn follower_counts(
         .collect())
 }
 
+/// `user_id` 关注的全部用户（关注流用，不设上限，D-041 方案 A）。
+pub async fn following_ids(conn: &mut PgConnection, user_id: i64) -> Result<Vec<i64>, Problem> {
+    Ok(repo::followee_ids(conn, user_id).await?)
+}
+
 /// `targets` 中 `follower_id` 关注了的人。
 pub async fn following_among(
     conn: &mut PgConnection,

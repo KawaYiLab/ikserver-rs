@@ -6,6 +6,7 @@ use ik_comments::CommentsState;
 use ik_content::ContentState;
 use ik_economy::EconomyState;
 use ik_exam::ExamState;
+use ik_feed::FeedState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
@@ -32,6 +33,7 @@ pub struct AppState {
     pub notify: NotifyState,
     pub realtime: RealtimeState,
     pub profile: ProfileState,
+    pub feed: FeedState,
 }
 
 impl AppState {
@@ -56,6 +58,7 @@ impl AppState {
         let notify = NotifyState::new(db.clone(), bus.clone());
         let realtime = RealtimeState::start(&bus, config.http.allowed_origins.clone())?;
         let profile = ProfileState::new(db.clone(), ids.clone(), content.clone(), comments.clone());
+        let feed = FeedState::start(content.clone(), config.hot.clone())?;
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -70,6 +73,7 @@ impl AppState {
             notify,
             realtime,
             profile,
+            feed,
         })
     }
 }
@@ -125,5 +129,11 @@ impl FromRef<AppState> for RealtimeState {
 impl FromRef<AppState> for ProfileState {
     fn from_ref(state: &AppState) -> Self {
         state.profile.clone()
+    }
+}
+
+impl FromRef<AppState> for FeedState {
+    fn from_ref(state: &AppState) -> Self {
+        state.feed.clone()
     }
 }

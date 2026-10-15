@@ -453,3 +453,33 @@ pub(crate) async fn author_comment_count(
     .fetch_one(conn)
     .await
 }
+
+// ---------- 热榜数据 ----------
+
+pub(crate) struct ActivityRow {
+    pub post_id: i64,
+    pub user_id: i64,
+    pub first_at: DateTime<Utc>,
+}
+
+/// 窗口内的有效评论：评论未隐藏，回复的一级评论也未隐藏（只有一层楼中楼，HOT-005）。
+/// 每个 (帖子, 评论者) 一行，取最早时间。
+pub(crate) async fn comment_activity(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> sqlx::Result<Vec<ActivityRow>> {
+    sqlx::query_as!(
+        ActivityRow,
+        r#"SELECT c.post_id, c.author_id AS user_id, min(c.created_at) AS "first_at!"
+           FROM comments c
+           LEFT JOIN comments parent ON parent.id = c.parent_id
+           WHERE c.created_at >= $1 AND c.created_at <= $2 AND c.hidden_at IS NULL
+             AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)
+           GROUP BY c.post_id, c.author_id"#,
+        since,
+        until,
+    )
+    .fetch_all(conn)
+    .await
+}

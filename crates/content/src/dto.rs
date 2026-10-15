@@ -132,6 +132,8 @@ pub struct PostCard {
     pub edited_at: Option<DateTime<Utc>>,
     /// 最近一次顶帖的是不是当前用户自己。
     pub bumped_by_self: bool,
+    /// 当前用户读过（有阅读记录）。游客恒为 false。
+    pub is_read: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -366,4 +368,30 @@ pub struct PinCandidatesQuery {
     pub cursor: Option<String>,
     /// 默认 20，最大 50。
     pub limit: Option<u32>,
+}
+
+/// 首页信息流。置顶与热门只在第一页返回，`items` 里不会再出现它们。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeFeedPage {
+    pub pinned: Vec<PostCard>,
+    /// 热门位（最多 4 篇；按分区或标签筛选时没有）。
+    pub hot: Vec<PostCard>,
+    pub items: Vec<PostCard>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MarkReadRequest {
+    /// 帖子 id，去重后最多 100 个。
+    pub post_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MarkReadResult {
+    /// 新写入的阅读记录数（之前读过的不重复计）。
+    pub marked: u64,
 }

@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.post_id, c.author_id AS user_id, min(c.created_at) AS \"first_at!\"\n           FROM comments c\n           LEFT JOIN comments parent ON parent.id = c.parent_id\n           WHERE c.created_at >= $1 AND c.created_at <= $2 AND c.hidden_at IS NULL\n             AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)\n           GROUP BY c.post_id, c.author_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "first_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "b3b211603ccda97a6643fb0d72c5a1ecdb78e6f68741a251f594d588ae0fce40"
+}

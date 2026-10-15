@@ -523,9 +523,15 @@ pub(crate) struct FeedFilter {
     pub limit: i64,
     /// 与读者有拉黑关系的作者；他们的匿名帖不受影响（COMMON-008）。
     pub excluded_authors: Vec<i64>,
+    /// 已经在本页别处展示过的帖子（置顶、热门），翻页时也一直排除（FEED-143）。
+    pub exclude_ids: Vec<i64>,
+    /// 关注流：只看这些作者的**非匿名**帖子（FEED-130）。
+    pub author_ids: Option<Vec<i64>>,
+    /// 未看流：去掉该用户读过的帖子（UNRD-003，NOT EXISTS 按主键探测）。
+    pub unread_for: Option<i64>,
 }
 
-/// 公开帖子按 (bumped_at, id) 倒序。可选按分区、标签筛选。
+/// 公开帖子按 (bumped_at, id) 倒序。可选按分区、标签筛选，以及关注流、未看流的附加条件。
 pub(crate) async fn feed(
     conn: &mut PgConnection,
     filter: &FeedFilter,
@@ -547,6 +553,10 @@ pub(crate) async fn feed(
              AND (NOT $3 OR p.pinned_at IS NULL)
              AND ($4::timestamptz IS NULL OR (p.bumped_at, p.id) < ($4, $5::bigint))
              AND (p.is_anonymous OR NOT (p.author_id = ANY($7)))
+             AND NOT (p.id = ANY($8))
+             AND ($9::bigint[] IS NULL OR (NOT p.is_anonymous AND p.author_id = ANY($9)))
+             AND ($10::bigint IS NULL OR NOT EXISTS (
+                     SELECT 1 FROM post_reads r WHERE r.user_id = $10 AND r.post_id = p.id))
            ORDER BY p.bumped_at DESC, p.id DESC
            LIMIT $6"#,
         filter.category_id,
@@ -556,6 +566,9 @@ pub(crate) async fn feed(
         after_id,
         filter.limit,
         &filter.excluded_authors,
+        &filter.exclude_ids,
+        filter.author_ids.as_deref(),
+        filter.unread_for,
     )
     .fetch_all(conn)
     .await
@@ -1188,6 +1201,151 @@ pub(crate) async fn public_posts(
         PublicPostRow,
         "SELECT id, title FROM posts WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL",
         ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+// ---------- 阅读记录 ----------
+
+/// `post_ids` 中该用户读过的。
+pub(crate) async fn read_among(
+    conn: &mut PgConnection,
+    user_id: i64,
+    post_ids: &[i64],
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT post_id FROM post_reads WHERE user_id = $1 AND post_id = ANY($2)",
+        user_id,
+        post_ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// `ids` 中存在的帖子（不论状态）。
+pub(crate) async fn existing_post_ids(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!("SELECT id FROM posts WHERE id = ANY($1)", ids)
+        .fetch_all(conn)
+        .await
+}
+
+/// 记为已读（已有的不重复写），返回新写入条数。
+pub(crate) async fn mark_read(
+    conn: &mut PgConnection,
+    user_id: i64,
+    post_ids: &[i64],
+    now: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    let result = sqlx::query!(
+        "INSERT INTO post_reads (user_id, post_id, created_at)
+         SELECT $1, id, $3 FROM unnest($2::bigint[]) AS t(id)
+         ON CONFLICT DO NOTHING",
+        user_id,
+        post_ids,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// 按给定 id 取公开、且不被拉黑过滤的帖子卡片（顺序不保证）。热门榜与首页热门位用。
+pub(crate) async fn public_cards_by_ids(
+    conn: &mut PgConnection,
+    ids: &[i64],
+    excluded_authors: &[i64],
+) -> sqlx::Result<Vec<CardRow>> {
+    sqlx::query_as!(
+        CardRow,
+        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
+                  p.view_count, p.like_count, p.comment_count,
+                  p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
+                  p.edited_at, p.last_bumped_by,
+                  c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id = ANY($1) AND p.status = 'published' AND p.hidden_at IS NULL
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))"#,
+        ids,
+        excluded_authors,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+// ---------- 热榜数据 ----------
+
+pub(crate) struct HotPostRow {
+    pub id: i64,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub created_at: DateTime<Utc>,
+    pub bumped_at: DateTime<Utc>,
+    pub like_count: i32,
+}
+
+/// 最近活跃的公开帖子（HOT-004 候选集的第一部分）。c 取首次发布时间（EDGE-016）。
+pub(crate) async fn hot_recent(
+    conn: &mut PgConnection,
+    limit: i64,
+) -> sqlx::Result<Vec<HotPostRow>> {
+    sqlx::query_as!(
+        HotPostRow,
+        r#"SELECT id, author_id, is_anonymous,
+                  COALESCE(first_published_at, published_at) AS "created_at!",
+                  bumped_at AS "bumped_at!", like_count
+           FROM posts
+           WHERE status = 'published' AND hidden_at IS NULL
+           ORDER BY bumped_at DESC, id DESC
+           LIMIT $1"#,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 指定 id 中公开的帖子（候选集的第二部分：窗口内有活动但不在最近活跃里的）。
+pub(crate) async fn hot_by_ids(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<HotPostRow>> {
+    sqlx::query_as!(
+        HotPostRow,
+        r#"SELECT id, author_id, is_anonymous,
+                  COALESCE(first_published_at, published_at) AS "created_at!",
+                  bumped_at AS "bumped_at!", like_count
+           FROM posts
+           WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL"#,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct ActivityRow {
+    pub post_id: i64,
+    pub user_id: i64,
+    pub first_at: DateTime<Utc>,
+}
+
+/// 窗口内对帖子的点赞：每个 (帖子, 用户) 一行，取最早时间（HOT-005/006）。
+pub(crate) async fn like_activity(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> sqlx::Result<Vec<ActivityRow>> {
+    sqlx::query_as!(
+        ActivityRow,
+        r#"SELECT post_id, user_id, min(created_at) AS "first_at!"
+           FROM post_likes
+           WHERE created_at >= $1 AND created_at <= $2
+           GROUP BY post_id, user_id"#,
+        since,
+        until,
     )
     .fetch_all(conn)
     .await

@@ -24,6 +24,7 @@ ik-social.workspace = true
 ik-notify.workspace = true
 ik-realtime.workspace = true
 ik-profile.workspace = true
+ik-feed.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

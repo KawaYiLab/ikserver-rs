@@ -4,6 +4,7 @@
 //! `ik_content::interop` 在同一事务里更新。
 
 pub mod dto;
+pub mod interop;
 mod repo;
 mod routes;
 pub mod service;

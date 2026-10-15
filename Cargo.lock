@@ -1454,6 +1454,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-feed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "chrono",
+ "http",
+ "ik-auth",
+ "ik-comments",
+ "ik-content",
+ "ik-kernel",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+ "utoipa",
+ "utoipa-axum",
+]
+
+[[package]]
 name = "ik-kernel"
 version = "0.1.0"
 dependencies = [
@@ -1560,6 +1582,7 @@ dependencies = [
  "ik-content",
  "ik-economy",
  "ik-exam",
+ "ik-feed",
  "ik-kernel",
  "ik-notify",
  "ik-profile",

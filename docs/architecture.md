@@ -50,6 +50,8 @@ kernel ◄── auth ◄── content ◄── feed
 - 拉黑几乎在每个读写路径上生效，所以 `social` 只放用户之间的关系（关注、拉黑），位于 content 之下，
   由 `ik_social::interop` 提供「任一方向拉黑」判断与列表过滤的排除集合。点赞、收藏、三连是帖子和评论
   上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
+- `feed → auth, content, comments`：热榜要合并点赞（content）与评论（comments）两类活动，所以在两者之上；
+  各种信息流的 SQL 仍在 content（帖子表归它），feed 只负责热度计算与组合（把展示位 id 交给 content）。
 - `profile → auth, social, economy, content, comments`：作者主页要汇总账号、关系、经验、帖子与评论，
   所以放在最上层，只调用各域的 service / interop；没有其他域依赖它。
 - `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）是事件总线的唯一订阅者，按受众转发；
