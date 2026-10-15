@@ -3,7 +3,8 @@
 use chrono::{DateTime, Utc};
 use ik_content::dto::PostCard;
 use ik_kernel::Id;
-use ik_kernel::id::marker::{Post, User};
+use ik_kernel::id::marker::{Media, Post, User};
+use ik_media::dto::MediaView;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -48,6 +49,9 @@ pub struct ProfileView {
     pub following_count: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<ProfileStats>,
+    /// 自定义头像；没有设置时省略（客户端用默认头像）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<MediaView>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ToSchema)]
@@ -99,6 +103,8 @@ pub struct MyProfileView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<Vec<String>>)]
     pub pinned_post_ids: Option<Vec<Id<Post>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<MediaView>,
 }
 
 #[derive(Debug, Default, Deserialize, ToSchema)]
@@ -166,4 +172,21 @@ pub struct MentionCandidate {
     pub id: Id<User>,
     pub username: String,
     pub level: i16,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetAvatarRequest {
+    /// 自己图库里的图片（先走直传上传）。
+    #[schema(value_type = String)]
+    pub media_id: Id<Media>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<MediaView>,
+    /// 操作后的丁尼余额。换成同一张图或清除头像时不扣费。
+    pub balance: i32,
 }

@@ -198,3 +198,24 @@
 - `(sender_id, client_id)` 部分唯一索引实现发送去重。
 - 收件箱时间线（`/v1/inbox/dm-<id>/items`）把这里的消息与 `notifications` 里对方发来的通知按 `(created_at, id)` 归并，
   同一时刻通知在前；两边各自走自己的索引，不跨表 JOIN。
+
+## 媒体域（`20261020000001_media.sql`）
+
+### `media_files`
+
+- 只存校验通过、已发布的图片：`object_key` 是服务端生成的最终 key（客户端拿到的预签名地址只能写暂存 key，UPL-052）；
+  `mime` 来自文件头嗅探；`size_bytes` 统一用字节（旧系统是 KB，UPL-063）；`width`/`height` 是客户端上报的。
+- `sha256` 是服务端对读回的字节计算的哈希，去重只信它（UPL-051）。签名阶段只按「自己上传过的」去重，
+  跨用户去重只在完成阶段字节已校验之后（D-077 方案 A）。
+- `receipt` = 完成凭证字符串的 SHA-256，唯一：同一凭证的重试与并发完成收敛到同一行（UPL-014/035）。
+- 文件从不物理删除（D-078 方案 A）；对象存储里的暂存对象完成后删除，没完成的靠存储的生命周期规则清理（UPL-060）。
+
+### `media_uploaders`
+
+- 文件 ↔ 上传者，多对多。永不对外暴露（防匿名内容溯源，UPL-056）。「我的图库」就是这张表；从图库移除只删这一行。
+- `(user_id, created_at DESC, media_id DESC)` 支撑图库分页。
+
+## 自定义头像（`20261020000002_profile_avatar.sql`）
+
+- `user_profiles.avatar_media_id` 引用 `media_files`（profile 域的列，跨域外键只做兜底，`ON DELETE SET NULL`）。
+  设置时经 `ik_media::interop::owned_media` 校验是自己图库里的文件（D-012 方案 A），与扣费同一事务。

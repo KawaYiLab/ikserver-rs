@@ -81,6 +81,12 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CODE_INVALID | 400 | 验证码错误或已过期 | 已使用的验证码同样返回此码 |
 | COMMENT_NOT_TOP_LEVEL | 400 | 只有一级评论可以置顶或采纳 | |
 | FOLLOW_SELF | 400 | 不能关注自己 | |
+| UPLOAD_TOKEN_INVALID | 400 | 上传凭证无效 | 格式或签名不对，或不是自己的凭证 |
+| UPLOAD_TOKEN_EXPIRED | 400 | 上传凭证已过期，请重新上传 | 签名后 10 分钟内完成 |
+| UPLOAD_NOT_FOUND | 400 | 没有找到已上传的文件，请重新上传 | 还没 PUT，或暂存对象已被清理 |
+| UPLOAD_SIZE_MISMATCH | 400 | 上传的文件大小与声明不符 | 也包括读取过程中对象被替换 |
+| UPLOAD_CHECKSUM_MISMATCH | 400 | 上传的文件内容与声明的哈希不符 | |
+| UPLOAD_NOT_IMAGE | 400 | 上传的文件不是支持的图片格式 | 按文件头嗅探，只认 jpeg/png/gif/webp/avif |
 | DM_SELF | 400 | 不能给自己发私信 | |
 | REPLY_TARGET_INVALID | 400 | 被回复的消息不存在或已撤回 | 也包括别的会话里的消息 |
 | BLOCK_SELF | 400 | 不能拉黑自己 | |
@@ -118,6 +124,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | UNSUPPORTED_MEDIA_TYPE | 415 | 请求体必须是 application/json | |
 | WEBSOCKET_REQUIRED | 426 | 请使用 WebSocket 连接 | `/v1/realtime` 收到普通 HTTP 请求 |
 | RATE_LIMITED | 429 | 操作过于频繁，请稍后再试 | 带 `Retry-After`（秒） |
+| UPLOAD_VERIFICATION_BUSY | 429 | 上传校验繁忙，请稍后重试 | 排队已满；带 `Retry-After` |
+| UPLOAD_VERIFICATION_TIMEOUT | 429 | 上传校验超时，请稍后重试 | 排队或校验超时；带 `Retry-After` |
 | CODE_COOLDOWN | 429 | 验证码发送过于频繁，请 N 秒后再试 | 仅注册用途；带 `Retry-After` |
 | CODE_TOO_MANY_ATTEMPTS | 429 | 验证码错误次数过多，请重新获取 | 同一验证码错 5 次作废 |
 | EXAM_COOLDOWN | 429 | 考试失败次数过多，请 N 分钟后再试 | 最近 3 次都未通过；带 `Retry-After` |
@@ -200,14 +208,19 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 两步直传（S3 预签名）：
 
-1. `POST /v1/uploads/sign` → 返回 `{ uploadUrl, method, headers, uploadId, expiresAt }`；
-   若内容哈希已存在（且归本人或可复用）直接返回已有媒体（`existing: true`）。
-2. 客户端 PUT 到对象存储。
-3. `POST /v1/uploads/{uploadId}/complete` → 服务端 HeadObject 比对大小 →
-   带 If-Match(ETag) 读取 → SHA-256 + 魔数嗅探 → 发布到服务端随机新 key → 返回媒体对象。
+1. `POST /v1/uploads/sign`（需要通过考试）→ 自己上传过相同内容（声明了 `contentHash`）时返回
+   `{ existing: true, media }`；否则返回 `{ existing: false, uploadId, uploadUrl, method: "PUT", headers, expiresAt }`。
+2. 客户端按 `method`、`headers` 把原文件 PUT 到 `uploadUrl`（`Content-Length` 已签入，必须与声明的 `size` 一致）。
+3. `POST /v1/uploads/{uploadId}/complete`（可带 `{ width, height }`）→ 服务端 HEAD 比对大小 → 带 If-Match(ETag) 读回 →
+   SHA-256（与声明的一致）+ 文件头嗅探 → 把校验过的字节发布到服务端生成的新 key → 返回媒体对象（201）。
+   同一 `uploadId` 重试返回同一个文件（200）；内容与已有文件相同时复用已有文件并加入自己的图库（200）。
 
-- 限制：≤ 30 MiB；MIME 白名单 image/jpeg|png|gif|webp|avif；像素上限防爆。
-- 媒体对象统一含 `{ id, url, width, height, thumbhash, mime, size }`。
+- 限制：≤ 30 MiB；类型只认 image/jpeg|png|gif|webp|avif（以嗅探为准，不信任客户端声明）；签名每人每分钟 60 次；
+  同时校验 2 个（可配置），排队最多 64 个，满了或超时返回 429。
+- 媒体对象统一含 `{ id, url, thumbUrl, mime, size, width?, height?, name, createdAt }`；`thumbUrl` 为 360 宽 WebP
+  （配置了 CDN 时按大小选阿里云 ESA 或 R2 图片变换，没有 CDN 时与原图相同）。缩略哈希（thumbhash）尚未实现。
+- 我的图库：`GET /v1/me/uploads`、`DELETE /v1/me/uploads/{id}`（只从图库移除，文件不删）。
+- 引用媒体（头像，以后的帖子封面、评论图片）只能用自己图库里的文件（D-012 方案 A）。
 
 ## 缓存
 

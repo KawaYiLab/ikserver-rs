@@ -11,6 +11,7 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
+use ik_media::MediaState;
 use ik_messaging::MessagingState;
 use ik_notify::NotifyState;
 use ik_profile::ProfileState;
@@ -38,6 +39,7 @@ pub struct AppState {
     pub profile: ProfileState,
     pub feed: FeedState,
     pub search: SearchState,
+    pub media: MediaState,
 }
 
 impl AppState {
@@ -72,7 +74,19 @@ impl AppState {
         };
         let realtime =
             RealtimeState::start(&bus, config.http.allowed_origins.clone())?.with_typing(typing);
-        let profile = ProfileState::new(db.clone(), ids.clone(), content.clone(), comments.clone());
+        let media = MediaState::new(
+            db.clone(),
+            ids.clone(),
+            &config.storage,
+            config.secrets.code_hmac_key.expose().as_bytes(),
+        );
+        let profile = ProfileState::new(
+            db.clone(),
+            ids.clone(),
+            content.clone(),
+            comments.clone(),
+            media.clone(),
+        );
         let feed = FeedState::start(content.clone(), config.hot.clone())?;
         // 索引同步由 `serve` 显式启动（CLI 子命令不需要）。
         let search = SearchState::new(content.clone(), comments.clone(), &config.search)?;
@@ -93,6 +107,7 @@ impl AppState {
             profile,
             feed,
             search,
+            media,
         })
     }
 }
@@ -166,5 +181,11 @@ impl FromRef<AppState> for FeedState {
 impl FromRef<AppState> for SearchState {
     fn from_ref(state: &AppState) -> Self {
         state.search.clone()
+    }
+}
+
+impl FromRef<AppState> for MediaState {
+    fn from_ref(state: &AppState) -> Self {
+        state.media.clone()
     }
 }

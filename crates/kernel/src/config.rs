@@ -66,6 +66,55 @@ pub struct Config {
     pub exam: Exam,
     pub hot: Hot,
     pub search: Search,
+    pub storage: Storage,
+}
+
+/// 对象存储（S3 兼容：R2 / 七牛）与直传上传。`bucket` 为空时上传接口返回 503。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Storage {
+    /// 例如 `https://<account>.r2.cloudflarestorage.com`。
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub access_key: Secret,
+    pub secret_key: Secret,
+    /// 对外地址前缀（CDN，例如 `https://im.tiwat.cn`）。为空时用 `{endpoint}/{bucket}`（UPL-009）。
+    pub public_base_url: String,
+    /// 所有对象 key 的前缀（可空，例如 `uploads`）。
+    pub root_prefix: String,
+    /// 七牛等需要显式 ACL 的存储设为 true（写入时带 `public-read`）；R2 不支持 ACL，保持 false。
+    pub public_read_acl: bool,
+    /// 预签名 PUT 与完成令牌的有效期（UPL-011）。
+    pub sign_expires_secs: u64,
+    /// 同时校验的上传数（每个最多占 30 MiB 内存，D-003 方案 A）。
+    pub verify_slots: usize,
+    /// 排队等待校验槽位的上限时间（UPL-041）。
+    pub queue_timeout_secs: u64,
+    /// 单个校验任务的总时限（UPL-041）。
+    pub task_timeout_secs: u64,
+    /// 单个 S3 请求的超时（UPL-042）。
+    pub request_timeout_secs: u64,
+}
+
+impl Default for Storage {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            region: "auto".to_owned(),
+            bucket: String::new(),
+            access_key: Secret::default(),
+            secret_key: Secret::default(),
+            public_base_url: String::new(),
+            root_prefix: String::new(),
+            public_read_acl: false,
+            sign_expires_secs: 600,
+            verify_slots: 2,
+            queue_timeout_secs: 60,
+            task_timeout_secs: 90,
+            request_timeout_secs: 15,
+        }
+    }
 }
 
 /// 搜索（Meilisearch）。`url` 为空时不连接搜索引擎，搜索一律走数据库兜底（SRCH-014）。
@@ -178,6 +227,7 @@ impl Default for Config {
             exam: Exam::default(),
             hot: Hot::default(),
             search: Search::default(),
+            storage: Storage::default(),
         }
     }
 }
@@ -392,6 +442,28 @@ impl Config {
                     .to_owned(),
             ));
         }
+        let storage = &self.storage;
+        let prefix_ok = storage.root_prefix.split('/').all(|seg| {
+            seg.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        }) && !storage.root_prefix.starts_with('/')
+            && !storage.root_prefix.ends_with('/')
+            && !storage.root_prefix.contains("//");
+        if !prefix_ok
+            || !(60..=3600).contains(&storage.sign_expires_secs)
+            || !(1..=32).contains(&storage.verify_slots)
+            || !(1..=600).contains(&storage.queue_timeout_secs)
+            || !(1..=600).contains(&storage.task_timeout_secs)
+            || !(1..=300).contains(&storage.request_timeout_secs)
+            || (!storage.bucket.is_empty()
+                && !(storage.endpoint.starts_with("http://")
+                    || storage.endpoint.starts_with("https://")))
+        {
+            return Err(ConfigError::Invalid(
+                "storage 配置不合法：设置 bucket 时 endpoint 须为 http(s)://；root_prefix 只能是由字母、数字、_、- 组成的路径段；sign_expires_secs 60–3600，verify_slots 1–32，queue/task_timeout_secs 1–600，request_timeout_secs 1–300"
+                    .to_owned(),
+            ));
+        }
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
@@ -450,6 +522,38 @@ mod tests {
             err,
             ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY")
         ));
+    }
+
+    #[test]
+    fn storage_config_is_validated_at_startup() {
+        let base = || with(&[("database.url", "postgres://x")]);
+        assert!(
+            Config::from_figment(base())
+                .unwrap()
+                .storage
+                .bucket
+                .is_empty()
+        );
+        for (key, value) in [
+            ("storage.root_prefix", "/abs"),
+            ("storage.root_prefix", "a/../b"),
+            ("storage.bucket", "media"),
+        ] {
+            let err =
+                Config::from_figment(base().merge(Serialized::default(key, value))).unwrap_err();
+            assert!(matches!(err, ConfigError::Invalid(_)), "{key}={value}");
+        }
+        let ok = Config::from_figment(
+            base()
+                .merge(Serialized::default("storage.bucket", "media"))
+                .merge(Serialized::default(
+                    "storage.endpoint",
+                    "http://127.0.0.1:9000",
+                ))
+                .merge(Serialized::default("storage.root_prefix", "uploads/v2")),
+        )
+        .unwrap();
+        assert_eq!(ok.storage.verify_slots, 2);
     }
 
     #[test]

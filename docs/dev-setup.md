@@ -99,6 +99,9 @@ $env:IK_TEST_MEILI_URL = "http://127.0.0.1:7700"; $env:IK_TEST_MEILI_KEY = "dev-
 cargo nextest run -p ik-search
 ```
 
+媒体上传的用例同理需要一个 S3 兼容服务（MinIO，或 `pip install "moto[server]"` 后运行 `moto_server -p 9000`），
+设置 `IK_TEST_S3_URL`（及 MinIO 的 `IK_TEST_S3_ACCESS_KEY` / `IK_TEST_S3_SECRET_KEY`），每个用例用独立的桶。
+
 没有设置 `IK_TEST_MEILI_URL` 时这些用例直接通过（数据库兜底的用例照常运行）。每个用例用独立的索引前缀，结束时删除索引。
 
 ## 目录约定

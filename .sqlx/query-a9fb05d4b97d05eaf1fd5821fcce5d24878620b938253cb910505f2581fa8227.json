@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username, email, level, exam_passed_at)\n             VALUES ($1, $2, $3, 1, CASE WHEN $4 THEN now() END)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9fb05d4b97d05eaf1fd5821fcce5d24878620b938253cb910505f2581fa8227"
+}

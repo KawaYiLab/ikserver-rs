@@ -57,6 +57,9 @@ jobs:
       DATABASE_URL: postgres://ik:ik@localhost:5432/ik
       IK_TEST_MEILI_URL: http://localhost:7700
       IK_TEST_MEILI_KEY: ci-master-key-0123456789
+      IK_TEST_S3_URL: http://localhost:9000
+      IK_TEST_S3_ACCESS_KEY: ikminio
+      IK_TEST_S3_SECRET_KEY: ikminio-secret
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
@@ -66,6 +69,13 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
+      # 媒体上传用例（crates/media/tests）连它。服务容器不能传启动参数，所以用 docker run。
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=ikminio -e MINIO_ROOT_PASSWORD=ikminio-secret \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/live && break; sleep 1; done
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --version ${{ env.SQLX_VERSION }} --no-default-features --features postgres --locked
       - name: Apply migrations

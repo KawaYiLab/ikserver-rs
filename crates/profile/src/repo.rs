@@ -7,12 +7,13 @@ pub(crate) struct ProfileRow {
     pub bio: String,
     pub hidden: bool,
     pub pinned_post_ids: Option<Vec<i64>>,
+    pub avatar_media_id: Option<i64>,
 }
 
 pub(crate) async fn get(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<Option<ProfileRow>> {
     sqlx::query_as!(
         ProfileRow,
-        "SELECT bio, hidden, pinned_post_ids FROM user_profiles WHERE user_id = $1",
+        "SELECT bio, hidden, pinned_post_ids, avatar_media_id FROM user_profiles WHERE user_id = $1",
         user_id,
     )
     .fetch_optional(conn)
@@ -35,7 +36,7 @@ pub(crate) async fn update_settings(
              bio = COALESCE($2, user_profiles.bio),
              hidden = COALESCE($3, user_profiles.hidden),
              updated_at = $4
-         RETURNING bio, hidden, pinned_post_ids",
+         RETURNING bio, hidden, pinned_post_ids, avatar_media_id",
         user_id,
         bio,
         hidden,
@@ -55,9 +56,29 @@ pub(crate) async fn set_pinned(
         ProfileRow,
         "INSERT INTO user_profiles (user_id, pinned_post_ids, updated_at) VALUES ($1, $2, $3)
          ON CONFLICT (user_id) DO UPDATE SET pinned_post_ids = $2, updated_at = $3
-         RETURNING bio, hidden, pinned_post_ids",
+         RETURNING bio, hidden, pinned_post_ids, avatar_media_id",
         user_id,
         pinned,
+        now,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 设置 / 清除自定义头像，没有行时先按默认值创建。
+pub(crate) async fn set_avatar(
+    conn: &mut PgConnection,
+    user_id: i64,
+    media_id: Option<i64>,
+    now: DateTime<Utc>,
+) -> sqlx::Result<ProfileRow> {
+    sqlx::query_as!(
+        ProfileRow,
+        "INSERT INTO user_profiles (user_id, avatar_media_id, updated_at) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id) DO UPDATE SET avatar_media_id = $2, updated_at = $3
+         RETURNING bio, hidden, pinned_post_ids, avatar_media_id",
+        user_id,
+        media_id,
         now,
     )
     .fetch_one(conn)

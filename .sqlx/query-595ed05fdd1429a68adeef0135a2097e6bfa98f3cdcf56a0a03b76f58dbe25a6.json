@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO media_uploaders (media_id, user_id, created_at) VALUES ($1, $2, $3)\n         ON CONFLICT (media_id, user_id) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "595ed05fdd1429a68adeef0135a2097e6bfa98f3cdcf56a0a03b76f58dbe25a6"
+}

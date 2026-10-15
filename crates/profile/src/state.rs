@@ -6,6 +6,7 @@ use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_comments::CommentsState;
 use ik_content::ContentState;
 use ik_kernel::Snowflake;
+use ik_media::MediaState;
 use sqlx::PgPool;
 
 /// 用户搜索与 @ 候选：登录用户每秒 10 次（PROFILE-023/024）。
@@ -25,6 +26,7 @@ pub struct ProfileState {
     pub ids: Arc<Snowflake>,
     pub content: ContentState,
     pub comments: CommentsState,
+    pub media: MediaState,
     pub(crate) limits: Arc<SearchLimits>,
 }
 
@@ -39,12 +41,14 @@ impl ProfileState {
         ids: Arc<Snowflake>,
         content: ContentState,
         comments: CommentsState,
+        media: MediaState,
     ) -> Self {
         Self {
             db,
             ids,
             content,
             comments,
+            media,
             limits: Arc::new(SearchLimits {
                 per_user: RateLimiter::keyed(Quota::per_second(SEARCHES_PER_SECOND_USER)),
                 per_ip: RateLimiter::keyed(Quota::per_second(SEARCHES_PER_SECOND_IP)),

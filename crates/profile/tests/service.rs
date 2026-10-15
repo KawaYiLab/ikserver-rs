@@ -33,7 +33,13 @@ fn harness(db: PgPool) -> Harness {
     let content = ContentState::new(db.clone(), ids.clone(), bus.clone());
     let comments = CommentsState::new(db.clone(), ids.clone(), bus);
     Harness {
-        state: ProfileState::new(db.clone(), ids, content, comments),
+        state: ProfileState::new(
+            db.clone(),
+            ids.clone(),
+            content,
+            comments,
+            ik_media::MediaState::new(db.clone(), ids, &Default::default(), b"test"),
+        ),
         db,
     }
 }
@@ -576,4 +582,62 @@ async fn search_like_metacharacters_are_literal(db: PgPool) {
         .unwrap();
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].username, "a_b_c");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn custom_avatar_costs_10_denny_and_must_be_own_upload(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1, "avatarer").await;
+    h.user(2, "someone").await;
+    let sha = "a".repeat(64);
+    for (id, owner) in [(501, 1), (502, 1), (503, 2)] {
+        h.sql(&format!(
+            "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+             VALUES ({id}, 'k/{id}.png', 'image/png', 100, '{sha}', 'r{id}');
+             INSERT INTO media_uploaders (media_id, user_id) VALUES ({id}, {owner});"
+        ))
+        .await;
+    }
+    let set = |id: i64| {
+        let state = h.state.clone();
+        let me = me.clone();
+        async move {
+            service::set_avatar(
+                &state,
+                &me,
+                ik_profile::dto::SetAvatarRequest {
+                    media_id: Id::new(id),
+                },
+            )
+            .await
+        }
+    };
+
+    let first = set(501).await.unwrap();
+    assert_eq!(first.balance, 20);
+    assert_eq!(first.avatar.unwrap().id.get(), 501);
+    assert_eq!(set(501).await.unwrap().balance, 20, "同一张不扣费");
+    assert_eq!(set(503).await.unwrap_err().code(), "NOT_FOUND", "别人的图");
+    assert_eq!(set(999).await.unwrap_err().code(), "NOT_FOUND");
+    assert_eq!(h.balance(1).await, 20);
+
+    assert_eq!(set(502).await.unwrap().balance, 10);
+    assert_eq!(set(501).await.unwrap().balance, 0);
+    assert_eq!(set(502).await.unwrap_err().code(), "INSUFFICIENT_DENNY");
+    // 余额不足整体回滚：头像还是 501。
+    let mine = service::my_profile(&h.state, &me).await.unwrap();
+    assert_eq!(mine.avatar.unwrap().id.get(), 501);
+    let public = service::profile(&h.state, None, 1).await.unwrap();
+    assert_eq!(public.avatar.unwrap().id.get(), 501);
+
+    let cleared = service::clear_avatar(&h.state, &me).await.unwrap();
+    assert!(cleared.avatar.is_none());
+    assert_eq!(cleared.balance, 0);
+    assert!(
+        service::my_profile(&h.state, &me)
+            .await
+            .unwrap()
+            .avatar
+            .is_none()
+    );
 }

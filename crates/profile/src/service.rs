@@ -16,9 +16,9 @@ use sqlx::PgConnection;
 
 use crate::ProfileState;
 use crate::dto::{
-    MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, PostsScope, ProfilePostsPage,
-    ProfilePostsQuery, ProfileStats, ProfileView, RenameRequest, RenameResult, SearchQuery,
-    UpdateProfileRequest, UserSearchItem,
+    AvatarResult, MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, PostsScope,
+    ProfilePostsPage, ProfilePostsQuery, ProfileStats, ProfileView, RenameRequest, RenameResult,
+    SearchQuery, SetAvatarRequest, UpdateProfileRequest, UserSearchItem,
 };
 use crate::repo::{self, ProfileRow};
 
@@ -27,6 +27,8 @@ const USERNAME_MIN_CHARS: usize = 3;
 const USERNAME_MAX_CHARS: usize = 20;
 /// 改名收费（PROFILE-005）。
 const RENAME_COST: i32 = 10;
+/// 设置自定义头像的费用（AVA-002）。
+const AVATAR_COST: i32 = 10;
 const MAX_PINNED: usize = 6;
 const PROFILE_POSTS_DEFAULT: u32 = 10;
 const SEARCH_MAX_QUERY_CHARS: usize = 32;
@@ -56,6 +58,7 @@ fn defaults() -> ProfileRow {
         bio: String::new(),
         hidden: false,
         pinned_post_ids: None,
+        avatar_media_id: None,
     }
 }
 
@@ -166,7 +169,9 @@ pub async fn profile(
         (None, None)
     };
 
+    let avatar = avatar_view(state, t.profile.avatar_media_id).await?;
     Ok(ProfileView {
+        avatar,
         id: Id::new(t.user.id),
         username: t.user.username,
         level: t.user.level,
@@ -270,14 +275,25 @@ pub async fn comments(
 
 // ---------- 自己的资料 ----------
 
-fn my_view(row: ProfileRow) -> MyProfileView {
-    MyProfileView {
+async fn avatar_view(
+    state: &ProfileState,
+    media_id: Option<i64>,
+) -> Result<Option<ik_media::dto::MediaView>, Problem> {
+    let Some(id) = media_id else {
+        return Ok(None);
+    };
+    Ok(state.media.views(&[id]).await?.remove(&id))
+}
+
+async fn my_view(state: &ProfileState, row: ProfileRow) -> Result<MyProfileView, Problem> {
+    Ok(MyProfileView {
+        avatar: avatar_view(state, row.avatar_media_id).await?,
         bio: row.bio,
         hidden: row.hidden,
         pinned_post_ids: row
             .pinned_post_ids
             .map(|ids| ids.into_iter().map(Id::new).collect()),
-    }
+    })
 }
 
 pub async fn my_profile(
@@ -285,9 +301,9 @@ pub async fn my_profile(
     principal: &Principal,
 ) -> Result<MyProfileView, Problem> {
     let mut conn = state.db.acquire().await?;
-    Ok(my_view(
-        profile_row(&mut conn, principal.user_id.get()).await?,
-    ))
+    let row = profile_row(&mut conn, principal.user_id.get()).await?;
+    drop(conn);
+    my_view(state, row).await
 }
 
 /// 修改签名、隐藏主页。不收费、不要求通过考试（PROFILE-007/008）。
@@ -313,7 +329,7 @@ pub async fn update_profile(
         Utc::now(),
     )
     .await?;
-    Ok(my_view(row))
+    my_view(state, row).await
 }
 
 /// 用户名校验（D-018：区分大小写；字符集维持旧系统的宽松规则，只额外拒绝 `@` 与控制字符）。
@@ -385,6 +401,71 @@ pub async fn rename(
     })
 }
 
+/// 设置自定义头像（AVA-001～003）：每次 10 丁尼；换成当前同一张图不扣费。只能用自己图库里的图
+/// （D-012 方案 A）。不要求通过考试（AVA-005）。改资料与扣费同一事务，余额不足整体回滚。
+pub async fn set_avatar(
+    state: &ProfileState,
+    principal: &Principal,
+    request: SetAvatarRequest,
+) -> Result<AvatarResult, Problem> {
+    let user_id = principal.user_id.get();
+    let media_id = request.media_id.get();
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    // 锁住用户行，串行化同一用户的扣费。
+    ik_auth::interop::lock_active_user(&mut tx, user_id)
+        .await?
+        .ok_or_else(ik_auth::service::account_blocked)?;
+    if ik_media::interop::owned_media(&mut tx, user_id, &[media_id])
+        .await?
+        .is_empty()
+    {
+        return Err(Problem::new(
+            StatusCode::NOT_FOUND,
+            "NOT_FOUND",
+            "图片不存在或不在你的图库里",
+        ));
+    }
+    let current = profile_row(&mut tx, user_id).await?;
+    let balance = if current.avatar_media_id == Some(media_id) {
+        ik_economy::service::balance_of(&mut tx, user_id).await?
+    } else {
+        repo::set_avatar(&mut tx, user_id, Some(media_id), now).await?;
+        ik_economy::service::spend_denny(
+            &mut tx,
+            &state.ids,
+            user_id,
+            DennyAction::SpendAvatar,
+            AVATAR_COST,
+            "设置自定义头像",
+            now,
+        )
+        .await?
+        .balance
+    };
+    tx.commit().await?;
+    Ok(AvatarResult {
+        avatar: avatar_view(state, Some(media_id)).await?,
+        balance,
+    })
+}
+
+/// 清除自定义头像（恢复默认头像）。不收费。
+pub async fn clear_avatar(
+    state: &ProfileState,
+    principal: &Principal,
+) -> Result<AvatarResult, Problem> {
+    let user_id = principal.user_id.get();
+    let mut tx = state.db.begin().await?;
+    repo::set_avatar(&mut tx, user_id, None, Utc::now()).await?;
+    let balance = ik_economy::service::balance_of(&mut tx, user_id).await?;
+    tx.commit().await?;
+    Ok(AvatarResult {
+        avatar: None,
+        balance,
+    })
+}
+
 /// 保存主页精选（PROFILE-010～012）。去空白、去重、保序；超过 6 篇报错（在剔除失效项之前判断）；
 /// 不是自己的、未发布、匿名的帖子静默剔除，被隐藏的保留（D-026 方案 A）。
 pub async fn set_pinned(
@@ -427,7 +508,7 @@ pub async fn set_pinned(
     };
     let mut conn = state.db.acquire().await?;
     let row = repo::set_pinned(&mut conn, user_id, pinned.as_deref(), Utc::now()).await?;
-    Ok(my_view(row))
+    my_view(state, row).await
 }
 
 // ---------- 用户搜索 ----------

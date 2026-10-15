@@ -15,9 +15,9 @@ use utoipa_axum::routes;
 
 use crate::ProfileState;
 use crate::dto::{
-    MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, ProfilePostsPage,
-    ProfilePostsQuery, ProfileView, RenameRequest, RenameResult, SearchQuery, UpdateProfileRequest,
-    UserSearchItem,
+    AvatarResult, MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, ProfilePostsPage,
+    ProfilePostsQuery, ProfileView, RenameRequest, RenameResult, SearchQuery, SetAvatarRequest,
+    UpdateProfileRequest, UserSearchItem,
 };
 use crate::service;
 
@@ -35,6 +35,7 @@ where
         .routes(routes!(mention_candidates))
         .routes(routes!(my_profile, update_profile))
         .routes(routes!(rename))
+        .routes(routes!(set_avatar, clear_avatar))
         .routes(routes!(set_pinned))
         .routes(routes!(pin_candidates))
 }
@@ -272,4 +273,49 @@ async fn pin_candidates(
     Ok(Json(
         ik_content::service::pin_candidates(&state.content, &principal, query).await?,
     ))
+}
+
+/// 设置自定义头像
+///
+/// 用自己图库里的图片（先走直传上传）。每次 10 丁尼，换成当前同一张图不扣费；不要求通过考试。
+#[utoipa::path(
+    put,
+    path = "/v1/me/avatar",
+    tag = "profile",
+    request_body = SetAvatarRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AvatarResult),
+        (status = 402, description = "INSUFFICIENT_DENNY", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "图片不存在或不在自己的图库里", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn set_avatar(
+    State(state): State<ProfileState>,
+    CurrentUser(principal): CurrentUser,
+    Json(request): Json<SetAvatarRequest>,
+) -> Result<Json<AvatarResult>, Problem> {
+    Ok(Json(
+        service::set_avatar(&state, &principal, request).await?,
+    ))
+}
+
+/// 清除自定义头像
+///
+/// 恢复默认头像，不收费。
+#[utoipa::path(
+    delete,
+    path = "/v1/me/avatar",
+    tag = "profile",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AvatarResult),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn clear_avatar(
+    State(state): State<ProfileState>,
+    CurrentUser(principal): CurrentUser,
+) -> Result<Json<AvatarResult>, Problem> {
+    Ok(Json(service::clear_avatar(&state, &principal).await?))
 }
