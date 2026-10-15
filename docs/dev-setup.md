@@ -56,6 +56,7 @@ cargo run -p ik-server -- user set-role someone@example.com admin     # 设置�
 cargo run -p ik-server -- category create --slug guide --name 攻略 --order 1
 cargo run -p ik-server -- category create --slug notice --name 公告 --admin-only --allow-accept
 cargo run -p ik-server -- exam import questions.json                  # 导入入站考试题库
+cargo run -p ik-server -- search reindex                              # 推送搜索索引设置并全量重建
 ```
 
 题库文件是 JSON 数组，每题字段：
@@ -87,6 +88,18 @@ host  all  <开发账号>  <你的 IP 段>  scram-sha-256
 ```
 
 改完执行 `SELECT pg_reload_conf();` 生效。CI 用自带的 PostgreSQL 服务容器，不受影响。
+
+### 搜索引擎测试
+
+`crates/search/tests` 里搜索引擎相关的用例需要一个 Meilisearch 实例（官方发布页下载单个可执行文件即可）：
+
+```powershell
+meilisearch --master-key dev-master-key-0123456789 --no-analytics
+$env:IK_TEST_MEILI_URL = "http://127.0.0.1:7700"; $env:IK_TEST_MEILI_KEY = "dev-master-key-0123456789"
+cargo nextest run -p ik-search
+```
+
+没有设置 `IK_TEST_MEILI_URL` 时这些用例直接通过（数据库兜底的用例照常运行）。每个用例用独立的索引前缀，结束时删除索引。
 
 ## 目录约定
 

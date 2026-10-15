@@ -15,6 +15,7 @@ use ik_messaging::MessagingState;
 use ik_notify::NotifyState;
 use ik_profile::ProfileState;
 use ik_realtime::{RealtimeState, TypingHandler};
+use ik_search::SearchState;
 use ik_social::SocialState;
 use sqlx::PgPool;
 
@@ -36,6 +37,7 @@ pub struct AppState {
     pub realtime: RealtimeState,
     pub profile: ProfileState,
     pub feed: FeedState,
+    pub search: SearchState,
 }
 
 impl AppState {
@@ -72,6 +74,8 @@ impl AppState {
             RealtimeState::start(&bus, config.http.allowed_origins.clone())?.with_typing(typing);
         let profile = ProfileState::new(db.clone(), ids.clone(), content.clone(), comments.clone());
         let feed = FeedState::start(content.clone(), config.hot.clone())?;
+        // 索引同步由 `serve` 显式启动（CLI 子命令不需要）。
+        let search = SearchState::new(content.clone(), comments.clone(), &config.search)?;
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -88,6 +92,7 @@ impl AppState {
             realtime,
             profile,
             feed,
+            search,
         })
     }
 }
@@ -155,5 +160,11 @@ impl FromRef<AppState> for ProfileState {
 impl FromRef<AppState> for FeedState {
     fn from_ref(state: &AppState) -> Self {
         state.feed.clone()
+    }
+}
+
+impl FromRef<AppState> for SearchState {
+    fn from_ref(state: &AppState) -> Self {
+        state.search.clone()
     }
 }

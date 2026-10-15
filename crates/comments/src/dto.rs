@@ -101,3 +101,22 @@ pub struct AuthorCommentView {
     pub liked: bool,
     pub created_at: DateTime<Utc>,
 }
+
+/// 评论搜索的一条结果（SRCH-034）。不带父评论信息（PRIV-010），没有楼层号。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentSearchView {
+    #[schema(value_type = String)]
+    pub id: Id<Comment>,
+    #[schema(value_type = String)]
+    pub post_id: Id<Post>,
+    pub post_title: String,
+    pub body: String,
+    /// 匿名评论对所有人（包括作者本人）都显示匿名名。
+    pub author: AuthorView,
+    pub is_anonymous: bool,
+    pub like_count: i32,
+    /// 当前访客已点赞。
+    pub liked: bool,
+    pub created_at: DateTime<Utc>,
+}

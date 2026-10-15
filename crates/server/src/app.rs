@@ -50,6 +50,7 @@ use crate::{AppState, system};
         (name = "realtime", description = "实时通道（WebSocket）"),
         (name = "profile", description = "个人资料、作者主页与用户搜索"),
         (name = "feed", description = "首页、热门榜、关注流、未看流与阅读记录"),
+        (name = "search", description = "帖子与评论搜索、标题联想"),
     )
 )]
 pub struct ApiDoc;
@@ -94,6 +95,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_realtime::router())
         .merge(ik_profile::router())
         .merge(ik_feed::router())
+        .merge(ik_search::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

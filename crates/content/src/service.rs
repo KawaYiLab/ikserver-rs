@@ -2025,6 +2025,40 @@ pub async fn pin_candidates(
     )
 }
 
+// ---------- 搜索（search 域的数据库兜底）----------
+
+/// 数据库兜底搜索的窗口上限（SRCH-014、EDGE-008）。
+pub const SEARCH_FALLBACK_CAP: i64 = 1000;
+
+/// 数据库兜底搜索（search 域在搜索引擎不可用或命中全是残留时调用）：返回按排序排好的帖子 id，
+/// 最多 1000 个。已做公开、分区与拉黑过滤（匿名帖不按拉黑过滤）。
+pub async fn search_post_ids(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    q: &str,
+    category_slug: Option<&str>,
+    title_only: bool,
+    hot: bool,
+) -> Result<Vec<i64>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let excluded_authors =
+        ik_social::interop::excluded_authors(&mut conn, viewer.map(|p| p.user_id.get())).await?;
+    let ids = repo::search_post_ids(
+        &mut conn,
+        q,
+        category_slug,
+        &excluded_authors,
+        title_only,
+        hot,
+        SEARCH_FALLBACK_CAP,
+    )
+    .await?;
+    if i64::try_from(ids.len()).unwrap_or(i64::MAX) >= SEARCH_FALLBACK_CAP {
+        tracing::warn!(cap = SEARCH_FALLBACK_CAP, "帖子搜索兜底触顶，结果被截断");
+    }
+    Ok(ids)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

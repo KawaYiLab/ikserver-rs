@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM posts WHERE id = 10",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7e3c2fbadd8ba62da93e09ee044cec125f5cee1d09aa116d8ee203f86f69ea2c"
+}

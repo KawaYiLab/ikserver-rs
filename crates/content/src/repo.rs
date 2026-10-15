@@ -1350,3 +1350,130 @@ pub(crate) async fn like_activity(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 搜索（search 域建索引与数据库兜底用）----------
+
+pub(crate) struct SearchDocRow {
+    pub id: i64,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub title: String,
+    pub body: String,
+    pub category_slug: Option<String>,
+    pub category_name: Option<String>,
+    pub view_count: i64,
+    pub like_count: i32,
+    pub comment_count: i32,
+    pub bumped_at: DateTime<Utc>,
+}
+
+/// `ids` 中公开的帖子（建索引用）。
+pub(crate) async fn search_docs_by_ids(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<SearchDocRow>> {
+    sqlx::query_as!(
+        SearchDocRow,
+        r#"SELECT p.id, p.author_id, p.is_anonymous, p.title, p.body,
+                  c.slug AS "category_slug?", c.name AS "category_name?",
+                  p.view_count, p.like_count, p.comment_count, p.bumped_at AS "bumped_at!"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id = ANY($1) AND p.status = 'published' AND p.hidden_at IS NULL"#,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 全部公开帖子，按 id 升序分批（全量对账用）。
+pub(crate) async fn search_docs_after(
+    conn: &mut PgConnection,
+    after_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<SearchDocRow>> {
+    sqlx::query_as!(
+        SearchDocRow,
+        r#"SELECT p.id, p.author_id, p.is_anonymous, p.title, p.body,
+                  c.slug AS "category_slug?", c.name AS "category_name?",
+                  p.view_count, p.like_count, p.comment_count, p.bumped_at AS "bumped_at!"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id > $1 AND p.status = 'published' AND p.hidden_at IS NULL
+           ORDER BY p.id
+           LIMIT $2"#,
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// `since` 之后改动过的帖子（任意状态，下线 / 隐藏的也要同步删除）。
+pub(crate) async fn changed_post_ids(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM posts WHERE updated_at >= $1 ORDER BY updated_at, id LIMIT $2",
+        since,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 数据库兜底搜索（SRCH-014/015、SRCH-022）：标题（及正文）包含 `q`，忽略大小写；公开、
+/// 分区、拉黑过滤（匿名帖不过滤）。`hot` 按点赞、浏览倒序，否则按信息流时间倒序（D-038 方案 B）。
+/// 窗口固定为 `cap`，与翻页位置无关（EDGE-008）。
+pub(crate) async fn search_post_ids(
+    conn: &mut PgConnection,
+    q: &str,
+    category_slug: Option<&str>,
+    excluded_authors: &[i64],
+    title_only: bool,
+    hot: bool,
+    cap: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT p.id FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+         WHERE p.status = 'published' AND p.hidden_at IS NULL
+           AND ($2::text IS NULL OR c.slug = $2)
+           AND (p.is_anonymous OR NOT (p.author_id = ANY($3)))
+           AND (strpos(lower(p.title), lower($1)) > 0
+                OR (NOT $4 AND strpos(lower(p.body), lower($1)) > 0))
+         ORDER BY CASE WHEN $5 THEN p.like_count END DESC NULLS LAST,
+                  CASE WHEN $5 THEN p.view_count END DESC NULLS LAST,
+                  p.bumped_at DESC, p.id DESC
+         LIMIT $6",
+        q,
+        category_slug,
+        excluded_authors,
+        title_only,
+        hot,
+        cap,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct PostMetaRow {
+    pub id: i64,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub title: String,
+}
+
+/// `ids` 中公开的帖子：作者、是否匿名、标题。
+pub(crate) async fn public_post_meta(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<PostMetaRow>> {
+    sqlx::query_as!(
+        PostMetaRow,
+        "SELECT id, author_id, is_anonymous, title FROM posts
+         WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL",
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}

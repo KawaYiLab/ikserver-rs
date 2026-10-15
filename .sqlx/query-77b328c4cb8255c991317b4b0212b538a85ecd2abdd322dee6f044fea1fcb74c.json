@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n         WHERE p.status = 'published' AND p.hidden_at IS NULL\n           AND ($2::text IS NULL OR c.slug = $2)\n           AND (p.is_anonymous OR NOT (p.author_id = ANY($3)))\n           AND (strpos(lower(p.title), lower($1)) > 0\n                OR (NOT $4 AND strpos(lower(p.body), lower($1)) > 0))\n         ORDER BY CASE WHEN $5 THEN p.like_count END DESC NULLS LAST,\n                  CASE WHEN $5 THEN p.view_count END DESC NULLS LAST,\n                  p.bumped_at DESC, p.id DESC\n         LIMIT $6",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8Array",
+        "Bool",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "77b328c4cb8255c991317b4b0212b538a85ecd2abdd322dee6f044fea1fcb74c"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET status = 'draft' WHERE id = 10",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "839b40e4e1ce57f12c2e16c5d1a4278148670d4a15fccd72e020ce8731d16c40"
+}

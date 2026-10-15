@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO posts (id, author_id, category_id, status, title, body, is_anonymous,\n                                anonymous_seed, published_at, first_published_at, bumped_at, like_count)\n             VALUES ($1, $2, $3, CASE WHEN $4 THEN 'published' ELSE 'draft' END, $5, $6, $7,\n                     CASE WHEN $7 THEN 'seed' END,\n                     CASE WHEN $4 THEN $8::timestamptz END, CASE WHEN $4 THEN $8::timestamptz END,\n                     CASE WHEN $4 THEN $8::timestamptz END, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Text",
+        "Text",
+        "Bool",
+        "Timestamptz",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "497f89ce72eea119c08b9ee0db81d6ca64120b2793c6a25c29535cf61213cfe8"
+}

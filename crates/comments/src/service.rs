@@ -21,8 +21,8 @@ use sqlx::PgConnection;
 
 use crate::CommentsState;
 use crate::dto::{
-    AuthorCommentView, CommentLikeResult, CommentView, CommentsPage, CreateCommentRequest,
-    PageQuery, ThreadView,
+    AuthorCommentView, CommentLikeResult, CommentSearchView, CommentView, CommentsPage,
+    CreateCommentRequest, PageQuery, ThreadView,
 };
 use crate::repo::{self, CommentRow, NewComment};
 use crate::text;
@@ -330,6 +330,14 @@ pub async fn delete(
     let removed = i32::try_from(replies.saturating_add(1)).unwrap_or(i32::MAX);
     interop::comments_removed(&mut tx, post_id, removed).await?;
     tx.commit().await?;
+    // 内部事件：搜索索引删除这条评论及其回复。
+    let mut effects = Effects::new();
+    effects.publish(Event::new(
+        ik_kernel::bus::internal::COMMENT_REMOVED,
+        Audience::Internal,
+        &serde_json::json!({ "commentId": comment.id, "postId": post_id }),
+    )?);
+    effects.dispatch(state.bus.as_ref());
     Ok(())
 }
 
@@ -836,4 +844,102 @@ pub async fn author_comments(
         })
         .collect();
     Ok(Page { items, next_cursor })
+}
+
+// ---------- 搜索（search 域用）----------
+
+/// 数据库兜底搜索的窗口上限（SRCH-033、EDGE-008）。
+pub const SEARCH_FALLBACK_CAP: i64 = 1000;
+
+/// 对读者可见的评论（保持输入顺序，SRCH-032）：自身与父评论未隐藏、所属帖子公开；
+/// 评论作者、帖子作者与读者有拉黑关系时过滤（匿名评论 / 匿名帖不按拉黑过滤）。
+async fn visible_rows(
+    conn: &mut PgConnection,
+    viewer_id: Option<i64>,
+    ids: &[i64],
+) -> Result<(Vec<CommentRow>, HashMap<i64, ik_content::interop::PostMeta>), Problem> {
+    if ids.is_empty() {
+        return Ok((Vec::new(), HashMap::new()));
+    }
+    let mut rows = repo::listed_by_ids(conn, ids).await?;
+    let mut post_ids: Vec<i64> = rows.iter().map(|r| r.post_id).collect();
+    post_ids.sort_unstable();
+    post_ids.dedup();
+    let posts = interop::public_post_meta(conn, &post_ids).await?;
+    let excluded: HashSet<i64> = ik_social::interop::excluded_authors(conn, viewer_id)
+        .await?
+        .into_iter()
+        .collect();
+    rows.retain(|row| {
+        posts.get(&row.post_id).is_some_and(|post| {
+            (row.is_anonymous || !excluded.contains(&row.author_id))
+                && (post.is_anonymous || !excluded.contains(&post.author_id))
+        })
+    });
+    rows.sort_by_key(|row| ids.iter().position(|id| *id == row.id));
+    Ok((rows, posts))
+}
+
+/// 对读者可见的评论 id（保持输入顺序）。
+pub async fn search_visible_ids(
+    state: &CommentsState,
+    viewer: Option<&Principal>,
+    ids: &[i64],
+) -> Result<Vec<i64>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let (rows, _) = visible_rows(&mut conn, viewer.map(|p| p.user_id.get()), ids).await?;
+    Ok(rows.into_iter().map(|r| r.id).collect())
+}
+
+/// 评论搜索结果（保持输入顺序，不可见的跳过）。
+pub async fn search_views(
+    state: &CommentsState,
+    viewer: Option<&Principal>,
+    ids: &[i64],
+) -> Result<Vec<CommentSearchView>, Problem> {
+    let viewer_id = viewer.map(|p| p.user_id.get());
+    let mut conn = state.db.acquire().await?;
+    let (rows, posts) = visible_rows(&mut conn, viewer_id, ids).await?;
+    let refs: Vec<&CommentRow> = rows.iter().collect();
+    let liked = liked_set(&mut conn, viewer_id, &refs).await?;
+    drop(conn);
+    let authors = author_map(state, &refs).await?;
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            posts.get(&row.post_id).map(|post| CommentSearchView {
+                id: Id::new(row.id),
+                post_id: Id::new(row.post_id),
+                post_title: post.title.clone(),
+                body: row.body.clone(),
+                author: ik_content::service::author_view(
+                    row.author_id,
+                    row.is_anonymous,
+                    row.anonymous_seed.as_deref(),
+                    &authors,
+                ),
+                is_anonymous: row.is_anonymous,
+                like_count: row.like_count,
+                liked: liked.contains(&row.id),
+                created_at: row.created_at,
+            })
+        })
+        .collect())
+}
+
+/// 数据库兜底搜索（SRCH-033）：正文包含 `q` 的评论 id（新的在前），最多 1000 个候选，
+/// 再按读者可见性过滤。
+pub async fn search_comment_ids(
+    state: &CommentsState,
+    viewer: Option<&Principal>,
+    q: &str,
+    post_id: Option<i64>,
+) -> Result<Vec<i64>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let candidates = repo::search_candidates(&mut conn, q, post_id, SEARCH_FALLBACK_CAP).await?;
+    if i64::try_from(candidates.len()).unwrap_or(i64::MAX) >= SEARCH_FALLBACK_CAP {
+        tracing::warn!(cap = SEARCH_FALLBACK_CAP, "评论搜索兜底触顶，结果被截断");
+    }
+    let (rows, _) = visible_rows(&mut conn, viewer.map(|p| p.user_id.get()), &candidates).await?;
+    Ok(rows.into_iter().map(|r| r.id).collect())
 }

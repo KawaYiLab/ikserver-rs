@@ -483,3 +483,102 @@ pub(crate) async fn comment_activity(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 搜索（search 域建索引与数据库兜底用）----------
+
+/// 自身未隐藏、回复的一级评论也未隐藏的评论（所属帖子是否公开由调用方经 content 判断）。
+pub(crate) async fn listed_by_ids(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<CommentRow>> {
+    sqlx::query_as!(
+        CommentRow,
+        "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
+                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at
+         FROM comments c
+         LEFT JOIN comments parent ON parent.id = c.parent_id
+         WHERE c.id = ANY($1) AND c.hidden_at IS NULL
+           AND (c.parent_id IS NULL OR (parent.hidden_at IS NULL AND parent.post_id = c.post_id))",
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 同上，按 id 升序分批（全量对账）。
+pub(crate) async fn listed_after(
+    conn: &mut PgConnection,
+    after_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<CommentRow>> {
+    sqlx::query_as!(
+        CommentRow,
+        "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
+                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at
+         FROM comments c
+         LEFT JOIN comments parent ON parent.id = c.parent_id
+         WHERE c.id > $1 AND c.hidden_at IS NULL
+           AND (c.parent_id IS NULL OR (parent.hidden_at IS NULL AND parent.post_id = c.post_id))
+         ORDER BY c.id
+         LIMIT $2",
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 某个帖子下的全部评论 id（帖子重新公开时补建索引）。
+pub(crate) async fn ids_of_post(
+    conn: &mut PgConnection,
+    post_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM comments WHERE post_id = $1 ORDER BY id LIMIT $2",
+        post_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// `since` 之后发表的评论。
+pub(crate) async fn created_since(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM comments WHERE created_at >= $1 ORDER BY created_at, id LIMIT $2",
+        since,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 数据库兜底搜索的候选（SRCH-033）：正文包含 `q`（忽略大小写），自身与父评论未隐藏，
+/// 可选限定帖子，新的在前，最多 `cap` 条。所属帖子是否公开与拉黑由调用方再过滤。
+pub(crate) async fn search_candidates(
+    conn: &mut PgConnection,
+    q: &str,
+    post_id: Option<i64>,
+    cap: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT c.id FROM comments c
+         LEFT JOIN comments parent ON parent.id = c.parent_id
+         WHERE c.hidden_at IS NULL
+           AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)
+           AND ($2::bigint IS NULL OR c.post_id = $2)
+           AND strpos(lower(c.body), lower($1)) > 0
+         ORDER BY c.created_at DESC, c.id DESC
+         LIMIT $3",
+        q,
+        post_id,
+        cap,
+    )
+    .fetch_all(conn)
+    .await
+}

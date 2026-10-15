@@ -26,6 +26,7 @@ ik-messaging.workspace = true
 ik-realtime.workspace = true
 ik-profile.workspace = true
 ik-feed.workspace = true
+ik-search.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

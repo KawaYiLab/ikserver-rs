@@ -179,3 +179,106 @@ pub async fn like_activity(
         })
         .collect())
 }
+
+// ---------- 搜索（search 域用）----------
+
+/// 建索引用的公开帖子。匿名帖的 `author_id` 为 None：真实作者不进入搜索索引（PRIV-005）。
+#[derive(Debug, Clone)]
+pub struct PostSearchDoc {
+    pub id: i64,
+    pub author_id: Option<i64>,
+    pub title: String,
+    /// Markdown 原文，调用方负责转纯文本。
+    pub body: String,
+    pub category_slug: Option<String>,
+    pub category_name: Option<String>,
+    pub view_count: i64,
+    pub like_count: i32,
+    pub comment_count: i32,
+    pub bumped_at: DateTime<Utc>,
+}
+
+impl From<repo::SearchDocRow> for PostSearchDoc {
+    fn from(row: repo::SearchDocRow) -> Self {
+        Self {
+            id: row.id,
+            author_id: (!row.is_anonymous).then_some(row.author_id),
+            title: row.title,
+            body: row.body,
+            category_slug: row.category_slug,
+            category_name: row.category_name,
+            view_count: row.view_count,
+            like_count: row.like_count,
+            comment_count: row.comment_count,
+            bumped_at: row.bumped_at,
+        }
+    }
+}
+
+/// `ids` 中公开的帖子（不公开的不出现，调用方据此删除索引文档）。
+pub async fn search_docs(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<Vec<PostSearchDoc>, Problem> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(repo::search_docs_by_ids(conn, ids)
+        .await?
+        .into_iter()
+        .map(PostSearchDoc::from)
+        .collect())
+}
+
+/// 全部公开帖子，按 id 升序分批。
+pub async fn search_docs_after(
+    conn: &mut PgConnection,
+    after_id: i64,
+    limit: i64,
+) -> Result<Vec<PostSearchDoc>, Problem> {
+    Ok(repo::search_docs_after(conn, after_id, limit)
+        .await?
+        .into_iter()
+        .map(PostSearchDoc::from)
+        .collect())
+}
+
+/// `since` 之后改动过的帖子 id（任意状态），最多 `limit` 个，按改动时间升序。
+pub async fn changed_post_ids(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<i64>, Problem> {
+    Ok(repo::changed_post_ids(conn, since, limit).await?)
+}
+
+/// 公开帖子的作者与标题（评论搜索的可见性与拉黑判断用）。
+#[derive(Debug, Clone)]
+pub struct PostMeta {
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub title: String,
+}
+
+pub async fn public_post_meta(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, PostMeta>, Problem> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    Ok(repo::public_post_meta(conn, ids)
+        .await?
+        .into_iter()
+        .map(|row| {
+            (
+                row.id,
+                PostMeta {
+                    author_id: row.author_id,
+                    is_anonymous: row.is_anonymous,
+                    title: row.title,
+                },
+            )
+        })
+        .collect())
+}

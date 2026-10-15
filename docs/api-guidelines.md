@@ -133,6 +133,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 - 维度：IP（XFF 从右往左数 `IK_HTTP__TRUSTED_PROXY_HOPS` 跳）+ 用户 + 接口类别。
 - 默认值：匿名读 300/min、匿名写 60/min、登录读 600/min、登录写 120/min；
   登录/验证码类另按 IP 20/min。具体接口在代码里用 helper 声明。
+- 搜索（`/v1/search/*`）：登录用户每秒 10 次，游客每 IP 每秒 5 次。
 
 ## 实时（WebSocket `/v1/realtime`）
 
@@ -169,6 +170,10 @@ GET /v1/posts?cursor=eyJ...&limit=20
   `dm.typing { conversationId, userId }`（只发给对方）；`dm.conversation.updated { conversationId, muted, pinned }`、
   `dm.conversation.left { conversationId }`（只发给本人，多端同步）。
 - 收件箱：`inbox.read { key, lastReadAt?, notificationsUpdated }`、`inbox.read.all { at }`（只发给本人）。
+- 内部事件（`Audience::Internal`，网关不转发，只给进程内订阅者，例如搜索索引同步）：
+  `comment.removed { commentId, postId }`、`user.renamed { userId }`（载荷里是数字 id）。
+  帖子的 `post.published` / `post.removed` / `post.bumped` 同时被搜索索引同步消费；
+  以后的隐藏 / 恢复帖子（moderation）必须发 `post.removed` / `post.published`，隐藏评论必须发 `comment.removed`。
 - 限制：每用户最多 5 连接（挤掉最旧）；客户端单帧 ≤ 64KB；订阅数上限 100；待发队列（256 帧）写满即断开。
 - 心跳：连接 30s 没有收到客户端任何帧时服务端发 ping 帧，60s 没有任何帧则断开（D-008：60s 容忍度与旧系统一致）。
 - 吊销：登出、踢设备、重置密码后立即断开对应连接；另外已登录连接每 30s 回库复查一次，复查失败按失效处理。

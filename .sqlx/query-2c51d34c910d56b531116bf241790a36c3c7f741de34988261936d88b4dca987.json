@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.id FROM comments c\n         LEFT JOIN comments parent ON parent.id = c.parent_id\n         WHERE c.hidden_at IS NULL\n           AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)\n           AND ($2::bigint IS NULL OR c.post_id = $2)\n           AND strpos(lower(c.body), lower($1)) > 0\n         ORDER BY c.created_at DESC, c.id DESC\n         LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2c51d34c910d56b531116bf241790a36c3c7f741de34988261936d88b4dca987"
+}

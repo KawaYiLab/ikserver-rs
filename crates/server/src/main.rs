@@ -31,6 +31,9 @@ enum Command {
     /// 入站考试题库运维
     #[command(subcommand)]
     Exam(ExamCommand),
+    /// 搜索索引运维
+    #[command(subcommand)]
+    Search(SearchCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -40,6 +43,12 @@ enum ExamCommand {
         /// JSON 文件路径
         path: std::path::PathBuf,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum SearchCommand {
+    /// 推送索引设置并全量重建（删除库里已经没有的残留文档），等处理完再退出
+    Reindex,
 }
 
 #[derive(Debug, Subcommand)]
@@ -91,6 +100,12 @@ async fn main() -> anyhow::Result<()> {
         Command::User(cmd) => user_command(cmd).await,
         Command::Category(cmd) => category_command(cmd).await,
         Command::Exam(cmd) => exam_command(cmd).await,
+        Command::Search(SearchCommand::Reindex) => {
+            let state = connect_for_cli().await?;
+            state.search.reindex().await?;
+            tracing::info!("搜索索引已重建");
+            Ok(())
+        }
     }
 }
 
@@ -200,6 +215,9 @@ async fn serve() -> anyhow::Result<()> {
         .context("连接数据库失败")?;
     let addr = config.http.addr;
     let state = AppState::new(config, db)?;
+    state
+        .search
+        .start_indexer(&state.bus, &state.config.search)?;
     let hub = state.realtime.hub.clone();
     let app = build_app(state)?;
 

@@ -46,8 +46,17 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # 搜索引擎用例（crates/search/tests）连它；没有它时这些用例直接通过。
+      meilisearch:
+        image: getmeili/meilisearch:v1.55
+        env:
+          MEILI_MASTER_KEY: ci-master-key-0123456789
+          MEILI_NO_ANALYTICS: "true"
+        ports: ["7700:7700"]
     env:
       DATABASE_URL: postgres://ik:ik@localhost:5432/ik
+      IK_TEST_MEILI_URL: http://localhost:7700
+      IK_TEST_MEILI_KEY: ci-master-key-0123456789
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO categories (id, slug, name) VALUES (100, 'guide', '攻略'), (101, 'chat', '闲聊')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7341dcaec9c6a2c178ff2f89f2dfcfce7203920728b4578fdaf927155f48d125"
+}

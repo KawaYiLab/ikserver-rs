@@ -214,6 +214,9 @@ impl Hub {
     }
 
     fn dispatch(&self, event: &Event) {
+        if event.audience == Audience::Internal {
+            return;
+        }
         // 会话吊销是内部事件：不推给客户端，只让该用户的连接去复查。
         if event.kind == ik_auth::service::SESSIONS_CHANGED {
             if let Audience::User(user_id) = &event.audience {
@@ -284,6 +287,7 @@ impl Hub {
                 .iter()
                 .map(|(id, c)| (*id, c.tx.clone()))
                 .collect(),
+            Audience::Internal => Vec::new(),
         }
     }
 }

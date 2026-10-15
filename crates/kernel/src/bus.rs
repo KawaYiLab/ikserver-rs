@@ -19,6 +19,8 @@ pub enum Audience {
     /// 订阅了某频道的连接（例如某个私信会话、某个信息流）。
     Channel(Arc<str>),
     Broadcast,
+    /// 只给进程内订阅者（例如搜索索引同步），实时网关不转发给任何客户端。
+    Internal,
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +44,14 @@ impl Event {
             data: Arc::new(data),
         })
     }
+}
+
+/// 内部事件名（`Audience::Internal`，只给进程内订阅者，例如搜索索引同步）。
+pub mod internal {
+    /// 评论被删除。载荷 `{ commentId, postId }`（数字）。
+    pub const COMMENT_REMOVED: &str = "comment.removed";
+    /// 用户改了名。载荷 `{ userId }`（数字）。
+    pub const USER_RENAMED: &str = "user.renamed";
 }
 
 pub trait EventBus: Send + Sync + 'static {

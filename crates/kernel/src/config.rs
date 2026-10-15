@@ -65,6 +65,37 @@ pub struct Config {
     pub log: Log,
     pub exam: Exam,
     pub hot: Hot,
+    pub search: Search,
+}
+
+/// 搜索（Meilisearch）。`url` 为空时不连接搜索引擎，搜索一律走数据库兜底（SRCH-014）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Search {
+    /// 例如 `http://127.0.0.1:7700`。
+    pub url: Option<String>,
+    pub api_key: Secret,
+    /// 索引名前缀（区分环境），只允许小写字母、数字、`_`、`-`，最长 32（SRCH-006）。
+    pub index_prefix: String,
+    /// 单次搜索请求超时（SRCH-012：3000ms）。
+    pub timeout_ms: u64,
+    /// 增量同步间隔：扫描最近改动的帖子与新评论。
+    pub sweep_secs: u64,
+    /// 全量对账间隔（启动时也跑一次）：重建全部文档并删除残留。
+    pub reconcile_hours: u64,
+}
+
+impl Default for Search {
+    fn default() -> Self {
+        Self {
+            url: None,
+            api_key: Secret::default(),
+            index_prefix: String::new(),
+            timeout_ms: 3000,
+            sweep_secs: 30,
+            reconcile_hours: 24,
+        }
+    }
 }
 
 /// 热榜参数（HOT-001）。启动时校验，不接受 0 或非法值（EDGE-017）。
@@ -146,6 +177,7 @@ impl Default for Config {
             log: Log::default(),
             exam: Exam::default(),
             hot: Hot::default(),
+            search: Search::default(),
         }
     }
 }
@@ -340,6 +372,26 @@ impl Config {
                     .to_owned(),
             ));
         }
+        let search = &self.search;
+        let prefix_ok = search.index_prefix.len() <= 32
+            && search
+                .index_prefix
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-');
+        if !prefix_ok
+            || !(100..=30_000).contains(&search.timeout_ms)
+            || !(1..=3600).contains(&search.sweep_secs)
+            || !(1..=168).contains(&search.reconcile_hours)
+            || search
+                .url
+                .as_deref()
+                .is_some_and(|u| !(u.starts_with("http://") || u.starts_with("https://")))
+        {
+            return Err(ConfigError::Invalid(
+                "search 配置不合法：url 须为 http(s)://，index_prefix 只能含小写字母、数字、_、-（≤32），timeout_ms 100–30000，sweep_secs 1–3600，reconcile_hours 1–168"
+                    .to_owned(),
+            ));
+        }
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
@@ -398,6 +450,30 @@ mod tests {
             err,
             ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY")
         ));
+    }
+
+    #[test]
+    fn search_config_is_validated_at_startup() {
+        let base = || with(&[("database.url", "postgres://x")]);
+        assert!(Config::from_figment(base()).unwrap().search.url.is_none());
+        for (key, value) in [
+            ("search.index_prefix", "Prod/"),
+            ("search.url", "localhost:7700"),
+        ] {
+            let err =
+                Config::from_figment(base().merge(Serialized::default(key, value))).unwrap_err();
+            assert!(matches!(err, ConfigError::Invalid(_)), "{key}={value}");
+        }
+        let err = Config::from_figment(base().merge(Serialized::default("search.timeout_ms", 0)))
+            .unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
+        let ok = Config::from_figment(
+            base()
+                .merge(Serialized::default("search.url", "http://127.0.0.1:7700"))
+                .merge(Serialized::default("search.index_prefix", "staging_")),
+        )
+        .unwrap();
+        assert_eq!(ok.search.index_prefix, "staging_");
     }
 
     #[test]

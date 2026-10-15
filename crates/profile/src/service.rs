@@ -9,6 +9,7 @@ use http::StatusCode;
 use ik_auth::Principal;
 use ik_auth::interop::ProfileUser;
 use ik_economy::service::DennyAction;
+use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::cursor::Page;
 use ik_kernel::{FieldError, Id, Problem};
 use sqlx::PgConnection;
@@ -370,6 +371,14 @@ pub async fn rename(
     )
     .await?;
     tx.commit().await?;
+    // 内部事件：搜索索引里此人非匿名内容的作者名随之更新（D-039 方案 A）。
+    let mut effects = Effects::new();
+    effects.publish(Event::new(
+        ik_kernel::bus::internal::USER_RENAMED,
+        Audience::Internal,
+        &serde_json::json!({ "userId": user_id }),
+    )?);
+    effects.dispatch(state.content.bus.as_ref());
     Ok(RenameResult {
         username,
         balance: spent.balance,

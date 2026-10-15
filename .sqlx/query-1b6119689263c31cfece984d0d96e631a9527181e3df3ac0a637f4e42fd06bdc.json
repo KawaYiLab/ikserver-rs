@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE comments SET hidden_at = now() WHERE id = 5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1b6119689263c31cfece984d0d96e631a9527181e3df3ac0a637f4e42fd06bdc"
+}

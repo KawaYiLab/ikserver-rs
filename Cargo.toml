@@ -22,6 +22,7 @@ ik-messaging = { path = "crates/messaging" }
 ik-realtime = { path = "crates/realtime" }
 ik-profile = { path = "crates/profile" }
 ik-feed = { path = "crates/feed" }
+ik-search = { path = "crates/search" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
@@ -72,6 +73,9 @@ hmac = "0.13"
 getrandom = "0.4"
 base64 = "0.23"
 subtle = "2.6"
+
+# 搜索（内网 HTTP，不启用 TLS）
+meilisearch-sdk = { version = "0.33", default-features = false, features = ["reqwest"] }
 
 # 其他
 moka = { version = "0.12", features = ["future"] }
