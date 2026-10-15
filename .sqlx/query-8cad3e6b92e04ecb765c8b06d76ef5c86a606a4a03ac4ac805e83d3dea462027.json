@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.conversation_id = $1\n             AND ($2::timestamptz IS NULL OR x.created_at < $2\n                  OR (x.created_at = $2 AND ($4 OR x.id < $3::bigint)))\n           ORDER BY x.created_at DESC, x.id DESC\n           LIMIT $5",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key, x.ai_workflow\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.conversation_id = $1\n             AND ($2::timestamptz IS NULL OR x.created_at < $2\n                  OR (x.created_at = $2 AND ($4 OR x.id < $3::bigint)))\n           ORDER BY x.created_at DESC, x.id DESC\n           LIMIT $5",
   "describe": {
     "columns": [
       {
@@ -167,6 +167,17 @@
             "name": "ai_model_key"
           }
         }
+      },
+      {
+        "ordinal": 15,
+        "name": "ai_workflow",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_workflow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -193,8 +204,9 @@
       false,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "26627e7f9f862f969c3317b8739eca8d7710a4754690be65ae60a9aa371407f3"
+  "hash": "8cad3e6b92e04ecb765c8b06d76ef5c86a606a4a03ac4ac805e83d3dea462027"
 }

@@ -14,7 +14,6 @@ use ik_ai::dto::ImportFile;
 use ik_ai::llm::{LlmError, Providers};
 use ik_ai::{immersion, quota, service};
 use ik_auth::Principal;
-use ik_comments::CommentsState;
 use ik_comments::dto::CreateCommentRequest;
 use ik_content::ContentState;
 use ik_content::dto::PostInput;
@@ -75,11 +74,11 @@ async fn harness_with(db: PgPool, per_user: i64) -> Harness {
     let bus = Arc::new(LocalBus::new(1024));
     let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
     let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
-    let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
-    let content = ContentState::new(db.clone(), ids, bus, media);
+    let forum = ik_ai::Forum::for_tests(db.clone(), ids, bus, media).unwrap();
+    let content = forum.content.clone();
     let fake = Arc::new(Scripted::default());
     let providers = Providers::default().with("fake", fake.clone());
-    let state = AiState::new(messaging, comments, Ai::default(), providers);
+    let state = AiState::new(messaging, forum, Ai::default(), providers);
     assert!(state.install_hooks());
     for (id, ai) in [(ALICE, false), (BOB, false), (FAIRY, true), (QUIET, true)] {
         insert_user(&db, id, ai).await;
@@ -466,4 +465,32 @@ async fn failures_retry_then_fail_without_a_reply(db: PgPool) {
     assert_eq!(status, "failed");
     assert_eq!(reason.as_deref(), Some("empty reply after sanitize"));
     assert!(h.reply(trigger).await.is_none());
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comment_replies_can_use_tools_but_keep_only_the_final_answer(db: PgPool) {
+    let h = harness(db).await;
+    let post = h.post(FAIRY, false).await;
+    let trigger = h.comment(BOB, post, None, "这帖子热度怎么样").await;
+    h.fake.push(vec![
+        content("我查一下。"),
+        Step::Emit(ik_ai::llm::StreamEvent::ToolCallDelta {
+            index: 0,
+            id: Some("call_1".into()),
+            name: Some("get_post_engagement".into()),
+            arguments: Some(format!(r#"{{"document_id":"{post}"}}"#)),
+        }),
+        usage(50, 5),
+    ]);
+    h.answer("目前阅读还不多，欢迎大家来看。");
+    assert_eq!(h.run(trigger).await, RunOutcome::Completed);
+    let requests = h.fake.requests();
+    assert_eq!(requests[0].tools.len(), 12);
+    let (_, _, body) = h.reply(trigger).await.unwrap();
+    // 只用最后一轮（不把「我查一下」发到评论区）。
+    assert_eq!(
+        body,
+        format!("@[user{BOB}]({BOB})\n目前阅读还不多，欢迎大家来看。")
+    );
+    assert_eq!(h.used(BOB).await, 175);
 }

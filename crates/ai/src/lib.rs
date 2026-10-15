@@ -8,6 +8,7 @@ pub mod catalog;
 pub mod comment;
 pub mod dm;
 pub mod dto;
+mod generate;
 pub mod immersion;
 pub mod jobs;
 pub mod llm;
@@ -18,6 +19,8 @@ pub mod sanitize;
 pub mod service;
 pub mod sessions;
 mod state;
+pub mod tools;
+pub mod workflow;
 
 pub use routes::router;
-pub use state::AiState;
+pub use state::{AiState, Forum};

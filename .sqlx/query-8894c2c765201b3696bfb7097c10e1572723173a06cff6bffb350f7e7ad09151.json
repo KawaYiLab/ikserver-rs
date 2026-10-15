@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.id = $1",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key, x.ai_workflow\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.sender_id = $1 AND x.client_id = $2",
   "describe": {
     "columns": [
       {
@@ -167,11 +167,23 @@
             "name": "ai_model_key"
           }
         }
+      },
+      {
+        "ordinal": 15,
+        "name": "ai_workflow",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_workflow"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -189,8 +201,9 @@
       true,
       true,
       true,
+      true,
       true
     ]
   },
-  "hash": "fe630994cdcb214fd80aa84be33db76bf28f592c828d0dc28a94fd037be1cab8"
+  "hash": "8894c2c765201b3696bfb7097c10e1572723173a06cff6bffb350f7e7ad09151"
 }

@@ -233,9 +233,11 @@ pub async fn update_ai_message(
     content: &str,
     ai_state: &str,
     ai_model_key: Option<&str>,
+    workflow: Option<&serde_json::Value>,
     effects: &mut Effects,
 ) -> Result<Option<MessageView>, Problem> {
-    if !repo::update_ai_message(conn, message_id, content, ai_state, ai_model_key).await? {
+    if !repo::update_ai_message(conn, message_id, content, ai_state, ai_model_key, workflow).await?
+    {
         return Ok(None);
     }
     let view = message_view(

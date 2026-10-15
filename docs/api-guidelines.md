@@ -222,6 +222,10 @@ GET /v1/posts?cursor=eyJ...&limit=20
   增长 ≥ `ai.stream_min_chars` 字才推一次）；每 2 秒一次 `dm.typing`（`userId` 是 AI 账号）；定稿、停止、失败都以
   `dm.message.edited` 下发完整消息（`ai.state` 为 `done` / `stopped` / `failed`）；重新生成时旧回复以
   `dm.message.withdrawn` 移除。改 AI 会话推 `dm.conversation.updated { conversationId, title, aiModelKey }`（只发给本人）。
+  生成中的工作流事件 `dm.message.workflow { conversationId, messageId, event }`（WF-003，已脱敏：思考文本、工具参数与
+  结果不下发）；`event` 的形状与 `message.ai.workflow[]` 相同 `{ type, stepId, seq, at, data?, usage? }`，客户端按 `seq`
+  去重排序（同一回复重试后继续递增）。`answer.delta { partIndex, text }` 是多气泡分段（GEN-050），正文仍以
+  `dm.message.delta` 的累计全文为准。定稿后整条时间线随消息下发（`message.ai.workflow`，最多 1000 个事件）。
   额度用尽或 AI 全局关闭时，AI 发一条不计费的 `kind = system` 提示消息（D-082 方案 A）。
 - AI 评论回复没有专门的事件：生成完一次性发出（D-089 方案 A），与普通回复一样只有 `post.bumped`；
   AI 账号发出的互动通知（回复、提及）不写也不推（NOTIF-014）。

@@ -21,9 +21,10 @@ use sqlx::PgConnection;
 
 use crate::AiState;
 use crate::catalog::{Catalog, CatalogCache, Model, OutputMode, RoleCard};
-use crate::dm::{self, End, RunOutcome, StreamCtx};
+use crate::dm::{self, RunOutcome};
+use crate::generate::{self, End, StreamCtx};
 use crate::immersion;
-use crate::llm::{ChatMessage, Usage};
+use crate::llm::ChatMessage;
 use crate::quota::{self, Hold};
 use crate::repo::{self, JobOutcome, JobRow, NewJob};
 use crate::sanitize;
@@ -478,14 +479,19 @@ pub async fn run_job(
         Prepare::Done(outcome) => return Ok(outcome),
         Prepare::Ready(prepared) => *prepared,
     };
+    // 评论回复同样可以用论坛工具（查看者 = 评论者），但不产生时间线（D-089 方案 A）。
     let ctx = StreamCtx {
         state,
         job_id,
         live: None,
         mode: OutputMode::Plain,
+        max_chars: sanitize::COMMENT_MAX_CHARS,
+        tools: Some(crate::tools::ToolContext::new(state, prepared.job.quota_user_id).await?),
     };
-    let generated = dm::generate(
+    let mut workflow = crate::workflow::Workflow::disabled();
+    let generated = generate::generate(
         &ctx,
+        &mut workflow,
         &prepared.model,
         prepared.default_model.as_ref(),
         &prepared.messages,
@@ -496,7 +502,6 @@ pub async fn run_job(
         &prepared,
         &generated.model,
         generated.streamed,
-        generated.earlier,
         attempt,
         last_attempt,
     )
@@ -523,22 +528,16 @@ async fn finalize(
     state: &AiState,
     prepared: &Prepared,
     model: &Model,
-    streamed: dm::Streamed,
-    earlier: Usage,
+    streamed: generate::Streamed,
     attempt: i16,
     last_attempt: bool,
 ) -> Result<RunOutcome, Problem> {
     let job_id = prepared.job.id;
-    let usage = {
-        let current = dm::charge_usage(state, &prepared.messages, &streamed);
-        Usage {
-            prompt_tokens: current.prompt_tokens + earlier.prompt_tokens,
-            completion_tokens: current.completion_tokens + earlier.completion_tokens,
-        }
-    };
+    let usage = streamed.charged;
     let charge = quota::weighted(usage.total(), model.weight());
     let text = match streamed.end {
-        End::Finished => finished_reply(&streamed.content, &prepared.post_text, job_id),
+        // 只用最后一轮：前几轮多是调用工具前的过程话。
+        End::Finished => finished_reply(&streamed.final_text, &prepared.post_text, job_id),
         _ => String::new(),
     };
     let now = Utc::now();

@@ -2,39 +2,32 @@
 //!
 //! 一个任务（`ai_jobs` 一行）由后台任务 `ai.dm_reply` 执行，三段各自独立：
 //! 1. 准备（短事务，锁会话行）：复核触发条件（TRIG-023、CTX-024），决定模型，预占额度，建占位消息；
-//! 2. 生成（事务之外）：流式调用上游，节流推送累计正文，轮询停止信号，首帧看门狗与总预算；
-//! 3. 定稿（短事务，锁会话行）：写正文与状态、结算额度、记审计，提交后广播。
+//! 2. 生成（事务之外，[`crate::generate`]）：流式调用上游与工具循环，节流推送累计正文与工作流事件，
+//!    轮询停止信号，首帧看门狗与总预算；
+//! 3. 定稿（短事务，锁会话行）：写正文、状态与时间线，结算额度、记审计，提交后广播。
 //!
 //! 失败交给后台任务重试（同一条占位继续写，GEN-002/007）；首帧超时是终态，不重试（TRIG-034）。
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use chrono::Utc;
-use futures_util::StreamExt;
-use ik_kernel::bus::{Audience, Effects, Event};
+use ik_kernel::bus::Effects;
 use ik_kernel::jobs::{IntoTaskHandlerResult, JobSpec, Jobs, TaskHandler, WorkerContext};
 use ik_kernel::{Problem, Snowflake};
 use ik_messaging::interop::{HistoryItem, NewAiMessage};
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
-use tokio::time::Instant;
 
 use crate::AiState;
 use crate::catalog::{Catalog, Model, OutputMode, RoleCard};
-use crate::llm::{ChatMessage, ChatProvider, ChatRequest, LlmError, StreamEvent, Usage};
+use crate::generate::{End, Live, StreamCtx, Streamed, generate};
+use crate::llm::{ChatMessage, LlmError};
 use crate::quota::{self, Denial, Hold};
 use crate::repo::{self, JobOutcome, JobRow, SessionRow};
 use crate::sanitize;
+use crate::tools::ToolContext;
+use crate::workflow::Workflow;
 
-/// 停止信号的轮询间隔（GEN-011）。
-const STOP_POLL: Duration = Duration::from_millis(600);
-/// 生成期间「正在输入」的间隔（GEN-005）。
-const TYPING_EVERY: Duration = Duration::from_secs(2);
-/// 剩余预算少于这么多时，首帧超时后不再退回默认模型（GEN-022）。
-const FALLBACK_MIN_REMAINING: Duration = Duration::from_secs(20);
-/// 上游输出（正文 + 思考）累计上限（GEN-023、LLM-012）。
-const MAX_STREAM_CHARS: usize = 131_072;
 const FAILED_TEXT: &str = "（生成失败，请重试）";
 const STOPPED_TEXT: &str = "（已停止）";
 
@@ -221,14 +214,6 @@ pub(crate) fn build_messages(
     messages
 }
 
-pub(crate) fn prompt_tokens_estimate(state: &AiState, messages: &[ChatMessage]) -> i64 {
-    state.config.estimated_context_tokens
-        + messages
-            .iter()
-            .map(|m| quota::estimate_text_tokens(m.text()))
-            .sum::<i64>()
-}
-
 /// 准备阶段的结果。
 struct Prepared {
     job: JobRow,
@@ -259,6 +244,7 @@ async fn skip(
             reply_id,
             STOPPED_TEXT,
             "stopped",
+            None,
             None,
             effects,
         )
@@ -436,12 +422,14 @@ async fn prepare(
     // 占位（GEN-001/002/003）：同一任务重试复用同一条。
     let reply_id = match job.reply_message_id {
         Some(reply_id) => {
+            // 重试：清空上次的正文与时间线（WF-006：seq 继续递增）。
             let reused = ik_messaging::interop::update_ai_message(
                 &mut tx,
                 reply_id,
                 "",
                 "streaming",
                 Some(&model.key),
+                Some(&serde_json::json!([])),
                 effects,
             )
             .await?;
@@ -484,180 +472,6 @@ async fn prepare(
     })))
 }
 
-/// 生成阶段怎么结束的。
-#[derive(Debug)]
-pub(crate) enum End {
-    Finished,
-    Stopped,
-    FirstDeltaTimeout,
-    Failed(LlmError),
-    TooLarge,
-}
-
-/// 一次流式调用的产出。
-#[derive(Debug)]
-pub(crate) struct Streamed {
-    pub content: String,
-    pub received_chars: usize,
-    pub usage: Option<Usage>,
-    /// 上游已经接受请求（开始计费的可能）。
-    pub started: bool,
-    pub end: End,
-}
-
-/// 私信回复的实时推送目标。评论回复没有（GEN-030：一次性发出）。
-pub(crate) struct Live {
-    pub conversation_id: i64,
-    pub reply_id: i64,
-    pub ai_user_id: i64,
-    /// 推送对象（会话里的人类成员）。
-    pub audience: Vec<i64>,
-}
-
-pub(crate) struct StreamCtx<'a> {
-    pub state: &'a AiState,
-    pub job_id: i64,
-    /// 有推送目标时推送累计正文与「正在输入」，并轮询停止信号。
-    pub live: Option<Live>,
-    pub mode: OutputMode,
-}
-
-impl StreamCtx<'_> {
-    fn publish(&self, kind: &'static str, data: &serde_json::Value) {
-        let Some(live) = self.live.as_ref().filter(|l| !l.audience.is_empty()) else {
-            return;
-        };
-        match Event::new(kind, Audience::Users(live.audience.clone().into()), data) {
-            Ok(event) => self.state.bus.publish(event),
-            Err(problem) => tracing::warn!(?problem, kind, "构造实时事件失败"),
-        }
-    }
-
-    async fn stop_requested(&self) -> bool {
-        if self.live.is_none() {
-            return false;
-        }
-        match self.state.db.acquire().await {
-            Ok(mut conn) => repo::stop_requested(&mut conn, self.job_id)
-                .await
-                .map(|s| s.is_some())
-                .unwrap_or(false),
-            Err(_) => false,
-        }
-    }
-}
-
-/// 一次流式调用（LLM-004）：节流推送累计正文（GEN-004），每 600ms 查停止信号（GEN-011），
-/// 每 2 秒推「正在输入」（GEN-005），首帧看门狗（GEN-021）与总预算（GEN-020）。
-async fn stream_once(
-    ctx: &StreamCtx<'_>,
-    provider: &dyn ChatProvider,
-    request: &ChatRequest,
-    deadline: Instant,
-    first_delta: Option<Duration>,
-) -> Streamed {
-    let mut out = Streamed {
-        content: String::new(),
-        received_chars: 0,
-        usage: None,
-        started: false,
-        end: End::Finished,
-    };
-    let first_deadline = first_delta.map(|d| (Instant::now() + d).min(deadline));
-    let opened = tokio::time::timeout_at(deadline, provider.stream(request)).await;
-    let mut stream = match opened {
-        Ok(Ok(stream)) => stream,
-        Ok(Err(error)) => {
-            out.end = End::Failed(error);
-            return out;
-        }
-        Err(_) => {
-            out.end = End::Failed(LlmError::Timeout);
-            return out;
-        }
-    };
-    out.started = true;
-    let mut stop_tick = tokio::time::interval(STOP_POLL);
-    let mut typing_tick = tokio::time::interval(TYPING_EVERY);
-    let mut got_content = false;
-    let mut pushed_chars = 0usize;
-    let min_chars = ctx.state.config.stream_min_chars;
-    let (conversation_id, reply_id, ai_user_id) = ctx
-        .live
-        .as_ref()
-        .map_or((0, 0, 0), |l| (l.conversation_id, l.reply_id, l.ai_user_id));
-    let typing = serde_json::json!({
-        "conversationId": conversation_id.to_string(),
-        "userId": ai_user_id.to_string(),
-    });
-    loop {
-        let watchdog = async {
-            match first_deadline {
-                Some(at) if !got_content => tokio::time::sleep_until(at).await,
-                _ => std::future::pending::<()>().await,
-            }
-        };
-        tokio::select! {
-            item = stream.next() => {
-                let Some(item) = item else { break };
-                let event = match item {
-                    Ok(event) => event,
-                    Err(error) => {
-                        out.end = End::Failed(error);
-                        break;
-                    }
-                };
-                match event {
-                    StreamEvent::Reasoning(text) => {
-                        got_content = true;
-                        out.received_chars += text.chars().count();
-                    }
-                    StreamEvent::Content(text) => {
-                        got_content = true;
-                        out.received_chars += text.chars().count();
-                        out.content.push_str(&text);
-                        let total = out.content.chars().count();
-                        if ctx.live.is_some() && total >= pushed_chars + min_chars {
-                            pushed_chars = total;
-                            let shown = sanitize::sanitize(&out.content, ctx.mode, sanitize::DM_MAX_CHARS);
-                            ctx.publish("dm.message.delta", &serde_json::json!({
-                                "conversationId": conversation_id.to_string(),
-                                "messageId": reply_id.to_string(),
-                                "content": shown,
-                            }));
-                        }
-                    }
-                    StreamEvent::ToolCallDelta { .. } => got_content = true,
-                    StreamEvent::Usage(usage) => out.usage = Some(usage),
-                    StreamEvent::Finish(_) => {}
-                }
-                if out.received_chars > MAX_STREAM_CHARS {
-                    out.end = End::TooLarge;
-                    break;
-                }
-            }
-            _ = stop_tick.tick() => {
-                if ctx.stop_requested().await {
-                    out.end = End::Stopped;
-                    break;
-                }
-            }
-            _ = typing_tick.tick() => ctx.publish("dm.typing", &typing),
-            () = tokio::time::sleep_until(deadline) => {
-                out.end = End::Failed(LlmError::Timeout);
-                break;
-            }
-            () = watchdog => {
-                out.end = End::FirstDeltaTimeout;
-                break;
-            }
-        }
-    }
-    // 丢弃流即断开上游连接：停止也终止服务端那次生成（GEN-012）。
-    drop(stream);
-    out
-}
-
 /// 执行一个私聊任务。`last_attempt` 时失败记为最终失败（TRIG-034）。
 pub async fn run_job(
     state: &AiState,
@@ -692,9 +506,13 @@ pub async fn run_job(
             audience,
         }),
         mode: prepared.card.output_mode,
+        max_chars: sanitize::DM_MAX_CHARS,
+        tools: Some(ToolContext::new(state, prepared.job.quota_user_id).await?),
     };
+    let mut workflow = Workflow::new(attempt, prepared.card.output_mode);
     let generated = generate(
         &ctx,
+        &mut workflow,
         &prepared.model,
         prepared.default_model.as_ref(),
         &prepared.messages,
@@ -702,100 +520,15 @@ pub async fn run_job(
     .await;
     finalize(
         state,
+        &ctx,
         &prepared,
         &generated.model,
         generated.streamed,
-        generated.earlier,
+        workflow,
         attempt,
         last_attempt,
     )
     .await
-}
-
-/// 一次回复的生成结果。
-pub(crate) struct Generated {
-    /// 最终用的模型（首帧超时后可能是默认模型）。
-    pub model: Model,
-    pub streamed: Streamed,
-    /// 之前那次（被首帧超时打断的）调用的计费用量。
-    pub earlier: Usage,
-}
-
-/// 调用上游生成一条回复（LLM-007）：总预算内调用一次；首帧超时时，剩余预算够、且当前不是默认模型，
-/// 退回默认模型重试一次且不挂看门狗（GEN-020～022）。
-pub(crate) async fn generate(
-    ctx: &StreamCtx<'_>,
-    model: &Model,
-    default_model: Option<&Model>,
-    messages: &[ChatMessage],
-) -> Generated {
-    let state = ctx.state;
-    let budget = Duration::from_secs(state.config.reply_timeout_secs);
-    let deadline = Instant::now() + budget;
-    let first_delta =
-        Some(Duration::from_secs(state.config.first_delta_timeout_secs)).filter(|d| !d.is_zero());
-
-    let mut model = model.clone();
-    let mut streamed = match state.providers.get(&model.provider) {
-        Ok(provider) => {
-            let request = ChatRequest {
-                model: model.provider_model.clone(),
-                messages: messages.to_vec(),
-                tools: Vec::new(),
-            };
-            stream_once(ctx, provider.as_ref(), &request, deadline, first_delta).await
-        }
-        Err(error) => Streamed {
-            content: String::new(),
-            received_chars: 0,
-            usage: None,
-            started: false,
-            end: End::Failed(error),
-        },
-    };
-    let mut earlier = Usage::default();
-    if matches!(streamed.end, End::FirstDeltaTimeout)
-        && let Some(fallback) = default_model.filter(|d| d.key != model.key)
-        && deadline.saturating_duration_since(Instant::now()) >= FALLBACK_MIN_REMAINING
-        && let Ok(provider) = state.providers.get(&fallback.provider)
-    {
-        tracing::warn!(job = ctx.job_id, from = %model.key, to = %fallback.key, "首帧超时，退回默认模型");
-        // 第一次调用已经开始，按估算计入（D-083 方案 C）。
-        earlier = charge_usage(state, messages, &streamed);
-        model = fallback.clone();
-        let request = ChatRequest {
-            model: model.provider_model.clone(),
-            messages: messages.to_vec(),
-            tools: Vec::new(),
-        };
-        streamed = stream_once(ctx, provider.as_ref(), &request, deadline, None).await;
-    }
-    Generated {
-        model,
-        streamed,
-        earlier,
-    }
-}
-
-/// 计费用量（LLM-006、GEN-080/081、D-083 方案 C）：上游报了就用上游的；没报但调用已开始，按估算；
-/// 没开始记 0。
-pub(crate) fn charge_usage(
-    state: &AiState,
-    messages: &[ChatMessage],
-    streamed: &Streamed,
-) -> Usage {
-    if let Some(usage) = streamed.usage.filter(|u| !u.is_zero()) {
-        return usage;
-    }
-    if !streamed.started {
-        return Usage::default();
-    }
-    tracing::info!("provider reported no usage, charging estimate");
-    Usage {
-        prompt_tokens: prompt_tokens_estimate(state, messages),
-        completion_tokens: quota::estimate_text_tokens(&streamed.content)
-            .max(i64::try_from(streamed.received_chars / 4).unwrap_or(0)),
-    }
 }
 
 /// 停止时的正文（GEN-011）：有正文则「正文 + 空行 + （已停止）」，否则只有「（已停止）」。
@@ -809,26 +542,62 @@ pub(crate) fn stopped_text(content: &str, mode: OutputMode) -> String {
     }
 }
 
+/// 失败时时间线上的说明（不外泄上游错误文本）。
+fn failure_label(end: &End) -> &'static str {
+    match end {
+        End::Failed(LlmError::Timeout) | End::FirstDeltaTimeout => "生成超时",
+        End::Failed(LlmError::RateLimited(_)) => "模型服务繁忙",
+        End::Failed(_) => "模型服务出错",
+        End::TooLarge => "回复过长",
+        End::Finished | End::Stopped => "没有生成有效回复",
+    }
+}
+
+/// 回答里引用的公开帖子补进时间线（WF-009）。模型编出来的、不公开的 id 忽略。
+pub(crate) async fn cite_answer(
+    state: &AiState,
+    workflow: &mut Workflow,
+    answer: &str,
+) -> Result<(), Problem> {
+    let ids: Vec<i64> = crate::workflow::cited_post_ids(answer)
+        .into_iter()
+        .filter(|id| !workflow.is_cited(*id))
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut conn = state.db.acquire().await?;
+    let titles = ik_content::interop::public_post_titles(&mut conn, &ids).await?;
+    for id in ids {
+        if let Some(title) = titles.get(&id) {
+            workflow.cite(id, title);
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn finalize(
     state: &AiState,
+    ctx: &StreamCtx<'_>,
     prepared: &Prepared,
     model: &Model,
     streamed: Streamed,
-    earlier: Usage,
+    mut workflow: Workflow,
     attempt: i16,
     last_attempt: bool,
 ) -> Result<RunOutcome, Problem> {
     let job_id = prepared.job.id;
     let mode = prepared.card.output_mode;
-    let usage = {
-        let current = charge_usage(state, &prepared.messages, &streamed);
-        Usage {
-            prompt_tokens: current.prompt_tokens + earlier.prompt_tokens,
-            completion_tokens: current.completion_tokens + earlier.completion_tokens,
-        }
-    };
+    let usage = streamed.charged;
     let charge = quota::weighted(usage.total(), model.weight());
+    let answer = match streamed.end {
+        End::Finished => sanitize::sanitize(&streamed.content, mode, sanitize::DM_MAX_CHARS),
+        _ => String::new(),
+    };
+    if !answer.is_empty() {
+        cite_answer(state, &mut workflow, &answer).await?;
+    }
     let now = Utc::now();
     let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
@@ -839,13 +608,9 @@ async fn finalize(
     // 定稿前复查（CTX-025、GEN-006）：停止、重置、撤回触发消息都会置停止信号。
     let interrupted = job.stop_requested_at.is_some()
         || session.is_none_or(|s| s.context_epoch != job.generation_epoch);
-    let finished_text = match streamed.end {
-        End::Finished if !interrupted => {
-            sanitize::sanitize(&streamed.content, mode, sanitize::DM_MAX_CHARS)
-        }
-        _ => String::new(),
-    };
+    let finished_text = if interrupted { String::new() } else { answer };
     let (content, ai_state, status, reason, outcome) = if !finished_text.is_empty() {
+        workflow.finish(usage);
         (
             finished_text,
             "done",
@@ -854,6 +619,7 @@ async fn finalize(
             RunOutcome::Completed,
         )
     } else if interrupted || matches!(streamed.end, End::Stopped) {
+        workflow.finish(usage);
         (
             stopped_text(&streamed.content, mode),
             "stopped",
@@ -863,6 +629,7 @@ async fn finalize(
         )
     } else {
         // 空回复（GEN-024/044）、上游错误、超时、超长都按失败；首帧超时与超长不重试（TRIG-034）。
+        workflow.error(failure_label(&streamed.end));
         let (message, retryable) = match &streamed.end {
             End::Failed(error) => (error.to_string(), true),
             End::FirstDeltaTimeout => ("first_delta_timeout".to_owned(), false),
@@ -893,6 +660,7 @@ async fn finalize(
         &content,
         ai_state,
         Some(&model.key),
+        Some(&workflow.events()),
         &mut effects,
     )
     .await?;
@@ -918,6 +686,8 @@ async fn finalize(
     )
     .await?;
     tx.commit().await?;
+    // 收尾事件先于定稿的 `dm.message.edited` 推出。
+    ctx.publish_workflow(&mut workflow);
     effects.dispatch(state.bus.as_ref());
     match &outcome {
         RunOutcome::Retry(reason) => {

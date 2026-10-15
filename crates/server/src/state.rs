@@ -120,7 +120,14 @@ impl AppState {
             media.clone(),
             config.moderation.auto_hide_threshold,
         );
-        let ai = AiState::from_config(messaging.clone(), comments.clone(), &config.ai)?;
+        let forum = ik_ai::Forum {
+            content: content.clone(),
+            comments: comments.clone(),
+            profile: profile.clone(),
+            feed: feed.clone(),
+            search: search.clone(),
+        };
+        let ai = AiState::from_config(messaging.clone(), forum, &config.ai)?;
         ai.install_hooks();
         Ok(Self {
             ai,

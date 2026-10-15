@@ -43,7 +43,7 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；`moderation → auth, content, comments, notify, media`；`ai → auth, media, social, messaging, content, comments`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
+- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；`moderation → auth, content, comments, notify, media`；`ai → auth, media, social, messaging, content, comments, economy, profile, feed, search`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
   `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
   `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
@@ -93,6 +93,9 @@ kernel ◄── auth ◄── content ◄── feed
   后台任务 `ai.comment_reply` 准备（复核、组装上下文与记忆、预占）→ 事务外调用（不推增量）→ 定稿（清洗、
   沉浸守卫、经 `ik_comments::interop::insert_ai_reply` 以 AI 名义回复、结算、审计）。AI 账号发出的互动通知
   由 `ik_notify::interop::send` 统一不写（NOTIF-014）。
+  生成核心在 `ik_ai::generate`（私信与评论共用）：工具循环（12 个只读论坛工具，`ik_ai::tools`，以游客身份调用
+  content / comments / profile / feed / search 的 service，再按触发者做拉黑过滤）、逐轮计费、首帧看门狗与退回默认模型；
+  私信另有工作流时间线与多气泡分段（`ik_ai::workflow`），评论没有（D-089 方案 A）。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。

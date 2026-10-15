@@ -315,3 +315,9 @@
   也兼作 `post_id` 外键索引。
 - AI 的回复就是一条普通的实名评论（`author_id` 是 AI 账号，`parent_id` 是触发评论所在的一级评论，D-004 方案 A）；
   `comments` 表本身没有改动。
+
+## AI 工作流时间线（`20261030000001_ai_workflow.sql`）
+
+- `messages.ai_workflow JSONB`：AI 回复定稿时写入整条时间线（WF-003），只存**已脱敏**的客户端形态
+  （思考文本、工具参数与结果从不进入事件），最多 1000 个事件（超限先丢最早的 `reasoning.delta`，WF-005）。
+  同一占位重试时清空为 `[]`，seq 与 stepId 按尝试次数换起点继续递增（WF-006）。CHECK：只有 AI 回复有，且是数组。

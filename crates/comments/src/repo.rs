@@ -259,6 +259,46 @@ pub(crate) async fn pinned(
     .await
 }
 
+/// 按热度的一级评论（AI 工具 `get_post_comments`）：可见，赞数多的在前，同赞新的在前。
+pub(crate) async fn hot_top_level(
+    conn: &mut PgConnection,
+    post_id: i64,
+    excluded_authors: &[i64],
+    limit: i64,
+) -> sqlx::Result<Vec<CommentRow>> {
+    sqlx::query_as!(
+        CommentRow,
+        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
+                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+         FROM comments
+         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($2)))
+         ORDER BY like_count DESC, created_at DESC, id DESC
+         LIMIT $3",
+        post_id,
+        excluded_authors,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn visible_top_level_count(
+    conn: &mut PgConnection,
+    post_id: i64,
+    excluded_authors: &[i64],
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM comments
+           WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
+             AND (is_anonymous OR NOT (author_id = ANY($2)))"#,
+        post_id,
+        excluded_authors,
+    )
+    .fetch_one(conn)
+    .await
+}
+
 /// 每个一级评论各自的前 `per_parent` 条可见回复（不是整页共享名额，CMT-069/146）。
 pub(crate) async fn inline_replies(
     conn: &mut PgConnection,

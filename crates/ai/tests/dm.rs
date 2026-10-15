@@ -72,10 +72,10 @@ async fn harness_with(db: PgPool, config: Ai, per_user: i64) -> Harness {
     let bus = Arc::new(LocalBus::new(1024));
     let media = ik_media::MediaState::for_tests(db.clone(), ids.clone());
     let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
-    let comments = ik_comments::CommentsState::new(db.clone(), ids, bus.clone(), media);
+    let forum = ik_ai::Forum::for_tests(db.clone(), ids, bus.clone(), media).unwrap();
     let fake = Arc::new(Scripted::default());
     let providers = Providers::default().with("fake", fake.clone());
-    let state = AiState::new(messaging, comments, config, providers);
+    let state = AiState::new(messaging, forum, config, providers);
     assert!(state.install_hooks());
     insert_user(&db, HUMAN, false).await;
     insert_user(&db, FAIRY, true).await;
@@ -555,4 +555,200 @@ async fn regenerate_replaces_the_latest_reply_once(db: PgPool) {
         .await
         .unwrap_err();
     assert_eq!(problem.code(), "AI_NOT_LATEST_REPLY");
+}
+
+fn tool_call(id: &str, name: &str, arguments: &str) -> Step {
+    Step::Emit(StreamEvent::ToolCallDelta {
+        index: 0,
+        id: Some(id.into()),
+        name: Some(name.into()),
+        arguments: Some(arguments.into()),
+    })
+}
+
+impl Harness {
+    async fn guide_post(&self) -> i64 {
+        ik_content::service::create(
+            &self.state.forum.content,
+            &self.me,
+            ik_content::dto::PostInput {
+                title: "零号空洞攻略".into(),
+                body: "先清怪，再开箱。".into(),
+                category_id: None,
+                tags: Vec::new(),
+                is_anonymous: false,
+                external_videos: Vec::new(),
+                editor_state: None,
+                cover_ids: Vec::new(),
+            },
+            true,
+        )
+        .await
+        .unwrap()
+        .id
+        .get()
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
+    let h = harness(db).await;
+    let post = h.guide_post().await;
+    let conversation = h.session().await;
+    let trigger = h.send(conversation, "帮我找找零号空洞的攻略").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        Step::Emit(StreamEvent::Reasoning(
+            "用户想找攻略，先在站内搜一下。".into(),
+        )),
+        content("正在检索相关帖子。"),
+        tool_call("call_1", "search_posts", r#"{"query":"零号空洞、攻略"}"#),
+        Step::Emit(StreamEvent::Finish("tool_calls".into())),
+        usage(100, 10),
+    ]);
+    h.fake.push(vec![
+        content(&format!(
+            "检索完毕。\n\n## 结论\n推荐阅读 [零号空洞攻略](/post/{post})。"
+        )),
+        usage(200, 20),
+    ]);
+    let mut rx = h.bus.subscribe();
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+
+    // 第一轮带 12 个工具；第二轮回灌了工具调用与结果（LLM-005）。
+    let requests = h.fake.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].tools.len(), 12);
+    let second = &requests[1].messages;
+    assert!(matches!(
+        &second[second.len() - 2],
+        ChatMessage::Assistant { tool_calls, .. } if tool_calls[0].name == "search_posts"
+    ));
+    let ChatMessage::Tool {
+        tool_call_id,
+        content: result,
+    } = &second[second.len() - 1]
+    else {
+        panic!("{second:?}");
+    };
+    assert_eq!(tool_call_id, "call_1");
+    assert!(
+        result.contains(&format!("[零号空洞攻略](/post/{post})")),
+        "{result}"
+    );
+
+    // 正文是两轮拼起来的；用量逐轮累加（LLM-006）。
+    let (reply, text, _, _) = h.reply(job).await;
+    assert_eq!(
+        text,
+        format!(
+            "正在检索相关帖子。\n\n检索完毕。\n\n结论\n推荐阅读 [零号空洞攻略](/post/{post})。"
+        )
+    );
+    assert_eq!(h.used().await, 330);
+
+    // 时间线落库（WF-003），并随消息下发。
+    let page = ik_messaging::service::messages(
+        &h.state.messaging,
+        &h.me,
+        conversation,
+        ik_messaging::dto::MessagesQuery {
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    let shown = page.items.iter().find(|m| m.id.get() == reply).unwrap();
+    let timeline = shown.ai.as_ref().unwrap().workflow.as_ref().unwrap();
+    assert_eq!(timeline.last().unwrap().kind, "answer.finish");
+    let stored: serde_json::Value =
+        sqlx::query_scalar!("SELECT ai_workflow FROM messages WHERE id = $1", reply)
+            .fetch_one(&h.db)
+            .await
+            .unwrap()
+            .unwrap();
+    let events = stored.as_array().unwrap();
+    let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        types,
+        vec![
+            "reasoning.start",
+            "reasoning.finish",
+            "answer.start",
+            "answer.delta",
+            "forum.search.start",
+            "forum.search.finish",
+            "answer.delta",
+            "answer.delta",
+            "citation.add",
+            "answer.finish",
+        ]
+    );
+    assert_eq!(events[3]["data"]["text"], "正在检索相关帖子。");
+    assert_eq!(events[4]["data"]["query"], "零号空洞、攻略");
+    assert_eq!(
+        events[5]["data"]["items"][0]["documentId"],
+        post.to_string()
+    );
+    assert_eq!(
+        events[6]["data"],
+        serde_json::json!({ "partIndex": 1, "text": "检索完毕。" })
+    );
+    assert_eq!(events[7]["data"]["partIndex"], 2);
+    assert_eq!(
+        events[8]["data"],
+        serde_json::json!({ "documentId": post.to_string(), "title": "零号空洞攻略" })
+    );
+    assert_eq!(
+        events[9]["usage"],
+        serde_json::json!({ "promptTokens": 300, "completionTokens": 30 })
+    );
+    // 思考文本、工具参数与结果不进入时间线。
+    assert!(!stored.to_string().contains("用户想找攻略"));
+    assert!(!stored.to_string().contains("先清怪"));
+
+    // 实时推送：工作流事件在定稿之前。
+    let kinds: Vec<&str> = h.drain(&mut rx).iter().map(|e| e.kind).collect();
+    let workflow_events = kinds
+        .iter()
+        .filter(|k| **k == "dm.message.workflow")
+        .count();
+    assert_eq!(workflow_events, events.len());
+    assert_eq!(kinds.last(), Some(&"dm.message.edited"));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn tool_rounds_are_capped(db: PgPool) {
+    let config = Ai {
+        max_tool_rounds: 1,
+        ..Ai::default()
+    };
+    let h = harness_with(db, config, 1_000_000).await;
+    let conversation = h.session().await;
+    let trigger = h.send(conversation, "今天热门是什么").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        tool_call("call_1", "get_hot_posts", "{}"),
+        usage(10, 1),
+    ]);
+    h.fake.push(vec![content("目前没有热帖。"), usage(10, 1)]);
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let requests = h.fake.requests();
+    // 轮数用完：不再提供工具，并要求基于已有结果作答。
+    assert!(requests[1].tools.is_empty());
+    assert!(matches!(
+        requests[1].messages.last(),
+        Some(ChatMessage::User { content }) if content.contains("工具调用次数已达上限")
+    ));
+    assert!(matches!(
+        &requests[1].messages[requests[1].messages.len() - 2],
+        ChatMessage::Tool { content, .. } if content == "当前没有可推荐的热帖。"
+    ));
 }

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE messages SET content = $2, ai_state = $3, ai_model_key = $4,\n             ai_workflow = COALESCE($5, ai_workflow)\n         WHERE id = $1 AND ai_state IS NOT NULL AND withdrawn_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "45b2dc8f6f906b17ccd181e69ff4695ad6f88551cae633863b6c2bded6c6e06e"
+}

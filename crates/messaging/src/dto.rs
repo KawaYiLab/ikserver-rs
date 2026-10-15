@@ -45,6 +45,30 @@ pub struct AiReplyMeta {
     /// 本条回复所用模型（`/v1/ai/models` 的 key）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_key: Option<String>,
+    /// 工作流时间线（WF-003，已脱敏；定稿后才有）。生成中的事件经 `dm.message.workflow` 实时推送。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<Vec<WorkflowEvent>>,
+}
+
+/// AI 回复的一个工作流事件（WF-001、第 7.1 节的事件类型表）。
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowEvent {
+    /// 如 `reasoning.start`、`forum.search.finish`、`answer.delta`、`citation.add`、`answer.finish`。
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// 同一步骤的开始 / 中间 / 结束共享（形如 `s<n>`）。
+    pub step_id: String,
+    /// 单调递增（去重、排序；同一回复重试后继续递增）。
+    pub seq: i64,
+    pub at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub data: Option<serde_json::Value>,
+    /// 只出现在 `answer.finish`：`{ promptTokens, completionTokens }`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub usage: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]

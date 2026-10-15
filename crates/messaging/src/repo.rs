@@ -520,6 +520,7 @@ pub(crate) struct MessageRow {
     pub reply_withdrawn_at: Option<DateTime<Utc>>,
     pub ai_state: Option<String>,
     pub ai_model_key: Option<String>,
+    pub ai_workflow: Option<serde_json::Value>,
 }
 
 pub(crate) async fn message(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<MessageRow>> {
@@ -528,7 +529,7 @@ pub(crate) async fn message(conn: &mut PgConnection, id: i64) -> sqlx::Result<Op
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.id = $1"#,
         id,
@@ -547,7 +548,7 @@ pub(crate) async fn lock_message(
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.id = $1
            FOR NO KEY UPDATE OF x"#,
@@ -567,7 +568,7 @@ pub(crate) async fn message_by_client_id(
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.sender_id = $1 AND x.client_id = $2"#,
         sender_id,
@@ -593,7 +594,7 @@ pub(crate) async fn messages(
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
                   r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.conversation_id = $1
              AND ($2::timestamptz IS NULL OR x.created_at < $2
@@ -685,14 +686,17 @@ pub(crate) async fn update_ai_message(
     content: &str,
     ai_state: &str,
     ai_model_key: Option<&str>,
+    ai_workflow: Option<&serde_json::Value>,
 ) -> sqlx::Result<bool> {
     let result = sqlx::query!(
-        "UPDATE messages SET content = $2, ai_state = $3, ai_model_key = $4
+        "UPDATE messages SET content = $2, ai_state = $3, ai_model_key = $4,
+             ai_workflow = COALESCE($5, ai_workflow)
          WHERE id = $1 AND ai_state IS NOT NULL AND withdrawn_at IS NULL",
         id,
         content,
         ai_state,
         ai_model_key,
+        ai_workflow,
     )
     .execute(conn)
     .await?;

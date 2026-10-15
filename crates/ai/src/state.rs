@@ -1,12 +1,16 @@
 use std::sync::Arc;
 
 use ik_comments::CommentsState;
+use ik_content::ContentState;
+use ik_feed::FeedState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
 use ik_kernel::config::Ai;
 use ik_kernel::jobs::Jobs;
 use ik_media::MediaState;
 use ik_messaging::MessagingState;
+use ik_profile::ProfileState;
+use ik_search::SearchState;
 use sqlx::PgPool;
 
 use crate::catalog::CatalogCache;
@@ -22,20 +26,55 @@ pub struct AiState {
     pub messaging: MessagingState,
     /// AI 评论回复写在评论之下（触发钩子、以 AI 名义回复）。
     pub comments: CommentsState,
+    /// 论坛工具读取的各域（TOOL 第 8 节）。
+    pub forum: Forum,
     pub jobs: Jobs,
     pub catalog: CatalogCache,
     pub providers: Providers,
     pub config: Arc<Ai>,
 }
 
+/// 论坛工具读取的各域：都以游客身份调用它们的 service，只读公开内容（TOOL-001/008）。
+#[derive(Clone)]
+pub struct Forum {
+    pub content: ContentState,
+    pub comments: CommentsState,
+    pub profile: ProfileState,
+    pub feed: FeedState,
+    pub search: SearchState,
+}
+
+impl Forum {
+    /// 测试用：搜索不连搜索引擎（走数据库兜底），热榜不自动刷新。
+    #[doc(hidden)]
+    pub fn for_tests(
+        db: PgPool,
+        ids: Arc<Snowflake>,
+        bus: Arc<dyn EventBus>,
+        media: MediaState,
+    ) -> anyhow::Result<Self> {
+        let content = ContentState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+        let comments = CommentsState::new(db.clone(), ids.clone(), bus, media.clone());
+        let profile = ProfileState::new(db, ids, content.clone(), comments.clone(), media);
+        let feed = FeedState::new(content.clone(), ik_kernel::config::Hot::default());
+        let search = SearchState::new(
+            content.clone(),
+            comments.clone(),
+            &ik_kernel::config::Search::default(),
+        )?;
+        Ok(Self {
+            content,
+            comments,
+            profile,
+            feed,
+            search,
+        })
+    }
+}
+
 impl AiState {
     /// 数据库、ID、事件总线、媒体与私信共用。
-    pub fn new(
-        messaging: MessagingState,
-        comments: CommentsState,
-        config: Ai,
-        providers: Providers,
-    ) -> Self {
+    pub fn new(messaging: MessagingState, forum: Forum, config: Ai, providers: Providers) -> Self {
         Self {
             catalog: CatalogCache::new(messaging.db.clone()),
             jobs: Jobs::new(messaging.db.clone()),
@@ -44,7 +83,8 @@ impl AiState {
             bus: messaging.bus.clone(),
             media: messaging.media.clone(),
             messaging,
-            comments,
+            comments: forum.comments.clone(),
+            forum,
             providers,
             config: Arc::new(config),
         }
@@ -53,23 +93,28 @@ impl AiState {
     /// 按配置里的提供方建上游客户端。
     pub fn from_config(
         messaging: MessagingState,
-        comments: CommentsState,
+        forum: Forum,
         config: &Ai,
     ) -> anyhow::Result<Self> {
         let providers = Providers::from_config(&config.providers)?;
-        Ok(Self::new(messaging, comments, config.clone(), providers))
+        Ok(Self::new(messaging, forum, config.clone(), providers))
     }
 
     /// 测试用的便捷构造。
     #[doc(hidden)]
-    pub fn for_tests(db: PgPool, ids: Arc<Snowflake>, bus: Arc<dyn EventBus>, config: Ai) -> Self {
+    pub fn for_tests(
+        db: PgPool,
+        ids: Arc<Snowflake>,
+        bus: Arc<dyn EventBus>,
+        config: Ai,
+    ) -> anyhow::Result<Self> {
         let media = MediaState::for_tests(db.clone(), ids.clone());
-        Self::new(
+        Ok(Self::new(
             MessagingState::new(db.clone(), ids.clone(), bus.clone(), media.clone()),
-            CommentsState::new(db, ids, bus, media),
+            Forum::for_tests(db, ids, bus, media)?,
             config,
             Providers::default(),
-        )
+        ))
     }
 
     /// 让私信（AI 会话里发消息、撤回消息）与评论（发表评论）通知本模块（组装时调用一次）。

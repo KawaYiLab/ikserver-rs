@@ -792,6 +792,53 @@ async fn readable_post(
         .ok_or_else(post_not_found)
 }
 
+/// 按热度的评论区摘要（AI 工具 `get_post_comments`，TOOL-008/009）。
+#[derive(Debug)]
+pub struct HotThreads {
+    /// 可见的一级评论总数。
+    pub total: i64,
+    /// 一级评论（赞数降序、时间降序）与各自最早的几条回复（时间升序）。
+    pub threads: Vec<(CommentView, Vec<CommentView>)>,
+}
+
+/// 公开帖子的热门评论：只看公开内容（帖子公开；评论与父评论未隐藏），与 `viewer_id` 有拉黑关系的人的
+/// 实名评论不出现（匿名评论不做拉黑过滤，防止反推）。匿名评论的作者是假名。帖子不公开时返回 None。
+pub async fn hot_threads(
+    state: &CommentsState,
+    viewer_id: Option<i64>,
+    post_id: i64,
+    limit: i64,
+    replies_per_thread: i64,
+) -> Result<Option<HotThreads>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    if !interop::post(&mut conn, post_id)
+        .await?
+        .is_some_and(|p| p.is_public)
+    {
+        return Ok(None);
+    }
+    let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
+    let total = repo::visible_top_level_count(&mut conn, post_id, &excluded).await?;
+    let tops = repo::hot_top_level(&mut conn, post_id, &excluded, limit).await?;
+    let top_ids: Vec<i64> = tops.iter().map(|r| r.id).collect();
+    let replies = repo::inline_replies(&mut conn, &top_ids, &excluded, replies_per_thread).await?;
+    drop(conn);
+    let rows: Vec<&CommentRow> = tops.iter().chain(replies.iter()).collect();
+    let lookup = lookup_with(state, &rows, HashSet::new()).await?;
+    let threads = tops
+        .iter()
+        .map(|top| {
+            let children = replies
+                .iter()
+                .filter(|r| r.parent_id == Some(top.id))
+                .map(|r| view(r, &lookup, None))
+                .collect();
+            (view(top, &lookup, None), children)
+        })
+        .collect();
+    Ok(Some(HotThreads { total, threads }))
+}
+
 /// 帖子的一级评论。第一页额外返回采纳与置顶（各最多一条），它们不再出现在 `items` 里。
 pub async fn list(
     state: &CommentsState,

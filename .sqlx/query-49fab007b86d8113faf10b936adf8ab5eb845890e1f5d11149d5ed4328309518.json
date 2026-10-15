@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_profiles (user_id, bio, hidden, updated_at) VALUES ($1, '简介  第一行\n第二行', FALSE, now()),\n                                                                     ($2, '', TRUE, now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "49fab007b86d8113faf10b936adf8ab5eb845890e1f5d11149d5ed4328309518"
+}

@@ -19,6 +19,7 @@ use crate::MessagingState;
 use crate::dto::{
     AiReplyMeta, ConversationView, EditMessageRequest, LastMessageView, MessageView, MessagesQuery,
     OpenDirectRequest, PeerView, ReplyView, SendMessageRequest, UpdateConversationRequest,
+    WorkflowEvent,
 };
 use crate::repo::{self, MessageRow, NewMessage, SummaryRow};
 
@@ -84,6 +85,12 @@ pub(crate) fn message_view(row: MessageRow) -> MessageView {
         ai: row.ai_state.map(|state| AiReplyMeta {
             state,
             model_key: row.ai_model_key,
+            // 撤回后时间线随正文一起隐藏。
+            workflow: row
+                .ai_workflow
+                .filter(|_| !withdrawn)
+                .and_then(|w| serde_json::from_value(w).ok())
+                .filter(|w: &Vec<WorkflowEvent>| !w.is_empty()),
         }),
     }
 }
