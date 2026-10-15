@@ -48,6 +48,8 @@ getrandom.workspace = true
 graphile_worker.workspace = true
 chrono.workspace = true
 sha2.workspace = true
+governor.workspace = true
+moka.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

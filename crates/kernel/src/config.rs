@@ -68,6 +68,31 @@ pub struct Config {
     pub search: Search,
     pub storage: Storage,
     pub jobs: Jobs,
+    pub rate_limit: RateLimit,
+}
+
+/// 全站默认限流（每分钟，RL-002）。读 = GET / HEAD，其余为写。登录用户按用户计，游客按 IP 计。
+/// 进程内计数：多实例时每个实例各自计。具体接口另有更严的限流时两者都生效。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RateLimit {
+    pub enabled: bool,
+    pub anon_read_per_min: u32,
+    pub anon_write_per_min: u32,
+    pub user_read_per_min: u32,
+    pub user_write_per_min: u32,
+}
+
+impl Default for RateLimit {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            anon_read_per_min: 300,
+            anon_write_per_min: 60,
+            user_read_per_min: 600,
+            user_write_per_min: 120,
+        }
+    }
 }
 
 /// 后台任务（graphile_worker）。
@@ -252,6 +277,7 @@ impl Default for Config {
             search: Search::default(),
             storage: Storage::default(),
             jobs: Jobs::default(),
+            rate_limit: RateLimit::default(),
         }
     }
 }
@@ -436,6 +462,20 @@ impl Config {
         if !(1..=64).contains(&self.jobs.concurrency) {
             return Err(ConfigError::Invalid(
                 "jobs.concurrency 必须在 1–64 之间".to_owned(),
+            ));
+        }
+        let rl = &self.rate_limit;
+        if [
+            rl.anon_read_per_min,
+            rl.anon_write_per_min,
+            rl.user_read_per_min,
+            rl.user_write_per_min,
+        ]
+        .iter()
+        .any(|n| !(1..=100_000).contains(n))
+        {
+            return Err(ConfigError::Invalid(
+                "rate_limit 的每分钟次数必须在 1–100000 之间".to_owned(),
             ));
         }
         let hot = &self.hot;

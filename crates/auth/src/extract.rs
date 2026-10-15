@@ -61,14 +61,19 @@ impl Principal {
 }
 
 fn credential(parts: &Parts, cookie_name: &str) -> Option<String> {
-    if let Some(value) = parts.headers.get(header::AUTHORIZATION) {
+    credential_from(&parts.headers, cookie_name)
+}
+
+/// 请求携带的会话令牌原文（未校验）：`Authorization: Bearer` 优先，其次会话 Cookie。
+pub fn credential_from(headers: &http::HeaderMap, cookie_name: &str) -> Option<String> {
+    if let Some(value) = headers.get(header::AUTHORIZATION) {
         return value
             .to_str()
             .ok()
             .and_then(|v| v.strip_prefix("Bearer "))
             .map(|t| t.trim().to_owned());
     }
-    CookieJar::from_headers(&parts.headers)
+    CookieJar::from_headers(headers)
         .get(cookie_name)
         .map(|c| c.value().to_owned())
 }

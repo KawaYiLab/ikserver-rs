@@ -132,6 +132,7 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
 
     // Router::layer 每调用一次就包在外层，所以这里从最内层往外写。
     // 逐层调用（而不是一个 ServiceBuilder）让 axum 在每层之间统一响应体类型。
+    let rate_limit = axum::middleware::from_fn_with_state(state.clone(), crate::rate_limit::layer);
     Ok(router
         .fallback(|| async { Problem::not_found() })
         // 幂等层在超时层之内：超时只丢弃等待，处理任务照样完成并记下结果。
@@ -146,6 +147,8 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
         .layer(DefaultBodyLimit::max(config.http.body_limit_bytes))
         .layer(CompressionLayer::new())
         .layer(csrf)
+        // 在 CORS 之内：429 也带 CORS 头，浏览器才读得到 Retry-After。
+        .layer(rate_limit)
         .layer(cors(&config.http.allowed_origins)?)
         .layer(CatchPanicLayer::custom(|_panic| {
             tracing::error!("handler panicked");

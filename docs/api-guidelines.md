@@ -144,11 +144,15 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 ## 限流
 
-- 被限流的 429 响应带 `Retry-After: <秒>`（已实现）。
-- 计划：成功响应附带 `RateLimit-Limit`、`RateLimit-Remaining`、`RateLimit-Reset`（尚未实现）。
-- 维度：IP（XFF 从右往左数 `IK_HTTP__TRUSTED_PROXY_HOPS` 跳）+ 用户 + 接口类别。
-- 默认值：匿名读 300/min、匿名写 60/min、登录读 600/min、登录写 120/min；
-  登录/验证码类另按 IP 20/min。具体接口在代码里用 helper 声明。
+- 被限流的 429 `RATE_LIMITED` 响应带 `Retry-After: <秒>`。
+- 全站默认限流（`/v1/` 下所有请求，`crates/server/src/rate_limit.rs`）：游客按 IP（XFF 从右往左数
+  `IK_HTTP__TRUSTED_PROXY_HOPS` 跳）、登录用户按用户计，读（GET/HEAD）写分开；默认匿名读 300/min、匿名写 60/min、
+  登录读 600/min、登录写 120/min（`IK_RATE_LIMIT__*` 可调，`IK_RATE_LIMIT__ENABLED=false` 关闭）。
+  令牌无效、账号封禁按游客处理。令牌桶（GCRA），没有固定窗口边界的突发。
+- `/v1/` 下的每个响应（包括 429）带 `RateLimit-Limit`（每分钟次数）、`RateLimit-Remaining`、
+  `RateLimit-Reset`（全部额度恢复还要几秒）。这几个头只描述全站默认限流；具体接口的限流只在超限时用 429 体现。
+- 具体接口另有更严的限流（两者都生效）：登录/验证码类按 IP 每路由 20/min，评论、私信、拉黑、上传签名等见各域代码。
+- 计数在进程内（不使用 Redis），多实例时每个实例各自计。
 - 搜索（`/v1/search/*`）：登录用户每秒 10 次，游客每 IP 每秒 5 次。
 
 ## 实时（WebSocket `/v1/realtime`）

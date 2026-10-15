@@ -40,6 +40,7 @@ pub struct AppState {
     pub feed: FeedState,
     pub search: SearchState,
     pub media: MediaState,
+    pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
 }
 
 impl AppState {
@@ -90,7 +91,9 @@ impl AppState {
         let feed = FeedState::start(content.clone(), config.hot.clone())?;
         // 索引同步由 `serve` 显式启动（CLI 子命令不需要）。
         let search = SearchState::new(content.clone(), comments.clone(), &config.search)?;
+        let rate_limit = crate::rate_limit::GlobalLimiter::new(&config.rate_limit);
         Ok(Self {
+            rate_limit,
             config: Arc::new(config),
             db,
             ids,

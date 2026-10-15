@@ -4,6 +4,7 @@ pub mod app;
 pub mod idempotency;
 pub mod jobs;
 pub mod middleware;
+pub mod rate_limit;
 pub mod state;
 pub mod system;
 
