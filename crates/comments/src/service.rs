@@ -362,24 +362,38 @@ pub async fn delete(
     if comment.author_id != principal.user_id.get() {
         return Err(Problem::forbidden());
     }
-    let replies = repo::count_all_replies(&mut tx, comment.id).await?;
-    // 必须在删除之前：外键 ON DELETE SET NULL 会先把帖子的 accepted_comment_id 置空，
-    // 之后就匹配不到这条评论了。
-    if comment.accepted_at.is_some() {
-        interop::clear_solved(&mut tx, post_id, comment.id).await?;
-    }
-    repo::delete(&mut tx, comment.id).await?;
-    let removed = i32::try_from(replies.saturating_add(1)).unwrap_or(i32::MAX);
-    interop::comments_removed(&mut tx, post_id, removed).await?;
+    remove_locked(&mut tx, post_id, &comment).await?;
     tx.commit().await?;
     // 内部事件：搜索索引删除这条评论及其回复。
     let mut effects = Effects::new();
-    effects.publish(Event::new(
+    effects.publish(removed_event(comment.id, post_id)?);
+    effects.dispatch(state.bus.as_ref());
+    Ok(())
+}
+
+pub(crate) fn removed_event(comment_id: i64, post_id: i64) -> Result<Event, Problem> {
+    Event::new(
         ik_kernel::bus::internal::COMMENT_REMOVED,
         Audience::Internal,
-        &serde_json::json!({ "commentId": comment.id, "postId": post_id }),
-    )?);
-    effects.dispatch(state.bus.as_ref());
+        &serde_json::json!({ "commentId": comment_id, "postId": post_id }),
+    )
+}
+
+/// 删除已锁住的评论及其回复，并维护帖子的评论数与采纳。调用方已锁住帖子与评论。
+pub(crate) async fn remove_locked(
+    conn: &mut PgConnection,
+    post_id: i64,
+    comment: &CommentRow,
+) -> Result<(), Problem> {
+    let replies = repo::count_all_replies(conn, comment.id).await?;
+    // 必须在删除之前：外键 ON DELETE SET NULL 会先把帖子的 accepted_comment_id 置空，
+    // 之后就匹配不到这条评论了。
+    if comment.accepted_at.is_some() {
+        interop::clear_solved(conn, post_id, comment.id).await?;
+    }
+    repo::delete(conn, comment.id).await?;
+    let removed = i32::try_from(replies.saturating_add(1)).unwrap_or(i32::MAX);
+    interop::comments_removed(conn, post_id, removed).await?;
     Ok(())
 }
 

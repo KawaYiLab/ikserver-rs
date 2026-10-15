@@ -43,7 +43,8 @@ pub(crate) struct NewSystemBatch<'a> {
     pub post_id: Option<i64>,
     pub post_title: Option<&'a str>,
     pub excerpt: &'a str,
-    pub dedup_key: &'a str,
+    /// 幂等键；为空时不去重。
+    pub dedup_key: Option<&'a str>,
     pub now: DateTime<Utc>,
 }
 

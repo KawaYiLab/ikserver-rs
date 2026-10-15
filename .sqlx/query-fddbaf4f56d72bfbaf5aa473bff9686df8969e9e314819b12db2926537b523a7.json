@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH before AS (\n               SELECT id, (status = 'published' AND hidden_at IS NULL) AS was_public\n               FROM posts WHERE id = $1 FOR UPDATE\n           )\n           UPDATE posts p\n           SET hidden_at = COALESCE(p.hidden_at, $4), hidden_by = $2, hidden_reason = $3,\n               pinned_at = NULL, pinned_by = NULL\n           FROM before b WHERE p.id = b.id\n           RETURNING b.was_public AS \"was_public!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "was_public!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fddbaf4f56d72bfbaf5aa473bff9686df8969e9e314819b12db2926537b523a7"
+}

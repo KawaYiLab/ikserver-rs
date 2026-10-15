@@ -80,6 +80,12 @@ impl Dirty {
                     self.posts.insert(id);
                 }
             }
+            // 恢复的评论随所属帖子一起重建（帖子的评论都会重新检查一遍）。
+            kind if kind == internal::COMMENT_RESTORED => {
+                if let Some(id) = number("postId") {
+                    self.posts_with_comments.insert(id);
+                }
+            }
             kind if kind == internal::COMMENT_REMOVED => {
                 if let Some(id) = number("commentId") {
                     self.removed_comments.insert(id);

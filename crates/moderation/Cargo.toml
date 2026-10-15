@@ -1,0 +1,32 @@
+[package]
+name = "ik-moderation"
+description = "举报与审核：举报、自动隐藏、领取与结案、封禁与解封、审核日志"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ik-kernel.workspace = true
+ik-auth.workspace = true
+ik-content.workspace = true
+ik-comments.workspace = true
+ik-notify.workspace = true
+ik-media.workspace = true
+axum.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+chrono.workspace = true
+governor.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+futures-util.workspace = true
+
+[lints]
+workspace = true

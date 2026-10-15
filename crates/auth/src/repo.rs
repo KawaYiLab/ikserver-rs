@@ -947,3 +947,70 @@ pub(crate) async fn anonymize(
         .await?;
     Ok(())
 }
+
+// ---------- 审核（moderation） ----------
+
+pub(crate) struct UserStatusRow {
+    pub id: i64,
+    pub username: String,
+    pub status: String,
+    pub role: Role,
+}
+
+pub(crate) async fn user_statuses(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<UserStatusRow>> {
+    sqlx::query_as!(
+        UserStatusRow,
+        r#"SELECT id, username, status, role AS "role: Role" FROM users WHERE id = ANY($1)"#,
+        ids
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn lock_user_status(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<UserStatusRow>> {
+    sqlx::query_as!(
+        UserStatusRow,
+        r#"SELECT id, username, status, role AS "role: Role" FROM users WHERE id = $1 FOR UPDATE"#,
+        id
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn set_status(
+    conn: &mut PgConnection,
+    id: i64,
+    status: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE users SET status = $2, updated_at = $3 WHERE id = $1",
+        id,
+        status,
+        now
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 用户名包含 `needle` 的账号（不区分大小写，最多 `limit` 个）。审核后台按举报人搜索用。
+pub(crate) async fn ids_by_username_fragment(
+    conn: &mut PgConnection,
+    needle: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE strpos(lower(username), lower($1)) > 0 ORDER BY id LIMIT $2",
+        needle,
+        limit
+    )
+    .fetch_all(conn)
+    .await
+}

@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE comments SET hidden_at = NULL, hidden_by = NULL, hidden_reason = NULL\n         WHERE id = $1 AND hidden_at IS NOT NULL AND hidden_reason = $2\n         RETURNING post_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "post_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a88d2c81523fc262d5e9c03948de97689e5378d2204b0b3fd4565afb2a678063"
+}

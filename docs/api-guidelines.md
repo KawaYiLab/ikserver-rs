@@ -119,6 +119,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
 | MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |
 | MIHOYO_DELETE_ACCOUNT_MISMATCH | 403 | 扫码的米游社账号与当前账号不一致，请使用当前账号绑定的米游社扫码 | MHY-017 |
+| CANNOT_SANCTION_STAFF | 403 | 不能封禁版主或管理员 | 审核结案 `block_user` |
 | MIHOYO_UNBIND_FORBIDDEN | 403 | 当前账号只能通过米游社扫码登录，请先绑定邮箱 | 没有邮箱的账号解绑会把自己锁在外面（MHY-014） |
 | MIHOYO_NOT_BOUND | 404 | 当前账号未绑定米游社 | |
 | IDENTITY_ALREADY_BOUND | 409 | 该米游社账号已绑定其他绳网账号，请先在原账号解绑或注销 | 不接管任何账号（MHY-013） |
@@ -126,6 +127,9 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | IDENTITY_CONFLICT | 409 | 这个米游社账号关联了多个绳网账号，请联系管理员 | aid 与 mid 指向不同账号（历史数据），运维处理 |
 | QR_SESSION_CONSUMED | 409 | 这次扫码登录已经失效，请重新扫码 | 同一个二维码登录的会话已登出或过期，不会另起新会话 |
 | ACCOUNT_CHANGED | 409 | 账号信息已变更，请重新验证 | 核验之后邮箱或密码被改过（修改密码、注销），DEL-005 |
+| REPORT_DUPLICATE | 409 | 你已举报过该内容，正在处理中 | 同一目标有未结案的举报；结案后可以再举报 |
+| REPORT_CLOSED | 409 | 该举报已结案 | 领取、结案时这个目标已经没有未结案的举报 |
+| REPORT_ALREADY_CLAIMED | 409 | 该举报已被 <名字> 领取，仅处理人可以处理 | 组里有被别人领取的举报；不做部分领取 |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |

@@ -43,7 +43,7 @@ kernel ◄── auth ◄── content ◄── feed
 - 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
+- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；`moderation → auth, content, comments, notify, media`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
   `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
   `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
   所以投币的入口在 content，记账在 economy。
@@ -76,6 +76,10 @@ kernel ◄── auth ◄── content ◄── feed
 - `account → auth, mihoyo, profile`：账号安全概览与注销。注销在一个事务里消费核验（注销验证码或扫码核验，
   扫码会话在数据库里，所以与注销同一事务，回滚时凭证还在）、删除米游社绑定、清空个人资料、账号脱敏并吊销会话；
   提交后发布会话吊销事件（实时网关断开连接）与 `user.renamed`（搜索索引更新作者名）。
+- `moderation → auth, content, comments, notify, media`：举报（`reports`）与审核日志（`moderation_log`）。
+  隐藏、删除内容经 `ik_content::interop` / `ik_comments::interop`，封禁经 `ik_auth::interop::block_user`，
+  通知经 `ik_notify::interop::system`，全部在审核自己的事务里；同一目标的未结案举报是一组，领取、释放、结案先锁整组。
+  审核接口 `/v1/admin/reports*` 需要版主或管理员角色（论坛账号的 `role`，D-062 的「后台账号」不再单独存在）。
   对象存储的读写都在数据库事务之外；校验并发由进程内闸门（`ik_media::gate`）限制。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。

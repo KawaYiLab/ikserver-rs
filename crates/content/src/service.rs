@@ -431,7 +431,11 @@ fn seed_for(is_anonymous: bool, existing: Option<&str>) -> Result<Option<String>
     }
 }
 
-fn published_event(post_id: i64, category_id: Option<i64>, first: bool) -> Result<Event, Problem> {
+pub(crate) fn published_event(
+    post_id: i64,
+    category_id: Option<i64>,
+    first: bool,
+) -> Result<Event, Problem> {
     Event::new(
         "post.published",
         Audience::Broadcast,
@@ -443,7 +447,7 @@ fn published_event(post_id: i64, category_id: Option<i64>, first: bool) -> Resul
     )
 }
 
-fn removed_event(post_id: i64) -> Result<Event, Problem> {
+pub(crate) fn removed_event(post_id: i64) -> Result<Event, Problem> {
     Event::new(
         "post.removed",
         Audience::Broadcast,
@@ -931,7 +935,7 @@ pub fn author_view(
     }
 }
 
-fn excerpt(body: &str) -> String {
+pub(crate) fn excerpt(body: &str) -> String {
     body.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")

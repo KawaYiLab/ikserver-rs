@@ -71,6 +71,23 @@ pub struct Config {
     pub rate_limit: RateLimit,
     pub bus: Bus,
     pub mihoyo: Mihoyo,
+    pub moderation: Moderation,
+}
+
+/// 举报与审核。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Moderation {
+    /// 同一内容收到这么多个不同的人的待处理举报时自动隐藏（RPT-052，1–100）。
+    pub auto_hide_threshold: i64,
+}
+
+impl Default for Moderation {
+    fn default() -> Self {
+        Self {
+            auto_hide_threshold: 5,
+        }
+    }
 }
 
 /// 米游社扫码登录与绑定（MHY）。
@@ -313,6 +330,7 @@ impl Default for Config {
             rate_limit: RateLimit::default(),
             bus: Bus::default(),
             mihoyo: Mihoyo::default(),
+            moderation: Moderation::default(),
         }
     }
 }
@@ -580,6 +598,11 @@ impl Config {
         if self.bus.cluster && self.secrets.qr_session_key.is_empty() {
             return Err(ConfigError::Missing(
                 "IK_SECRETS__QR_SESSION_KEY（bus.cluster 打开时必须配置，且各实例相同）",
+            ));
+        }
+        if !(1..=100).contains(&self.moderation.auto_hide_threshold) {
+            return Err(ConfigError::Invalid(
+                "moderation.auto_hide_threshold 必须在 1–100 之间".to_owned(),
             ));
         }
         let mihoyo = &self.mihoyo;

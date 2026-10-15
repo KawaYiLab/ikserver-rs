@@ -64,6 +64,8 @@ impl Event {
 pub mod internal {
     /// 评论被删除。载荷 `{ commentId, postId }`（数字）。
     pub const COMMENT_REMOVED: &str = "comment.removed";
+    /// 被隐藏的评论恢复可见（驳回自动隐藏）。载荷 `{ commentId, postId }`（数字）。
+    pub const COMMENT_RESTORED: &str = "comment.restored";
     /// 用户改了名。载荷 `{ userId }`（数字）。
     pub const USER_RENAMED: &str = "user.renamed";
 }

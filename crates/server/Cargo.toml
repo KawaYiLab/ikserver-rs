@@ -31,6 +31,7 @@ ik-media.workspace = true
 ik-cosmetics.workspace = true
 ik-mihoyo.workspace = true
 ik-account.workspace = true
+ik-moderation.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

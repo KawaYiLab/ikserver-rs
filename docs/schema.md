@@ -267,3 +267,15 @@
 - `mihoyo_qr_logins.mode` 加 `delete`（扫码注销核验），与 `bind` 一样必须有发起的 `user_id`。
 - 注销不删行：`users.status = 'deleted'`、用户名改为「已注销用户_<id>」、`email` 置 NULL、删 `user_passwords` 与
   `mihoyo_bindings` 行、清 `user_profiles` 的签名与精选。
+
+## 举报与审核（`20261026000001_moderation.sql`）
+
+- `reports` 归 ik-moderation。目标用 `(target_type, target_id)` 表示（帖子、评论、用户的雪花 id，内容删除后不变，
+  替代旧的 `targetKey` 与关系回退，RPT-004～006）。`owner_user_id` 是作者或被举报的用户，匿名内容也记录（处置要用），
+  但不出现在任何接口里。`snapshot` 存举报时的标题、摘要、图片 id、是否匿名。
+- 部分唯一索引 `reports_open_uq`：同一人对同一目标只能有一条未结案的举报（RPT-011 下沉到 DDL）。
+- CHECK 保证结案与 `resolution`、`handled_at` 同时出现；领取人随账号删除置空。
+- 没有旧系统的 `report_actions` 删除任务表：删除内容与结案在同一个事务里完成（见业务规则差异）。
+- `moderation_log`：每次自动隐藏、结案、解封一行（操作人、动作、目标、涉及的举报条数、备注）。
+- 隐藏原因（`posts.hidden_reason`、`comments.hidden_reason`）：`auto_report`（多人举报自动隐藏，驳回时恢复）、
+  `moderator`（版主隐藏）。

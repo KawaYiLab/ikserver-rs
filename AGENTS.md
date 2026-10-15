@@ -39,8 +39,9 @@ crates/
   cosmetics/ 装扮：系统头像与论坛名片的目录、装备（装备状态存在账号上）
   mihoyo/    米游社扫码登录（自动建号）、绑定与解绑、扫码注销核验、上游协议客户端
   account/   账号安全：安全概览、注销账号（编排 auth、mihoyo、profile）
+  moderation/ 举报与审核：举报、多人举报自动隐藏、领取与结案、封禁与解封、审核日志
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：moderation ai admin）
+  （后续按业务域新增：ai admin）
 docs/
   architecture.md     架构与模块边界
   api-guidelines.md   接口设计规范（含错误码登记表）

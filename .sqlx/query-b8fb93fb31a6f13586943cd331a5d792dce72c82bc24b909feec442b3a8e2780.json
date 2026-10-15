@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO sessions (id, user_id, token_hash, login_method, expires_at, max_expires_at)\n         VALUES (77, 1, '\\x01', 'password', now() + interval '1 day', now() + interval '1 day')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b8fb93fb31a6f13586943cd331a5d792dce72c82bc24b909feec442b3a8e2780"
+}

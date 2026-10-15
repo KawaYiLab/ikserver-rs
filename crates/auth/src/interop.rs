@@ -302,3 +302,111 @@ pub async fn anonymize_deleted(
     repo::revoke_user_sessions(conn, user_id, None, now, "account_deleted").await?;
     Ok(())
 }
+
+// ---------- 审核（moderation） ----------
+
+/// 账号状态（审核用）。
+#[derive(Debug, Clone)]
+pub struct UserStatus {
+    pub id: i64,
+    pub username: String,
+    /// active / blocked / deleted / merged。
+    pub status: String,
+    pub role: Role,
+}
+
+impl UserStatus {
+    /// 已注销或已合并。
+    pub fn gone(&self) -> bool {
+        matches!(self.status.as_str(), "deleted" | "merged")
+    }
+}
+
+impl From<repo::UserStatusRow> for UserStatus {
+    fn from(row: repo::UserStatusRow) -> Self {
+        Self {
+            id: row.id,
+            username: row.username,
+            status: row.status,
+            role: row.role,
+        }
+    }
+}
+
+pub async fn user_statuses(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, UserStatus>, Problem> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    Ok(repo::user_statuses(conn, ids)
+        .await?
+        .into_iter()
+        .map(|row| (row.id, row.into()))
+        .collect())
+}
+
+/// 封禁的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlockOutcome {
+    Blocked,
+    /// 原本就是封禁状态。
+    AlreadyBlocked,
+    /// 已注销、已合并或不存在：没有可封禁的账号。
+    Gone,
+    /// 工作人员（版主、管理员）不能被封禁。
+    Staff,
+}
+
+/// 封禁账号（SANCTION-001）：状态改为 blocked 并吊销全部会话（D-059 方案 A）。调用方在提交后发布
+/// [`crate::service::sessions_changed_event`]，实时连接随之断开。已发布的内容不隐藏（D-058 方案 A）。
+pub async fn block_user(
+    conn: &mut PgConnection,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> Result<BlockOutcome, Problem> {
+    let Some(user) = repo::lock_user_status(conn, user_id)
+        .await?
+        .map(UserStatus::from)
+    else {
+        return Ok(BlockOutcome::Gone);
+    };
+    if user.gone() {
+        return Ok(BlockOutcome::Gone);
+    }
+    if user.role.is_staff() {
+        return Ok(BlockOutcome::Staff);
+    }
+    if user.status == "blocked" {
+        return Ok(BlockOutcome::AlreadyBlocked);
+    }
+    repo::set_status(conn, user_id, "blocked", now).await?;
+    repo::revoke_user_sessions(conn, user_id, None, now, "blocked").await?;
+    Ok(BlockOutcome::Blocked)
+}
+
+/// 解封（D-057）。只有封禁中的账号会改回 active；返回是否改了。
+pub async fn unblock_user(
+    conn: &mut PgConnection,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> Result<bool, Problem> {
+    let Some(user) = repo::lock_user_status(conn, user_id).await? else {
+        return Ok(false);
+    };
+    if user.status != "blocked" {
+        return Ok(false);
+    }
+    repo::set_status(conn, user_id, "active", now).await?;
+    Ok(true)
+}
+
+/// 用户名包含 `needle` 的账号 id（不区分大小写，最多 `limit` 个）。
+pub async fn ids_by_username_fragment(
+    conn: &mut PgConnection,
+    needle: &str,
+    limit: i64,
+) -> Result<Vec<i64>, Problem> {
+    Ok(repo::ids_by_username_fragment(conn, needle, limit).await?)
+}

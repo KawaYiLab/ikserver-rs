@@ -1,0 +1,106 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT target_type AS \"target_type!\", target_id AS \"target_id!\",\n                  count(*) AS \"report_count!\",\n                  min(created_at) AS \"first_at!\", max(created_at) AS \"latest_at!\",\n                  CASE WHEN bool_or(status = 'pending') THEN 'pending'\n                       WHEN bool_or(status = 'reviewing') THEN 'reviewing'\n                       ELSE (array_agg(status ORDER BY created_at DESC, id DESC))[1] END AS \"status!\",\n                  (array_agg(assigned_to ORDER BY created_at DESC, id DESC)\n                       FILTER (WHERE assigned_to IS NOT NULL))[1] AS assigned_to,\n                  (array_agg(snapshot ORDER BY created_at DESC, id DESC))[1] AS \"snapshot!\",\n                  (array_agg(owner_user_id ORDER BY created_at DESC, id DESC))[1] AS owner_user_id,\n                  count(*) OVER () AS \"total!\"\n           FROM reports\n           WHERE status = ANY($1)\n             AND ($2::text IS NULL OR target_type = $2)\n             AND ($3::text IS NULL OR reason = $3)\n             AND ($4::timestamptz IS NULL OR created_at >= $4)\n             AND ($5::timestamptz IS NULL OR created_at < $5)\n             AND ($6::bigint IS NULL OR assigned_to = $6)\n             AND ($11::bigint IS NULL OR target_id = $11)\n           GROUP BY target_type, target_id\n           HAVING $7::text IS NULL OR bool_or(\n               snapshot->>'title' ILIKE $7 OR snapshot->>'excerpt' ILIKE $7\n               OR snapshot->>'username' ILIKE $7 OR reporter_id = ANY($8))\n           ORDER BY max(created_at) DESC, target_id DESC\n           LIMIT $9 OFFSET $10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "target_type!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reports",
+            "name": "target_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "target_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "reports",
+            "name": "target_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "report_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "first_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "latest_at!",
+        "type_info": "Timestamptz",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "status!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "assigned_to",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "snapshot!",
+        "type_info": "Jsonb",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 8,
+        "name": "owner_user_id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Int8",
+        "Text",
+        "Int8Array",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "96a75adb880791b2fcf5ac6e9bb9c534965ce463ccf59477b5ce1465d11fe07d"
+}

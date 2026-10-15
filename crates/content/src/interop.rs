@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use ik_kernel::Problem;
+use ik_kernel::bus::Effects;
 use sqlx::PgConnection;
 
 use crate::repo;
@@ -283,5 +284,108 @@ pub async fn public_post_meta(
                 },
             )
         })
+        .collect())
+}
+
+// ---------- 审核（moderation） ----------
+
+/// 隐藏原因（SANCTION-010）。
+pub const HIDDEN_BY_REPORTS: &str = "auto_report";
+pub const HIDDEN_BY_MODERATOR: &str = "moderator";
+
+/// 举报目标：帖子（RPT-009、RPT-013）。
+#[derive(Debug, Clone)]
+pub struct ReportablePost {
+    pub author_id: i64,
+    pub title: String,
+    pub excerpt: String,
+    /// 封面（媒体 id，有序）。
+    pub cover_ids: Vec<i64>,
+    pub is_anonymous: bool,
+    /// 已发布且未隐藏。只有公开的帖子能被举报。
+    pub is_public: bool,
+}
+
+pub async fn reportable_post(
+    conn: &mut PgConnection,
+    post_id: i64,
+) -> Result<Option<ReportablePost>, Problem> {
+    Ok(repo::reportable(conn, post_id)
+        .await?
+        .map(|row| ReportablePost {
+            author_id: row.author_id,
+            excerpt: crate::service::excerpt(&row.body),
+            title: row.title,
+            cover_ids: row.cover_ids,
+            is_anonymous: row.is_anonymous,
+            is_public: row.is_public,
+        }))
+}
+
+/// 隐藏帖子（同时取消置顶，RPT-053）。已经隐藏的改为新的原因与操作人。帖子不存在时返回 false。
+/// 原本公开的帖子会发出 `post.removed`（信息流、搜索、在线客户端据此移除）。
+pub async fn hide_post(
+    conn: &mut PgConnection,
+    post_id: i64,
+    by: Option<i64>,
+    reason: &str,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<bool, Problem> {
+    let Some(row) = repo::hide(conn, post_id, by, reason, now).await? else {
+        return Ok(false);
+    };
+    if row.was_public {
+        effects.publish(crate::service::removed_event(post_id)?);
+    }
+    Ok(true)
+}
+
+/// 取消隐藏，只在当前隐藏原因是 `reason` 时生效（驳回只恢复自动隐藏，RPTADM-060）。返回是否恢复了。
+pub async fn unhide_post(
+    conn: &mut PgConnection,
+    post_id: i64,
+    reason: &str,
+    effects: &mut Effects,
+) -> Result<bool, Problem> {
+    let Some((category_id, published)) = repo::unhide(conn, post_id, reason).await? else {
+        return Ok(false);
+    };
+    if published {
+        effects.publish(crate::service::published_event(
+            post_id,
+            category_id,
+            false,
+        )?);
+    }
+    Ok(true)
+}
+
+/// 审核删除帖子（评论随外键一起删除）。返回是否删除了。
+pub async fn delete_post(
+    conn: &mut PgConnection,
+    post_id: i64,
+    effects: &mut Effects,
+) -> Result<bool, Problem> {
+    if repo::get_post(conn, post_id).await?.is_none() {
+        return Ok(false);
+    }
+    repo::delete_post(conn, post_id).await?;
+    effects.publish(crate::service::removed_event(post_id)?);
+    Ok(true)
+}
+
+/// 帖子是否隐藏（按 id；已删除的不出现）。审核后台展示目标状态用。
+pub async fn hidden_states(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, bool>, Problem> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    Ok(repo::moderation_states(conn, ids)
+        .await?
+        .into_iter()
+        .map(|r| (r.id, r.hidden))
         .collect())
 }

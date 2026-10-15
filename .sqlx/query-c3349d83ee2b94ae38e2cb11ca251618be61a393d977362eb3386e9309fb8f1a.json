@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH before AS (SELECT id, hidden_at IS NULL AS was_visible FROM comments WHERE id = $1 FOR UPDATE)\n           UPDATE comments c\n           SET hidden_at = COALESCE(c.hidden_at, $4), hidden_by = $2, hidden_reason = $3, pinned_at = NULL\n           FROM before b WHERE c.id = b.id\n           RETURNING b.was_visible AS \"was_visible!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "was_visible!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c3349d83ee2b94ae38e2cb11ca251618be61a393d977362eb3386e9309fb8f1a"
+}

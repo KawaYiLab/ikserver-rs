@@ -1491,3 +1491,98 @@ pub(crate) async fn public_post_meta(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 审核（moderation） ----------
+
+pub(crate) struct ReportableRow {
+    pub author_id: i64,
+    pub title: String,
+    pub body: String,
+    pub cover_ids: Vec<i64>,
+    pub is_anonymous: bool,
+    pub is_public: bool,
+}
+
+pub(crate) async fn reportable(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<ReportableRow>> {
+    sqlx::query_as!(
+        ReportableRow,
+        r#"SELECT author_id, title, body, cover_ids, is_anonymous,
+                  (status = 'published' AND hidden_at IS NULL) AS "is_public!"
+           FROM posts WHERE id = $1"#,
+        id
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct HiddenRow {
+    pub was_public: bool,
+}
+
+/// 隐藏帖子并取消置顶（RPT-053）。已经隐藏的只改原因与操作人。返回隐藏前的状态。
+pub(crate) async fn hide(
+    conn: &mut PgConnection,
+    id: i64,
+    by: Option<i64>,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<HiddenRow>> {
+    sqlx::query_as!(
+        HiddenRow,
+        r#"WITH before AS (
+               SELECT id, (status = 'published' AND hidden_at IS NULL) AS was_public
+               FROM posts WHERE id = $1 FOR UPDATE
+           )
+           UPDATE posts p
+           SET hidden_at = COALESCE(p.hidden_at, $4), hidden_by = $2, hidden_reason = $3,
+               pinned_at = NULL, pinned_by = NULL
+           FROM before b WHERE p.id = b.id
+           RETURNING b.was_public AS "was_public!""#,
+        id,
+        by,
+        reason,
+        now
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 取消隐藏，只在当前隐藏原因是 `reason` 时生效（驳回只恢复自动隐藏，RPTADM-060）。
+/// 返回帖子分区（发布时的事件要用）与恢复后是否公开。
+pub(crate) async fn unhide(
+    conn: &mut PgConnection,
+    id: i64,
+    reason: &str,
+) -> sqlx::Result<Option<(Option<i64>, bool)>> {
+    let row = sqlx::query!(
+        "UPDATE posts SET hidden_at = NULL, hidden_by = NULL, hidden_reason = NULL
+         WHERE id = $1 AND hidden_at IS NOT NULL AND hidden_reason = $2
+         RETURNING category_id, status",
+        id,
+        reason
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|r| (r.category_id, r.status == "published")))
+}
+
+pub(crate) struct ModerationStateRow {
+    pub id: i64,
+    pub hidden: bool,
+}
+
+pub(crate) async fn moderation_states(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<ModerationStateRow>> {
+    sqlx::query_as!(
+        ModerationStateRow,
+        r#"SELECT id, (hidden_at IS NOT NULL) AS "hidden!" FROM posts WHERE id = ANY($1)"#,
+        ids
+    )
+    .fetch_all(conn)
+    .await
+}

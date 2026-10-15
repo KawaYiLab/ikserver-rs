@@ -588,3 +588,64 @@ pub(crate) async fn search_candidates(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 审核（moderation） ----------
+
+/// 隐藏评论并取消置顶（RPT-053）；采纳保留（D-028 方案 A，驳回后自然恢复）。已隐藏的只改原因与操作人。
+/// 返回隐藏前是否可见。
+pub(crate) async fn hide(
+    conn: &mut PgConnection,
+    id: i64,
+    by: Option<i64>,
+    reason: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<bool>> {
+    sqlx::query_scalar!(
+        r#"WITH before AS (SELECT id, hidden_at IS NULL AS was_visible FROM comments WHERE id = $1 FOR UPDATE)
+           UPDATE comments c
+           SET hidden_at = COALESCE(c.hidden_at, $4), hidden_by = $2, hidden_reason = $3, pinned_at = NULL
+           FROM before b WHERE c.id = b.id
+           RETURNING b.was_visible AS "was_visible!""#,
+        id,
+        by,
+        reason,
+        now
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 取消隐藏，只在当前隐藏原因是 `reason` 时生效。返回所属帖子。
+pub(crate) async fn unhide(
+    conn: &mut PgConnection,
+    id: i64,
+    reason: &str,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "UPDATE comments SET hidden_at = NULL, hidden_by = NULL, hidden_reason = NULL
+         WHERE id = $1 AND hidden_at IS NOT NULL AND hidden_reason = $2
+         RETURNING post_id",
+        id,
+        reason
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct CommentStateRow {
+    pub id: i64,
+    pub hidden: bool,
+}
+
+pub(crate) async fn moderation_states(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<CommentStateRow>> {
+    sqlx::query_as!(
+        CommentStateRow,
+        r#"SELECT id, (hidden_at IS NOT NULL) AS "hidden!" FROM comments WHERE id = ANY($1)"#,
+        ids
+    )
+    .fetch_all(conn)
+    .await
+}

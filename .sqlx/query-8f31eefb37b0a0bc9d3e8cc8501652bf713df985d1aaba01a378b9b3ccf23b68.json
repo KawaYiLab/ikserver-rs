@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reports SET status = 'reviewing'\n         WHERE target_type = $1 AND target_id = $2 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8f31eefb37b0a0bc9d3e8cc8501652bf713df985d1aaba01a378b9b3ccf23b68"
+}

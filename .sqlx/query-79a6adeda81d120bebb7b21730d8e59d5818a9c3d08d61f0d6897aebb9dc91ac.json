@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reports SET status = 'reviewing', assigned_to = $3, assigned_at = $4\n         WHERE target_type = $1 AND target_id = $2\n           AND (status = 'pending' OR (status = 'reviewing' AND assigned_to IS NULL))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "79a6adeda81d120bebb7b21730d8e59d5818a9c3d08d61f0d6897aebb9dc91ac"
+}

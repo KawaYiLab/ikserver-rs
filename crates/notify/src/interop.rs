@@ -259,7 +259,7 @@ pub async fn fanout_new_post(
             post_id: Some(post_id),
             post_title: Some(&title),
             excerpt: &message,
-            dedup_key: &dedup_key,
+            dedup_key: Some(&dedup_key),
             now,
         },
     )
@@ -272,6 +272,52 @@ pub async fn fanout_new_post(
         )?);
     }
     done(sent.len())
+}
+
+/// 发系统通知（举报处理结果等，RPTADM-090）：每个收件人一条，正文截到 500 字。
+/// 已注销、已合并的收件人跳过；被封禁的照样收到（这样才看得到封禁原因）。返回写入的条数。
+pub async fn system(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    recipients: &[i64],
+    message: &str,
+    post_id: Option<i64>,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<usize, Problem> {
+    let mut recipients: Vec<i64> = ik_auth::interop::user_statuses(conn, recipients)
+        .await?
+        .into_values()
+        .filter(|u| !u.gone())
+        .map(|u| u.id)
+        .collect();
+    recipients.sort_unstable();
+    if recipients.is_empty() {
+        return Ok(0);
+    }
+    let message = truncate(message, SYSTEM_MAX_CHARS);
+    let row_ids: Vec<i64> = recipients.iter().map(|_| ids.next_raw()).collect();
+    let sent = repo::insert_system_batch(
+        conn,
+        &NewSystemBatch {
+            ids: &row_ids,
+            recipients: &recipients,
+            post_id,
+            post_title: None,
+            excerpt: &message,
+            dedup_key: None,
+            now,
+        },
+    )
+    .await?;
+    if !sent.is_empty() {
+        effects.publish(Event::new(
+            "notification.created",
+            Audience::Users(sent.clone().into()),
+            &serde_json::json!({ "bucket": SYSTEM_BUCKET }),
+        )?);
+    }
+    Ok(sent.len())
 }
 
 #[cfg(test)]
