@@ -1,0 +1,218 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions\n         FROM ai_role_cards ORDER BY sort_order, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "bio",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "bio"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "avatar_media_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "avatar_media_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "bound_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "bound_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "knock_visible",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "knock_visible"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "dm_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "dm_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "comment_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "comment_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "sort_order",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "sort_order"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "output_mode",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "output_mode"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "system_prompt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "system_prompt"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "examples",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "examples"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "default_model_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "default_model_id"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "allowed_model_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "allowed_model_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "suggested_questions",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "suggested_questions"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "bb40000779beaaf5c3c0a73e01281ae44e008d30e005d3c026ff2106fbbf77d9"
+}

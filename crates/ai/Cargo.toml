@@ -1,0 +1,38 @@
+[package]
+name = "ik-ai"
+description = "AI 助手：模型与角色卡、额度、大模型调用、触发与生成"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ik-kernel.workspace = true
+ik-auth.workspace = true
+ik-media.workspace = true
+axum.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+futures-util.workspace = true
+moka.workspace = true
+regex.workspace = true
+async-openai.workspace = true
+reqwest13.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+
+[lints]
+workspace = true

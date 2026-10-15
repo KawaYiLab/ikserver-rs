@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT global_enabled, daily_tokens_per_user, daily_tokens FROM ai_settings WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "global_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_settings",
+            "name": "global_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "daily_tokens_per_user",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_settings",
+            "name": "daily_tokens_per_user"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "daily_tokens",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_settings",
+            "name": "daily_tokens"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1e73bb7e1751743dffd533696e1e3c18c2aec670e797d7a6acc58c234e056e50"
+}

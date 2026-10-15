@@ -72,6 +72,57 @@ pub struct Config {
     pub bus: Bus,
     pub mihoyo: Mihoyo,
     pub moderation: Moderation,
+    pub ai: Ai,
+}
+
+/// AI 助手（ai-assistant.md）。模型、角色卡、额度上限在数据库里（后台维护）；这里是部署相关的参数与
+/// 上游提供方的地址、密钥（不进数据库）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ai {
+    /// OpenAI 兼容的上游，按名字引用（`ai_models.provider`）。环境变量形如
+    /// `IK_AI__PROVIDERS__DEEPSEEK__BASE_URL`、`IK_AI__PROVIDERS__DEEPSEEK__API_KEY`。
+    pub providers: std::collections::BTreeMap<String, AiProvider>,
+    /// 预占的存活时长，覆盖一次最坏耗时的生成（QUOTA-010，60–7200 秒）。
+    pub hold_ttl_secs: u64,
+    /// 单条回复的总墙钟预算（GEN-020，10–1800 秒）。
+    pub reply_timeout_secs: u64,
+    /// 首帧看门狗（GEN-021，0 关闭，否则不超过总预算）。
+    pub first_delta_timeout_secs: u64,
+    /// 正文增量至少增长这么多字符才推送一次（GEN-004，1–1000）。
+    pub stream_min_chars: usize,
+    /// 私信历史最多带多少条消息（D-086，1–200）。
+    pub max_history_messages: usize,
+    /// 一次回复最多几轮工具调用（D-086，0–10）；超出后要求模型基于已有结果作答。
+    pub max_tool_rounds: u32,
+    /// 预占估算与无用量时的估算用的上下文基数（QUOTA-007、GEN-081，0–100000）。
+    pub estimated_context_tokens: i64,
+    /// 单个任务最多尝试几次（TRIG-033，1–10）。
+    pub max_attempts: i16,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AiProvider {
+    /// 例如 `https://api.deepseek.com/v1`。
+    pub base_url: String,
+    pub api_key: Secret,
+}
+
+impl Default for Ai {
+    fn default() -> Self {
+        Self {
+            providers: std::collections::BTreeMap::new(),
+            hold_ttl_secs: 900,
+            reply_timeout_secs: 300,
+            first_delta_timeout_secs: 90,
+            stream_min_chars: 16,
+            max_history_messages: 40,
+            max_tool_rounds: 3,
+            estimated_context_tokens: 4000,
+            max_attempts: 3,
+        }
+    }
 }
 
 /// 举报与审核。
@@ -331,6 +382,7 @@ impl Default for Config {
             bus: Bus::default(),
             mihoyo: Mihoyo::default(),
             moderation: Moderation::default(),
+            ai: Ai::default(),
         }
     }
 }
@@ -600,6 +652,27 @@ impl Config {
                 "IK_SECRETS__QR_SESSION_KEY（bus.cluster 打开时必须配置，且各实例相同）",
             ));
         }
+        let ai = &self.ai;
+        if !(60..=7200).contains(&ai.hold_ttl_secs)
+            || !(10..=1800).contains(&ai.reply_timeout_secs)
+            || ai.first_delta_timeout_secs > ai.reply_timeout_secs
+            || !(1..=1000).contains(&ai.stream_min_chars)
+            || !(1..=200).contains(&ai.max_history_messages)
+            || ai.max_tool_rounds > 10
+            || !(0..=100_000).contains(&ai.estimated_context_tokens)
+            || !(1..=10).contains(&ai.max_attempts)
+            || ai.providers.iter().any(|(name, p)| {
+                name.is_empty()
+                    || !(p.base_url.starts_with("https://") || p.base_url.starts_with("http://"))
+            })
+        {
+            return Err(ConfigError::Invalid(
+                "ai 配置不合法：hold_ttl_secs 60–7200，reply_timeout_secs 10–1800，first_delta_timeout_secs 不超过总预算，\
+                 stream_min_chars 1–1000，max_history_messages 1–200，max_tool_rounds 0–10，\
+                 estimated_context_tokens 0–100000，max_attempts 1–10，providers 的 base_url 须为 http(s)://"
+                    .to_owned(),
+            ));
+        }
         if !(1..=100).contains(&self.moderation.auto_hide_threshold) {
             return Err(ConfigError::Invalid(
                 "moderation.auto_hide_threshold 必须在 1–100 之间".to_owned(),
@@ -695,6 +768,28 @@ mod tests {
         )
         .unwrap();
         assert!(config.bus.cluster);
+    }
+
+    #[test]
+    fn ai_providers_come_from_nested_keys() {
+        let config = Config::from_figment(with(&[
+            ("database.url", "postgres://x"),
+            (
+                "ai.providers.deepseek.base_url",
+                "https://api.deepseek.com/v1",
+            ),
+            ("ai.providers.deepseek.api_key", "sk-test"),
+        ]))
+        .unwrap();
+        let provider = &config.ai.providers["deepseek"];
+        assert_eq!(provider.base_url, "https://api.deepseek.com/v1");
+        assert_eq!(provider.api_key.expose(), "sk-test");
+        let err = Config::from_figment(with(&[
+            ("database.url", "postgres://x"),
+            ("ai.providers.bad.base_url", "ftp://x"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
     }
 
     #[test]

@@ -1,0 +1,146 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, key, display_name, description, badge, provider, provider_model, cost_weight,\n                enabled, is_default, sort_order\n         FROM ai_models ORDER BY sort_order, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "badge",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "badge"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "provider"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "provider_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "provider_model"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "cost_weight",
+        "type_info": "Float8",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "cost_weight"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "is_default",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "is_default"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "sort_order",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "sort_order"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3e7862e71f3aeecdce88122b5c714ea77200543a5d67b41d5306d17c5b6898fc"
+}

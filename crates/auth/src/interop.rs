@@ -410,3 +410,13 @@ pub async fn ids_by_username_fragment(
 ) -> Result<Vec<i64>, Problem> {
     Ok(repo::ids_by_username_fragment(conn, needle, limit).await?)
 }
+
+/// 把用户名为 `username` 的活跃账号标为 AI 账号（AI-012，AI 角色卡导入用），返回其 id；
+/// 账号不存在或非活跃时返回 None。
+pub async fn mark_ai_agent(
+    conn: &mut PgConnection,
+    username: &str,
+    now: DateTime<Utc>,
+) -> Result<Option<i64>, Problem> {
+    Ok(repo::mark_ai_agent(conn, username, now).await?)
+}

@@ -1014,3 +1014,20 @@ pub(crate) async fn ids_by_username_fragment(
     .fetch_all(conn)
     .await
 }
+
+/// 把活跃账号标为 AI 账号（AI-012），返回其 id。
+pub(crate) async fn mark_ai_agent(
+    conn: &mut PgConnection,
+    username: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "UPDATE users SET is_ai_agent = TRUE, updated_at = $2
+         WHERE username = $1 AND status = 'active'
+         RETURNING id",
+        username,
+        now,
+    )
+    .fetch_optional(conn)
+    .await
+}

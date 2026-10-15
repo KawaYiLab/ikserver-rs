@@ -40,8 +40,9 @@ crates/
   mihoyo/    米游社扫码登录（自动建号）、绑定与解绑、扫码注销核验、上游协议客户端
   account/   账号安全：安全概览、注销账号（编排 auth、mihoyo、profile）
   moderation/ 举报与审核：举报、多人举报自动隐藏、领取与结案、封禁与解封、审核日志
+  ai/        AI 助手：模型与角色卡、每日加权额度（预占 / 结算）、OpenAI 兼容上游的流式客户端
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：ai admin）
+  （后续按业务域新增：admin）
 docs/
   architecture.md     架构与模块边界
   api-guidelines.md   接口设计规范（含错误码登记表）

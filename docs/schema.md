@@ -279,3 +279,15 @@
 - `moderation_log`：每次自动隐藏、结案、解封一行（操作人、动作、目标、涉及的举报条数、备注）。
 - 隐藏原因（`posts.hidden_reason`、`comments.hidden_reason`）：`auto_report`（多人举报自动隐藏，驳回时恢复）、
   `moderator`（版主隐藏）。
+
+## AI 助手（`20261027000001_ai.sql`）
+
+- 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。
+- `ai_models`：`key` 对外；`provider`（部署配置里的提供方名字）与 `provider_model` 是上游路由，只在服务端流转。
+  部分唯一索引保证最多一条默认模型，CHECK 保证默认模型启用（D-005 方案 A：默认模型是一条有自己倍率的记录）。
+- `ai_role_cards`：角色卡直接持有 system prompt 与示例对话（`examples` JSONB，few-shot，GEN-071）；
+  `allowed_model_ids` 为空表示不限制；「某用户的角色卡」= 启用的、按 `sort_order, id` 取第一张（部分索引）。
+- 额度账本（替代旧 Redis + Lua）：`ai_quota_counters(day, user_id)`，`user_id = 0` 是全站，`day` 是北京时间
+  04:00 切换的配额日；计数含在飞预占，并发请求在行锁上串行。`ai_quota_holds` 一份预占一行，删除即认领；
+  过期的由每分钟的定时任务回收。`ai_quota_settlements` 是结算去重标记（键 `hold:<id>` 或 `exec:<执行 id>`，
+  保留 48 小时）。计数器保留 90 天。

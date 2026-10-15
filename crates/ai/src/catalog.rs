@@ -1,0 +1,372 @@
+//! 全局配置、模型、角色卡的进程内快照（AI-002、AI-004：缓存 60 秒，写入时主动失效）。
+//!
+//! 多实例部署时别的实例最多晚 60 秒看到后台的改动。
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use ik_kernel::Problem;
+use moka::future::Cache;
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+
+use crate::quota::{self, Limits};
+use crate::repo;
+
+pub const CACHE_TTL: Duration = Duration::from_secs(60);
+
+#[derive(Debug, Clone)]
+pub struct Model {
+    pub id: i64,
+    pub key: String,
+    pub display_name: String,
+    pub description: String,
+    pub badge: Option<String>,
+    pub provider: String,
+    pub provider_model: String,
+    pub cost_weight: f64,
+    pub enabled: bool,
+    pub is_default: bool,
+    pub sort_order: i32,
+}
+
+impl Model {
+    pub fn weight(&self) -> f64 {
+        quota::sane_weight(self.cost_weight)
+    }
+}
+
+/// 输出模式（AI-007）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputMode {
+    #[default]
+    Plain,
+    Markdown,
+}
+
+impl OutputMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Plain => "plain",
+            Self::Markdown => "markdown",
+        }
+    }
+
+    fn parse(raw: &str) -> Self {
+        if raw == "markdown" {
+            Self::Markdown
+        } else {
+            Self::Plain
+        }
+    }
+}
+
+/// 人格的示例对话（GEN-071）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct Example {
+    pub user: String,
+    pub assistant: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoleCard {
+    pub id: i64,
+    pub slug: String,
+    pub display_name: String,
+    pub bio: String,
+    pub avatar_media_id: Option<i64>,
+    pub bound_user_id: i64,
+    pub enabled: bool,
+    pub knock_visible: bool,
+    pub dm_enabled: bool,
+    pub comment_enabled: bool,
+    pub sort_order: i32,
+    pub output_mode: OutputMode,
+    pub system_prompt: String,
+    pub examples: Vec<Example>,
+    pub default_model_id: Option<i64>,
+    /// 空 = 全部启用模型。
+    pub allowed_model_ids: Vec<i64>,
+    pub suggested_questions: Vec<String>,
+}
+
+impl RoleCard {
+    pub fn allows(&self, model: &Model) -> bool {
+        model.enabled
+            && (self.allowed_model_ids.is_empty() || self.allowed_model_ids.contains(&model.id))
+    }
+}
+
+/// 一份快照。模型、角色卡都按 `sort_order, id` 排好。
+#[derive(Debug, Clone)]
+pub struct Catalog {
+    pub limits: Limits,
+    pub models: Vec<Model>,
+    pub cards: Vec<RoleCard>,
+}
+
+impl Catalog {
+    pub fn enabled_models(&self) -> impl Iterator<Item = &Model> {
+        self.models.iter().filter(|m| m.enabled)
+    }
+
+    /// 启用的模型（按 key）。
+    pub fn model(&self, key: &str) -> Option<&Model> {
+        self.enabled_models().find(|m| m.key == key)
+    }
+
+    pub fn model_by_id(&self, id: i64) -> Option<&Model> {
+        self.models.iter().find(|m| m.id == id)
+    }
+
+    /// 默认模型（D-005 方案 A：必须是一条启用的模型记录）。
+    pub fn default_model(&self) -> Option<&Model> {
+        self.enabled_models().find(|m| m.is_default)
+    }
+
+    /// 预占时不知道模型时用的倍率：启用模型里最大的（QUOTA-008）。
+    pub fn max_weight(&self) -> f64 {
+        self.enabled_models()
+            .map(Model::weight)
+            .fold(None, |acc: Option<f64>, w| {
+                Some(acc.map_or(w, |a| a.max(w)))
+            })
+            .unwrap_or(1.0)
+    }
+
+    /// 某个 AI 账号的角色卡：启用的、按排序取第一张（AI-006）。
+    pub fn card_for_user(&self, user_id: i64) -> Option<&RoleCard> {
+        self.cards
+            .iter()
+            .find(|c| c.enabled && c.bound_user_id == user_id)
+    }
+
+    pub fn card_by_slug(&self, slug: &str) -> Option<&RoleCard> {
+        self.cards.iter().find(|c| c.slug == slug)
+    }
+
+    /// 敲敲角色列表（AI-020）。
+    pub fn visible_cards(&self) -> impl Iterator<Item = &RoleCard> {
+        self.cards.iter().filter(|c| c.enabled && c.knock_visible)
+    }
+
+    /// 角色卡白名单内的启用模型（白名单空 = 全部启用模型）。
+    pub fn allowed_models<'a>(&'a self, card: &'a RoleCard) -> impl Iterator<Item = &'a Model> {
+        self.enabled_models().filter(move |m| card.allows(m))
+    }
+
+    /// 单次回复的模型（CTX-030）：单次覆盖 → 会话级选择 → 角色卡默认 → 白名单内第一个启用模型 →
+    /// 全站默认模型。任何一级不合法都静默跳过。评论回复不传会话级选择（CTX-031）。
+    pub fn resolve_model<'a>(
+        &'a self,
+        card: &'a RoleCard,
+        override_key: Option<&str>,
+        session_key: Option<&str>,
+    ) -> Option<&'a Model> {
+        let pick = |key: Option<&str>| key.and_then(|k| self.model(k)).filter(|m| card.allows(m));
+        pick(override_key)
+            .or_else(|| pick(session_key))
+            .or_else(|| {
+                card.default_model_id
+                    .and_then(|id| self.model_by_id(id))
+                    .filter(|m| card.allows(m))
+            })
+            .or_else(|| self.allowed_models(card).next())
+            .or_else(|| self.default_model())
+    }
+}
+
+/// 进程内缓存。
+#[derive(Clone)]
+pub struct CatalogCache {
+    db: PgPool,
+    cache: Cache<(), Arc<Catalog>>,
+}
+
+impl CatalogCache {
+    pub fn new(db: PgPool) -> Self {
+        Self {
+            db,
+            cache: Cache::builder()
+                .max_capacity(1)
+                .time_to_live(CACHE_TTL)
+                .build(),
+        }
+    }
+
+    pub async fn get(&self) -> Result<Arc<Catalog>, Problem> {
+        let db = self.db.clone();
+        self.cache
+            .try_get_with((), async move { load(&db).await.map(Arc::new) })
+            .await
+            .map_err(|e| (*e).clone())
+    }
+
+    /// 后台改了配置、模型、角色卡之后调用。
+    pub async fn invalidate(&self) {
+        self.cache.invalidate(&()).await;
+    }
+}
+
+async fn load(db: &PgPool) -> Result<Catalog, Problem> {
+    let mut conn = db.acquire().await?;
+    // 配置行不存在时按默认值（AI-002）。
+    let limits = repo::settings(&mut conn).await?.map_or(
+        Limits {
+            global_enabled: true,
+            per_user: 1_000_000,
+            site: 0,
+        },
+        |row| Limits {
+            global_enabled: row.global_enabled,
+            per_user: row.daily_tokens_per_user,
+            site: row.daily_tokens,
+        },
+    );
+    let models = repo::models(&mut conn)
+        .await?
+        .into_iter()
+        .map(|row| Model {
+            id: row.id,
+            key: row.key,
+            display_name: row.display_name,
+            description: row.description,
+            badge: row.badge,
+            provider: row.provider,
+            provider_model: row.provider_model,
+            cost_weight: row.cost_weight,
+            enabled: row.enabled,
+            is_default: row.is_default,
+            sort_order: row.sort_order,
+        })
+        .collect();
+    let cards = repo::cards(&mut conn)
+        .await?
+        .into_iter()
+        .map(|row| RoleCard {
+            id: row.id,
+            slug: row.slug,
+            display_name: row.display_name,
+            bio: row.bio,
+            avatar_media_id: row.avatar_media_id,
+            bound_user_id: row.bound_user_id,
+            enabled: row.enabled,
+            knock_visible: row.knock_visible,
+            dm_enabled: row.dm_enabled,
+            comment_enabled: row.comment_enabled,
+            sort_order: row.sort_order,
+            output_mode: OutputMode::parse(&row.output_mode),
+            system_prompt: row.system_prompt,
+            // 坏数据按没有示例处理，不阻塞生成（GEN-072）。
+            examples: serde_json::from_value(row.examples).unwrap_or_default(),
+            default_model_id: row.default_model_id,
+            allowed_model_ids: row.allowed_model_ids,
+            suggested_questions: row
+                .suggested_questions
+                .into_iter()
+                .filter(|q| !q.trim().is_empty())
+                .collect(),
+        })
+        .collect();
+    Ok(Catalog {
+        limits,
+        models,
+        cards,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+    use super::*;
+
+    fn model(id: i64, key: &str, enabled: bool, is_default: bool, weight: f64) -> Model {
+        Model {
+            id,
+            key: key.into(),
+            display_name: key.into(),
+            description: String::new(),
+            badge: None,
+            provider: "p".into(),
+            provider_model: key.into(),
+            cost_weight: weight,
+            enabled,
+            is_default,
+            sort_order: 0,
+        }
+    }
+
+    fn card(default_model_id: Option<i64>, allowed: Vec<i64>) -> RoleCard {
+        RoleCard {
+            id: 1,
+            slug: "fairy".into(),
+            display_name: "Fairy".into(),
+            bio: String::new(),
+            avatar_media_id: None,
+            bound_user_id: 7,
+            enabled: true,
+            knock_visible: true,
+            dm_enabled: true,
+            comment_enabled: true,
+            sort_order: 0,
+            output_mode: OutputMode::Plain,
+            system_prompt: String::new(),
+            examples: Vec::new(),
+            default_model_id,
+            allowed_model_ids: allowed,
+            suggested_questions: Vec::new(),
+        }
+    }
+
+    fn catalog(models: Vec<Model>) -> Catalog {
+        Catalog {
+            limits: Limits {
+                global_enabled: true,
+                per_user: 0,
+                site: 0,
+            },
+            models,
+            cards: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn model_resolution_follows_ctx_030() {
+        let c = catalog(vec![
+            model(1, "base", true, true, 1.0),
+            model(2, "pro", true, false, 3.0),
+            model(3, "off", false, false, 9.0),
+            model(4, "lite", true, false, 0.5),
+        ]);
+        let open = card(Some(2), vec![]);
+        let key = |m: Option<&Model>| m.map(|m| m.key.clone());
+        // 单次覆盖优先。
+        assert_eq!(
+            key(c.resolve_model(&open, Some("lite"), Some("base"))),
+            Some("lite".into())
+        );
+        // 停用的覆盖与会话选择静默跳过，落到角色卡默认。
+        assert_eq!(
+            key(c.resolve_model(&open, Some("off"), Some("nope"))),
+            Some("pro".into())
+        );
+        assert_eq!(
+            key(c.resolve_model(&open, None, Some("base"))),
+            Some("base".into())
+        );
+        // 白名单：默认模型出白名单被忽略，取白名单内第一个启用模型。
+        let limited = card(Some(2), vec![4, 3]);
+        assert_eq!(
+            key(c.resolve_model(&limited, Some("pro"), None)),
+            Some("lite".into())
+        );
+        // 白名单里都停用了：落到全站默认模型。
+        let dead = card(None, vec![3]);
+        assert_eq!(key(c.resolve_model(&dead, None, None)), Some("base".into()));
+        assert_eq!(c.max_weight(), 3.0);
+        assert_eq!(catalog(vec![]).max_weight(), 1.0);
+        assert!(catalog(vec![]).resolve_model(&open, None, None).is_none());
+    }
+}

@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_quota_counters (day, user_id, used) VALUES ($1, $2, GREATEST($3::bigint, 0))\n         ON CONFLICT (day, user_id) DO UPDATE SET used = GREATEST(0, ai_quota_counters.used + $3::bigint)\n         RETURNING used",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "used",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_quota_counters",
+            "name": "used"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "18316627a2df2692453694a46a14c0f9a09b4f95f98b27107f1c9c1404f85e73"
+}

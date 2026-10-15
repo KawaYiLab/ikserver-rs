@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_role_cards (id, slug, display_name, bio, avatar_media_id, bound_user_id,\n                                    enabled, knock_visible, dm_enabled, comment_enabled, sort_order,\n                                    output_mode, system_prompt, examples, default_model_id,\n                                    allowed_model_ids, suggested_questions, created_at, updated_at)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $18)\n         ON CONFLICT (slug) DO UPDATE SET display_name = $3, bio = $4, avatar_media_id = $5,\n             bound_user_id = $6, enabled = $7, knock_visible = $8, dm_enabled = $9,\n             comment_enabled = $10, sort_order = $11, output_mode = $12, system_prompt = $13,\n             examples = $14, default_model_id = $15, allowed_model_ids = $16,\n             suggested_questions = $17, updated_at = $18\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Int4",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Int8",
+        "Int8Array",
+        "TextArray",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f5f9c8efb4bd3ae4477e95835bd46b1ee9f854a0cb33af90f063c5be1325454f"
+}

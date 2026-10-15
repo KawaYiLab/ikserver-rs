@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use ik_ai::AiState;
 use ik_auth::{AuthSettings, AuthState};
 use ik_comments::CommentsState;
 use ik_content::ContentState;
@@ -50,6 +51,7 @@ pub struct AppState {
     pub cosmetics: CosmeticsState,
     pub mihoyo: MihoyoState,
     pub moderation: ModerationState,
+    pub ai: AiState,
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
 }
 
@@ -118,7 +120,15 @@ impl AppState {
             media.clone(),
             config.moderation.auto_hide_threshold,
         );
+        let ai = AiState::from_config(
+            db.clone(),
+            ids.clone(),
+            publisher.clone(),
+            media.clone(),
+            &config.ai,
+        )?;
         Ok(Self {
+            ai,
             moderation,
             cosmetics,
             mihoyo,
@@ -232,6 +242,12 @@ impl FromRef<AppState> for MihoyoState {
 impl FromRef<AppState> for ModerationState {
     fn from_ref(state: &AppState) -> Self {
         state.moderation.clone()
+    }
+}
+
+impl FromRef<AppState> for AiState {
+    fn from_ref(state: &AppState) -> Self {
+        state.ai.clone()
     }
 }
 

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM ai_quota_counters WHERE day < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f68c57a945da1c579a216acb67f9f34ad0aced4e1a7f9c9b14eaf40c4bfdacb0"
+}

@@ -37,6 +37,19 @@ enum Command {
     /// 装扮目录运维
     #[command(subcommand)]
     Cosmetics(CosmeticsCommand),
+    /// AI 助手配置运维
+    #[command(subcommand)]
+    Ai(AiCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum AiCommand {
+    /// 从 JSON 文件导入 AI 配置：全局上限、模型（按 key）、角色卡（按 slug）新增或更新；
+    /// 整份一个事务。角色卡绑定的账号会被标为 AI 账号
+    Import {
+        /// `{"settings":{…},"models":[…],"characters":[…]}`，字段见 `ik_ai::dto::ImportFile`
+        path: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -134,6 +147,27 @@ async fn main() -> anyhow::Result<()> {
                 cards = report.cards,
                 refreshed_users = report.refreshed_users,
                 "装扮目录已导入"
+            );
+            Ok(())
+        }
+        Command::Ai(AiCommand::Import { path }) => {
+            let state = connect_for_cli().await?;
+            let raw = std::fs::read_to_string(&path)
+                .with_context(|| format!("读取 {} 失败", path.display()))?;
+            let file: ik_ai::dto::ImportFile =
+                serde_json::from_str(&raw).context("AI 配置文件不是合法的 JSON")?;
+            let report = ik_ai::service::import(&state.ai, file).await.map_err(|p| {
+                let fields: Vec<String> = p
+                    .field_errors()
+                    .iter()
+                    .map(|e| format!("{}：{}", e.field, e.detail))
+                    .collect();
+                anyhow::anyhow!("{p} {}", fields.join("；"))
+            })?;
+            tracing::info!(
+                models = report.models,
+                characters = report.characters,
+                "AI 配置已导入"
             );
             Ok(())
         }

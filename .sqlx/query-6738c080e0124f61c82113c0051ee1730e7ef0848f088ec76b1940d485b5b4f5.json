@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_quota_settlements (key, created_at) VALUES ($1, $2)\n         ON CONFLICT (key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6738c080e0124f61c82113c0051ee1730e7ef0848f088ec76b1940d485b5b4f5"
+}

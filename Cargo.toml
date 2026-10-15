@@ -28,6 +28,7 @@ ik-cosmetics = { path = "crates/cosmetics" }
 ik-mihoyo = { path = "crates/mihoyo" }
 ik-account = { path = "crates/account" }
 ik-moderation = { path = "crates/moderation" }
+ik-ai = { path = "crates/ai" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
@@ -95,6 +96,13 @@ graphile_worker = { version = "0.14", default-features = false, features = ["run
 
 # 调用米游社等外部 HTTPS 接口（rustls + ring，与对象存储一致，不引入 aws-lc）。
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+
+# 大模型：OpenAI 兼容协议。byot 用自己的类型解析流（思考增量、工具调用等各家扩展字段）。
+# TLS 不用它默认的 aws-lc，由 ik-ai 用 ring 构造 reqwest 客户端交给它。
+async-openai = { version = "0.42", default-features = false, features = ["chat-completion", "byot", "rustls-no-provider"] }
+reqwest13 = { package = "reqwest", version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
 
 # 其他
 moka = { version = "0.12", features = ["future"] }
