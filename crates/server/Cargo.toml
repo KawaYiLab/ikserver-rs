@@ -23,6 +23,7 @@ ik-exam.workspace = true
 ik-social.workspace = true
 ik-notify.workspace = true
 ik-realtime.workspace = true
+ik-profile.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

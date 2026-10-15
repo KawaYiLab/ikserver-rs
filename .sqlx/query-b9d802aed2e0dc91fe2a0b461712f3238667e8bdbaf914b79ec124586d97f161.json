@@ -1,0 +1,68 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, title, published_at AS \"published_at!\", hidden_at\n           FROM posts\n           WHERE author_id = $1 AND status = 'published' AND NOT is_anonymous\n             AND ($2::text IS NULL OR title ILIKE $2 ESCAPE '\\')\n             AND ($3::timestamptz IS NULL OR (published_at, id) < ($3, $4::bigint))\n           ORDER BY published_at DESC, id DESC\n           LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "published_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "hidden_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "b9d802aed2e0dc91fe2a0b461712f3238667e8bdbaf914b79ec124586d97f161"
+}

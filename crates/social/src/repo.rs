@@ -261,3 +261,63 @@ pub(crate) async fn blocking_among(
     .fetch_all(conn)
     .await
 }
+
+pub(crate) struct BlockStatusRow {
+    pub blocking: bool,
+    pub blocked_by: bool,
+}
+
+pub(crate) async fn block_status(
+    conn: &mut PgConnection,
+    viewer: i64,
+    target: i64,
+) -> sqlx::Result<BlockStatusRow> {
+    sqlx::query_as!(
+        BlockStatusRow,
+        r#"SELECT
+               EXISTS (SELECT 1 FROM user_blocks WHERE blocker_id = $1 AND blocked_id = $2) AS "blocking!",
+               EXISTS (SELECT 1 FROM user_blocks WHERE blocker_id = $2 AND blocked_id = $1) AS "blocked_by!""#,
+        viewer,
+        target,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) struct FollowCountsRow {
+    pub followers: i64,
+    pub following: i64,
+}
+
+pub(crate) async fn follow_counts(
+    conn: &mut PgConnection,
+    user: i64,
+) -> sqlx::Result<FollowCountsRow> {
+    sqlx::query_as!(
+        FollowCountsRow,
+        r#"SELECT (SELECT count(*) FROM follows WHERE followee_id = $1) AS "followers!",
+                  (SELECT count(*) FROM follows WHERE follower_id = $1) AS "following!""#,
+        user,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) struct UserCountRow {
+    pub user_id: i64,
+    pub n: i64,
+}
+
+pub(crate) async fn follower_counts(
+    conn: &mut PgConnection,
+    users: &[i64],
+) -> sqlx::Result<Vec<UserCountRow>> {
+    sqlx::query_as!(
+        UserCountRow,
+        r#"SELECT followee_id AS "user_id!", count(*) AS "n!"
+           FROM follows WHERE followee_id = ANY($1) GROUP BY followee_id"#,
+        users,
+    )
+    .fetch_all(conn)
+    .await
+}

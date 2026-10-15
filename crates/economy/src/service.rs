@@ -253,6 +253,18 @@ pub async fn refresh_level(conn: &mut PgConnection, user_id: i64) -> Result<Opti
     Ok(Some(sync_level(conn, &user, row.exp).await?))
 }
 
+/// 某个用户的累计经验（作者主页展示用）。没有经济行时为 0。
+pub async fn exp_of(conn: &mut PgConnection, user_id: i64) -> Result<i64, Problem> {
+    Ok(repo::get_row(conn, user_id).await?.map_or(0, |row| row.exp))
+}
+
+/// 某个用户的丁尼余额（不加锁）。没有经济行时为初始值 30。
+pub async fn balance_of(conn: &mut PgConnection, user_id: i64) -> Result<i32, Problem> {
+    Ok(repo::get_row(conn, user_id)
+        .await?
+        .map_or(INITIAL_BALANCE, |row| row.denny_balance))
+}
+
 // ---------- 丁尼 ----------
 
 /// 丁尼动作（DENNY 动作总表；删帖扣费已取消，D-007）。

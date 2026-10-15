@@ -31,6 +31,7 @@ crates/
   social/    关注、拉黑（位于 content 之下，供各域做拉黑判断与过滤）
   notify/    通知（敲敲）：写入、撤回、新帖扇出、列表、按发送者分组、已读
   realtime/  WebSocket 网关 /v1/realtime：连接表、按用户 / 会话 / 频道分发、心跳、吊销断开
+  profile/   个人资料与作者主页：签名、隐藏主页、改名、主页精选、用户搜索（最上层，依赖各域 service）
   server/    二进制入口：组装路由、中间件、任务、CLI
   （后续按业务域新增：feed messaging media search
     moderation ai admin）

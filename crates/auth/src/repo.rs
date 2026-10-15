@@ -344,6 +344,75 @@ pub(crate) async fn active_users(
     .await
 }
 
+pub(crate) struct ProfileUserRow {
+    pub id: i64,
+    pub username: String,
+    pub level: i16,
+    pub status: String,
+    pub is_ai_agent: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn profile_user(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<ProfileUserRow>> {
+    sqlx::query_as!(
+        ProfileUserRow,
+        "SELECT id, username, level, status, is_ai_agent, created_at FROM users WHERE id = $1",
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 只改状态正常的账号；返回是否命中。
+pub(crate) async fn rename(
+    conn: &mut PgConnection,
+    id: i64,
+    username: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET username = $2, updated_at = $3 WHERE id = $1 AND status = 'active'",
+        id,
+        username,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) struct FoundUserRow {
+    pub id: i64,
+    pub username: String,
+    pub level: i16,
+}
+
+/// `query` 原文用于完全匹配与前缀排序，`escaped` 是转义过 LIKE 元字符的同一个词。
+pub(crate) async fn search_users(
+    conn: &mut PgConnection,
+    query: &str,
+    escaped: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<FoundUserRow>> {
+    sqlx::query_as!(
+        FoundUserRow,
+        r"SELECT id, username, level FROM users
+          WHERE status = 'active' AND username ILIKE '%' || $2 || '%' ESCAPE '\'
+          ORDER BY (lower(username) = lower($1)) DESC,
+                   (username ILIKE $2 || '%' ESCAPE '\') DESC,
+                   username, id
+          LIMIT $3",
+        query,
+        escaped,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
 pub(crate) async fn exam_passed_at(
     conn: &mut PgConnection,
     id: i64,

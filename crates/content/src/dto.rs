@@ -343,3 +343,27 @@ pub struct SavedPost {
     /// 点赞 / 收藏的时间。
     pub saved_at: DateTime<Utc>,
 }
+
+// ---------- 作者主页 ----------
+
+/// 主页精选的候选帖子。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PinCandidate {
+    #[schema(value_type = String)]
+    pub id: Id<Post>,
+    pub title: String,
+    pub published_at: DateTime<Utc>,
+    /// 被隐藏的帖子可以设为精选，但访客看不到（D-026）。
+    pub is_hidden: bool,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct PinCandidatesQuery {
+    /// 按标题搜索（不区分大小写，最多取前 50 字）。
+    pub q: Option<String>,
+    pub cursor: Option<String>,
+    /// 默认 20，最大 50。
+    pub limit: Option<u32>,
+}

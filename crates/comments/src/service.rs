@@ -21,7 +21,8 @@ use sqlx::PgConnection;
 
 use crate::CommentsState;
 use crate::dto::{
-    CommentLikeResult, CommentView, CommentsPage, CreateCommentRequest, PageQuery, ThreadView,
+    AuthorCommentView, CommentLikeResult, CommentView, CommentsPage, CreateCommentRequest,
+    PageQuery, ThreadView,
 };
 use crate::repo::{self, CommentRow, NewComment};
 use crate::text;
@@ -779,4 +780,60 @@ pub async fn replies(
             i: item.id.get(),
         },
     )
+}
+
+// ---------- 作者主页 ----------
+
+/// 作者的非匿名、未隐藏评论数（作者主页统计；不按所属帖子是否公开过滤）。
+pub async fn author_comment_count(state: &CommentsState, author_id: i64) -> Result<i64, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::author_comment_count(&mut conn, author_id).await?)
+}
+
+/// 作者主页的评论（新的在前，PROFILE-020）：非匿名、未隐藏、所属帖子公开。
+/// 所属帖子的可见性在取出之后过滤，所以一页可能不满；游标照常按原始行推进，`nextCursor` 为空才是到底。
+pub async fn author_comments(
+    state: &CommentsState,
+    viewer: Option<&Principal>,
+    author_id: i64,
+    query: PageQuery,
+) -> Result<Page<AuthorCommentView>, Problem> {
+    let viewer_id = viewer.map(|p| p.user_id.get());
+    let limit = page_limit(query.limit);
+    let after = decode_cursor(query.cursor.as_deref())?;
+    let mut conn = state.db.acquire().await?;
+    let mut rows = repo::author_comments(&mut conn, author_id, after, limit + 1).await?;
+    let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+    rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    let next_cursor = match (has_more, rows.last()) {
+        (true, Some(last)) => Some(cursor::encode(&CommentCursor {
+            c: last.created_at,
+            i: last.id,
+        })?),
+        _ => None,
+    };
+    let mut post_ids: Vec<i64> = rows.iter().map(|r| r.post_id).collect();
+    post_ids.sort_unstable();
+    post_ids.dedup();
+    let titles = interop::public_post_titles(&mut conn, &post_ids).await?;
+    let visible: Vec<&CommentRow> = rows
+        .iter()
+        .filter(|r| titles.contains_key(&r.post_id))
+        .collect();
+    let liked = liked_set(&mut conn, viewer_id, &visible).await?;
+    let items = visible
+        .into_iter()
+        .filter_map(|row| {
+            titles.get(&row.post_id).map(|title| AuthorCommentView {
+                id: Id::new(row.id),
+                post_id: Id::new(row.post_id),
+                post_title: title.clone(),
+                body: row.body.clone(),
+                like_count: row.like_count,
+                liked: liked.contains(&row.id),
+                created_at: row.created_at,
+            })
+        })
+        .collect();
+    Ok(Page { items, next_cursor })
 }

@@ -46,6 +46,7 @@ use crate::{AppState, system};
         (name = "social", description = "关注与拉黑"),
         (name = "notify", description = "通知（敲敲）与已读"),
         (name = "realtime", description = "实时通道（WebSocket）"),
+        (name = "profile", description = "个人资料、作者主页与用户搜索"),
     )
 )]
 pub struct ApiDoc;
@@ -87,6 +88,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_social::router())
         .merge(ik_notify::router())
         .merge(ik_realtime::router())
+        .merge(ik_profile::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

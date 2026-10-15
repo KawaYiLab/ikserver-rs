@@ -145,6 +145,9 @@ async fn openapi_document_is_served() {
     assert!(body["paths"]["/v1/notifications/buckets/{key}"]["get"].is_object());
     assert!(body["paths"]["/v1/notifications/{id}/read"]["put"].is_object());
     assert!(body["paths"]["/v1/realtime"]["get"].is_object());
+    assert!(body["paths"]["/v1/users/{id}"]["get"].is_object());
+    assert!(body["paths"]["/v1/users/search"]["get"].is_object());
+    assert!(body["paths"]["/v1/me/username"]["put"].is_object());
     assert!(body["components"]["schemas"]["ServerFrame"].is_object());
     let schemes = &body["components"]["securitySchemes"];
     assert_eq!(schemes["session_cookie"]["in"], "cookie");

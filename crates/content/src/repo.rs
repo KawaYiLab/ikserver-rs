@@ -1035,3 +1035,160 @@ pub(crate) async fn denny_count(conn: &mut PgConnection, id: i64) -> sqlx::Resul
         .fetch_optional(conn)
         .await
 }
+
+// ---------- 作者主页 ----------
+
+pub(crate) struct AuthorStatsRow {
+    pub post_count: i64,
+    pub total_views: i64,
+    pub total_comments: i64,
+    pub total_likes: i64,
+}
+
+/// 作者公开的非匿名帖子的统计（PROFILE-015）。匿名帖对任何人都不计入，作者本人也一样。
+pub(crate) async fn author_stats(
+    conn: &mut PgConnection,
+    author_id: i64,
+) -> sqlx::Result<AuthorStatsRow> {
+    sqlx::query_as!(
+        AuthorStatsRow,
+        r#"SELECT count(*) AS "post_count!",
+                  COALESCE(sum(view_count), 0)::bigint AS "total_views!",
+                  COALESCE(sum(comment_count), 0)::bigint AS "total_comments!",
+                  COALESCE(sum(like_count), 0)::bigint AS "total_likes!"
+           FROM posts
+           WHERE author_id = $1 AND status = 'published' AND hidden_at IS NULL AND NOT is_anonymous"#,
+        author_id,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 作者主页的帖子：已发布、非匿名；`include_hidden` 时包含被隐藏的（作者本人看自己）。按发布时间倒序。
+pub(crate) async fn author_cards(
+    conn: &mut PgConnection,
+    author_id: i64,
+    include_hidden: bool,
+    after: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> sqlx::Result<Vec<CardRow>> {
+    let (after_at, after_id) = after.unzip();
+    sqlx::query_as!(
+        CardRow,
+        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
+                  p.view_count, p.like_count, p.comment_count,
+                  p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
+                  p.edited_at, p.last_bumped_by,
+                  c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.author_id = $1 AND p.status = 'published' AND NOT p.is_anonymous
+             AND ($2 OR p.hidden_at IS NULL)
+             AND ($3::timestamptz IS NULL OR (p.published_at, p.id) < ($3, $4::bigint))
+           ORDER BY p.published_at DESC, p.id DESC
+           LIMIT $5"#,
+        author_id,
+        include_hidden,
+        after_at,
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 指定 id 中属于作者、已发布、非匿名的帖子（顺序不保证）。
+pub(crate) async fn author_cards_by_ids(
+    conn: &mut PgConnection,
+    author_id: i64,
+    ids: &[i64],
+    include_hidden: bool,
+) -> sqlx::Result<Vec<CardRow>> {
+    sqlx::query_as!(
+        CardRow,
+        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
+                  p.view_count, p.like_count, p.comment_count,
+                  p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
+                  p.edited_at, p.last_bumped_by,
+                  c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id = ANY($2) AND p.author_id = $1 AND p.status = 'published'
+             AND NOT p.is_anonymous AND ($3 OR p.hidden_at IS NULL)"#,
+        author_id,
+        ids,
+        include_hidden,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct PinCandidateRow {
+    pub id: i64,
+    pub title: String,
+    pub published_at: DateTime<Utc>,
+    pub hidden_at: Option<DateTime<Utc>>,
+}
+
+/// 可以设为主页精选的帖子：自己的、已发布、非匿名（含被隐藏的，D-026），按发布时间倒序，可按标题搜索。
+pub(crate) async fn pin_candidates(
+    conn: &mut PgConnection,
+    author_id: i64,
+    title_pattern: Option<&str>,
+    after: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> sqlx::Result<Vec<PinCandidateRow>> {
+    let (after_at, after_id) = after.unzip();
+    sqlx::query_as!(
+        PinCandidateRow,
+        r#"SELECT id, title, published_at AS "published_at!", hidden_at
+           FROM posts
+           WHERE author_id = $1 AND status = 'published' AND NOT is_anonymous
+             AND ($2::text IS NULL OR title ILIKE $2 ESCAPE '\')
+             AND ($3::timestamptz IS NULL OR (published_at, id) < ($3, $4::bigint))
+           ORDER BY published_at DESC, id DESC
+           LIMIT $5"#,
+        author_id,
+        title_pattern,
+        after_at,
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// `ids` 中可以设为精选的（规则同 [`pin_candidates`]）。
+pub(crate) async fn pinnable_ids(
+    conn: &mut PgConnection,
+    author_id: i64,
+    ids: &[i64],
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM posts
+         WHERE id = ANY($2) AND author_id = $1 AND status = 'published' AND NOT is_anonymous",
+        author_id,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct PublicPostRow {
+    pub id: i64,
+    pub title: String,
+}
+
+/// `ids` 中公开（已发布且未隐藏）的帖子及其标题。
+pub(crate) async fn public_posts(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<PublicPostRow>> {
+    sqlx::query_as!(
+        PublicPostRow,
+        "SELECT id, title FROM posts WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL",
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}

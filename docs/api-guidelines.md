@@ -99,6 +99,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
+| USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
 | NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
 | CHECK_IN_ALREADY_TODAY | 409 | 今天已经签到过了，明天 4 点后再来吧 | 签到日按北京时间 04:00 切日 |

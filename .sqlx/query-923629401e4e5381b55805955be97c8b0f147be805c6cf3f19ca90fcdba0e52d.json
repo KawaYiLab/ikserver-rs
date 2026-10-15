@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, username, level FROM users\n          WHERE status = 'active' AND username ILIKE '%' || $2 || '%' ESCAPE '\\'\n          ORDER BY (lower(username) = lower($1)) DESC,\n                   (username ILIKE $2 || '%' ESCAPE '\\') DESC,\n                   username, id\n          LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "username"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "level",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "level"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "923629401e4e5381b55805955be97c8b0f147be805c6cf3f19ca90fcdba0e52d"
+}

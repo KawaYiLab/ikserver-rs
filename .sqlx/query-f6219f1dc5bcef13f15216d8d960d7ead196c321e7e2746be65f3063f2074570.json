@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_profiles (user_id, bio, hidden, updated_at)\n         VALUES ($1, COALESCE($2, ''), COALESCE($3, FALSE), $4)\n         ON CONFLICT (user_id) DO UPDATE SET\n             bio = COALESCE($2, user_profiles.bio),\n             hidden = COALESCE($3, user_profiles.hidden),\n             updated_at = $4\n         RETURNING bio, hidden, pinned_post_ids",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bio",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "bio"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hidden",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "hidden"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "pinned_post_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "pinned_post_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f6219f1dc5bcef13f15216d8d960d7ead196c321e7e2746be65f3063f2074570"
+}

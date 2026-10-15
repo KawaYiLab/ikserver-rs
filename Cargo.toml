@@ -19,6 +19,7 @@ ik-exam = { path = "crates/exam" }
 ik-social = { path = "crates/social" }
 ik-notify = { path = "crates/notify" }
 ik-realtime = { path = "crates/realtime" }
+ik-profile = { path = "crates/profile" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }

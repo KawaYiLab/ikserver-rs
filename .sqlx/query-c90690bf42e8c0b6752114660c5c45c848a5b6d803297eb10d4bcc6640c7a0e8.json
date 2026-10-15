@@ -1,0 +1,231 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by,\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.author_id = $1 AND p.status = 'published' AND NOT p.is_anonymous\n             AND ($2 OR p.hidden_at IS NULL)\n             AND ($3::timestamptz IS NULL OR (p.published_at, p.id) < ($3, $4::bigint))\n           ORDER BY p.published_at DESC, p.id DESC\n           LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "excerpt_source!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "is_anonymous"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "anonymous_seed",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "anonymous_seed"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "pinned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "pinned_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "solved_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "solved_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "view_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "view_count"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "like_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "like_count"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "comment_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "comment_count"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "published_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "bumped_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "bumped_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "edited_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "edited_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "last_bumped_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "last_bumped_by"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "category_id?",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "categories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "category_slug?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "categories",
+            "name": "slug"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "category_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "categories",
+            "name": "name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c90690bf42e8c0b6752114660c5c45c848a5b6d803297eb10d4bcc6640c7a0e8"
+}

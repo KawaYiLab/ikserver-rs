@@ -88,3 +88,18 @@ pub async fn clear_solved(
 ) -> Result<(), Problem> {
     Ok(repo::clear_solved(conn, post_id, comment_id).await?)
 }
+
+/// `ids` 中公开（已发布且未隐藏）的帖子 → 标题。作者主页的评论列表用它过滤并展示所属帖子。
+pub async fn public_post_titles(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, String>, Problem> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    Ok(repo::public_posts(conn, ids)
+        .await?
+        .into_iter()
+        .map(|row| (row.id, row.title))
+        .collect())
+}

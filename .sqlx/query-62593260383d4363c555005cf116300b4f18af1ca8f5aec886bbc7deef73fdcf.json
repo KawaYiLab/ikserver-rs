@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"post_count!\",\n                  COALESCE(sum(view_count), 0)::bigint AS \"total_views!\",\n                  COALESCE(sum(comment_count), 0)::bigint AS \"total_comments!\",\n                  COALESCE(sum(like_count), 0)::bigint AS \"total_likes!\"\n           FROM posts\n           WHERE author_id = $1 AND status = 'published' AND hidden_at IS NULL AND NOT is_anonymous",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_views!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_comments!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_likes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "62593260383d4363c555005cf116300b4f18af1ca8f5aec886bbc7deef73fdcf"
+}

@@ -88,6 +88,90 @@ pub async fn active_users(
         .collect())
 }
 
+/// 作者主页需要的账号信息。
+#[derive(Debug, Clone)]
+pub struct ProfileUser {
+    pub id: i64,
+    pub username: String,
+    pub level: i16,
+    pub is_ai_agent: bool,
+    /// 已注销或已合并。
+    pub gone: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+pub async fn profile_user(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Option<ProfileUser>, Problem> {
+    Ok(repo::profile_user(conn, user_id)
+        .await?
+        .map(|row| ProfileUser {
+            id: row.id,
+            gone: matches!(row.status.as_str(), "deleted" | "merged"),
+            username: row.username,
+            level: row.level,
+            is_ai_agent: row.is_ai_agent,
+            created_at: row.created_at,
+        }))
+}
+
+/// 改用户名。调用方负责校验格式、扣费，并已锁住用户行。
+/// 名字已被占用 → 409 `USERNAME_TAKEN`（调用方的事务随之回滚，扣费一并撤销）。
+pub async fn rename(
+    conn: &mut PgConnection,
+    user_id: i64,
+    username: &str,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    match repo::rename(conn, user_id, username, now).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(crate::service::account_blocked()),
+        Err(error) if ik_kernel::db::is_unique_violation(&error, "users_username_uq") => {
+            Err(Problem::conflict("USERNAME_TAKEN", "该用户名已被占用"))
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// 用户名搜索的一条结果。
+#[derive(Debug, Clone)]
+pub struct FoundUser {
+    pub id: i64,
+    pub username: String,
+    pub level: i16,
+}
+
+/// 按用户名子串搜索状态正常的账号（不区分大小写）。完全匹配排最前，其次前缀匹配，同档按用户名排序
+/// （PROFILE-024）。隐藏主页、拉黑过滤由调用方完成。
+pub async fn search_users(
+    conn: &mut PgConnection,
+    query: &str,
+    limit: i64,
+) -> Result<Vec<FoundUser>, Problem> {
+    let escaped = like_escape(query);
+    Ok(repo::search_users(conn, query, &escaped, limit)
+        .await?
+        .into_iter()
+        .map(|row| FoundUser {
+            id: row.id,
+            username: row.username,
+            level: row.level,
+        })
+        .collect())
+}
+
+fn like_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        if matches!(ch, '\\' | '%' | '_') {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
+}
+
 /// 入站考试通过时间（不加锁）。用户不存在时返回 None，未通过时返回 `Some(None)`。
 pub async fn exam_passed_at(
     conn: &mut PgConnection,

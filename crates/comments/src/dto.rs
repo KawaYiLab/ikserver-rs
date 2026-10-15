@@ -85,3 +85,19 @@ pub struct CommentLikeResult {
     pub liked: bool,
     pub like_count: i32,
 }
+
+/// 作者主页上的一条评论。不带父评论信息，避免暴露匿名父评论（PROFILE-020）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorCommentView {
+    #[schema(value_type = String)]
+    pub id: Id<Comment>,
+    #[schema(value_type = String)]
+    pub post_id: Id<Post>,
+    pub post_title: String,
+    pub body: String,
+    pub like_count: i32,
+    /// 当前访客已点赞。
+    pub liked: bool,
+    pub created_at: DateTime<Utc>,
+}

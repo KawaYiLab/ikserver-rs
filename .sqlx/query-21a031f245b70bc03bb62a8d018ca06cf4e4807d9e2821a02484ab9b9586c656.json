@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, bio FROM user_profiles WHERE user_id = ANY($1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "bio",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "bio"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "21a031f245b70bc03bb62a8d018ca06cf4e4807d9e2821a02484ab9b9586c656"
+}

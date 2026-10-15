@@ -409,3 +409,47 @@ pub(crate) async fn liked_among(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 作者主页 ----------
+
+/// 作者主页展示的评论：非匿名、未隐藏、回复的一级评论也未隐藏。所属帖子是否公开由调用方再过滤。
+pub(crate) async fn author_comments(
+    conn: &mut PgConnection,
+    author_id: i64,
+    after: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> sqlx::Result<Vec<CommentRow>> {
+    let (after_at, after_id) = after.unzip();
+    sqlx::query_as!(
+        CommentRow,
+        "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
+                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at
+         FROM comments c
+         LEFT JOIN comments parent ON parent.id = c.parent_id
+         WHERE c.author_id = $1 AND NOT c.is_anonymous AND c.hidden_at IS NULL
+           AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)
+           AND ($2::timestamptz IS NULL OR (c.created_at, c.id) < ($2, $3::bigint))
+         ORDER BY c.created_at DESC, c.id DESC
+         LIMIT $4",
+        author_id,
+        after_at,
+        after_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 作者的非匿名、未隐藏评论数（作者主页统计）。
+pub(crate) async fn author_comment_count(
+    conn: &mut PgConnection,
+    author_id: i64,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM comments
+           WHERE author_id = $1 AND NOT is_anonymous AND hidden_at IS NULL"#,
+        author_id,
+    )
+    .fetch_one(conn)
+    .await
+}

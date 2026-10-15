@@ -14,8 +14,9 @@ use sqlx::PgConnection;
 
 use crate::dto::{
     AuthorView, CategoryRef, CategoryView, FavoriteResult, FeedPage, FeedQuery, GiftRequest,
-    GiftResult, LikeResult, MyPostItem, MyPostsQuery, MyPostsState, PostCard, PostDetail,
-    PostEditView, PostInput, PostStatus, SavedPost, SavedQuery, TagRef, TripleResult, ViewResult,
+    GiftResult, LikeResult, MyPostItem, MyPostsQuery, MyPostsState, PinCandidate,
+    PinCandidatesQuery, PostCard, PostDetail, PostEditView, PostInput, PostStatus, SavedPost,
+    SavedQuery, TagRef, TripleResult, ViewResult,
 };
 use crate::repo::{self, CardRow, Content, DraftRow, FeedFilter, PostRow};
 use crate::video::{self, ExternalVideo, MAX_EXTERNAL_VIDEOS};
@@ -1674,6 +1675,141 @@ pub async fn my_favorites(
     query: SavedQuery,
 ) -> Result<Page<SavedPost>, Problem> {
     saved_posts(state, principal, query, Saved::Favorites).await
+}
+
+// ---------- 作者主页 ----------
+
+/// 作者公开的非匿名帖子统计（PROFILE-015）。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AuthorPostStats {
+    pub post_count: i64,
+    pub total_views: i64,
+    pub total_comments: i64,
+    pub total_likes: i64,
+}
+
+pub async fn author_stats(
+    state: &ContentState,
+    author_id: i64,
+) -> Result<AuthorPostStats, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let row = repo::author_stats(&mut conn, author_id).await?;
+    Ok(AuthorPostStats {
+        post_count: row.post_count,
+        total_views: row.total_views,
+        total_comments: row.total_comments,
+        total_likes: row.total_likes,
+    })
+}
+
+#[derive(Serialize, Deserialize)]
+struct AuthorCursor {
+    p: DateTime<Utc>,
+    i: i64,
+}
+
+/// 作者主页的帖子（新发布的在前）。匿名帖对任何人都不出现（PROFILE-018）；
+/// `include_hidden` 只应在作者本人查看时为真。
+pub async fn author_posts(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    author_id: i64,
+    include_hidden: bool,
+    raw_cursor: Option<&str>,
+    limit: Option<u32>,
+) -> Result<Page<PostCard>, Problem> {
+    let limit = page_limit(limit);
+    let after = raw_cursor
+        .map(cursor::decode::<AuthorCursor>)
+        .transpose()?
+        .map(|c| (c.p, c.i));
+    let mut conn = state.db.acquire().await?;
+    let rows = repo::author_cards(&mut conn, author_id, include_hidden, after, limit + 1).await?;
+    let items = cards(state, &mut conn, viewer, rows).await?;
+    Page::from_rows(items, usize::try_from(limit).unwrap_or(20), |card| {
+        AuthorCursor {
+            p: card.published_at,
+            i: card.id.get(),
+        }
+    })
+}
+
+/// 主页精选：按给定顺序返回其中仍然有效的帖子（已发布、非匿名、属于作者），失效的跳过。
+pub async fn author_posts_by_ids(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    author_id: i64,
+    ids: &[i64],
+    include_hidden: bool,
+) -> Result<Vec<PostCard>, Problem> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut conn = state.db.acquire().await?;
+    let rows = repo::author_cards_by_ids(&mut conn, author_id, ids, include_hidden).await?;
+    let mut cards = cards(state, &mut conn, viewer, rows).await?;
+    cards.sort_by_key(|card| ids.iter().position(|id| *id == card.id.get()));
+    Ok(cards)
+}
+
+/// `ids` 中可以设为主页精选的（自己的、已发布、非匿名；被隐藏的也可以，D-026 方案 A）。
+pub async fn pinnable_post_ids(
+    state: &ContentState,
+    author_id: i64,
+    ids: &[i64],
+) -> Result<Vec<i64>, Problem> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::pinnable_ids(&mut conn, author_id, ids).await?)
+}
+
+/// 主页精选的候选（自己的已发布非匿名帖，新的在前，可按标题搜索，PROFILE-013）。
+pub async fn pin_candidates(
+    state: &ContentState,
+    principal: &Principal,
+    query: PinCandidatesQuery,
+) -> Result<Page<PinCandidate>, Problem> {
+    let limit = page_limit(query.limit);
+    let after = query
+        .cursor
+        .as_deref()
+        .map(cursor::decode::<AuthorCursor>)
+        .transpose()?
+        .map(|c| (c.p, c.i));
+    let pattern = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .map(|q| format!("%{}%", like_escape(&q.chars().take(50).collect::<String>())));
+    let mut conn = state.db.acquire().await?;
+    let rows = repo::pin_candidates(
+        &mut conn,
+        principal.user_id.get(),
+        pattern.as_deref(),
+        after,
+        limit + 1,
+    )
+    .await?;
+    let items = rows
+        .into_iter()
+        .map(|row| PinCandidate {
+            id: Id::new(row.id),
+            title: row.title,
+            published_at: row.published_at,
+            is_hidden: row.hidden_at.is_some(),
+        })
+        .collect();
+    Page::from_rows(
+        items,
+        usize::try_from(limit).unwrap_or(20),
+        |item: &PinCandidate| AuthorCursor {
+            p: item.published_at,
+            i: item.id.get(),
+        },
+    )
 }
 
 #[cfg(test)]

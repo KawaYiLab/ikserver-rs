@@ -11,6 +11,7 @@ use ik_kernel::bus::LocalBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
 use ik_notify::NotifyState;
+use ik_profile::ProfileState;
 use ik_realtime::RealtimeState;
 use ik_social::SocialState;
 use sqlx::PgPool;
@@ -30,6 +31,7 @@ pub struct AppState {
     pub social: SocialState,
     pub notify: NotifyState,
     pub realtime: RealtimeState,
+    pub profile: ProfileState,
 }
 
 impl AppState {
@@ -53,6 +55,7 @@ impl AppState {
         let social = SocialState::new(db.clone());
         let notify = NotifyState::new(db.clone(), bus.clone());
         let realtime = RealtimeState::start(&bus, config.http.allowed_origins.clone())?;
+        let profile = ProfileState::new(db.clone(), ids.clone(), content.clone(), comments.clone());
         Ok(Self {
             config: Arc::new(config),
             db,
@@ -66,6 +69,7 @@ impl AppState {
             social,
             notify,
             realtime,
+            profile,
         })
     }
 }
@@ -115,5 +119,11 @@ impl FromRef<AppState> for NotifyState {
 impl FromRef<AppState> for RealtimeState {
     fn from_ref(state: &AppState) -> Self {
         state.realtime.clone()
+    }
+}
+
+impl FromRef<AppState> for ProfileState {
+    fn from_ref(state: &AppState) -> Self {
+        state.profile.clone()
     }
 }

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT denny_balance FROM user_economy WHERE user_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "denny_balance",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "denny_balance"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4fc7bb74cd30aaa14831191a09e828b1a85c74b4d362a800030ede9c59825d16"
+}
