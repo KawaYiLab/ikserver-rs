@@ -26,6 +26,7 @@ base64.workspace = true
 validator.workspace = true
 async-trait.workspace = true
 parking_lot.workspace = true
+graphile_worker.workspace = true
 
 [dev-dependencies]
 insta.workspace = true

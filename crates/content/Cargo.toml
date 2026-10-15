@@ -31,6 +31,7 @@ regex.workspace = true
 unicode-normalization.workspace = true
 
 [dev-dependencies]
+graphile_worker.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]

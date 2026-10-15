@@ -102,13 +102,33 @@ pub async fn following_among(
     Ok(repo::following_among(conn, follower_id, targets).await?)
 }
 
-/// 新帖扇出的候选收件人：`user_id` 的粉丝，去掉与其有任一方向拉黑的人（FOLLOW-017）。
-/// 拉黑本来就会删除关注，这里是兜底。
+/// `user_id` 是否有粉丝（不看拉黑，只用来决定要不要安排新帖扇出）。
+pub async fn has_followers(conn: &mut PgConnection, user_id: i64) -> Result<bool, Problem> {
+    Ok(repo::has_followers(conn, user_id).await?)
+}
+
+/// 新帖扇出的一批候选收件人：`user_id` 的粉丝里 id 大于 `after` 的前 `limit` 个（按 id 升序），
+/// 去掉与其有任一方向拉黑的人（FOLLOW-017）。拉黑本来就会删除关注，这里是兜底。
+///
+/// 返回这一批收件人，以及下一批的起点（扫到了 `limit` 条关注时为最后一条的粉丝 id，否则为 `None`）。
+/// 起点按关注记录算而不是按过滤后的收件人算，所以被过滤掉的人不会让分页提前结束。
 pub async fn followers_for_fanout(
     conn: &mut PgConnection,
     user_id: i64,
-) -> Result<Vec<i64>, Problem> {
-    Ok(repo::followers_without_blocks(conn, user_id).await?)
+    after: i64,
+    limit: i64,
+) -> Result<(Vec<i64>, Option<i64>), Problem> {
+    let rows = repo::followers_page(conn, user_id, after, limit).await?;
+    let next = match rows.last() {
+        Some(last) if i64::try_from(rows.len()).is_ok_and(|n| n >= limit) => Some(last.follower_id),
+        _ => None,
+    };
+    let followers = rows
+        .into_iter()
+        .filter(|r| !r.blocked)
+        .map(|r| r.follower_id)
+        .collect();
+    Ok((followers, next))
 }
 
 /// 列表过滤用的排除集合：「我拉黑的人 ∪ 拉黑我的人」（COMMON-008）。未登录时为空。

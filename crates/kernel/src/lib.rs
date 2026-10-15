@@ -10,6 +10,7 @@ pub mod error;
 pub mod extract;
 pub mod http;
 pub mod id;
+pub mod jobs;
 pub mod mail;
 pub mod role;
 pub mod time;

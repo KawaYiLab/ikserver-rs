@@ -7,6 +7,7 @@
 pub mod anonymous;
 pub mod dto;
 pub mod interop;
+pub mod jobs;
 mod repo;
 mod routes;
 pub mod service;

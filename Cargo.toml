@@ -86,6 +86,9 @@ aws-credential-types = { version = "1", features = ["hardcoded-credentials"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 thumbhash = "0.1"
 
+# 后台任务（PostgreSQL 队列）。不启用 TLS，与 sqlx 一致。
+graphile_worker = { version = "0.14", default-features = false, features = ["runtime-tokio", "driver-sqlx"] }
+
 # 其他
 moka = { version = "0.12", features = ["future"] }
 governor = "0.10"

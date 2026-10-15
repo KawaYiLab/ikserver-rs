@@ -1235,6 +1235,7 @@ async fn reactions_notify_the_author_and_unlike_retracts(db: PgPool) {
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn first_publish_notifies_followers_once(db: PgPool) {
     let h = harness(db);
+    h.state.jobs.migrate().await.unwrap();
     let author = h.writer(1).await;
     h.writer(2).await;
     sqlx::query!("INSERT INTO follows (follower_id, followee_id) VALUES (2, 1)")
@@ -1251,6 +1252,7 @@ async fn first_publish_notifies_followers_once(db: PgPool) {
     service::publish(&h.state, &author, draft, None, None)
         .await
         .unwrap();
+    h.run_jobs().await;
     assert_eq!(notifications(&h.db, 2).await, vec!["system"]);
     // 下线后重新发布不再通知。
     service::unpublish(&h.state, &author, draft, false)
@@ -1261,6 +1263,7 @@ async fn first_publish_notifies_followers_once(db: PgPool) {
         .unwrap();
     publish(&h, &author, "匿名", true).await;
     publish(&h, &author, "直接发布", false).await;
+    h.run_jobs().await;
     assert_eq!(notifications(&h.db, 2).await, vec!["system", "system"]);
 }
 
@@ -1446,4 +1449,115 @@ async fn authors_show_avatars_except_when_anonymous(db: PgPool) {
     .unwrap();
     let card = feed.items.iter().find(|c| c.id == named.id).unwrap();
     assert!(card.author.avatar_url.is_some());
+}
+
+// ---------- 新帖扇出（后台任务） ----------
+
+impl Harness {
+    /// 用户 `from..=to` 全部关注 `followee`。
+    async fn followers(&self, followee: i64, from: i64, to: i64) {
+        sqlx::query!(
+            "INSERT INTO users (id, username, email, role, level)
+             SELECT g, 'user' || g, 'user' || g || '@example.com', 'user', 1
+             FROM generate_series($1::bigint, $2::bigint) AS g",
+            from,
+            to
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO follows (follower_id, followee_id)
+             SELECT g, $3 FROM generate_series($1::bigint, $2::bigint) AS g",
+            from,
+            to,
+            followee
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+    }
+
+    /// 把队列里的任务（包括执行中新安排的）全部做完。
+    async fn run_jobs(&self) {
+        graphile_worker::WorkerOptions::default()
+            .schema(ik_kernel::jobs::SCHEMA)
+            .pg_pool(self.db.clone())
+            .listen_os_shutdown_signals(false)
+            .define_job::<ik_content::jobs::FanoutNewPost>()
+            .add_extension(self.state.clone())
+            .init()
+            .await
+            .unwrap()
+            .run_once()
+            .await
+            .unwrap();
+    }
+
+    async fn follow_notices(&self, post_id: i64) -> i64 {
+        sqlx::query_scalar!(
+            r#"SELECT count(*) AS "n!" FROM notifications WHERE dedup_key = $1"#,
+            format!("follow:{post_id}")
+        )
+        .fetch_one(&self.db)
+        .await
+        .unwrap()
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn first_publish_fans_out_to_followers_in_batches(db: PgPool) {
+    let h = harness(db);
+    h.state.jobs.migrate().await.unwrap();
+    let me = h.writer(1).await;
+    // 超过一批（1000），走任务链。
+    h.followers(1, 10_000, 11_499).await;
+
+    let post = service::create(&h.state, &me, input("新委托"), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        h.follow_notices(post.id.get()).await,
+        0,
+        "发布事务里只安排任务"
+    );
+    h.run_jobs().await;
+    assert_eq!(h.follow_notices(post.id.get()).await, 1500);
+    let excerpt = sqlx::query_scalar!(
+        "SELECT excerpt FROM notifications WHERE recipient_id = 10000 AND kind = 'system'"
+    )
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(excerpt, "你关注的 user1 发布了新委托《新委托》");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn fanout_skips_anonymous_and_withdrawn_posts(db: PgPool) {
+    let h = harness(db);
+    h.state.jobs.migrate().await.unwrap();
+    let me = h.writer(1).await;
+    h.followers(1, 100, 102).await;
+
+    let anon = service::create(
+        &h.state,
+        &me,
+        PostInput {
+            is_anonymous: true,
+            ..input("匿名")
+        },
+        true,
+    )
+    .await
+    .unwrap();
+    // 任务执行前帖子就下线了：不再通知。
+    let withdrawn = service::create(&h.state, &me, input("撤回"), true)
+        .await
+        .unwrap();
+    service::unpublish(&h.state, &me, withdrawn.id.get(), false)
+        .await
+        .unwrap();
+    h.run_jobs().await;
+    assert_eq!(h.follow_notices(anon.id.get()).await, 0);
+    assert_eq!(h.follow_notices(withdrawn.id.get()).await, 0);
 }

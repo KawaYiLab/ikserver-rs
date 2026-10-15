@@ -67,6 +67,26 @@ pub struct Config {
     pub hot: Hot,
     pub search: Search,
     pub storage: Storage,
+    pub jobs: Jobs,
+}
+
+/// 后台任务（graphile_worker）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Jobs {
+    /// 本实例是否执行任务。多实例时可以只让部分实例执行；入队不受影响。
+    pub run_worker: bool,
+    /// 同时执行的任务数（1–64）。
+    pub concurrency: usize,
+}
+
+impl Default for Jobs {
+    fn default() -> Self {
+        Self {
+            run_worker: true,
+            concurrency: 4,
+        }
+    }
 }
 
 /// 对象存储（S3 兼容：R2 / 七牛）与直传上传。`bucket` 为空时上传接口返回 503。
@@ -231,6 +251,7 @@ impl Default for Config {
             hot: Hot::default(),
             search: Search::default(),
             storage: Storage::default(),
+            jobs: Jobs::default(),
         }
     }
 }
@@ -410,6 +431,11 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "exam 配置不合法：题数、及格线（1–100）、时限、冷却次数必须为正，冷却时长与奖励不能为负"
                     .to_owned(),
+            ));
+        }
+        if !(1..=64).contains(&self.jobs.concurrency) {
+            return Err(ConfigError::Invalid(
+                "jobs.concurrency 必须在 1–64 之间".to_owned(),
             ));
         }
         let hot = &self.hot;

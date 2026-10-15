@@ -451,18 +451,17 @@ fn removed_event(post_id: i64) -> Result<Event, Problem> {
     )
 }
 
-/// 首次发布时通知作者的粉丝（FOLLOW-009）。匿名帖不要调用（FOLLOW-016）。
+/// 首次发布时安排通知作者的粉丝（FOLLOW-009），由后台任务分批完成。匿名帖不要调用（FOLLOW-016）。
+/// 大多数作者没有粉丝，这时不建任务。
 async fn fanout_first_publish(
     state: &ContentState,
     conn: &mut PgConnection,
     author_id: i64,
     post_id: i64,
-    title: &str,
-    now: DateTime<Utc>,
-    effects: &mut Effects,
 ) -> Result<(), Problem> {
-    ik_notify::interop::fanout_new_post(conn, &state.ids, author_id, post_id, title, now, effects)
-        .await?;
+    if ik_social::interop::has_followers(conn, author_id).await? {
+        crate::jobs::FanoutNewPost::schedule(state, conn, post_id).await?;
+    }
     Ok(())
 }
 
@@ -512,16 +511,7 @@ pub async fn create(
         repo::mark_published(&mut tx, post_id, author_id, now).await?;
         grant_first_publish_exp(state, &mut tx, author_id, now).await?;
         if !content.is_anonymous {
-            fanout_first_publish(
-                state,
-                &mut tx,
-                author_id,
-                post_id,
-                &content.title,
-                now,
-                &mut effects,
-            )
-            .await?;
+            fanout_first_publish(state, &mut tx, author_id, post_id).await?;
         }
         effects.publish(published_event(post_id, content.category_id, true)?);
     }
@@ -676,16 +666,7 @@ pub async fn publish(
         if first {
             grant_first_publish_exp(state, &mut tx, author_id, now).await?;
             if !row.is_anonymous {
-                fanout_first_publish(
-                    state,
-                    &mut tx,
-                    author_id,
-                    post_id,
-                    &title,
-                    now,
-                    &mut effects,
-                )
-                .await?;
+                fanout_first_publish(state, &mut tx, author_id, post_id).await?;
             }
         }
         effects.publish(published_event(post_id, category_id, first)?);

@@ -25,7 +25,10 @@
 `DATABASE_URL` 里（不入库），向维护者索取。
 
 - 开发账号需要 `CREATEDB` 权限：`#[sqlx::test]` 会为每个测试临时建库、测完删除。
-- 迁移：`cargo sqlx migrate run`。
+- 迁移：`cargo sqlx migrate run`（只管 `migrations/`）；`cargo run -p ik-server -- migrate` 还会建好后台任务队列的表
+  （schema `graphile_worker`，`serve` 启动执行器时也会自动建）。
+- 测试里要入队任务的（例如有粉丝的作者发帖），先调用 `state.jobs.migrate()`；执行任务用
+  `graphile_worker::WorkerOptions` 的 `run_once`，参考 `crates/content/tests/service.rs` 的 `run_jobs`。
 - 开发库与生产库物理隔离；不要把生产连接串写进 `.env`。
 
 ## 环境变量

@@ -297,17 +297,30 @@ async fn fanout_skips_blocked_ai_and_inactive_followers_and_is_idempotent(db: Pg
         .await
         .unwrap();
 
-    let fanout = || async {
+    let h = &h;
+    let batch = |after| async move {
         let mut tx = h.db.begin().await.unwrap();
         let mut effects = Effects::new();
-        let n = interop::fanout_new_post(&mut tx, &h.ids, 1, 10, "新帖", Utc::now(), &mut effects)
-            .await
-            .unwrap();
+        let outcome = interop::fanout_new_post(
+            &mut tx,
+            &h.ids,
+            1,
+            10,
+            "新帖",
+            interop::FanoutPage { after, limit: 2 },
+            Utc::now(),
+            &mut effects,
+        )
+        .await
+        .unwrap();
         tx.commit().await.unwrap();
-        n
+        (outcome.sent, outcome.next_after)
     };
-    assert_eq!(fanout().await, 2);
-    assert_eq!(fanout().await, 0, "同一帖子对同一人只通知一次");
+    // 按关注记录分页：被过滤掉的人（4 拉黑、5 AI、6 封禁）不会让分页提前结束。
+    assert_eq!(batch(0).await, (2, Some(3)));
+    assert_eq!(batch(3).await, (0, Some(5)));
+    assert_eq!(batch(5).await, (0, None));
+    assert_eq!(batch(0).await, (0, Some(3)), "同一帖子对同一人只通知一次");
 
     let follower = Principal {
         user_id: Id::new(2),

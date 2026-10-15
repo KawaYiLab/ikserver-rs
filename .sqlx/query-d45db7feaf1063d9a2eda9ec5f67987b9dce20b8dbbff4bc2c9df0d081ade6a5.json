@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT excerpt FROM notifications WHERE recipient_id = 10000 AND kind = 'system'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "excerpt",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notifications",
+            "name": "excerpt"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d45db7feaf1063d9a2eda9ec5f67987b9dce20b8dbbff4bc2c9df0d081ade6a5"
+}

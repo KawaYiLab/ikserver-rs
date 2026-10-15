@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.follower_id,\n                  EXISTS (\n                      SELECT 1 FROM user_blocks b\n                      WHERE (b.blocker_id = $1 AND b.blocked_id = f.follower_id)\n                         OR (b.blocker_id = f.follower_id AND b.blocked_id = $1)) AS \"blocked!\"\n           FROM follows f\n           WHERE f.followee_id = $1 AND f.follower_id > $2\n           ORDER BY f.follower_id\n           LIMIT $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "follower_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "follows",
+            "name": "follower_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "blocked!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "fa39ffb24991e486e3c719aca9ca8e76137fa51f12e23870312953305e05184d"
+}

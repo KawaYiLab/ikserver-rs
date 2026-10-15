@@ -224,3 +224,8 @@
   文件从不物理删除，所以用数组而不是关系表，也不需要外键；数量上限随等级在服务端校验，DDL 只兜底最高档。
   卡片查询直接取 `cover_ids[1]`。
 - `media_files.thumbhash`：完成上传时在阻塞线程里解码（限制 16384 像素、256 MiB）并缩到 100×100 计算。
+
+## 后台任务队列（graphile_worker）
+
+- schema `graphile_worker` 由 graphile_worker 自己迁移（执行器启动、`ik-server migrate`），不进 `migrations/`，
+  也不归任何业务域；业务代码只经 `ik_kernel::jobs::Jobs::enqueue` 在自己的事务里写入。

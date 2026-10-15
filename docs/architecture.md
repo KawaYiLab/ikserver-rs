@@ -100,12 +100,21 @@ WS 网关是唯一订阅者，按用户/会话/频道过滤后推送。
 
 ## 后台任务与定时任务
 
-graphile_worker（schema `graphile_worker`）：
-- 事件任务：follow_fanout、search_sync、ai_reply、report_action、account_cleanup、
-  media_gc、thumbhash。
-- cron：热榜 10min、会话清理 5min、计数/余额对账每日、搜索全量对账每日、
-  过期验证码/幂等键清理每小时。
-- 全部任务幂等（payload 带幂等键或天然可重入）；死信表人工处理入口在管理后台。
+graphile_worker（schema `graphile_worker`，由它自己迁移：执行器启动时、`ik-server migrate` 时）。
+`ik_kernel::jobs::Jobs` 负责入队（`enqueue` 接收业务事务的连接），任务由业务域定义，执行器在
+`crates/server/src/jobs.rs` 统一登记任务、定时任务与执行时用的各域 state。
+
+- 已实现：
+  - `content.fanout_new_post`：首次发布且作者有粉丝时在发布事务里入队；每批 1000 条关注记录、一批一个事务，
+    做完一批在同一事务里安排下一批；执行时帖子已下线、隐藏、删除就停止。最多 10 次尝试。
+  - `media.sweep_staging`：定时任务，每小时第 17 分钟，清理过期的上传暂存对象。只尝试一次，失败等下个小时。
+- 仍在进程内（每个实例各自做，不适合放进队列）：热榜刷新（结果是本实例的内存缓存）、搜索索引同步
+  （订阅事件总线，失败的文档进重试表，另有定期对账）。
+- 计划：会话清理、计数/余额对账、过期验证码/登录尝试清理（D-022）、AI 回复、举报处置、账号清理。
+- 全部任务幂等（payload 带幂等键或天然可重入）。重试用 graphile_worker 的指数退避，`max_attempts` 写在任务定义旁；
+  用完次数的任务留在队列表里（`attempts = max_attempts`，`last_error` 有原因），即死信，以后由管理后台处理。
+- `IK_JOBS__RUN_WORKER=false` 时本实例只入队不执行；多实例时 graphile_worker 保证每个任务只被一个实例领取，
+  定时任务也只安排一次。
 
 ## 实时
 

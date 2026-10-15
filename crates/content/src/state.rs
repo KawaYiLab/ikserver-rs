@@ -5,6 +5,7 @@ use std::time::Duration;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
+use ik_kernel::jobs::Jobs;
 use ik_media::MediaState;
 use moka::future::Cache;
 use sqlx::PgPool;
@@ -25,12 +26,14 @@ pub struct ContentState {
     pub bus: Arc<dyn EventBus>,
     /// 封面、头像的展示数据与归属校验。
     pub media: MediaState,
+    pub jobs: Jobs,
     pub(crate) views: Arc<ViewGuard>,
 }
 
 impl ContentState {
     pub fn new(db: PgPool, ids: Arc<Snowflake>, bus: Arc<dyn EventBus>, media: MediaState) -> Self {
         Self {
+            jobs: Jobs::new(db.clone()),
             db,
             ids,
             bus,
@@ -50,4 +53,11 @@ pub(crate) struct ViewGuard {
     /// 键 `<观众>|<帖子>`。单进程内存实现；多实例部署时同一观众可能在每个实例各计一次。
     pub cooldown: Cache<String, ()>,
     pub limiter: DefaultKeyedRateLimiter<String>,
+}
+
+// 执行器的扩展要求 Debug；内部都是连接池与缓存，不值得打印。
+impl std::fmt::Debug for ContentState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContentState").finish_non_exhaustive()
+    }
 }

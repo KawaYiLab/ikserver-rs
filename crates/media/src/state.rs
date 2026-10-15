@@ -129,29 +129,6 @@ impl MediaState {
             .await?)
     }
 
-    /// 启动后台清理（每小时一次）。没有配置对象存储时什么都不做。
-    pub fn start_janitor(&self) -> anyhow::Result<()> {
-        if self.backend.is_none() {
-            return Ok(());
-        }
-        let runtime = tokio::runtime::Handle::try_current()
-            .map_err(|e| anyhow::anyhow!("媒体清理任务需要在 tokio 运行时里启动：{e}"))?;
-        let state = self.clone();
-        runtime.spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_secs(3600));
-            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                tick.tick().await;
-                match state.sweep_staging().await {
-                    Ok(0) => {}
-                    Ok(deleted) => tracing::info!(deleted, "清理了过期的上传暂存对象"),
-                    Err(error) => tracing::warn!(?error, "清理上传暂存对象失败"),
-                }
-            }
-        });
-        Ok(())
-    }
-
     /// 这些作者的头像缩略图地址（按用户 id）。没有头像、已注销的不出现。
     pub async fn avatar_urls<'a>(
         &self,
@@ -179,5 +156,12 @@ impl MediaState {
             backend.storage.ensure_bucket().await?;
         }
         Ok(())
+    }
+}
+
+// 执行器的扩展要求 Debug；内部有存储凭据，不打印字段。
+impl std::fmt::Debug for MediaState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaState").finish_non_exhaustive()
     }
 }

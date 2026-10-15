@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username, email, role, level)\n             SELECT g, 'user' || g, 'user' || g || '@example.com', 'user', 1\n             FROM generate_series($1::bigint, $2::bigint) AS g",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3da1cf3a84432d410410b3ce2fda0dc62d8f84f251fe0c65d9c865738c903dc2"
+}

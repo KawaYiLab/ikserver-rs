@@ -181,31 +181,55 @@ pub async fn retract(
     Ok(())
 }
 
+/// 新帖扇出的一批：从粉丝 id 大于 `after` 处起最多 `limit` 个关注记录。
+#[derive(Debug, Clone, Copy)]
+pub struct FanoutPage {
+    pub after: i64,
+    pub limit: i64,
+}
+
+/// 一批扇出的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FanoutOutcome {
+    /// 这一批实际通知到的人数。
+    pub sent: usize,
+    /// 还有下一批时，下一批的 `after`。
+    pub next_after: Option<i64>,
+}
+
 /// 新帖扇出：通知作者的粉丝「你关注的 X 发布了新委托《T》」（FOLLOW-009～020）。
 ///
-/// 只在首次发布时调用；匿名帖不要调用（FOLLOW-016）。收件人排除：与作者有拉黑关系、
-/// 封禁或注销、AI 账号（FOLLOW-017）。每个帖子对每个收件人只通知一次（幂等键 `follow:<帖子 id>`）。
-/// 返回通知人数。
-// TODO(jobs)：粉丝很多时应改为后台任务分批扇出；目前在发布事务里一条 INSERT 完成。
+/// 只在首次发布时调用；匿名帖不要调用（FOLLOW-016）。粉丝可能很多，所以按批进行，由调用方
+/// （content 的后台任务）逐批推进，每批一个事务。收件人排除：与作者有拉黑关系、封禁或注销、
+/// AI 账号（FOLLOW-017）。每个帖子对每个收件人只通知一次（幂等键 `follow:<帖子 id>`），
+/// 所以同一批重做是安全的。
+#[allow(clippy::too_many_arguments)]
 pub async fn fanout_new_post(
     conn: &mut PgConnection,
     ids: &Snowflake,
     author_id: i64,
     post_id: i64,
     title: &str,
+    page: FanoutPage,
     now: DateTime<Utc>,
     effects: &mut Effects,
-) -> Result<usize, Problem> {
-    let followers = ik_social::interop::followers_for_fanout(conn, author_id).await?;
+) -> Result<FanoutOutcome, Problem> {
+    let (followers, next_after) =
+        ik_social::interop::followers_for_fanout(conn, author_id, page.after, page.limit).await?;
+    let done = |sent| Ok(FanoutOutcome { sent, next_after });
     if followers.is_empty() {
-        return Ok(0);
+        return done(0);
     }
     let Some(author) = ik_auth::interop::active_users(conn, &[author_id])
         .await?
         .into_iter()
         .next()
     else {
-        return Ok(0);
+        // 作者已经封禁或注销：后面的批次也不用再发。
+        return Ok(FanoutOutcome {
+            sent: 0,
+            next_after: None,
+        });
     };
     let mut recipients: Vec<i64> = ik_auth::interop::active_users(conn, &followers)
         .await?
@@ -215,7 +239,7 @@ pub async fn fanout_new_post(
         .collect();
     recipients.sort_unstable();
     if recipients.is_empty() {
-        return Ok(0);
+        return done(0);
     }
     let title = truncate(title, NAME_MAX_CHARS);
     let message = truncate(
@@ -247,7 +271,7 @@ pub async fn fanout_new_post(
             &serde_json::json!({ "bucket": SYSTEM_BUCKET }),
         )?);
     }
-    Ok(sent.len())
+    done(sent.len())
 }
 
 #[cfg(test)]

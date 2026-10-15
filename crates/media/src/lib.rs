@@ -7,6 +7,7 @@ pub mod cdn;
 pub mod dto;
 pub mod gate;
 pub mod interop;
+pub mod jobs;
 mod repo;
 mod routes;
 pub mod service;

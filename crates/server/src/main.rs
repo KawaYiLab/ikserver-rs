@@ -200,6 +200,7 @@ async fn migrate() -> anyhow::Result<()> {
         .await
         .context("连接数据库失败")?;
     ik_server::MIGRATOR.run(&db).await.context("执行迁移失败")?;
+    ik_kernel::jobs::Jobs::new(db.clone()).migrate().await?;
     tracing::info!("迁移完成");
     Ok(())
 }
@@ -219,6 +220,23 @@ async fn serve() -> anyhow::Result<()> {
         .search
         .start_indexer(&state.bus, &state.config.search)?;
     let hub = state.realtime.hub.clone();
+    let worker = if state.config.jobs.run_worker {
+        let worker = std::sync::Arc::new(
+            ik_server::jobs::worker_options(&state)?
+                .init()
+                .await
+                .map_err(|e| anyhow::anyhow!("后台任务执行器启动失败：{e:?}"))?,
+        );
+        let runner = worker.clone();
+        let handle = tokio::spawn(async move {
+            if let Err(error) = runner.run().await {
+                tracing::error!(?error, "后台任务执行器异常退出");
+            }
+        });
+        Some((worker, handle))
+    } else {
+        None
+    };
     let app = build_app(state)?;
 
     let listener = tokio::net::TcpListener::bind(addr)
@@ -235,6 +253,13 @@ async fn serve() -> anyhow::Result<()> {
         hub.shutdown();
     })
     .await?;
+    if let Some((worker, handle)) = worker {
+        // 不再领取新任务，等在途任务做完。
+        worker.request_shutdown();
+        if let Err(error) = handle.await {
+            tracing::error!(?error, "后台任务执行器退出失败");
+        }
+    }
     tracing::info!("ik-server 已退出");
     Ok(())
 }

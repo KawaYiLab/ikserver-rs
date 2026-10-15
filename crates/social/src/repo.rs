@@ -126,21 +126,43 @@ pub(crate) async fn following_page(
     .await
 }
 
-pub(crate) async fn followers_without_blocks(
+pub(crate) struct FollowerRow {
+    pub follower_id: i64,
+    /// 与被关注者之间存在任一方向的拉黑。
+    pub blocked: bool,
+}
+
+pub(crate) async fn followers_page(
     conn: &mut PgConnection,
     user: i64,
-) -> sqlx::Result<Vec<i64>> {
-    sqlx::query_scalar!(
-        "SELECT f.follower_id FROM follows f
-         WHERE f.followee_id = $1
-           AND NOT EXISTS (
-               SELECT 1 FROM user_blocks b
-               WHERE (b.blocker_id = $1 AND b.blocked_id = f.follower_id)
-                  OR (b.blocker_id = f.follower_id AND b.blocked_id = $1))
-         ORDER BY f.follower_id",
+    after: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<FollowerRow>> {
+    sqlx::query_as!(
+        FollowerRow,
+        r#"SELECT f.follower_id,
+                  EXISTS (
+                      SELECT 1 FROM user_blocks b
+                      WHERE (b.blocker_id = $1 AND b.blocked_id = f.follower_id)
+                         OR (b.blocker_id = f.follower_id AND b.blocked_id = $1)) AS "blocked!"
+           FROM follows f
+           WHERE f.followee_id = $1 AND f.follower_id > $2
+           ORDER BY f.follower_id
+           LIMIT $3"#,
         user,
+        after,
+        limit,
     )
     .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn has_followers(conn: &mut PgConnection, user: i64) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (SELECT 1 FROM follows WHERE followee_id = $1) AS "exists!""#,
+        user
+    )
+    .fetch_one(conn)
     .await
 }
 
