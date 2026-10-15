@@ -371,6 +371,8 @@ impl Indexer {
         loop {
             tokio::select! {
                 event = events.recv() => match event {
+                    // 其他实例的变更由那个实例自己同步，这里只管本实例发出的。
+                    Ok(event) if event.origin == ik_kernel::bus::Origin::Remote => {}
                     Ok(event) => dirty.absorb(&event),
                     Err(broadcast::error::RecvError::Lagged(skipped)) => {
                         // 丢掉的事件由增量扫描与全量对账补上。

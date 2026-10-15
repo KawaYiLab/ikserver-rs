@@ -3,6 +3,7 @@
 //! 本 crate 不依赖任何业务域。
 
 pub mod bus;
+pub mod cluster;
 pub mod config;
 pub mod cursor;
 pub mod db;

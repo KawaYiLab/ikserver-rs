@@ -1,7 +1,8 @@
 //! 进程内事件总线：业务事务提交后发布实时事件，WebSocket 网关订阅并按受众推送。
 //!
 //! 发布方不假设订阅方在线；事件丢失由客户端通过 REST 补齐。
-//! 需要多实例部署时，换成基于 PostgreSQL LISTEN/NOTIFY 的实现，调用方不变。
+//! 多实例部署时由 [`crate::cluster::ClusterBus`] 经 PostgreSQL LISTEN/NOTIFY 转发给其他实例，
+//! 调用方不变；订阅方仍然订阅本实例的 [`LocalBus`]，用 [`Event::origin`] 区分事件是不是本实例发出的。
 
 use std::sync::Arc;
 
@@ -23,12 +24,24 @@ pub enum Audience {
     Internal,
 }
 
+/// 事件从哪里来。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Origin {
+    /// 本实例发布的。
+    #[default]
+    Local,
+    /// 其他实例发布、经集群总线转来的。只该被「每个实例都要做」的订阅方处理（例如实时推送），
+    /// 「全集群做一次」的订阅方（例如搜索索引同步）应忽略。
+    Remote,
+}
+
 #[derive(Debug, Clone)]
 pub struct Event {
     /// 事件类型，如 `dm.message.created`。
     pub kind: &'static str,
     pub audience: Audience,
     pub data: Arc<serde_json::Value>,
+    pub origin: Origin,
 }
 
 impl Event {
@@ -42,6 +55,7 @@ impl Event {
             kind,
             audience,
             data: Arc::new(data),
+            origin: Origin::Local,
         })
     }
 }

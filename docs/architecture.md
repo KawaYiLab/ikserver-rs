@@ -94,9 +94,22 @@ HTTP → SetRequestId → Trace → CORS → CsrfLayer → 限流 → BodyLimit 
 
 ## 事件总线
 
-进程内广播（dashmap 订阅表 + tokio broadcast）。定义为 `kernel::bus::EventBus` trait，
-单机实现先行；需要多实例时换成 PG LISTEN/NOTIFY 实现，调用方不变。
-WS 网关是唯一订阅者，按用户/会话/频道过滤后推送。
+业务域发布到 `kernel::bus::EventBus`，订阅方（WS 网关、搜索索引同步）订阅本实例的 `LocalBus`（tokio broadcast）。
+
+- 单实例：发布方就是 `LocalBus`。
+- 多实例（`IK_BUS__CLUSTER=true`）：发布方是 `kernel::cluster::ClusterBus`，先发本地，再把非 `Internal` 事件
+  经 PostgreSQL `pg_notify('ik_events', …)` 转给其他实例；各实例一条 LISTEN 连接，收到别的实例的事件以
+  `Origin::Remote` 发给本地。超过 NOTIFY 上限的事件（大收件人列表）走 `bus_outbox` 表转运。
+  事件只是提醒，断线、队列满时丢弃，客户端靠 REST 补齐。
+- 订阅方按需区分来源：WS 网关推送所有事件（连接可能在任何实例上）；搜索索引同步只处理本实例发出的事件
+  （否则 N 个实例各同步一遍）；会话吊销（`auth.sessions_changed`）跨实例生效，别的实例上的连接也会断开。
+
+### 多实例部署要求
+
+- 每个实例 `IK_NODE_ID` 不同（雪花 ID 与集群事件去重都靠它），`IK_BUS__CLUSTER=true`。
+- 所有实例配置相同的 `IK_SECRETS__CODE_HMAC_KEY`（上传凭证在一个实例签发、在另一个实例校验）。
+- 后台任务由 graphile_worker 在实例间分配，定时任务只安排一次；可以用 `IK_JOBS__RUN_WORKER=false` 让部分实例只服务 HTTP。
+- 仍按实例计的（可接受的近似）：全站与各接口限流、浏览量冷却、热榜缓存、每个用户的 WebSocket 连接数上限。
 
 ## 后台任务与定时任务
 

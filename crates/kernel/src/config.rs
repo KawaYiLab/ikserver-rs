@@ -69,6 +69,15 @@ pub struct Config {
     pub storage: Storage,
     pub jobs: Jobs,
     pub rate_limit: RateLimit,
+    pub bus: Bus,
+}
+
+/// 事件总线。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Bus {
+    /// 多实例部署时打开：实时事件经 PostgreSQL LISTEN/NOTIFY 转给其他实例。单实例不需要。
+    pub cluster: bool,
 }
 
 /// 全站默认限流（每分钟，RL-002）。读 = GET / HEAD，其余为写。登录用户按用户计，游客按 IP 计。
@@ -278,6 +287,7 @@ impl Default for Config {
             storage: Storage::default(),
             jobs: Jobs::default(),
             rate_limit: RateLimit::default(),
+            bus: Bus::default(),
         }
     }
 }
@@ -534,6 +544,12 @@ impl Config {
                     .to_owned(),
             ));
         }
+        // 多实例时各实例的进程内随机密钥不同，一个实例签发的上传凭证在另一个实例校验不过。
+        if self.bus.cluster && self.secrets.code_hmac_key.is_empty() {
+            return Err(ConfigError::Missing(
+                "IK_SECRETS__CODE_HMAC_KEY（bus.cluster 打开时必须配置，且各实例相同）",
+            ));
+        }
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
@@ -582,6 +598,24 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn cluster_requires_a_shared_hmac_key() {
+        let cluster = Serialized::default("bus.cluster", true);
+        let err =
+            Config::from_figment(with(&[("database.url", "postgres://x")]).merge(cluster.clone()))
+                .unwrap_err();
+        assert!(matches!(err, ConfigError::Missing(_)));
+        let config = Config::from_figment(
+            with(&[
+                ("database.url", "postgres://x"),
+                ("secrets.code_hmac_key", "a2V5"),
+            ])
+            .merge(cluster),
+        )
+        .unwrap();
+        assert!(config.bus.cluster);
     }
 
     #[test]

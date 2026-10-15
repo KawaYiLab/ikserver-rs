@@ -8,7 +8,8 @@ use ik_economy::EconomyState;
 use ik_exam::ExamState;
 use ik_feed::FeedState;
 use ik_kernel::Snowflake;
-use ik_kernel::bus::LocalBus;
+use ik_kernel::bus::{EventBus, LocalBus};
+use ik_kernel::cluster::ClusterBus;
 use ik_kernel::config::{Config, MailProvider};
 use ik_kernel::mail::{DevLogMailer, Mailer};
 use ik_media::MediaState;
@@ -26,7 +27,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub db: PgPool,
     pub ids: Arc<Snowflake>,
+    /// 本实例的事件总线：订阅方（实时网关、搜索索引同步）订阅它。
     pub bus: Arc<LocalBus>,
+    /// 业务域发布事件用：单实例就是 `bus`，多实例时还会转给其他实例。
+    pub publisher: Arc<dyn EventBus>,
     pub auth: AuthState,
     pub content: ContentState,
     pub comments: CommentsState,
@@ -50,12 +54,17 @@ impl AppState {
             MailProvider::DevLog => Arc::new(DevLogMailer),
         };
         let bus = Arc::new(LocalBus::new(4096));
+        let publisher: Arc<dyn EventBus> = if config.bus.cluster {
+            ClusterBus::start(bus.clone(), db.clone(), config.node_id)?
+        } else {
+            bus.clone()
+        };
         let auth = AuthState::new(
             db.clone(),
             ids.clone(),
             mailer,
             AuthSettings::from_config(&config)?,
-            bus.clone(),
+            publisher.clone(),
         );
         let media = MediaState::new(
             db.clone(),
@@ -63,13 +72,15 @@ impl AppState {
             &config.storage,
             config.secrets.code_hmac_key.expose().as_bytes(),
         );
-        let content = ContentState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
-        let comments = CommentsState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+        let content = ContentState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
+        let comments =
+            CommentsState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
         let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
         let social = SocialState::new(db.clone());
-        let notify = NotifyState::new(db.clone(), bus.clone(), media.clone());
-        let messaging = MessagingState::new(db.clone(), ids.clone(), bus.clone(), media.clone());
+        let notify = NotifyState::new(db.clone(), publisher.clone(), media.clone());
+        let messaging =
+            MessagingState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
         let typing: TypingHandler = {
             let messaging = messaging.clone();
             Arc::new(move |user_id, conversation_id| {
@@ -98,6 +109,7 @@ impl AppState {
             db,
             ids,
             bus,
+            publisher,
             auth,
             content,
             comments,
