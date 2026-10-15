@@ -1482,6 +1482,9 @@ impl Harness {
     async fn run_jobs(&self) {
         graphile_worker::WorkerOptions::default()
             .schema(ik_kernel::jobs::SCHEMA)
+            // run_once 在队列取空时结束；并发大于 1 时它会在上一批还没提交下一批之前就去取，
+            // 取不到就提前结束。串行执行才能把任务链跑完。
+            .concurrency(1)
             .pg_pool(self.db.clone())
             .listen_os_shutdown_signals(false)
             .define_job::<ik_content::jobs::FanoutNewPost>()
