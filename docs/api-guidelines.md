@@ -5,7 +5,8 @@ CI 用 oasdiff 阻止破坏性变更。
 
 ## 基础约定
 
-- 基础地址：`https://api.<站点域名>/v1`（每个网页域名配同站 API 子域，Cookie 同站）。
+- 基础地址：网页用**页面所在域名**的 `/v1`（nginx 同源反代，例如 `https://interk.net/v1`；
+  管理后台是 `https://ik.tiwat.cn/v1`），App 用 `https://ik.tiwat.cn/v1`。见 ADR 0002。
 - 全部 JSON；请求 `Content-Type: application/json`；响应 UTF-8。
 - ID：字符串形式的 64 位雪花 ID（按时间有序），JSON 里永远是 string。
 - 时间：RFC 3339（UTC，`Z` 结尾）。
@@ -24,7 +25,8 @@ CI 用 oasdiff 阻止破坏性变更。
 - App/脚本：`Authorization: Bearer <token>`。
 - 不透明令牌（256 位随机，DB 存 SHA-256 哈希），30 天有效、活跃自动续期、最长 180 天。
 - 会话可单独吊销；吊销即时生效并断开对应 WebSocket。
-- CSRF：tower-http `CsrfLayer`（Sec-Fetch-Site + Origin 白名单 + Origin/Host 回退）。
+- CSRF：tower-http `CsrfLayer`（Sec-Fetch-Site + Origin 白名单 + Origin/Host 回退）。网页都同源，
+  正式环境的 `allowed_origins` 可以留空；反向代理必须原样转发 `Host`。
   仅 Cookie 鉴权的非 GET 请求受约束；Bearer 请求天然免疫。
 
 ## 分页
@@ -191,11 +193,11 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 ## 实时（WebSocket `/v1/realtime`）
 
-握手：网页同站 Cookie；App 用 `Authorization` 头（WS 握手允许带 Authorization）。
+握手：网页用同源 Cookie；App 用 `Authorization` 头（WS 握手允许带 Authorization）。
 不带凭据时以**游客**连接，只收广播与公开频道（全站游客连接上限 5000，满了返回 503 + `Retry-After: 30`）。
 
 - 带了凭据但已失效：401 `SESSION_EXPIRED`，不会静默降级成游客；账号封禁：403 `ACCOUNT_BLOCKED`。
-- 非 Bearer 的连接（Cookie 或游客）带了 `Origin` 时必须在白名单里，否则 403 `CSRF_REJECTED`
+- 非 Bearer 的连接（Cookie 或游客）带了 `Origin` 时，必须与请求的 `Host` 同源或在白名单里，否则 403 `CSRF_REJECTED`
   （握手是 GET，CSRF 中间件不拦，这里单独防跨站 WebSocket 劫持）。
 - 不是 WebSocket 握手：426 `WEBSOCKET_REQUIRED`。
 

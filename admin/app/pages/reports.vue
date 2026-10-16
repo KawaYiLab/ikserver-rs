@@ -20,6 +20,7 @@ type Tab = 'pending' | 'reviewing' | 'closed'
 type Action = Schemas['Action']
 
 const { me } = useSession()
+const siteLink = useSiteLink()
 const { run, failure } = useNotify()
 
 const tab = ref<Tab>('pending')
@@ -294,11 +295,11 @@ async function resolve() {
               </a>
             </div>
             <div class="flex flex-wrap gap-3 text-sm">
-              <a v-if="detail.targetType === 'post' && detail.target.exists" :href="`/post/${detail.targetId}`" target="_blank" class="underline">
+              <a v-if="detail.targetType === 'post' && detail.target.exists" :href="siteLink(`/post/${detail.targetId}`)" target="_blank" class="underline">
                 查看帖子<template v-if="detail.target.hidden">（已隐藏）</template>
               </a>
-              <a v-if="detail.target.postId" :href="`/post/${detail.target.postId}?comment=${detail.targetId}`" target="_blank" class="underline">查看评论</a>
-              <a v-if="detail.targetType === 'user'" :href="`/profile/${detail.targetId}`" target="_blank" class="underline">查看主页</a>
+              <a v-if="detail.target.postId" :href="siteLink(`/post/${detail.target.postId}?comment=${detail.targetId}`)" target="_blank" class="underline">查看评论</a>
+              <a v-if="detail.targetType === 'user'" :href="siteLink(`/profile/${detail.targetId}`)" target="_blank" class="underline">查看主页</a>
               <span v-if="detail.target.owner">作者：@{{ detail.target.owner.username }}</span>
             </div>
             <div>

@@ -50,16 +50,18 @@ pnpm build            # nuxt generate → .output/public
 
 ## 部署
 
-把 `.output/public` 发布到 nginx 的 `/admin/`。这是纯 SPA，找不到的路径要回退到 `200.html`：
+后台挂在后端域名下：`https://ik.tiwat.cn/admin/`，与 `/v1` 同源（见
+[ADR 0002](../docs/adr/0002-same-origin-web-api.md)）。
 
-```nginx
-location /admin/ {
-    alias /srv/interknot/admin/;
-    try_files $uri $uri/ /admin/200.html;
-}
+```bash
+pnpm install --frozen-lockfile && pnpm build
+rsync -a --delete .output/public/ server:/srv/interknot/admin/
 ```
 
-`/v1` 和 `/admin` 必须在同一个域名下，因为会话 Cookie 是 `SameSite=Lax`，CSRF 也按 Origin 校验。
+nginx 配置在 [`deploy/nginx/ik.tiwat.cn.conf`](../deploy/nginx/ik.tiwat.cn.conf)。预渲染的路由按
+`<路由>/index.html` 返回，其余路径回退到 `200.html`；带哈希的 `_nuxt/` 资源长期缓存。
+
+后台里「查看帖子 / 主页」会链接到主站，地址在构建时用 `NUXT_PUBLIC_SITE_URL` 设置（默认 `https://interk.net`）。
 
 ## 约定
 

@@ -19,6 +19,7 @@ type User = Schemas['AdminUser']
 type Role = Schemas['Role']
 
 const { me, isAdmin } = useSession()
+const siteLink = useSiteLink()
 const { run, failure, success } = useNotify()
 const confirm = useConfirm()
 
@@ -322,7 +323,7 @@ async function unblock() {
               <div><dt class="text-muted-foreground">注册时间</dt><dd>{{ formatTime(detail.user.createdAt) }}</dd></div>
               <div><dt class="text-muted-foreground">考试通过</dt><dd>{{ formatTime(detail.user.examPassedAt) }}</dd></div>
             </dl>
-            <a :href="`/profile/${detail.user.id}`" target="_blank" class="text-sm underline">查看主页</a>
+            <a :href="siteLink(`/profile/${detail.user.id}`)" target="_blank" class="text-sm underline">查看主页</a>
 
             <template v-if="isAdmin">
               <Separator />

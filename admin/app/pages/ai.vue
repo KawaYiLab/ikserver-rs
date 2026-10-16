@@ -21,6 +21,7 @@ definePageMeta({ admin: true })
 type Model = Schemas['AdminModel']
 type Character = Schemas['AdminCharacter']
 
+const siteLink = useSiteLink()
 const { run, failure } = useNotify()
 const confirm = useConfirm()
 const tab = ref('settings')
@@ -456,7 +457,7 @@ function jobVariant(status: string) {
                 <TableCell class="whitespace-nowrap">{{ formatTime(job.updatedAt) }}</TableCell>
                 <TableCell>
                   {{ jobKindLabel[job.kind] ?? job.kind }}
-                  <a v-if="job.postId" :href="`/post/${job.postId}`" target="_blank" class="ml-1 text-xs underline">帖子</a>
+                  <a v-if="job.postId" :href="siteLink(`/post/${job.postId}`)" target="_blank" class="ml-1 text-xs underline">帖子</a>
                 </TableCell>
                 <TableCell>
                   <Badge :variant="jobVariant(job.status)">{{ jobStatusLabel[job.status] ?? job.status }}</Badge>
