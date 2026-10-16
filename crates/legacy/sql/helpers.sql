@@ -119,17 +119,25 @@ CREATE TABLE IF NOT EXISTS legacy.ik_media_digests (
     fetched_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- 作者 → 账号（作者没有对应账号时为空，这类作者的内容不导入）。
+-- 作者 → 账号（作者没有对应账号时为空，这类作者的内容不导入）。每个作者取最早的一条链接。
+-- 帖子、评论按作者逐行查这张视图：写成 NOT EXISTS 才能按 author_id 走索引；DISTINCT ON
+-- 无法下推连接条件，每查一行都要把整张链接表排一遍（5 万条评论要跑一分多钟）。
 CREATE VIEW legacy.ik_author_users AS
-SELECT DISTINCT ON (l.author_id) l.author_id, l.user_id
+SELECT l.author_id, l.user_id
 FROM legacy.up_users_author_lnk l
 WHERE l.author_id IS NOT NULL AND l.user_id IS NOT NULL
-ORDER BY l.author_id, l.id;
+  AND NOT EXISTS (
+      SELECT 1 FROM legacy.up_users_author_lnk e
+      WHERE e.author_id = l.author_id AND e.user_id IS NOT NULL AND e.id < l.id
+  );
 
 -- 帖子：Strapi 的草稿行与发布行（同一 document_id 两行，POST-001）合并成一条，帖子 id 取该文档
 -- 最小的行 id。有发布行 → published，内容取发布行；只有草稿行 → draft。
+-- 评论、通知按行 id 逐行查这张视图：用相关子查询（两次索引查找），不用窗口函数（窗口里的
+-- 条件下推不进去，每查一行都要扫全部文章，20 万条通知要跑一个多小时）。
 CREATE VIEW legacy.ik_post_rows AS
-SELECT a.id AS row_id, min(a.id) OVER (PARTITION BY a.document_id) AS post_id
+SELECT a.id AS row_id,
+       (SELECT min(d.id) FROM legacy.articles d WHERE d.document_id = a.document_id) AS post_id
 FROM legacy.articles a
 WHERE a.document_id IS NOT NULL;
 
