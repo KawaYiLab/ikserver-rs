@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversations (id, kind, user_low, user_high, created_at)\n           SELECT c.id, CASE WHEN c.is_ai THEN 'ai' ELSE 'direct' END, c.user_low, c.user_high,\n                  coalesce(c.created_at AT TIME ZONE $1, $2)\n           FROM legacy.ik_conversations c\n           JOIN users lo ON lo.id = c.user_low\n           JOIN users hi ON hi.id = c.user_high\n           WHERE c.id = c.survivor_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "75f5e2659a17c5f13faac240e7280be618e1abd2397c1466c64f810dd92c1ad5"
+}

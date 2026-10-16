@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM legacy.admin_users au\n           WHERE (EXISTS (SELECT 1 FROM legacy.reports_assigned_to_lnk l WHERE l.user_id = au.id)\n                  OR EXISTS (SELECT 1 FROM legacy.reports r\n                             WHERE r.handled_by IN (au.email, au.username, 'admin:' || au.id)))\n             AND NOT EXISTS (SELECT 1 FROM legacy.up_users u\n                             WHERE lower(btrim(u.email)) = lower(btrim(au.email)))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8140a37ca745d7f5b9f09a3b650ed59a6755a3ef7485bd7b95819f109bd5d28d"
+}

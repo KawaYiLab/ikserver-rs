@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_sessions (conversation_id, user_id, ai_user_id, context_epoch, context_from,\n                                    model_key, created_at)\n           SELECT nc.id, c.human_id, c.ai_user_id, greatest(coalesce(c.context_epoch, 0), 0),\n                  CASE WHEN coalesce(c.context_epoch, 0) > 0 THEN coalesce(\n                      (SELECT min(m.created_at) AT TIME ZONE $1 FROM legacy.ik_messages m\n                       WHERE m.conversation_id = c.id\n                         AND coalesce(m.generation_epoch, 0) >= c.context_epoch),\n                      $2) END,\n                  (SELECT nullif(btrim(am.key), '') FROM legacy.conversations_ai_model_lnk l\n                   JOIN legacy.ai_models am ON am.id = l.ai_model_id\n                   WHERE l.conversation_id = c.id ORDER BY l.id LIMIT 1),\n                  nc.created_at\n           FROM legacy.ik_conversations c\n           JOIN conversations nc ON nc.id = c.id AND nc.kind = 'ai'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "079c086479430b0eabe6b1a2de1fb79d96dcb6e18548b8734365ac743e4ba571"
+}

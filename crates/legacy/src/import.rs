@@ -69,6 +69,8 @@ pub async fn import(db: &PgPool, options: &ImportOptions) -> anyhow::Result<Impo
     steps::reactions::run(&mut tx, options, &mut report).await?;
     steps::economy::run(&mut tx, options, &mut report).await?;
     steps::catalog::run(&mut tx, options, &mut report).await?;
+    steps::messaging::run(&mut tx, options, &mut report).await?;
+    steps::notify::run(&mut tx, options, &mut report).await?;
     tx.commit().await?;
     Ok(report)
 }

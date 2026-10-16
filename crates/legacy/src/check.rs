@@ -43,6 +43,8 @@ pub async fn check(db: &PgPool) -> anyhow::Result<Vec<Finding>> {
     content(db, &mut out).await?;
     economy(db, &mut out).await?;
     catalog(db, &mut out).await?;
+    messaging(db, &mut out).await?;
+    notify(db, &mut out).await?;
     out.retain(|f| f.severity == Severity::Info || f.count > 0);
     Ok(out)
 }
@@ -358,6 +360,102 @@ async fn catalog(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
         Severity::Fixed,
         cosmetics,
         "没有可用图片的系统头像 / 名片不导入（装备着它们的账号随之卸下）",
+    ));
+    Ok(())
+}
+
+async fn messaging(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
+    let c = sqlx::query!(
+        r#"SELECT
+               (SELECT count(*) FROM legacy.conversations) AS "total!",
+               (SELECT count(*) FROM legacy.ik_conversations) AS "pairs!",
+               (SELECT count(*) FROM legacy.ik_conversations WHERE id <> survivor_id) AS "merged!",
+               (SELECT count(*) FROM legacy.ik_conversations WHERE is_ai) AS "ai!""#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "messaging.conversations_skipped",
+        Severity::Fixed,
+        c.total - c.pairs,
+        "不是恰好两个成员的会话（群聊、残缺的会话）不导入（群聊不实现，D-073）",
+    ));
+    out.push(Finding::new(
+        "messaging.conversations_merged",
+        Severity::Fixed,
+        c.merged,
+        "同一对用户的重复私聊合并成一条，消息并进去",
+    ));
+    out.push(Finding::new(
+        "messaging.ai_conversations",
+        Severity::Info,
+        c.ai,
+        "AI 会话（一方是 AI 账号），重置过的会话上下文从重置后开始（CTX-023）",
+    ));
+
+    let m = sqlx::query!(
+        r#"SELECT
+               count(*) FILTER (WHERE kind = 'image') AS "images!",
+               count(*) FILTER (WHERE char_length(coalesce(new_content, '')) = 0) AS "empty!",
+               count(*) FILTER (WHERE char_length(btrim(coalesce(content, ''))) > 4000) AS "long!"
+           FROM legacy.ik_messages"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "messaging.image_messages",
+        Severity::Fixed,
+        m.images,
+        "图片消息（不实现，D-021）改为正文里的图片地址；取不到图片时为「[图片]」",
+    ));
+    out.push(Finding::new(
+        "messaging.empty_messages",
+        Severity::Fixed,
+        m.empty,
+        "正文为空的消息不导入",
+    ));
+    out.push(Finding::new(
+        "messaging.body_truncated",
+        Severity::Fixed,
+        m.long,
+        "消息超过 4000 字，截断",
+    ));
+    Ok(())
+}
+
+async fn notify(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
+    let anonymous = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM legacy.notifications n
+           WHERE n.type IN ('comment', 'reply', 'mention')
+             AND (coalesce(n.bucket_key, '') LIKE 'anonymous:%'
+                  OR EXISTS (SELECT 1 FROM legacy.notifications_comment_lnk l
+                             JOIN legacy.comments c ON c.id = l.comment_id
+                             WHERE l.notification_id = n.id AND c.is_anonymous))"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "notifications.anonymous_as_system",
+        Severity::Fixed,
+        anonymous,
+        "匿名评论引起的通知改为系统通知（去掉发送者，防止暴露匿名者身份，D-032 / NOTIF-013）",
+    ));
+
+    let unmapped = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM legacy.admin_users au
+           WHERE (EXISTS (SELECT 1 FROM legacy.reports_assigned_to_lnk l WHERE l.user_id = au.id)
+                  OR EXISTS (SELECT 1 FROM legacy.reports r
+                             WHERE r.handled_by IN (au.email, au.username, 'admin:' || au.id)))
+             AND NOT EXISTS (SELECT 1 FROM legacy.up_users u
+                             WHERE lower(btrim(u.email)) = lower(btrim(au.email)))"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "reports.unmapped_admins",
+        Severity::Fixed,
+        unmapped,
+        "处理过举报的 Strapi 后台账号找不到同邮箱的论坛账号：这些举报的处理人 / 领取人留空",
     ));
     Ok(())
 }

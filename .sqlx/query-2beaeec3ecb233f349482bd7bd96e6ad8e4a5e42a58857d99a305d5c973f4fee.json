@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO conversation_members (conversation_id, user_id, peer_id, activity_at,\n                                             last_read_at, muted, pinned_at, left_at, created_at)\n           SELECT nc.id, m.user_id,\n                  CASE WHEN m.user_id = nc.user_low THEN nc.user_high ELSE nc.user_low END,\n                  max(coalesce(c.last_message_at, c.created_at) AT TIME ZONE $1),\n                  max(m.last_read_at AT TIME ZONE $1),\n                  bool_or(coalesce(m.muted, false)),\n                  max(coalesce(m.updated_at, m.created_at) AT TIME ZONE $1) FILTER (WHERE m.pinned),\n                  CASE WHEN bool_and(m.left_at IS NOT NULL) THEN max(m.left_at AT TIME ZONE $1) END,\n                  min(coalesce(m.created_at AT TIME ZONE $1, $2))\n           FROM legacy.ik_conversations c\n           JOIN conversations nc ON nc.id = c.survivor_id\n           JOIN legacy.ik_conversation_members m ON m.conversation_id = c.id\n           WHERE m.user_id IN (nc.user_low, nc.user_high)\n           GROUP BY nc.id, nc.user_low, nc.user_high, m.user_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2beaeec3ecb233f349482bd7bd96e6ad8e4a5e42a58857d99a305d5c973f4fee"
+}

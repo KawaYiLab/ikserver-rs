@@ -359,3 +359,70 @@ SELECT DISTINCT ON (r.related_type, r.related_id) r.related_type, r.related_id, 
 FROM legacy.ik_file_refs r
 WHERE r.field = 'image' AND r.related_type IN ('api::avatar.avatar', 'api::business-card.business-card')
 ORDER BY r.related_type, r.related_id, r."order", r.file_id;
+
+-- 私信成员（会话与账号都在链接表里）。
+CREATE VIEW legacy.ik_conversation_members AS
+SELECT m.*, cl.conversation_id, ul.user_id
+FROM legacy.conversation_members m
+JOIN LATERAL (SELECT l.conversation_id FROM legacy.conversation_members_conversation_lnk l
+              WHERE l.conversation_member_id = m.id ORDER BY l.id LIMIT 1) cl ON true
+JOIN LATERAL (SELECT l.user_id FROM legacy.conversation_members_user_lnk l
+              WHERE l.conversation_member_id = m.id ORDER BY l.id LIMIT 1) ul ON true
+WHERE cl.conversation_id IS NOT NULL AND ul.user_id IS NOT NULL;
+
+-- 私信会话：只导入恰好两个不同成员的一对一会话（群聊不实现，D-073）。一方是 AI 账号的是 AI 会话
+-- （kind = 'ai'，同一对可以有多条）；普通私聊同一对用户只留一条（survivor_id，最小的会话 id），
+-- 其余会话的消息并进去。
+CREATE VIEW legacy.ik_conversations AS
+WITH pairs AS (
+    SELECT c.id, c.context_epoch, c.last_message_at, c.created_at, c.updated_at,
+           min(m.user_id) AS user_low, max(m.user_id) AS user_high, count(DISTINCT m.user_id) AS members
+    FROM legacy.conversations c
+    JOIN legacy.ik_conversation_members m ON m.conversation_id = c.id
+    WHERE coalesce(c.kind, 'direct') = 'direct'
+    GROUP BY c.id, c.context_epoch, c.last_message_at, c.created_at, c.updated_at
+),
+flagged AS (
+    SELECT p.*,
+           coalesce(lo.is_ai_agent, false) AS low_ai,
+           coalesce(hi.is_ai_agent, false) AS high_ai
+    FROM pairs p
+    JOIN legacy.up_users lo ON lo.id = p.user_low
+    JOIN legacy.up_users hi ON hi.id = p.user_high
+    WHERE p.members = 2
+)
+SELECT
+    f.id, f.context_epoch, f.last_message_at, f.created_at, f.updated_at, f.user_low, f.user_high,
+    (f.low_ai <> f.high_ai) AS is_ai,
+    CASE WHEN f.low_ai AND NOT f.high_ai THEN f.user_low
+         WHEN f.high_ai AND NOT f.low_ai THEN f.user_high END AS ai_user_id,
+    CASE WHEN f.low_ai AND NOT f.high_ai THEN f.user_high
+         WHEN f.high_ai AND NOT f.low_ai THEN f.user_low END AS human_id,
+    CASE WHEN f.low_ai <> f.high_ai THEN f.id
+         ELSE min(f.id) FILTER (WHERE f.low_ai = f.high_ai)
+                  OVER (PARTITION BY f.user_low, f.user_high, (f.low_ai = f.high_ai)) END AS survivor_id
+FROM flagged f;
+
+-- 私信消息：会话换成存活的会话；图片消息（新系统不实现，D-021）把图片地址写进正文。
+CREATE VIEW legacy.ik_messages AS
+SELECT
+    msg.*,
+    c.survivor_id AS conversation_id,
+    c.is_ai,
+    (SELECT l.user_id FROM legacy.messages_sender_lnk l WHERE l.message_id = msg.id
+     ORDER BY l.id LIMIT 1) AS sender_id,
+    (SELECT l.inv_message_id FROM legacy.messages_reply_to_lnk l WHERE l.message_id = msg.id
+     ORDER BY l.id LIMIT 1) AS reply_to_legacy_id,
+    left(coalesce(
+        nullif(btrim(coalesce(msg.content, '')), ''),
+        (SELECT string_agg(legacy.ik_fix_hosts(f.url), E'\n' ORDER BY r."order", r.file_id)
+         FROM legacy.files_related_mph r
+         JOIN legacy.files f ON f.id = r.file_id
+         WHERE r.related_type = 'api::message.message' AND r.field = 'attachments'
+           AND r.related_id = msg.id AND f.url IS NOT NULL),
+        CASE WHEN msg.kind = 'image' THEN '[图片]' END
+    ), 4000) AS new_content
+FROM legacy.messages msg
+JOIN LATERAL (SELECT l.conversation_id FROM legacy.messages_conversation_lnk l
+              WHERE l.message_id = msg.id ORDER BY l.id LIMIT 1) ml ON true
+JOIN legacy.ik_conversations c ON c.id = ml.conversation_id;

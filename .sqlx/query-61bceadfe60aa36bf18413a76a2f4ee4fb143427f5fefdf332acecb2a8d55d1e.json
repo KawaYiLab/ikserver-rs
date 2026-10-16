@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n               count(*) FILTER (WHERE kind = 'image') AS \"images!\",\n               count(*) FILTER (WHERE char_length(coalesce(new_content, '')) = 0) AS \"empty!\",\n               count(*) FILTER (WHERE char_length(btrim(coalesce(content, ''))) > 4000) AS \"long!\"\n           FROM legacy.ik_messages",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "images!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "empty!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "long!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "61bceadfe60aa36bf18413a76a2f4ee4fb143427f5fefdf332acecb2a8d55d1e"
+}

@@ -1,0 +1,98 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, peer_id, activity_at, last_read_at, muted, pinned_at, left_at\n         FROM conversation_members WHERE conversation_id = 10 ORDER BY user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "peer_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "peer_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "activity_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "activity_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_read_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "last_read_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "muted",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "muted"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "pinned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "pinned_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "left_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "conversation_members",
+            "name": "left_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "4ff79876cef9be8a897fbedaea1cb672dfb13c90fe49d8fd010bee969e980615"
+}

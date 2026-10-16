@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM legacy.notifications n\n           WHERE n.type IN ('comment', 'reply', 'mention')\n             AND (coalesce(n.bucket_key, '') LIKE 'anonymous:%'\n                  OR EXISTS (SELECT 1 FROM legacy.notifications_comment_lnk l\n                             JOIN legacy.comments c ON c.id = l.comment_id\n                             WHERE l.notification_id = n.id AND c.is_anonymous))",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7b77d7e8abcf5b6ebe24a92929e08e8d692e3e08349eecfcfbd69e011531d3b0"
+}

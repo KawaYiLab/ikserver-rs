@@ -5,4 +5,6 @@ pub mod catalog;
 pub mod content;
 pub mod economy;
 pub mod media;
+pub mod messaging;
+pub mod notify;
 pub mod reactions;
