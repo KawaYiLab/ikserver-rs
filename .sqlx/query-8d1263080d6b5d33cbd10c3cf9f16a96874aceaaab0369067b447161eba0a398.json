@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_passwords (user_id, hash, updated_at)\n           SELECT u.id, u.password, now()\n           FROM legacy.ik_users u\n           WHERE u.status IN ('active', 'blocked')\n             AND u.password ~ '^\\$2[aby]\\$\\d{2}\\$'\n             AND u.provider IS DISTINCT FROM 'mihoyo'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "8d1263080d6b5d33cbd10c3cf9f16a96874aceaaab0369067b447161eba0a398"
+}

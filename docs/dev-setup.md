@@ -103,6 +103,18 @@ host  all  <开发账号>  <你的 IP 段>  scram-sha-256
 
 改完执行 `SELECT pg_reload_conf();` 生效。CI 用自带的 PostgreSQL 服务容器，不受影响。
 
+### 旧数据导入（crates/legacy）
+
+导入语句在编译期对照旧 Strapi 的表结构检查，所以开发库除了 `migrate`，还要加载一次旧表结构和辅助视图
+（只建空表，不影响新表）：
+
+```powershell
+psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -f crates/legacy/sql/strapi-schema.sql -f crates/legacy/sql/helpers.sql
+```
+
+改了 `helpers.sql` 之后重新执行第二个文件即可（视图是 `CREATE OR REPLACE`）。操作手册见
+[`crates/legacy/README.md`](../crates/legacy/README.md)。
+
 ### 搜索引擎测试
 
 `crates/search/tests` 里搜索引擎相关的用例需要一个 Meilisearch 实例（官方发布页下载单个可执行文件即可）：

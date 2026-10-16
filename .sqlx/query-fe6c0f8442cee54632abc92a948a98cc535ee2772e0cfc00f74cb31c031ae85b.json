@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_profiles (user_id, bio, hidden, updated_at)\n           SELECT p.user_id, left(btrim(p.bio_text), 100), p.hidden, $1\n           FROM legacy.ik_profiles p\n           WHERE btrim(p.bio_text) <> '' OR p.hidden",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe6c0f8442cee54632abc92a948a98cc535ee2772e0cfc00f74cb31c031ae85b"
+}

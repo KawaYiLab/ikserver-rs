@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username, email, status, role, is_ai_agent, exam_passed_at,\n                              legacy_id, level, created_at, updated_at)\n           SELECT u.id, u.username, u.email, u.status,\n                  CASE WHEN u.is_admin THEN 'admin' ELSE 'user' END,\n                  coalesce(u.is_ai_agent, false),\n                  CASE WHEN u.exam_passed THEN coalesce(u.exam_passed_at AT TIME ZONE $1, $2) END,\n                  coalesce(ua.author_document_id, u.document_id),\n                  least(greatest(coalesce(u.level, 0), 0), 7),\n                  coalesce(u.created_at AT TIME ZONE $1, $2),\n                  coalesce(u.updated_at AT TIME ZONE $1, u.created_at AT TIME ZONE $1, $2)\n           FROM legacy.ik_users u\n           LEFT JOIN legacy.ik_user_authors ua ON ua.user_id = u.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a7e9516b16c8d8b71f8c01d8b38e77d7659e25dd2ec928a63be8ef88f33677dc"
+}

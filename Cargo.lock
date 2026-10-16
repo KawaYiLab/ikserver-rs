@@ -2639,6 +2639,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-legacy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "ik-media"
 version = "0.1.0"
 dependencies = [
@@ -2867,6 +2880,7 @@ dependencies = [
  "ik-exam",
  "ik-feed",
  "ik-kernel",
+ "ik-legacy",
  "ik-media",
  "ik-messaging",
  "ik-mihoyo",

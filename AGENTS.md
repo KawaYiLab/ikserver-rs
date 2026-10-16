@@ -45,6 +45,7 @@ crates/
              AI 评论回复（@ 触发、按帖子与评论者的记忆、沉浸守卫，经 comments 的钩子与 interop）、
              12 个只读论坛工具与工具调用循环、工作流时间线与多气泡分段
   admin/     管理后台的跨域部分：账号管理、仪表盘、搜索索引运维、审计日志查看（各域的后台接口在各自 crate）
+  legacy/    一次性数据迁移：旧 Strapi 库（legacy schema）→ 新表（ADR 0003；与 migrations/ 一样是模块边界的例外）
   server/    二进制入口：组装路由、中间件、任务、CLI
 docs/
   architecture.md     架构与模块边界

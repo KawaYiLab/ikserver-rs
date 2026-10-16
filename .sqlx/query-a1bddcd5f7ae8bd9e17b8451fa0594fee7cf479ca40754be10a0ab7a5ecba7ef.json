@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM (\n               SELECT email FROM legacy.ik_users WHERE email IS NOT NULL\n               GROUP BY email HAVING count(*) > 1\n           ) d",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a1bddcd5f7ae8bd9e17b8451fa0594fee7cf479ca40754be10a0ab7a5ecba7ef"
+}

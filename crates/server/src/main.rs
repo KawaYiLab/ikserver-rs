@@ -40,6 +40,21 @@ enum Command {
     /// AI 助手配置运维
     #[command(subcommand)]
     Ai(AiCommand),
+    /// 从旧 Strapi 库一次性迁移数据（先把旧库恢复到本库的 legacy schema，见 crates/legacy/README.md）
+    #[command(subcommand)]
+    Legacy(LegacyCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum LegacyCommand {
+    /// 只读预检：列出导入会拒绝的问题、会自动修正的数据和时区判断依据
+    Check,
+    /// 在一个事务里导入全部数据；目标库必须是刚迁移好的空库
+    Import {
+        /// 旧库时间列所用的时区（旧服务进程的时区），例如 Asia/Shanghai 或 UTC；没有默认值
+        #[arg(long)]
+        legacy_timezone: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -171,6 +186,7 @@ async fn main() -> anyhow::Result<()> {
             );
             Ok(())
         }
+        Command::Legacy(cmd) => legacy_command(cmd).await,
         Command::Search(SearchCommand::Reindex) => {
             let state = connect_for_cli().await?;
             state.search.reindex().await?;
@@ -204,6 +220,42 @@ async fn exam_command(cmd: ExamCommand) -> anyhow::Result<()> {
                 imported += 1;
             }
             tracing::info!(imported, "题目已导入");
+        }
+    }
+    Ok(())
+}
+
+async fn legacy_command(cmd: LegacyCommand) -> anyhow::Result<()> {
+    let _ = dotenvy::dotenv();
+    let config = Config::load()?;
+    init_tracing(config.log.format);
+    let db = ik_kernel::db::connect(&config.database)
+        .await
+        .context("连接数据库失败")?;
+    let mut out = std::io::stdout().lock();
+    match cmd {
+        LegacyCommand::Check => {
+            for finding in ik_legacy::check(&db).await? {
+                writeln!(
+                    out,
+                    "[{:?}] {} = {}  {}",
+                    finding.severity, finding.key, finding.count, finding.message
+                )?;
+            }
+        }
+        LegacyCommand::Import { legacy_timezone } => {
+            let options = ik_legacy::ImportOptions {
+                legacy_timezone,
+                now: chrono::Utc::now(),
+            };
+            let report = ik_legacy::import(&db, &options).await?;
+            for step in &report.steps {
+                writeln!(out, "{:<24} {}", step.step, step.rows)?;
+            }
+            writeln!(
+                out,
+                "导入完成。接着运行 `ik-server search reindex` 重建搜索索引。"
+            )?;
         }
     }
     Ok(())

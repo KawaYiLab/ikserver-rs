@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO users (id, username) VALUES (99, 'already')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "35eaca40c5c3f372c27a89425bc8e0e850dd8c0aaac4a07483ab1a025a44466a"
+}

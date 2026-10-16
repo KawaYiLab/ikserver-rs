@@ -83,6 +83,9 @@ jobs:
         run: cargo run -q -p ik-server --locked -- migrate
         env:
           SQLX_OFFLINE: "true"
+      # 旧 Strapi 的表结构与导入工具的辅助视图（crates/legacy，ADR 0003）：导入语句的编译期检查要用。
+      - name: Load legacy schema
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -q -f crates/legacy/sql/strapi-schema.sql -f crates/legacy/sql/helpers.sql
       # .sqlx/ 必须与迁移后的真实库一致；忘了 `cargo sqlx prepare` 会在这里失败。
       - name: Check .sqlx offline cache
         run: cargo sqlx prepare --workspace --check -- --all-targets
