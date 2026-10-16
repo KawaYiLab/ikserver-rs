@@ -77,8 +77,12 @@ jobs:
           curl -sS -o /dev/null -w "moto %{http_code}\n" http://localhost:9000
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --version ${{ env.SQLX_VERSION }} --no-default-features --features postgres --locked
+      # 用服务自己的 migrate：除了 migrations/，还会建好 graphile_worker 的表（测试里有查询
+      # 直接读 graphile_worker.jobs，编译期检查需要它）。此时库还是空的，所以用 .sqlx 缓存离线编译。
       - name: Apply migrations
-        run: cargo sqlx migrate run
+        run: cargo run -q -p ik-server --locked -- migrate
+        env:
+          SQLX_OFFLINE: "true"
       # .sqlx/ 必须与迁移后的真实库一致；忘了 `cargo sqlx prepare` 会在这里失败。
       - name: Check .sqlx offline cache
         run: cargo sqlx prepare --workspace --check -- --all-targets
