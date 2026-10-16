@@ -9,6 +9,7 @@
 
 mod check;
 mod import;
+pub mod media;
 mod steps;
 
 pub use check::{Finding, Severity, check};

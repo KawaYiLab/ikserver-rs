@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_tags (post_id, tag_id, position)\n           SELECT x.post_id, x.tag_id, (x.rn - 1)::smallint\n           FROM (\n               SELECT d.post_id, d.tag_id,\n                      row_number() OVER (PARTITION BY d.post_id ORDER BY d.ord, d.tag_id) AS rn\n               FROM (\n                   SELECT DISTINCT ON (p.post_id, t.survivor_id)\n                          p.post_id, t.survivor_id AS tag_id, l.tag_ord AS ord\n                   FROM legacy.ik_posts p\n                   JOIN posts np ON np.id = p.post_id\n                   JOIN legacy.articles_tags_lnk l ON l.article_id = p.main_row\n                   JOIN legacy.ik_tags t ON t.id = l.tag_id\n                   ORDER BY p.post_id, t.survivor_id, l.tag_ord\n               ) d\n           ) x\n           WHERE x.rn <= 5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "d841eb8924fed58c4d4db2e43c53dccb01c5d0f7933b03d56d1dc7adf8bb33bc"
+}

@@ -49,6 +49,18 @@ enum Command {
 enum LegacyCommand {
     /// 只读预检：列出导入会拒绝的问题、会自动修正的数据和时区判断依据
     Check,
+    /// 预先读取旧文件（对象存储）算哈希与真实类型，可续跑；文件不搬家，新旧系统用同一个桶
+    Media {
+        /// 旧文件 URL 的公开前缀，去掉后剩下对象 key；可重复。默认取 storage.public_base_url
+        #[arg(long = "url-prefix")]
+        url_prefixes: Vec<String>,
+        /// 同时读取的文件数
+        #[arg(long, default_value_t = 8)]
+        concurrency: usize,
+        /// 重新读取之前失败的文件
+        #[arg(long)]
+        retry_failed: bool,
+    },
     /// 在一个事务里导入全部数据；目标库必须是刚迁移好的空库
     Import {
         /// 旧库时间列所用的时区（旧服务进程的时区），例如 Asia/Shanghai 或 UTC；没有默认值
@@ -242,6 +254,28 @@ async fn legacy_command(cmd: LegacyCommand) -> anyhow::Result<()> {
                     finding.severity, finding.key, finding.count, finding.message
                 )?;
             }
+        }
+        LegacyCommand::Media {
+            mut url_prefixes,
+            concurrency,
+            retry_failed,
+        } => {
+            if url_prefixes.is_empty() {
+                let base = config.storage.public_base_url.trim_end_matches('/');
+                anyhow::ensure!(
+                    !base.is_empty(),
+                    "没有配置 storage.public_base_url，请用 --url-prefix 指定旧文件 URL 的前缀"
+                );
+                url_prefixes.push(format!("{base}/"));
+            }
+            let storage = ik_media::storage::Storage::new(&config.storage);
+            let options = ik_legacy::media::MediaOptions {
+                url_prefixes,
+                concurrency,
+                retry_failed,
+            };
+            let report = ik_legacy::media::fetch_digests(&db, &storage, &options).await?;
+            writeln!(out, "读取成功 {}，失败 {}", report.fetched, report.failed)?;
         }
         LegacyCommand::Import { legacy_timezone } => {
             let options = ik_legacy::ImportOptions {

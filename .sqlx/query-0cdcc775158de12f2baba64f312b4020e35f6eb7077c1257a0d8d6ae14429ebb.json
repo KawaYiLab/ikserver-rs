@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO media_files (id, object_key, mime, size_bytes, width, height, sha256, receipt,\n                                    name, created_at, thumbhash)\n           SELECT f.id, d.object_key, d.mime, d.size_bytes,\n                  CASE WHEN f.width > 0 THEN f.width END,\n                  CASE WHEN f.height > 0 THEN f.height END,\n                  d.sha256, 'legacy:' || f.id, left(coalesce(f.name, ''), 255),\n                  coalesce(f.created_at AT TIME ZONE $1, $2), d.thumbhash\n           FROM legacy.files f\n           JOIN legacy.ik_media_digests d ON d.file_id = f.id AND d.error IS NULL\n           ON CONFLICT (object_key) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0cdcc775158de12f2baba64f312b4020e35f6eb7077c1257a0d8d6ae14429ebb"
+}

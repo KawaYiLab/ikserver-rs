@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_blocks (blocker_id, blocked_id, created_at)\n           SELECT DISTINCT ON (br.user_id, bd.user_id) br.user_id, bd.user_id,\n                  coalesce(b.created_at AT TIME ZONE $1, $2)\n           FROM legacy.user_blocks b\n           JOIN legacy.user_blocks_blocker_lnk br ON br.user_block_id = b.id\n           JOIN legacy.user_blocks_blocked_user_lnk bd ON bd.user_block_id = b.id\n           JOIN users x ON x.id = br.user_id\n           JOIN users y ON y.id = bd.user_id\n           WHERE br.user_id <> bd.user_id\n           ORDER BY br.user_id, bd.user_id, b.created_at, b.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74b47043184a67f060059d9938ef76ad028922e9c9921c70270ab1e70133311f"
+}

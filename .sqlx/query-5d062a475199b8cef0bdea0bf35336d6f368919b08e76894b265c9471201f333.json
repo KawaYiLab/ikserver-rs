@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO follows (follower_id, followee_id, created_at)\n           SELECT DISTINCT ON (fr.user_id, au.user_id) fr.user_id, au.user_id,\n                  coalesce(f.created_at AT TIME ZONE $1, $2)\n           FROM legacy.follows f\n           JOIN legacy.follows_follower_lnk fr ON fr.follow_id = f.id\n           JOIN legacy.follows_following_lnk fg ON fg.follow_id = f.id\n           JOIN legacy.ik_author_users au ON au.author_id = fg.author_id\n           JOIN users a ON a.id = fr.user_id\n           JOIN users b ON b.id = au.user_id\n           WHERE fr.user_id <> au.user_id\n           ORDER BY fr.user_id, au.user_id, f.created_at, f.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5d062a475199b8cef0bdea0bf35336d6f368919b08e76894b265c9471201f333"
+}

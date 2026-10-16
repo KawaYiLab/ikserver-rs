@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO categories (id, slug, name, description, sort_order, is_active, admin_only,\n                                   allow_comment_accept, legacy_id, created_at, updated_at)\n           SELECT c.id, c.new_slug, c.new_name, coalesce(c.description, ''), coalesce(c.\"order\", 0),\n                  coalesce(c.is_active, true), coalesce(c.admin_only, false),\n                  coalesce(c.allow_comment_accept, false), c.document_id,\n                  coalesce(c.created_at AT TIME ZONE $1, $2),\n                  coalesce(c.updated_at AT TIME ZONE $1, c.created_at AT TIME ZONE $1, $2)\n           FROM legacy.ik_categories c",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c76adb43b91f86c2597f9c746a4d4145970651f0017906785aa2f2cdfbbabe5f"
+}

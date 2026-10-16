@@ -1,0 +1,165 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, post_id, parent_id, author_id, floor, char_length(body) AS \"len!\",\n                  is_anonymous, anonymous_seed, accepted_at, accepted_by, hidden_at, image_ids, legacy_id\n           FROM comments ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "parent_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "parent_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "floor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "floor"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "len!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "is_anonymous"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "anonymous_seed",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "anonymous_seed"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "accepted_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "accepted_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "accepted_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "accepted_by"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "hidden_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "hidden_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "image_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "image_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "legacy_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "legacy_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      true,
+      null,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "4be84bd41392b567937b89e266d02e983f5c8f2864cfd5f3047c852dc8b8c06a"
+}

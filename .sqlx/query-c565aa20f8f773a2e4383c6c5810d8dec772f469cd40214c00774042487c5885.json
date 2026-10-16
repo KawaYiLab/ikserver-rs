@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pinned_post_ids FROM user_profiles WHERE user_id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pinned_post_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "user_profiles",
+            "name": "pinned_post_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c565aa20f8f773a2e4383c6c5810d8dec772f469cd40214c00774042487c5885"
+}

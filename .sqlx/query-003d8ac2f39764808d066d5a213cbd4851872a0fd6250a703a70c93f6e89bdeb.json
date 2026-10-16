@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_profiles (user_id, pinned_post_ids, updated_at)\n           SELECT x.user_id, x.ids, $1\n           FROM (\n               SELECT pr.user_id,\n                      (array_agg(np.id ORDER BY d.ord))[1:6] AS ids\n               FROM legacy.ik_profiles pr\n               CROSS JOIN LATERAL jsonb_array_elements_text(pr.pinned_document_ids)\n                    WITH ORDINALITY AS d(document_id, ord)\n               JOIN posts np ON np.legacy_id = d.document_id AND np.author_id = pr.user_id\n               WHERE pr.pinned_document_ids IS NOT NULL\n               GROUP BY pr.user_id\n           ) x\n           ON CONFLICT (user_id) DO UPDATE SET pinned_post_ids = EXCLUDED.pinned_post_ids",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "003d8ac2f39764808d066d5a213cbd4851872a0fd6250a703a70c93f6e89bdeb"
+}

@@ -112,7 +112,7 @@ host  all  <开发账号>  <你的 IP 段>  scram-sha-256
 psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -f crates/legacy/sql/strapi-schema.sql -f crates/legacy/sql/helpers.sql
 ```
 
-改了 `helpers.sql` 之后重新执行第二个文件即可（视图是 `CREATE OR REPLACE`）。操作手册见
+改了 `helpers.sql` 之后重新执行第二个文件即可（它会先删掉再重建全部 `legacy.ik_*` 视图）。操作手册见
 [`crates/legacy/README.md`](../crates/legacy/README.md)。
 
 ### 搜索引擎测试

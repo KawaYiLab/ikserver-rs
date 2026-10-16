@@ -20,20 +20,24 @@ psql -d ik_legacy_tmp -c 'ALTER SCHEMA public RENAME TO legacy' -c 'CREATE SCHEM
 pg_dump --no-owner --no-privileges -n legacy -d ik_legacy_tmp | psql -v ON_ERROR_STOP=1 -d "$DATABASE_URL"
 dropdb ik_legacy_tmp
 
-# 3. 预检（只读）。[Blocking] 必须先在旧库处理；[Fixed] 会自动修正并计数；[Info] 用来判断时区
+# 3. 读取旧文件的哈希与真实类型（只读对象存储，可续跑；可以在停机前提前跑，停机后再跑一次补新文件）
+#    新系统的 storage 配置必须指向旧系统同一个桶与 CDN，文件不搬家
+ik-server legacy media --url-prefix https://im.tiwat.cn/ --url-prefix https://image.tiwat.cn/
+
+# 4. 预检（只读）。[Blocking] 必须先处理；[Fixed] 会自动修正并计数；[Info] 用来判断时区
 ik-server legacy check
 
-# 4. 导入（一个事务）。时区填旧服务进程所在的时区：在旧机器上看 `date`，或对照预检里的最新时间
+# 5. 导入（一个事务）。时区填旧服务进程所在的时区：在旧机器上看 `date`，或对照预检里的最新时间
 ik-server legacy import --legacy-timezone Asia/Shanghai
 
-# 5. 重建搜索索引
+# 6. 重建搜索索引
 ik-server search reindex
 
-# 6. 验收通过后删掉旧数据
+# 7. 验收通过后删掉旧数据
 psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 ```
 
-导入失败时整个事务回滚，新库保持为空，修正后直接重跑第 4 步。
+导入失败时整个事务回滚，新库保持为空，修正后直接重跑第 5 步。
 
 ## 映射规则
 
@@ -53,6 +57,43 @@ psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 | `password` | `user_passwords.hash` | 只迁 bcrypt 哈希，且仅限本地注册、未注销的账号（米游社首登的随机密码不算） |
 | 作者 `bio`（blocks 富文本） | `user_profiles.bio` | 取全部文字、段落换行，截到 100 字 |
 | `profile_hidden` | `user_profiles.hidden` | 原样 |
+
+### 媒体（media_files、media_uploaders、头像）
+
+| 旧 | 新 | 规则 |
+| --- | --- | --- |
+| `files.url` | `object_key` | 去掉公开前缀（`--url-prefix`）后的路径；文件原地不动 |
+| 文件内容 | `sha256`、`mime`、`thumbhash` | `legacy media` 读取对象算出（嗅探真实类型，只收图片、30 MB 以内）；读取失败的文件不导入，引用它的封面 / 配图 / 头像随之去掉 |
+| — | `receipt` | `legacy:<id>`（收据只用于新上传的重试幂等） |
+| `files_uploaders_lnk` | `media_uploaders` | 我的图库 |
+| 作者 `avatar` | `users.avatar_media_id` | 自定义头像 |
+
+### 内容（categories、tags、posts、post_drafts、post_tags、comments）
+
+| 旧 | 新 | 规则 |
+| --- | --- | --- |
+| 分区 `slug` / `name` | 同名 | slug 不合规改为 `c-<id>`，名称截到 30 字 |
+| 标签 | `tags` | slug 相同的合并到 id 最小的那个，帖子上的标签随之改指 |
+| 文章草稿行 + 发布行 | 一条 `posts` | 帖子 id 取该文档最小的行 id；有发布行 → `published`、内容取发布行，否则 `draft` |
+| 草稿行（与发布行不同时） | `post_drafts` | 已发布帖子的待发布修改 |
+| `title` / `text` | `title` / `body` | 截到 50 / 16000 字；正文里的 `image.tiwat.cn` 改为 `im.tiwat.cn`（CDN-001） |
+| `externalVideos` | `external_videos` | 只留第一个 |
+| `cover` | `cover_ids` | 只认读取成功的文件，最多 40 张 |
+| `isHidden` | `hidden_at` | `true` → 隐藏（时间取更新时间），`NULL` 视为可见（D-012） |
+| `bumpedAt` | `bumped_at` | 缺失时用发布时间（POST-061） |
+| `anonymousSeed` | 同名 | 匿名帖缺 seed 时由 documentId 派生（稳定） |
+| `blocks`（动态区块） | — | 新系统没有这个字段，不导入（预检里报数量） |
+| 评论 | `comments` | 楼层按时间编号；回复的回复挂到顶层评论下（CMT-025）；置顶、采纳只留在顶层；截到 2000 字；所在帖子或作者不存在的不导入 |
+| `acceptedCommentDocumentId` | `accepted_comment_id` | 只认同一帖子下的顶层评论 |
+| 作者 `profilePinnedArticles` | `user_profiles.pinned_post_ids` | documentId 换成帖子 id，只留本人仍存在的帖子，最多 6 个 |
+| 作者没有账号的帖子 | — | 不导入（连同评论与互动） |
+
+### 互动与社交
+
+点赞（帖子 / 评论）、收藏、投币、阅读记录、关注、拉黑：关系从 `*_lnk` 链接表取，指向帖子的按文档换成帖子 id；
+同一对象重复的记录只留最早的；对象或账号不存在、关注 / 拉黑自己的不导入。投币固定 1 枚、留言截到 100 字；
+阅读记录有就算已读（`isRead` 不参与，READ-001）；关注对象从作者换成作者的账号。
+帖子的点赞、收藏、投币、评论数和评论的点赞数按导入的行重新计算（评论数含回复与被隐藏的评论）。
 
 ## 重新生成旧表结构
 

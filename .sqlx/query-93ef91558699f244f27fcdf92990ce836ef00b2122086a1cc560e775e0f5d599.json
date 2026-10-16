@@ -1,0 +1,242 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, author_id, category_id, status, title, body, external_videos, is_anonymous,\n                  anonymous_seed, published_at, first_published_at, bumped_at, pinned_at, pinned_by,\n                  hidden_at, view_count, legacy_id, cover_ids, accepted_comment_id\n           FROM posts ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "category_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "category_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "external_videos",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "external_videos"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "is_anonymous"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "anonymous_seed",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "anonymous_seed"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "first_published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "first_published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "bumped_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "bumped_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "pinned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "pinned_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "pinned_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "pinned_by"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "hidden_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_at"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "view_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "view_count"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "legacy_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "legacy_id"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "cover_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "cover_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "accepted_comment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "accepted_comment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "93ef91558699f244f27fcdf92990ce836ef00b2122086a1cc560e775e0f5d599"
+}

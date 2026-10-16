@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM legacy.ik_categories\n           WHERE new_slug IS DISTINCT FROM slug OR new_name IS DISTINCT FROM name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0353dafc4caa71225c8f3037883570221123f4148b4d981ecc9e15914b044fc6"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_drafts (post_id, title, body, editor_state, external_videos, category_id,\n                                    tag_ids, cover_ids, updated_at)\n           SELECT p.post_id,\n                  coalesce(nullif(left(btrim(coalesce(d.title, '')), 50), ''), '无标题'),\n                  left(legacy.ik_fix_hosts(d.text), 16000),\n                  d.editor_state,\n                  CASE WHEN jsonb_typeof(d.external_videos) = 'array'\n                            AND jsonb_array_length(d.external_videos) > 0\n                       THEN jsonb_build_array(d.external_videos -> 0) ELSE '[]'::jsonb END,\n                  (SELECT cat.id FROM legacy.articles_category_lnk l\n                   JOIN categories cat ON cat.id = l.category_id\n                   WHERE l.article_id = d.id ORDER BY l.id LIMIT 1),\n                  coalesce((SELECT array_agg(x.tag_id ORDER BY x.ord, x.tag_id)\n                            FROM (SELECT y.tag_id, y.ord\n                                  FROM (SELECT DISTINCT ON (t.survivor_id) t.survivor_id AS tag_id,\n                                               l.tag_ord AS ord\n                                        FROM legacy.articles_tags_lnk l\n                                        JOIN legacy.ik_tags t ON t.id = l.tag_id\n                                        WHERE l.article_id = d.id\n                                        ORDER BY t.survivor_id, l.tag_ord) y\n                                  ORDER BY y.ord, y.tag_id LIMIT 5) x), '{}'),\n                  coalesce((SELECT array_agg(c.file_id ORDER BY c.\"order\", c.file_id)\n                            FROM (SELECT r.file_id, r.\"order\" FROM legacy.ik_file_refs r\n                                  WHERE r.related_type = 'api::article.article' AND r.field = 'cover'\n                                    AND r.related_id = d.id\n                                  ORDER BY r.\"order\", r.file_id LIMIT 40) c), '{}'),\n                  coalesce(d.updated_at AT TIME ZONE $1, $2)\n           FROM legacy.ik_posts p\n           JOIN legacy.articles d ON d.id = p.pending_row\n           JOIN posts np ON np.id = p.post_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebe9af29d6b2a248301f45ce1e95d43671a6bf575c88de0b02791219b9799ef5"
+}

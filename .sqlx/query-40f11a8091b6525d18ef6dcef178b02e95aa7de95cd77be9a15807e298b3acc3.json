@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_denny_gifts (post_id, giver_id, amount, message, created_at)\n           SELECT DISTINCT ON (pr.post_id, u.user_id) pr.post_id, u.user_id, 1,\n                  left(coalesce(g.message, ''), 100),\n                  coalesce(g.created_at AT TIME ZONE $1, $2)\n           FROM legacy.denny_givens g\n           JOIN legacy.denny_givens_article_lnk a ON a.denny_given_id = g.id\n           JOIN legacy.ik_post_rows pr ON pr.row_id = a.article_id\n           JOIN legacy.denny_givens_user_lnk u ON u.denny_given_id = g.id\n           JOIN posts p ON p.id = pr.post_id\n           JOIN users x ON x.id = u.user_id\n           ORDER BY pr.post_id, u.user_id, g.created_at, g.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "40f11a8091b6525d18ef6dcef178b02e95aa7de95cd77be9a15807e298b3acc3"
+}

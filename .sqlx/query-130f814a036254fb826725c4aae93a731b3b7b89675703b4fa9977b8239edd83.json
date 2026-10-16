@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tags (id, name, slug, is_blocked, legacy_id, created_at)\n           SELECT t.id, t.new_name, t.new_slug, coalesce(t.is_blocked, false), t.document_id,\n                  coalesce(t.created_at AT TIME ZONE $1, $2)\n           FROM legacy.ik_tags t\n           WHERE t.id = t.survivor_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "130f814a036254fb826725c4aae93a731b3b7b89675703b4fa9977b8239edd83"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE comments c SET\n               like_count = (SELECT count(*) FROM comment_likes l WHERE l.comment_id = c.id)::int",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1c1eb71e370be9d98cb4587e65e76bf8a1747a9264393f25234125e8f7e2cf76"
+}

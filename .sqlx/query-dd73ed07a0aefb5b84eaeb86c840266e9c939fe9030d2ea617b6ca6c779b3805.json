@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO legacy.ik_media_digests\n                 (file_id, object_key, sha256, mime, size_bytes, thumbhash, error, fetched_at)\n             VALUES ($1, $2, $3, $4, $5, $6, $7, now())\n             ON CONFLICT (file_id) DO UPDATE SET\n                 object_key = EXCLUDED.object_key, sha256 = EXCLUDED.sha256, mime = EXCLUDED.mime,\n                 size_bytes = EXCLUDED.size_bytes, thumbhash = EXCLUDED.thumbhash,\n                 error = EXCLUDED.error, fetched_at = EXCLUDED.fetched_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd73ed07a0aefb5b84eaeb86c840266e9c939fe9030d2ea617b6ca6c779b3805"
+}

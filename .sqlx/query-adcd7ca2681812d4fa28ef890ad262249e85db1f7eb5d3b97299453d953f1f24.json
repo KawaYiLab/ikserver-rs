@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_likes (post_id, user_id, created_at)\n           SELECT DISTINCT ON (pr.post_id, u.user_id) pr.post_id, u.user_id,\n                  coalesce(k.created_at AT TIME ZONE $1, $2)\n           FROM legacy.likes k\n           JOIN legacy.likes_article_lnk a ON a.like_id = k.id\n           JOIN legacy.ik_post_rows pr ON pr.row_id = a.article_id\n           JOIN legacy.likes_user_lnk u ON u.like_id = k.id\n           JOIN posts p ON p.id = pr.post_id\n           JOIN users x ON x.id = u.user_id\n           WHERE NOT EXISTS (SELECT 1 FROM legacy.likes_comment_lnk c WHERE c.like_id = k.id)\n           ORDER BY pr.post_id, u.user_id, k.created_at, k.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "adcd7ca2681812d4fa28ef890ad262249e85db1f7eb5d3b97299453d953f1f24"
+}

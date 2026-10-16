@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT file_id, object_key, sha256, mime, size_bytes, error\n         FROM legacy.ik_media_digests ORDER BY file_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "file_id",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "legacy.ik_media_digests",
+            "name": "file_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "object_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "legacy.ik_media_digests",
+            "name": "object_key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "legacy.ik_media_digests",
+            "name": "sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "mime",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "legacy.ik_media_digests",
+            "name": "mime"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "size_bytes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "legacy.ik_media_digests",
+            "name": "size_bytes"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "legacy.ik_media_digests",
+            "name": "error"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "67f38df02a9fc845b9b2475b26179c729fda43ac94ce9fc1767d62cb0a2c7a6b"
+}

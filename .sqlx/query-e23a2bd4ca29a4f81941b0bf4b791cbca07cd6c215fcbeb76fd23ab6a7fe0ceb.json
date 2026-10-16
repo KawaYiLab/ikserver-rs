@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT\n               count(*) AS \"posts!\",\n               count(*) FILTER (WHERE author_id IS NULL) AS \"no_author!\",\n               count(*) FILTER (WHERE char_length(btrim(coalesce(title, ''))) > 50) AS \"long_title!\",\n               count(*) FILTER (WHERE char_length(text) > 16000) AS \"long_body!\",\n               count(*) FILTER (WHERE is_hidden IS NULL) AS \"hidden_null!\",\n               count(*) FILTER (WHERE jsonb_typeof(external_videos) = 'array'\n                                  AND jsonb_array_length(external_videos) > 1) AS \"extra_videos!\"\n           FROM legacy.ik_posts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "posts!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "no_author!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "long_title!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "long_body!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "hidden_null!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "extra_videos!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e23a2bd4ca29a4f81941b0bf4b791cbca07cd6c215fcbeb76fd23ab6a7fe0ceb"
+}

@@ -2644,8 +2644,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "futures-util",
+ "ik-kernel",
+ "ik-media",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "sqlx",
  "tokio",
  "tracing",

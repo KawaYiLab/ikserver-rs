@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_favorites (post_id, user_id, created_at)\n           SELECT DISTINCT ON (pr.post_id, u.user_id) pr.post_id, u.user_id,\n                  coalesce(f.created_at AT TIME ZONE $1, $2)\n           FROM legacy.favorites f\n           JOIN legacy.favorites_article_lnk a ON a.favorite_id = f.id\n           JOIN legacy.ik_post_rows pr ON pr.row_id = a.article_id\n           JOIN legacy.favorites_user_lnk u ON u.favorite_id = f.id\n           JOIN posts p ON p.id = pr.post_id\n           JOIN users x ON x.id = u.user_id\n           ORDER BY pr.post_id, u.user_id, f.created_at, f.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9e8d1fa4434802da2a7332f28bd9e4c39a2ff5badb07ee463d764d2a8706515a"
+}

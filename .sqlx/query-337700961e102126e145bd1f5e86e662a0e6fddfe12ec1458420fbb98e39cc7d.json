@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO media_uploaders (media_id, user_id, created_at)\n           SELECT DISTINCT ON (m.id, u.id) m.id, u.id, m.created_at\n           FROM legacy.files_uploaders_lnk l\n           JOIN media_files m ON m.id = l.file_id\n           JOIN users u ON u.id = l.user_id\n           ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "337700961e102126e145bd1f5e86e662a0e6fddfe12ec1458420fbb98e39cc7d"
+}

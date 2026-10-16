@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_reads (user_id, post_id, created_at)\n           SELECT DISTINCT ON (u.user_id, pr.post_id) u.user_id, pr.post_id,\n                  coalesce(r.created_at AT TIME ZONE $1, $2)\n           FROM legacy.article_reads r\n           JOIN legacy.article_reads_article_lnk a ON a.article_read_id = r.id\n           JOIN legacy.ik_post_rows pr ON pr.row_id = a.article_id\n           JOIN legacy.article_reads_user_lnk u ON u.article_read_id = r.id\n           JOIN posts p ON p.id = pr.post_id\n           JOIN users x ON x.id = u.user_id\n           ORDER BY u.user_id, pr.post_id, r.created_at, r.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d770ae0f17458140d8050fa7e4018c037920812faa990a69abc0a85ef9926db7"
+}

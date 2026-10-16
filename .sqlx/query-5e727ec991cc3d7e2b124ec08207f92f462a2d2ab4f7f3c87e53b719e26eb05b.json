@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT like_count, favorite_count, denny_count, comment_count FROM posts WHERE id = 10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "like_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "like_count"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "favorite_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "favorite_count"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "denny_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "denny_count"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "comment_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "comment_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5e727ec991cc3d7e2b124ec08207f92f462a2d2ab4f7f3c87e53b719e26eb05b"
+}

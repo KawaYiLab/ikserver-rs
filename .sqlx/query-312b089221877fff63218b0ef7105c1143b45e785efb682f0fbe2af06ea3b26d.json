@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM legacy.files f\n           WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_media_digests d WHERE d.file_id = f.id)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "312b089221877fff63218b0ef7105c1143b45e785efb682f0fbe2af06ea3b26d"
+}

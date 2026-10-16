@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT post_id, title, body, category_id, tag_ids FROM post_drafts",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "post_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "body",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "body"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "category_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "category_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "tag_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "post_drafts",
+            "name": "tag_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "4218f9d3e66a5c27609545a605589855a9fdf253ece52e8133bcba38dea3ebf5"
+}

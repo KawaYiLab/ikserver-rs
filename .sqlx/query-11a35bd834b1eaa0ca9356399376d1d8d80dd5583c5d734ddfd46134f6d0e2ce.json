@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO legacy.files (id, name, url) VALUES\n           (1, 'a.png', 'https://im.tiwat.cn/uploads/a.png'),\n           (2, 'b.txt', 'https://im.tiwat.cn/uploads/b.txt'),\n           (3, 'c.png', 'https://im.tiwat.cn/uploads/missing.png'),\n           (4, 'd.png', 'https://elsewhere.example/d.png')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "11a35bd834b1eaa0ca9356399376d1d8d80dd5583c5d734ddfd46134f6d0e2ce"
+}

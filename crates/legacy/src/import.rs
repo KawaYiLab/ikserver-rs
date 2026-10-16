@@ -64,6 +64,9 @@ pub async fn import(db: &PgPool, options: &ImportOptions) -> anyhow::Result<Impo
     let mut report = ImportReport::default();
     let mut tx = db.begin().await?;
     steps::accounts::run(&mut tx, options, &mut report).await?;
+    steps::media::run(&mut tx, options, &mut report).await?;
+    steps::content::run(&mut tx, options, &mut report).await?;
+    steps::reactions::run(&mut tx, options, &mut report).await?;
     tx.commit().await?;
     Ok(report)
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts p SET\n               like_count = (SELECT count(*) FROM post_likes l WHERE l.post_id = p.id)::int,\n               favorite_count = (SELECT count(*) FROM post_favorites f WHERE f.post_id = p.id)::int,\n               denny_count = (SELECT count(*) FROM post_denny_gifts g WHERE g.post_id = p.id)::int,\n               comment_count = (SELECT count(*) FROM comments c WHERE c.post_id = p.id)::int",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "94794cabe1ee0c588b2d24a92e2d03c48fa13a28e5114d4c34163eb03ef1f5d1"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users u SET avatar_media_id = x.file_id\n           FROM (\n               SELECT DISTINCT ON (au.user_id) au.user_id, r.file_id\n               FROM legacy.ik_file_refs r\n               JOIN legacy.ik_author_users au ON au.author_id = r.related_id\n               JOIN media_files m ON m.id = r.file_id\n               WHERE r.related_type = 'api::author.author' AND r.field = 'avatar'\n               ORDER BY au.user_id, r.\"order\", r.file_id\n           ) x\n           WHERE u.id = x.user_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "bd6954207d3f59577a69922720c3684c38872b4f20d6c29b07e27993f21611c8"
+}

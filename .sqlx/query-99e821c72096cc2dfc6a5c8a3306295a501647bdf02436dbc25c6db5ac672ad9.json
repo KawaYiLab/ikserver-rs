@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT f.id AS \"file_id!\", f.url\n           FROM legacy.files f\n           LEFT JOIN legacy.ik_media_digests d ON d.file_id = f.id\n           WHERE d.file_id IS NULL OR ($1 AND d.error IS NOT NULL)\n           ORDER BY f.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "file_id!",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "legacy.files",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "legacy.files",
+            "name": "url"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "99e821c72096cc2dfc6a5c8a3306295a501647bdf02436dbc25c6db5ac672ad9"
+}

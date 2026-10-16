@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT like_count FROM comments WHERE id = 100",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "like_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "like_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "adefb3dbc2c3fd7dc0559e5f7bbfcb1705e4d161d202db1282f7f086bda5928b"
+}

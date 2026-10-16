@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT avatar_media_id FROM users WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "avatar_media_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "avatar_media_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "76d0ddbcadb9422790d873ef8eb7396d9d75c0aa1ed65c745f2b76d93be74b53"
+}
