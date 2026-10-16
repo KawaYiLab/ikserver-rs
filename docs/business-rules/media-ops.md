@@ -330,6 +330,15 @@
 - `MAIL-007` Brevo：`POST {BREVO_API_URL 默认 https://api.brevo.com/v3}/smtp/email`，头 `api-key: BREVO_API_KEY`，超时 `BREVO_TIMEOUT_MS` 默认 10000；`BREVO_FROM` 解析 `"Name" <email>` 或纯邮箱为 `sender`；可选 `BREVO_REPLYTO`；正文同时发 html 与 text。来源 `server/src/utils/email/config.ts:68-74`、`server/src/utils/email/senders/brevo-api.ts:10-55`。
 - `MAIL-008` 邮件配置独立于 Strapi email 插件，懒加载单例。来源 `server/src/utils/email/config.ts:1-4,46-79`。
 
+新系统实现（`crates/mail`，配置 `mail.*`，见 `.env.example`）：
+
+- MAIL-001～003、005～007 语义不变。旧环境变量对应：`SMTP_*` → `IK_MAIL__SMTP__*`（`SMTP_SECURE=true` → `tls = implicit`，
+  `false` → `starttls`，且必须升级成功才发送），`BREVO_*` → `IK_MAIL__BREVO__*`，`EMAIL_FALLBACK_ENABLED` → `IK_MAIL__FALLBACK`，
+  `EMAIL_DOMESTIC_DOMAINS` → `IK_MAIL__DOMESTIC_DOMAINS`（JSON 数组）。
+- 只配置一个通道时所有邮件都走它（旧系统两个通道都必须配置）。
+- MAIL-004 的 Redis 计数器不再保留（没有 Redis）：降级写一条 `mail_fallback = true` 的警告日志，按日志计数告警。
+- SMTP 邮件带 `Message-ID: <随机串@发件域名>`；连接池上限 3（`pool_size`），超时 15 秒（`timeout_secs`）。
+
 ---
 
 ## 13. 后台手工维护内容（ADMINCRUD）

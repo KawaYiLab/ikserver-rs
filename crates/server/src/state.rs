@@ -13,8 +13,7 @@ use ik_feed::FeedState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::{EventBus, LocalBus};
 use ik_kernel::cluster::ClusterBus;
-use ik_kernel::config::{Config, MailProvider};
-use ik_kernel::mail::{DevLogMailer, Mailer};
+use ik_kernel::config::Config;
 use ik_media::MediaState;
 use ik_messaging::MessagingState;
 use ik_mihoyo::MihoyoState;
@@ -60,9 +59,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: Config, db: PgPool) -> anyhow::Result<Self> {
         let ids = Arc::new(Snowflake::new(config.node_id)?);
-        let mailer: Arc<dyn Mailer> = match config.mail.provider {
-            MailProvider::DevLog => Arc::new(DevLogMailer),
-        };
+        let mailer = ik_mail::build(&config.mail)?;
         let bus = Arc::new(LocalBus::new(4096));
         let publisher: Arc<dyn EventBus> = if config.bus.cluster {
             ClusterBus::start(bus.clone(), db.clone(), config.node_id)?

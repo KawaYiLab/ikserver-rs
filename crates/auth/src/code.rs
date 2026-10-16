@@ -1,5 +1,6 @@
 //! 邮箱验证码：生成、哈希、校验。只存 HMAC，不存明文（CODE-004）。
 
+use chrono::Datelike;
 use hmac::{Hmac, KeyInit, Mac};
 use ik_kernel::Problem;
 use serde::{Deserialize, Serialize};
@@ -104,6 +105,66 @@ pub fn code_too_many_attempts() -> Problem {
 pub struct MailContent {
     pub subject: String,
     pub text: String,
+    pub html: String,
+}
+
+/// HTML 版共用的深色卡片模板（CODE-016），`%NAME%` 占位符在 `html_body` 里替换。
+const HTML_TEMPLATE: &str = include_str!("code_mail.html");
+
+/// HTML 版各用途的标题、大标题、说明与页脚（CODE-016，逐字保留）。
+struct HtmlCopy {
+    title: &'static str,
+    heading: &'static str,
+    description: &'static str,
+    footer: &'static str,
+}
+
+const fn html_copy(purpose: CodePurpose) -> HtmlCopy {
+    match purpose {
+        CodePurpose::Register => HtmlCopy {
+            title: "验证码",
+            heading: "注册验证码",
+            description: "请使用以下验证码完成账号注册",
+            footer: "如果你没有请求此验证码，请忽略此邮件。",
+        },
+        CodePurpose::ResetPassword => HtmlCopy {
+            title: "重置密码",
+            heading: "重置密码",
+            description: "请使用以下验证码完成密码重置",
+            footer: "如果你没有请求重置密码，请忽略此邮件，你的密码不会被更改。",
+        },
+        CodePurpose::BindEmail => HtmlCopy {
+            title: "绑定邮箱",
+            heading: "绑定邮箱",
+            description: "请使用以下验证码完成邮箱绑定",
+            footer: "如果你没有请求绑定邮箱，请忽略此邮件。",
+        },
+        CodePurpose::DeleteAccount => HtmlCopy {
+            title: "注销账号",
+            heading: "注销账号",
+            description: "请使用以下验证码确认注销账号，此操作将不可撤回",
+            footer: "如果你没有请求注销账号，请立即修改密码并忽略此邮件，你的账号不会被注销。",
+        },
+        CodePurpose::Login => HtmlCopy {
+            title: "登录验证码",
+            heading: "登录验证码",
+            description: "请使用以下验证码登录你的账号",
+            footer: "如果你没有尝试登录，请忽略此邮件，并考虑修改账号密码。",
+        },
+    }
+}
+
+/// 替换的值都是常量文案、6 位数字和年份，不含外部输入，不需要转义。
+fn html_body(purpose: CodePurpose, code: &str, minutes: i64, year: i32) -> String {
+    let copy = html_copy(purpose);
+    HTML_TEMPLATE
+        .replace("%TITLE%", copy.title)
+        .replace("%HEADING%", copy.heading)
+        .replace("%DESCRIPTION%", copy.description)
+        .replace("%FOOTER%", copy.footer)
+        .replace("%CODE%", code)
+        .replace("%MINUTES%", &minutes.to_string())
+        .replace("%YEAR%", &year.to_string())
 }
 
 pub fn mail_content(purpose: CodePurpose, code: &str) -> MailContent {
@@ -111,6 +172,14 @@ pub fn mail_content(purpose: CodePurpose, code: &str) -> MailContent {
     let minutes = CODE_TTL_SECS / 60;
     MailContent {
         subject: format!("【{code}】{label}验证码 - 绳网"),
+        html: html_body(
+            purpose,
+            code,
+            minutes,
+            chrono::Utc::now()
+                .with_timezone(&chrono_tz::Asia::Shanghai)
+                .year(),
+        ),
         text: match purpose {
             // 注销不可撤回，提示收到却不是本人操作时改密码（CODE-016）。
             CodePurpose::DeleteAccount => format!(
@@ -166,5 +235,38 @@ mod tests {
         let mail = mail_content(CodePurpose::Login, "042817");
         assert_eq!(mail.subject, "【042817】登录验证码 - 绳网");
         assert!(mail.text.contains("10 分钟内有效"));
+    }
+
+    #[test]
+    fn html_mail_fills_every_placeholder() {
+        for purpose in [
+            CodePurpose::Register,
+            CodePurpose::Login,
+            CodePurpose::ResetPassword,
+            CodePurpose::BindEmail,
+            CodePurpose::DeleteAccount,
+        ] {
+            let html = html_body(purpose, "042137", 10, 2026);
+            for name in [
+                "TITLE",
+                "HEADING",
+                "DESCRIPTION",
+                "FOOTER",
+                "CODE",
+                "MINUTES",
+                "YEAR",
+            ] {
+                assert!(
+                    !html.contains(&format!("%{name}%")),
+                    "{purpose:?} 没替换 {name}"
+                );
+            }
+            assert!(html.contains(">042137</span>"));
+            assert!(html.contains(html_copy(purpose).footer));
+            assert!(html.contains("&copy; 2026 绳网"));
+            assert!(html.contains("（10 分钟内有效）"));
+        }
+        let content = mail_content(CodePurpose::Login, "042137");
+        assert!(content.html.starts_with("<!DOCTYPE html>"));
     }
 }

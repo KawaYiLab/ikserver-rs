@@ -21,6 +21,7 @@ utoipa-axum.workspace = true
 tracing.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
+chrono-tz.workspace = true
 argon2.workspace = true
 bcrypt.workspace = true
 sha2.workspace = true

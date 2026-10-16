@@ -408,12 +408,159 @@ pub enum MailProvider {
     /// 只写日志不发信，仅允许在开发环境使用。
     #[default]
     DevLog,
+    /// 双通道（MAIL-001～003）：国内邮箱走 SMTP（国内邮件服务商），其余走 Brevo，主通道失败改走另一个。
+    /// 至少配置一个通道；只配一个时所有邮件都走它。
+    Dual,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Mail {
     pub provider: MailProvider,
+    /// 主通道失败时是否改走另一个通道（MAIL-003）。
+    pub fallback: bool,
+    /// 追加的国内邮箱域名（小写，MAIL-001 内置名单之外）。
+    pub domestic_domains: Vec<String>,
+    pub smtp: Smtp,
+    pub brevo: Brevo,
+}
+
+impl Default for Mail {
+    fn default() -> Self {
+        Self {
+            provider: MailProvider::DevLog,
+            fallback: true,
+            domestic_domains: Vec::new(),
+            smtp: Smtp::default(),
+            brevo: Brevo::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpTls {
+    /// 连接即 TLS（通常是 465 端口）。
+    #[default]
+    Implicit,
+    /// 明文连接后必须升级为 TLS（通常是 587 端口），服务器不支持时拒绝发送。
+    Starttls,
+}
+
+/// SMTP 通道（国内邮箱的主通道，MAIL-006）。`host` 为空表示不启用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Smtp {
+    pub host: String,
+    pub port: u16,
+    pub tls: SmtpTls,
+    pub username: String,
+    pub password: Secret,
+    /// 发件人，`绳网 <noreply@example.com>` 或纯地址。
+    pub from: String,
+    /// 回复地址，空为不设置。
+    pub reply_to: String,
+    /// 连接、握手与每条命令的超时（1–60 秒）。
+    pub timeout_secs: u64,
+    /// 连接池上限（1–16）。
+    pub pool_size: u32,
+}
+
+impl Default for Smtp {
+    fn default() -> Self {
+        Self {
+            host: String::new(),
+            port: 465,
+            tls: SmtpTls::Implicit,
+            username: String::new(),
+            password: Secret::default(),
+            from: String::new(),
+            reply_to: String::new(),
+            timeout_secs: 15,
+            pool_size: 3,
+        }
+    }
+}
+
+impl Smtp {
+    pub fn enabled(&self) -> bool {
+        !self.host.is_empty()
+    }
+}
+
+/// Brevo HTTP API 通道（国外邮箱的主通道，MAIL-007）。`api_key` 为空表示不启用。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Brevo {
+    pub api_key: Secret,
+    pub api_url: String,
+    /// 发件人，`绳网 <noreply@example.com>` 或纯地址（须是 Brevo 里验证过的发件人）。
+    pub from: String,
+    /// 回复地址，空为不设置。
+    pub reply_to: String,
+    /// 请求超时（1–60 秒）。
+    pub timeout_secs: u64,
+}
+
+impl Default for Brevo {
+    fn default() -> Self {
+        Self {
+            api_key: Secret::default(),
+            api_url: "https://api.brevo.com/v3".to_owned(),
+            from: String::new(),
+            reply_to: String::new(),
+            timeout_secs: 10,
+        }
+    }
+}
+
+impl Brevo {
+    pub fn enabled(&self) -> bool {
+        !self.api_key.is_empty()
+    }
+}
+
+impl Mail {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.provider != MailProvider::Dual {
+            return Ok(());
+        }
+        let invalid = |msg: &str| Err(ConfigError::Invalid(format!("mail 配置不合法：{msg}")));
+        if !self.smtp.enabled() && !self.brevo.enabled() {
+            return invalid("dual 至少要配置 smtp.host 或 brevo.api_key 之一");
+        }
+        if self.smtp.enabled() {
+            if self.smtp.from.is_empty() {
+                return invalid("缺少 smtp.from");
+            }
+            if !(1..=60).contains(&self.smtp.timeout_secs)
+                || !(1..=16).contains(&self.smtp.pool_size)
+            {
+                return invalid("smtp.timeout_secs 1–60，smtp.pool_size 1–16");
+            }
+        }
+        if self.brevo.enabled() {
+            if self.brevo.from.is_empty() {
+                return invalid("缺少 brevo.from");
+            }
+            if !(1..=60).contains(&self.brevo.timeout_secs) {
+                return invalid("brevo.timeout_secs 1–60");
+            }
+            if !(self.brevo.api_url.starts_with("https://")
+                || self.brevo.api_url.starts_with("http://"))
+            {
+                return invalid("brevo.api_url 须为 http(s)://");
+            }
+        }
+        if self
+            .domestic_domains
+            .iter()
+            .any(|d| d.is_empty() || d.contains('@') || *d != d.trim().to_lowercase())
+        {
+            return invalid("domestic_domains 须为小写域名，例如 [\"corp.cn\"]");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -515,14 +662,33 @@ pub enum ConfigError {
     Invalid(String),
 }
 
+/// `IK_MAIL__SMTP__PASSWORD` → `mail.smtp.password`。
+fn env_path(name: &str) -> String {
+    name.to_lowercase().replace("__", ".")
+}
+
+/// 值是自由文本、不能按数字或布尔解析的配置项（密码、密钥、账号名、发件人）。
+fn is_free_text(path: &str) -> bool {
+    let last = path.rsplit('.').next().unwrap_or(path);
+    matches!(last, "password" | "username" | "from" | "reply_to") || last.ends_with("key")
+}
+
 impl Config {
     /// 从环境变量加载配置并校验。调用前应先加载 `.env`（由二进制负责）。
     pub fn load() -> Result<Self, ConfigError> {
-        Self::from_figment(
-            Figment::new()
-                .merge(Serialized::defaults(Self::default()))
-                .merge(Env::prefixed("IK_").split("__")),
-        )
+        let mut figment = Figment::new()
+            .merge(Serialized::defaults(Self::default()))
+            .merge(Env::prefixed("IK_").split("__"));
+        // figment 会猜环境变量的类型：纯数字的密码 `000123` 会变成整数 123（报错且丢了前导零）。
+        // 凭据、发件人这类自由文本再按原样读一遍覆盖上去。
+        for (name, value) in std::env::vars() {
+            if let Some(path) = name.strip_prefix("IK_").map(env_path)
+                && is_free_text(&path)
+            {
+                figment = figment.merge(Serialized::default(&path, value));
+            }
+        }
+        Self::from_figment(figment)
     }
 
     pub fn from_figment(figment: Figment) -> Result<Self, ConfigError> {
@@ -688,6 +854,7 @@ impl Config {
                 "mihoyo 配置不合法：timeout_secs 1–60，上游地址须为 http(s)://".to_owned(),
             ));
         }
+        self.mail.validate()?;
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
@@ -728,6 +895,58 @@ mod tests {
         assert_eq!(config.http.addr.port(), 8080);
         assert_eq!(config.session.cookie_name, "ik_session");
         assert_eq!(config.database.url.expose(), "postgres://x");
+    }
+
+    #[test]
+    fn dual_mail_needs_a_complete_channel() {
+        let base = [("database.url", "postgres://x"), ("mail.provider", "dual")];
+        assert!(Config::from_figment(with(&base)).is_err());
+        let smtp_without_from =
+            [base.as_slice(), &[("mail.smtp.host", "smtp.example.cn")]].concat();
+        assert!(Config::from_figment(with(&smtp_without_from)).is_err());
+        let ok = [
+            base.as_slice(),
+            &[
+                ("mail.smtp.host", "smtp.example.cn"),
+                ("mail.smtp.from", "a@example.cn"),
+            ],
+        ]
+        .concat();
+        let config = Config::from_figment(with(&ok)).unwrap();
+        assert!(config.mail.smtp.enabled() && !config.mail.brevo.enabled());
+        assert!(config.mail.fallback);
+        let domains = |list: &[&str]| {
+            Config::from_figment(
+                with(&ok).merge(Serialized::default("mail.domestic_domains", list)),
+            )
+        };
+        assert!(domains(&["corp.cn"]).is_ok());
+        assert!(domains(&["Corp.CN"]).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::result_large_err)] // figment::Jail 的闭包签名是固定的
+    fn mail_settings_from_env_keep_strings() {
+        // 纯数字的密码、带空格和尖括号的发件人从环境变量读进来仍是原样的字符串。
+        figment::Jail::expect_with(|jail| {
+            jail.set_env("IK_DATABASE__URL", "postgres://x");
+            jail.set_env("IK_MAIL__PROVIDER", "dual");
+            jail.set_env("IK_MAIL__SMTP__HOST", "smtp.qiye.aliyun.com");
+            jail.set_env("IK_MAIL__SMTP__TLS", "starttls");
+            jail.set_env("IK_MAIL__SMTP__PORT", "587");
+            jail.set_env("IK_MAIL__SMTP__USERNAME", "123456");
+            jail.set_env("IK_MAIL__SMTP__PASSWORD", "000123");
+            jail.set_env("IK_MAIL__SMTP__FROM", "绳网 <noreply@example.cn>");
+            jail.set_env("IK_MAIL__DOMESTIC_DOMAINS", "[\"corp.cn\"]");
+            let config = Config::load().unwrap();
+            assert_eq!(config.mail.smtp.tls, SmtpTls::Starttls);
+            assert_eq!(config.mail.smtp.port, 587);
+            assert_eq!(config.mail.smtp.username, "123456");
+            assert_eq!(config.mail.smtp.password.expose(), "000123");
+            assert_eq!(config.mail.smtp.from, "绳网 <noreply@example.cn>");
+            assert_eq!(config.mail.domestic_domains, ["corp.cn"]);
+            Ok(())
+        });
     }
 
     #[test]

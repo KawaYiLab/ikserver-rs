@@ -1,0 +1,27 @@
+[package]
+name = "ik-mail"
+description = "发信通道：国内邮箱走 SMTP、其余走 Brevo，主通道失败改走另一个（MAIL-001～007）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ik-kernel.workspace = true
+anyhow.workspace = true
+async-trait.workspace = true
+getrandom.workspace = true
+lettre.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+serde_json.workspace = true
+parking_lot.workspace = true
+tokio = { workspace = true, features = ["io-util"] }
+
+[lints]
+workspace = true

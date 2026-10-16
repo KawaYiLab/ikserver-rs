@@ -69,6 +69,8 @@ kernel ◄── auth ◄── content ◄── feed
 - `cosmetics → auth, media`：系统头像、论坛名片的目录。装备状态写在账号上（`ik_auth::interop::equip_*`），
   系统头像的图片 id 也冗余在账号上，所以 `ik_auth::service::authors` 直接给出「装备头像优先，其次自定义头像」，
   展示作者的各域不依赖 cosmetics。目录换图时 cosmetics 在同一事务里调用 `refresh_equipped_avatar` 同步。
+- `mail → kernel`：发信通道（SMTP、Brevo）与双通道调度，实现 `ik_kernel::mail::Mailer`，只由 server 装配；
+  业务代码只依赖 `Mailer`（验证码邮件在 auth 里事务提交后发送）。
 - `mihoyo → auth`：米游社身份（`mihoyo_bindings`）与扫码会话（`mihoyo_qr_logins`，替代旧系统的 Redis 键）。
   建号经 `ik_auth::interop::insert_user_without_email`，登录经 `ik_auth::service::issue_session_with_secret`
   （确定性会话）。上游协议在 `ik_mihoyo::upstream`（trait，测试用假实现；HTTP 实现另有本地桩服务器测试）。

@@ -212,7 +212,7 @@ async fn deliver_code(
         to: email.to_owned(),
         subject: content.subject,
         text: content.text,
-        html: None,
+        html: Some(content.html),
     };
     if let Err(error) = state.mailer.send(mail).await {
         tracing::error!(%error, to = %mask_email(email), purpose = purpose.as_str(), "验证码邮件发送失败");

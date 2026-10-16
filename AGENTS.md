@@ -37,6 +37,7 @@ crates/
   search/    搜索：帖子与评论全文搜索、联想（Meilisearch + 数据库回查与兜底）、索引同步
   media/     媒体：直传上传（签名、完成校验与发布）、媒体文件、我的图库、CDN 缩略图地址
   cosmetics/ 装扮：系统头像与论坛名片的目录、装备（装备状态存在账号上）
+  mail/      发信通道：国内邮箱走 SMTP、其余走 Brevo，失败改走另一个（server 装配，业务只依赖 kernel 的 Mailer）
   mihoyo/    米游社扫码登录（自动建号）、绑定与解绑、扫码注销核验、上游协议客户端
   account/   账号安全：安全概览、注销账号（编排 auth、mihoyo、profile）
   moderation/ 举报与审核：举报、多人举报自动隐藏、领取与结案、封禁与解封、审核日志

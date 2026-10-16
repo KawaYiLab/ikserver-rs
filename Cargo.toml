@@ -31,6 +31,7 @@ ik-moderation = { path = "crates/moderation" }
 ik-ai = { path = "crates/ai" }
 ik-admin = { path = "crates/admin" }
 ik-legacy = { path = "crates/legacy" }
+ik-mail = { path = "crates/mail" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
@@ -98,6 +99,8 @@ thumbhash = "0.1"
 # 后台任务（PostgreSQL 队列）。不启用 TLS，与 sqlx 一致。
 graphile_worker = { version = "0.14", default-features = false, features = ["runtime-tokio", "driver-sqlx"] }
 
+# SMTP 发信（rustls + ring，与其他 TLS 一致，不引入 aws-lc / OpenSSL）
+lettre = { version = "0.11.23", default-features = false, features = ["smtp-transport", "pool", "hostname", "builder", "tokio1-rustls", "rustls-tls"] }
 # 调用米游社等外部 HTTPS 接口（rustls + ring，与对象存储一致，不引入 aws-lc）。
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
