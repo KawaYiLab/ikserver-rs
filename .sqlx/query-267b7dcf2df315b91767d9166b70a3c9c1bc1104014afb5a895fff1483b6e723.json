@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM exam_questions\n           WHERE ($1::text IS NULL OR kind = $1)\n             AND ($2::bool IS NULL OR enabled = $2)\n             AND ($3::text IS NULL OR question ILIKE $3 OR tag ILIKE $3)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "267b7dcf2df315b91767d9166b70a3c9c1bc1104014afb5a895fff1483b6e723"
+}

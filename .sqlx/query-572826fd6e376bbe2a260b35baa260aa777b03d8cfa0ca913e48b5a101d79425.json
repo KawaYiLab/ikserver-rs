@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_role_cards SET allowed_model_ids = array_remove(allowed_model_ids, $1)\n         WHERE $1 = ANY(allowed_model_ids)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "572826fd6e376bbe2a260b35baa260aa777b03d8cfa0ca913e48b5a101d79425"
+}

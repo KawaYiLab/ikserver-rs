@@ -710,3 +710,100 @@ pub(crate) async fn stop_older_epochs(
     .await?
     .rows_affected())
 }
+
+// ---------- 管理后台 ----------
+
+/// 删除模型；返回 (id, 是否默认)。默认模型由调用方先拦住。
+pub(crate) async fn model_by_key(
+    conn: &mut PgConnection,
+    key: &str,
+) -> sqlx::Result<Option<(i64, bool)>> {
+    Ok(
+        sqlx::query!("SELECT id, is_default FROM ai_models WHERE key = $1", key)
+            .fetch_optional(conn)
+            .await?
+            .map(|r| (r.id, r.is_default)),
+    )
+}
+
+/// 删除模型：角色卡的默认模型由外键置空，白名单里去掉它。
+pub(crate) async fn delete_model(conn: &mut PgConnection, id: i64) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_role_cards SET allowed_model_ids = array_remove(allowed_model_ids, $1)
+         WHERE $1 = ANY(allowed_model_ids)",
+        id,
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!("DELETE FROM ai_models WHERE id = $1", id)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+pub(crate) async fn delete_card(conn: &mut PgConnection, slug: &str) -> sqlx::Result<bool> {
+    Ok(
+        sqlx::query!("DELETE FROM ai_role_cards WHERE slug = $1", slug)
+            .execute(conn)
+            .await?
+            .rows_affected()
+            > 0,
+    )
+}
+
+pub(crate) struct JobFilter {
+    pub status: Option<String>,
+    pub kind: Option<String>,
+}
+
+pub(crate) struct AdminJobRow {
+    pub id: i64,
+    pub kind: String,
+    pub status: String,
+    pub reason: Option<String>,
+    pub quota_user_id: i64,
+    pub ai_user_id: i64,
+    pub conversation_id: Option<i64>,
+    pub post_id: Option<i64>,
+    pub attempts: i16,
+    pub model_key: Option<String>,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub(crate) async fn count_jobs(conn: &mut PgConnection, f: &JobFilter) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM ai_jobs
+           WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR kind = $2)"#,
+        f.status,
+        f.kind,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 任务审计，最近更新的在前（AI-027 死信查看：`status = failed`）。
+pub(crate) async fn list_jobs(
+    conn: &mut PgConnection,
+    f: &JobFilter,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AdminJobRow>> {
+    sqlx::query_as!(
+        AdminJobRow,
+        "SELECT id, kind, status, reason, quota_user_id, ai_user_id, conversation_id, post_id,
+                attempts, model_key, prompt_tokens, completion_tokens, created_at, updated_at
+         FROM ai_jobs
+         WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR kind = $2)
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $3 OFFSET $4",
+        f.status,
+        f.kind,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}

@@ -133,6 +133,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | IDENTITY_CONFLICT | 409 | 这个米游社账号关联了多个绳网账号，请联系管理员 | aid 与 mid 指向不同账号（历史数据），运维处理 |
 | QR_SESSION_CONSUMED | 409 | 这次扫码登录已经失效，请重新扫码 | 同一个二维码登录的会话已登出或过期，不会另起新会话 |
 | ACCOUNT_CHANGED | 409 | 账号信息已变更，请重新验证 | 核验之后邮箱或密码被改过（修改密码、注销），DEL-005 |
+| AI_MODEL_IS_DEFAULT | 409 | 默认模型不能删除，请先把其他模型设为默认 | 管理后台删除模型 |
 | AI_NOT_LATEST_REPLY | 409 | 只能重新生成最后一条 AI 回复 | GEN-013 |
 | AI_TRIGGER_WITHDRAWN | 409 | 触发这条回复的消息已撤回 | 重新生成时（GEN-014） |
 | REPORT_DUPLICATE | 409 | 你已举报过该内容，正在处理中 | 同一目标有未结案的举报；结案后可以再举报 |
@@ -288,6 +289,13 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 ## 管理后台
 
-- 全部在 `/v1/admin/*` 下，要求 moderator/admin 角色。
-- 写操作一律写审计日志（操作者、动作、目标、参数、IP、UA）。
-- 列表接口允许 `page` 分页与排序参数（管理场景可用性优先）。
+- 全部在 `/v1/admin/*` 下。权限两级（`ik_auth::StaffOperator` / `AdminOperator` 提取器）：
+  版主或管理员可以看后台、处理举报、封禁解封、查看题库；改配置（题库写入、AI、分区、装扮、账号角色等）
+  只有管理员。非员工 403 `FORBIDDEN`。
+- 写操作一律与业务写入同一事务写审计日志 `admin_audit_log`（操作者、动作、目标、参数摘要、IP、UA）；
+  动作命名 `<域>.<对象>.<动作>`，如 `exam.question.create`、`ai.model.save`。
+- 列表接口用页码分页：`page`（从 1 开始）、`limit`（上限 100），响应 `{ items, total, page, limit }`。
+- 已有：举报处理 `/v1/admin/reports*`、解封 `/v1/admin/users/{id}/unblock`；入站题库
+  `/v1/admin/exam/questions`（列表、新建）、`…/stats`、`…/{id}`（详情、整体覆盖）、`…/{id}/toggle`、
+  `…/bulk-delete`；AI 配置 `/v1/admin/ai/settings`、`/v1/admin/ai/models[/{key}]`（PUT 新建或修改，DELETE）、
+  `/v1/admin/ai/characters[/{slug}]`、任务审计 `/v1/admin/ai/jobs`（`status=failed` 即死信）。

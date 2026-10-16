@@ -35,6 +35,7 @@ where
         .routes(routes!(reset_session))
         .routes(routes!(stop))
         .routes(routes!(regenerate))
+        .merge(crate::admin::router())
 }
 
 /// AI 角色

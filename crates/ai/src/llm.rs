@@ -438,6 +438,11 @@ impl Providers {
             .ok_or_else(|| LlmError::UnknownProvider(name.to_owned()))
     }
 
+    /// 已配置的提供方名字（管理后台展示）。
+    pub fn names(&self) -> Vec<String> {
+        self.by_name.keys().cloned().collect()
+    }
+
     pub fn contains(&self, name: &str) -> bool {
         self.by_name.contains_key(name)
     }

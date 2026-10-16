@@ -546,8 +546,38 @@ pub async fn review(
 
 // ---------- 题库 ----------
 
-/// 新建题目（EXAMADM-004/005）。返回题目 id。
-pub async fn create_question(state: &ExamState, input: QuestionInput) -> Result<i64, Problem> {
+/// 校验通过、已归一化的题目（EXAMADM-004/005）。
+pub(crate) struct ValidQuestion {
+    pub question: String,
+    pub kind: QuestionKind,
+    pub options: serde_json::Value,
+    pub correct_keys: Vec<String>,
+    pub explanation: Option<String>,
+    pub weight: i32,
+    pub enabled: bool,
+    pub tag: Option<String>,
+}
+
+impl ValidQuestion {
+    pub(crate) fn row(&self, id: i64, now: DateTime<Utc>) -> NewQuestion<'_> {
+        NewQuestion {
+            id,
+            question: &self.question,
+            kind: self.kind.as_str(),
+            options: self.options.clone(),
+            correct_keys: &self.correct_keys,
+            explanation: self.explanation.as_deref(),
+            weight: self.weight,
+            enabled: self.enabled,
+            tag: self.tag.as_deref(),
+            now,
+        }
+    }
+}
+
+/// 写入校验（create 与 update 共用，EXAMADM-004）；weight 不是 ≥1 的整数时按 1，空解析与空标签存 NULL，
+/// 只有显式 false 才停用（EXAMADM-005）。
+pub(crate) fn validate_question(input: &QuestionInput) -> Result<ValidQuestion, Problem> {
     let invalid = |field: &str, detail: &str| Problem::field(field, "INVALID", detail);
     let question = input.question.trim();
     if question.is_empty() {
@@ -563,35 +593,30 @@ pub async fn create_question(state: &ExamState, input: QuestionInput) -> Result<
         .ok_or_else(|| invalid("correctKeys", "正确答案必须是选项 key 的子集"))?;
     paper::check_kind_shape(input.kind, &options, &correct)
         .map_err(|detail| invalid("kind", detail))?;
-    let weight = input.weight.filter(|w| *w >= 1).unwrap_or(1);
-    let explanation = input
-        .explanation
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
-    let tag = input
-        .tag
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let clean = |v: &Option<String>| {
+        v.as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    Ok(ValidQuestion {
+        question: question.to_owned(),
+        kind: input.kind,
+        options: serde_json::to_value(&options).map_err(|e| Problem::internal_from(&e))?,
+        correct_keys: correct,
+        explanation: clean(&input.explanation),
+        weight: input.weight.filter(|w| *w >= 1).unwrap_or(1),
+        enabled: input.enabled != Some(false),
+        tag: clean(&input.tag),
+    })
+}
+
+/// 新建题目（运维导入）。返回题目 id。
+pub async fn create_question(state: &ExamState, input: QuestionInput) -> Result<i64, Problem> {
+    let valid = validate_question(&input)?;
     let id = state.ids.next_raw();
     let mut conn = state.db.acquire().await?;
-    repo::insert_question(
-        &mut conn,
-        &NewQuestion {
-            id,
-            question,
-            kind: input.kind.as_str(),
-            options: serde_json::to_value(&options).map_err(|e| Problem::internal_from(&e))?,
-            correct_keys: &correct,
-            explanation,
-            weight,
-            enabled: input.enabled != Some(false),
-            tag,
-            now: Utc::now(),
-        },
-    )
-    .await?;
+    repo::insert_question(&mut conn, &valid.row(id, Utc::now())).await?;
     Ok(id)
 }
 

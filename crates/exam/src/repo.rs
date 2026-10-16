@@ -262,3 +262,158 @@ pub(crate) async fn submitted_attempt(
     .fetch_optional(conn)
     .await
 }
+
+// ---------- 题库后台（EXAMADM） ----------
+
+pub(crate) struct AdminQuestionRow {
+    pub id: i64,
+    pub question: String,
+    pub kind: String,
+    pub options: serde_json::Value,
+    pub correct_keys: Vec<String>,
+    pub explanation: Option<String>,
+    pub weight: i32,
+    pub enabled: bool,
+    pub tag: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub(crate) struct QuestionFilter {
+    pub kind: Option<String>,
+    pub enabled: Option<bool>,
+    /// ILIKE 模式（已转义）。
+    pub pattern: Option<String>,
+}
+
+pub(crate) async fn count_questions(
+    conn: &mut PgConnection,
+    f: &QuestionFilter,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM exam_questions
+           WHERE ($1::text IS NULL OR kind = $1)
+             AND ($2::bool IS NULL OR enabled = $2)
+             AND ($3::text IS NULL OR question ILIKE $3 OR tag ILIKE $3)"#,
+        f.kind,
+        f.enabled,
+        f.pattern,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 按更新时间倒序（EXAMADM-003）。
+pub(crate) async fn list_questions(
+    conn: &mut PgConnection,
+    f: &QuestionFilter,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AdminQuestionRow>> {
+    sqlx::query_as!(
+        AdminQuestionRow,
+        r#"SELECT id, question, kind, options, correct_keys, explanation, weight, enabled, tag,
+                  created_at, updated_at
+           FROM exam_questions
+           WHERE ($1::text IS NULL OR kind = $1)
+             AND ($2::bool IS NULL OR enabled = $2)
+             AND ($3::text IS NULL OR question ILIKE $3 OR tag ILIKE $3)
+           ORDER BY updated_at DESC, id DESC
+           LIMIT $4 OFFSET $5"#,
+        f.kind,
+        f.enabled,
+        f.pattern,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn admin_question(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<AdminQuestionRow>> {
+    sqlx::query_as!(
+        AdminQuestionRow,
+        "SELECT id, question, kind, options, correct_keys, explanation, weight, enabled, tag,
+                created_at, updated_at
+         FROM exam_questions WHERE id = $1",
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct QuestionStatsRow {
+    pub total: i64,
+    pub enabled: i64,
+    pub single: i64,
+    pub multiple: i64,
+    pub boolean: i64,
+}
+
+pub(crate) async fn question_stats(conn: &mut PgConnection) -> sqlx::Result<QuestionStatsRow> {
+    sqlx::query_as!(
+        QuestionStatsRow,
+        r#"SELECT count(*) AS "total!",
+                  count(*) FILTER (WHERE enabled) AS "enabled!",
+                  count(*) FILTER (WHERE kind = 'single') AS "single!",
+                  count(*) FILTER (WHERE kind = 'multiple') AS "multiple!",
+                  count(*) FILTER (WHERE kind = 'boolean') AS "boolean!"
+           FROM exam_questions"#,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 整体覆盖（EXAMADM-004）。返回是否存在。
+pub(crate) async fn update_question(
+    conn: &mut PgConnection,
+    q: &NewQuestion<'_>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE exam_questions SET question = $2, kind = $3, options = $4, correct_keys = $5,
+             explanation = $6, weight = $7, enabled = $8, tag = $9, updated_at = $10
+         WHERE id = $1",
+        q.id,
+        q.question,
+        q.kind,
+        q.options,
+        q.correct_keys,
+        q.explanation,
+        q.weight,
+        q.enabled,
+        q.tag,
+        q.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 启用 / 停用取反（EXAMADM-006）。返回新状态，不存在时 None。
+pub(crate) async fn toggle_question(
+    conn: &mut PgConnection,
+    id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<bool>> {
+    sqlx::query_scalar!(
+        "UPDATE exam_questions SET enabled = NOT enabled, updated_at = $2 WHERE id = $1
+         RETURNING enabled",
+        id,
+        now,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 物理删除（EXAMADM-007：历史场次有快照，不受影响）。返回实际删除的条数。
+pub(crate) async fn delete_questions(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<u64> {
+    Ok(
+        sqlx::query!("DELETE FROM exam_questions WHERE id = ANY($1)", ids)
+            .execute(conn)
+            .await?
+            .rows_affected(),
+    )
+}

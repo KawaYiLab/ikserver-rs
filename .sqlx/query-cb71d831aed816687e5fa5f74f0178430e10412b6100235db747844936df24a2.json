@@ -1,0 +1,152 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, question, kind, options, correct_keys, explanation, weight, enabled, tag,\n                  created_at, updated_at\n           FROM exam_questions\n           WHERE ($1::text IS NULL OR kind = $1)\n             AND ($2::bool IS NULL OR enabled = $2)\n             AND ($3::text IS NULL OR question ILIKE $3 OR tag ILIKE $3)\n           ORDER BY updated_at DESC, id DESC\n           LIMIT $4 OFFSET $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "question",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "question"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "options",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "options"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "correct_keys",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "correct_keys"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "explanation",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "explanation"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "weight",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "weight"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "tag",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "tag"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "cb71d831aed816687e5fa5f74f0178430e10412b6100235db747844936df24a2"
+}

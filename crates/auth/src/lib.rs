@@ -2,6 +2,7 @@
 //!
 //! 业务规则：`docs/business-rules/auth-account.md`。
 
+pub mod admin;
 mod code;
 pub mod dto;
 mod extract;
@@ -14,6 +15,7 @@ mod state;
 mod token;
 mod validate;
 
+pub use admin::{AdminOperator, Operator, StaffOperator};
 pub use extract::{
     AuthRateLimit, ClientMeta, CurrentUser, MaybeUser, Principal, UserIfPresent, credential_from,
 };

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM ai_jobs\n           WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR kind = $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cffbbe7b56d9f3ad48e20c576ba0bf81a8018132b4ccef96651b9fdcc9d3c3af"
+}

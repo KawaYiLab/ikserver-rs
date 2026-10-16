@@ -79,7 +79,8 @@ kernel ◄── auth ◄── content ◄── feed
 - `moderation → auth, content, comments, notify, media`：举报（`reports`）与审核日志（`moderation_log`）。
   隐藏、删除内容经 `ik_content::interop` / `ik_comments::interop`，封禁经 `ik_auth::interop::block_user`，
   通知经 `ik_notify::interop::system`，全部在审核自己的事务里；同一目标的未结案举报是一组，领取、释放、结案先锁整组。
-  审核接口 `/v1/admin/reports*` 需要版主或管理员角色（论坛账号的 `role`，D-062 的「后台账号」不再单独存在）。
+  管理后台接口放在各自的业务域里（`ik_exam::admin`、`ik_ai::admin`、moderation 的举报处理），操作者提取器与
+  审计日志在 ik-auth（`ik_auth::admin`）。审核接口 `/v1/admin/reports*` 需要版主或管理员角色（论坛账号的 `role`，D-062 的「后台账号」不再单独存在）。
   对象存储的读写都在数据库事务之外；校验并发由进程内闸门（`ik_media::gate`）限制。
 - `ai → auth, media`：直连 OpenAI 兼容的上游（`ik_ai::llm`，async-openai 的 byot 流式，rustls + ring），
   提供方地址与密钥在部署配置（`IK_AI__PROVIDERS__<名字>__BASE_URL` / `__API_KEY`），模型、角色卡、上限在数据库，

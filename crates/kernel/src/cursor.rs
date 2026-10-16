@@ -57,6 +57,26 @@ impl<T> Page<T> {
     }
 }
 
+/// 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Paged<T> {
+    pub items: Vec<T>,
+    /// 符合条件的总数。
+    pub total: i64,
+    /// 从 1 开始。
+    pub page: u32,
+    pub limit: u32,
+}
+
+/// 页码与每页条数：page 从 1 开始，limit 默认 `default`、范围 1–100。返回 (page, limit, offset)。
+pub fn page_window(page: Option<u32>, limit: Option<u32>, default: u32) -> (u32, u32, i64) {
+    let page = page.unwrap_or(1).max(1);
+    let limit = limit.unwrap_or(default).clamp(1, 100);
+    let offset = i64::from(page - 1) * i64::from(limit);
+    (page, limit, offset)
+}
+
 #[cfg(test)]
 mod tests {
     use serde::Deserialize;

@@ -1031,3 +1031,101 @@ pub(crate) async fn mark_ai_agent(
     .fetch_optional(conn)
     .await
 }
+
+// ---------- 管理后台审计 ----------
+
+pub(crate) struct NewAudit<'a> {
+    pub id: i64,
+    pub actor_id: i64,
+    pub action: &'a str,
+    pub target_type: &'a str,
+    pub target_id: Option<&'a str>,
+    pub details: &'a serde_json::Value,
+    pub ip: String,
+    pub user_agent: Option<&'a str>,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn insert_audit(conn: &mut PgConnection, a: &NewAudit<'_>) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO admin_audit_log (id, actor_id, action, target_type, target_id, details, ip,
+                                      user_agent, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::text::inet, $8, $9)",
+        a.id,
+        a.actor_id,
+        a.action,
+        a.target_type,
+        a.target_id,
+        a.details,
+        a.ip,
+        a.user_agent,
+        a.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) struct AuditFilter {
+    pub actor_id: Option<i64>,
+    pub action_prefix: Option<String>,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+}
+
+pub(crate) struct AuditRow {
+    pub id: i64,
+    pub actor_id: Option<i64>,
+    pub actor_name: Option<String>,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<String>,
+    pub details: serde_json::Value,
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn count_audit(conn: &mut PgConnection, f: &AuditFilter) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM admin_audit_log
+           WHERE ($1::bigint IS NULL OR actor_id = $1)
+             AND ($2::text IS NULL OR starts_with(action, $2))
+             AND ($3::text IS NULL OR target_type = $3)
+             AND ($4::text IS NULL OR target_id = $4)"#,
+        f.actor_id,
+        f.action_prefix,
+        f.target_type,
+        f.target_id,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) async fn list_audit(
+    conn: &mut PgConnection,
+    f: &AuditFilter,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AuditRow>> {
+    sqlx::query_as!(
+        AuditRow,
+        r#"SELECT a.id, a.actor_id, u.username AS "actor_name?", a.action, a.target_type, a.target_id,
+                  a.details, host(a.ip) AS ip, a.user_agent, a.created_at
+           FROM admin_audit_log a LEFT JOIN users u ON u.id = a.actor_id
+           WHERE ($1::bigint IS NULL OR a.actor_id = $1)
+             AND ($2::text IS NULL OR starts_with(a.action, $2))
+             AND ($3::text IS NULL OR a.target_type = $3)
+             AND ($4::text IS NULL OR a.target_id = $4)
+           ORDER BY a.created_at DESC, a.id DESC
+           LIMIT $5 OFFSET $6"#,
+        f.actor_id,
+        f.action_prefix,
+        f.target_type,
+        f.target_id,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}

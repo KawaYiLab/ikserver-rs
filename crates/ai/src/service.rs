@@ -220,6 +220,19 @@ fn validate_character(index: usize, c: &CharacterInput) -> Result<(), Problem> {
 
 /// 导入 AI 配置（CLI）。整份一个事务，有一项不合格就都不写入；写完让缓存失效。
 pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, Problem> {
+    let mut tx = state.db.begin().await?;
+    let report = apply(state, &mut tx, &file).await?;
+    tx.commit().await?;
+    state.catalog.invalidate().await;
+    Ok(report)
+}
+
+/// 校验并写入一份配置（导入与管理后台共用），在调用方的事务里。调用方提交后让缓存失效。
+pub(crate) async fn apply(
+    state: &AiState,
+    tx: &mut sqlx::PgConnection,
+    file: &ImportFile,
+) -> Result<ImportReport, Problem> {
     for (index, model) in file.models.iter().enumerate() {
         validate_model(index, model)?;
     }
@@ -245,10 +258,9 @@ pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, P
     }
 
     let now = Utc::now();
-    let mut tx = state.db.begin().await?;
     if let Some(settings) = &file.settings {
         repo::upsert_settings(
-            &mut tx,
+            tx,
             settings.global_enabled,
             settings.daily_tokens_per_user,
             settings.daily_tokens,
@@ -257,11 +269,11 @@ pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, P
         .await?;
     }
     if file.models.iter().any(|m| m.is_default) {
-        repo::clear_default_model(&mut tx).await?;
+        repo::clear_default_model(tx).await?;
     }
     for model in &file.models {
         repo::upsert_model(
-            &mut tx,
+            tx,
             &repo::NewModel {
                 id: state.ids.next_raw(),
                 key: &model.key,
@@ -279,7 +291,7 @@ pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, P
         )
         .await?;
     }
-    let models = repo::models(&mut tx).await?;
+    let models = repo::models(tx).await?;
     let model_id = |index: usize, key: &str| {
         models
             .iter()
@@ -332,8 +344,7 @@ pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, P
                 Some(id.get())
             }
         };
-        let Some(user_id) = ik_auth::interop::mark_ai_agent(&mut tx, &c.username, now).await?
-        else {
+        let Some(user_id) = ik_auth::interop::mark_ai_agent(tx, &c.username, now).await? else {
             return Err(Problem::field(
                 &format!("characters[{index}].username"),
                 "not_found",
@@ -348,7 +359,7 @@ pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, P
             .filter(|q| !q.is_empty())
             .collect();
         repo::upsert_card(
-            &mut tx,
+            tx,
             &repo::NewCard {
                 id: state.ids.next_raw(),
                 slug: &c.slug,
@@ -375,8 +386,6 @@ pub async fn import(state: &AiState, file: ImportFile) -> Result<ImportReport, P
     if !models.iter().any(|m| m.is_default && m.enabled) && !models.is_empty() {
         tracing::warn!("没有默认模型：角色卡白名单内都不可用时 AI 不会回复");
     }
-    tx.commit().await?;
-    state.catalog.invalidate().await;
     Ok(ImportReport {
         models: file.models.len(),
         characters: file.characters.len(),

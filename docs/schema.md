@@ -321,3 +321,9 @@
 - `messages.ai_workflow JSONB`：AI 回复定稿时写入整条时间线（WF-003），只存**已脱敏**的客户端形态
   （思考文本、工具参数与结果从不进入事件），最多 1000 个事件（超限先丢最早的 `reasoning.delta`，WF-005）。
   同一占位重试时清空为 `[]`，seq 与 stepId 按尝试次数换起点继续递增（WF-006）。CHECK：只有 AI 回复有，且是数组。
+
+## 管理后台审计（`20261031000001_admin_audit.sql`）
+
+- `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、
+  `action`（`<域>.<对象>.<动作>`）、`target_type` / `target_id`（id、key 或 slug，批量操作为 NULL）、
+  `details`（参数摘要，不含密钥类字段）、`ip`（INET）、`user_agent`。举报结案另有业务上的 `moderation_log`，两者并存。

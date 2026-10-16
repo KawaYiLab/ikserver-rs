@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT is_ai_agent FROM users WHERE id = 4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_ai_agent",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "is_ai_agent"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bc1ac909015f0f5d9a974052cc73464602d540403033573760b856ddc9f1b01e"
+}

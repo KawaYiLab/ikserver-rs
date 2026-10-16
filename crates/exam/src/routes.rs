@@ -27,6 +27,7 @@ where
         .routes(routes!(start))
         .routes(routes!(submit))
         .routes(routes!(review))
+        .merge(crate::admin::router())
 }
 
 /// 考试状态
