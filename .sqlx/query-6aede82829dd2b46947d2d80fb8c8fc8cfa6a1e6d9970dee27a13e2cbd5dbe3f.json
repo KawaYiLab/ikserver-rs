@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO check_ins (user_id, day, rank, streak, exp_granted, denny_granted, created_at)\n           SELECT s.user_id, s.day, s.rank,\n                  row_number() OVER (PARTITION BY s.user_id, s.grp ORDER BY s.day)::int,\n                  coalesce((SELECT sum(x.amount) FROM exp_logs x\n                            WHERE x.user_id = s.user_id AND x.action = 'check_in'\n                              AND x.biz_day = s.day), 0)::int,\n                  coalesce((SELECT sum(d.amount) FROM denny_logs d\n                            WHERE d.user_id = s.user_id AND d.action = 'check_in' AND d.amount > 0\n                              AND ((d.created_at AT TIME ZONE 'Asia/Shanghai') - interval '4 hours')::date\n                                  = s.day), 0)::int,\n                  s.at\n           FROM (\n               SELECT c.*,\n                      c.day - (row_number() OVER (PARTITION BY c.user_id ORDER BY c.day))::int AS grp\n               FROM (\n                   SELECT DISTINCT ON (cu.user_id, l.check_in_day)\n                          cu.user_id, l.check_in_day AS day, greatest(coalesce(l.rank, 1), 1) AS rank,\n                          coalesce(l.created_at AT TIME ZONE $1, $2) AS at\n                   FROM legacy.check_in_logs l\n                   JOIN legacy.ik_check_in_users cu ON cu.log_id = l.id\n                   JOIN users u ON u.id = cu.user_id\n                   WHERE l.check_in_day IS NOT NULL\n                   ORDER BY cu.user_id, l.check_in_day, l.id\n               ) c\n           ) s",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6aede82829dd2b46947d2d80fb8c8fc8cfa6a1e6d9970dee27a13e2cbd5dbe3f"
+}

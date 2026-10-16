@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_economy (user_id, exp, denny_balance, denny_given, last_check_in_day,\n                                     check_in_streak, check_in_total, created_at, updated_at)\n           SELECT u.id, greatest(coalesce(o.exp, 0), 0),\n                  least(greatest(coalesce(o.denny, 0), 0), 9999),\n                  greatest(coalesce(o.denny_given, 0), 0),\n                  o.last_check_in_date,\n                  greatest(coalesce(o.consecutive_check_in_days, 0), 0),\n                  (SELECT count(*) FROM legacy.ik_check_in_users c WHERE c.user_id = u.id)::int,\n                  u.created_at, $1\n           FROM users u\n           JOIN legacy.up_users o ON o.id = u.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c5ed9faa95be34270e7559cc5b1dea5d8c9f384252f1367d63465f32b5cfa013"
+}

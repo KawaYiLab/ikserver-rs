@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, equipped_avatar_id, equipped_avatar_media_id, equipped_card_id FROM users ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "equipped_avatar_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_avatar_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "equipped_avatar_media_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_avatar_media_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "equipped_card_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_card_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "2d44aea4e398ba11d6b1a9a62e82d804fe1a53c6054114f0784c09f63df8fe4a"
+}

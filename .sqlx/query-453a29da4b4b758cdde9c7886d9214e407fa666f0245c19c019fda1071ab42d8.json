@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO denny_logs (id, user_id, action, amount, balance, description, created_at)\n           SELECT d.id, lu.user_id, m.action, d.amount,\n                  least(greatest(coalesce(d.balance, 0), 0), 9999),\n                  left(coalesce(d.description, ''), 255),\n                  coalesce(d.created_at AT TIME ZONE $1, $2)\n           FROM legacy.denny_logs d\n           JOIN legacy.ik_denny_log_users lu ON lu.log_id = d.id\n           JOIN users u ON u.id = lu.user_id\n           JOIN legacy.ik_denny_actions m ON m.legacy_action = d.action\n           WHERE d.amount IS NOT NULL AND d.amount <> 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "453a29da4b4b758cdde9c7886d9214e407fa666f0245c19c019fda1071ab42d8"
+}

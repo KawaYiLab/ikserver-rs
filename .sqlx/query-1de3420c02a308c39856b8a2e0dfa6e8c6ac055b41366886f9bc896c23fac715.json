@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mihoyo_bindings (user_id, aid, mid, zzz_uid, zzz_nickname, zzz_level, zzz_region,\n                                        zzz_region_name, last_synced_at, created_at)\n           SELECT DISTINCT ON (b.aid) b.user_id, b.aid, b.mid, b.zzz_uid, b.zzz_nickname, b.zzz_level,\n                  b.zzz_region, b.zzz_region_name, b.last_synced_at, b.created_at\n           FROM (\n               SELECT DISTINCT ON (l.user_id) l.user_id, btrim(m.aid) AS aid,\n                      nullif(left(btrim(m.mid), 64), '') AS mid, m.zzz_uid, m.zzz_nickname, m.zzz_level,\n                      m.zzz_region, m.zzz_region_name, m.last_synced_at AT TIME ZONE $1 AS last_synced_at,\n                      coalesce(m.created_at AT TIME ZONE $1, $2) AS created_at, m.id\n               FROM legacy.mihoyo_bindings m\n               JOIN legacy.mihoyo_bindings_user_lnk l ON l.mihoyo_binding_id = m.id\n               JOIN users u ON u.id = l.user_id AND u.status IN ('active', 'blocked')\n               WHERE char_length(btrim(coalesce(m.aid, ''))) BETWEEN 1 AND 64\n               ORDER BY l.user_id, m.created_at, m.id\n           ) b\n           ORDER BY b.aid, b.created_at, b.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1de3420c02a308c39856b8a2e0dfa6e8c6ac055b41366886f9bc896c23fac715"
+}

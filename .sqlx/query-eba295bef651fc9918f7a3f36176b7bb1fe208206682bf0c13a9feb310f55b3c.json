@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM legacy.ik_exam_questions q\n           WHERE NOT (char_length(btrim(coalesce(q.question, ''))) BETWEEN 1 AND 2000\n                      AND jsonb_array_length(q.new_options) BETWEEN 2 AND 26\n                      AND cardinality(q.new_correct_keys) >= 1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eba295bef651fc9918f7a3f36176b7bb1fe208206682bf0c13a9feb310f55b3c"
+}

@@ -1,0 +1,110 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, question, kind, options, correct_keys, weight, enabled, legacy_id FROM exam_questions",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "question",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "question"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "options",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "options"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "correct_keys",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "correct_keys"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "weight",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "weight"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "legacy_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exam_questions",
+            "name": "legacy_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "48a651c14a0a48e11476cbf7705cd47f2518d2aac2987c5eb34f27bbfd60a99a"
+}

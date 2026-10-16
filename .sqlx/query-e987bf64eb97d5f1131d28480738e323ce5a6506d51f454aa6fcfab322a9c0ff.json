@@ -1,0 +1,98 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, action, amount, requested, bucket, biz_day, dedup_key FROM exp_logs ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "amount",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "amount"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "requested",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "requested"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "bucket",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "bucket"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "biz_day",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "biz_day"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "dedup_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "exp_logs",
+            "name": "dedup_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e987bf64eb97d5f1131d28480738e323ce5a6506d51f454aa6fcfab322a9c0ff"
+}

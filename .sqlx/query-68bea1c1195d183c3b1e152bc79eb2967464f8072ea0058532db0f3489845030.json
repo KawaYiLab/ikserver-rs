@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, day, rank, streak, exp_granted, denny_granted FROM check_ins ORDER BY user_id, day",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "check_ins",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "day",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "check_ins",
+            "name": "day"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "rank",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "check_ins",
+            "name": "rank"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "streak",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "check_ins",
+            "name": "streak"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "exp_granted",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "check_ins",
+            "name": "exp_granted"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "denny_granted",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "check_ins",
+            "name": "denny_granted"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "68bea1c1195d183c3b1e152bc79eb2967464f8072ea0058532db0f3489845030"
+}

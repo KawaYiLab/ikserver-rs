@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users u SET equipped_avatar_id = a.id, equipped_avatar_media_id = a.image_media_id\n           FROM legacy.up_users_equipped_avatar_lnk l\n           JOIN system_avatars a ON a.id = l.avatar_id\n           WHERE u.id = l.user_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e69160484e7d02170f4684577d41cf92aca30cf41ed7fed848c5d8a892ae7c7e"
+}

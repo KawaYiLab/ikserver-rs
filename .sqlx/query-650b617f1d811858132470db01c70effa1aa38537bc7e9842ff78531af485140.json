@@ -1,0 +1,98 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT user_id, exp, denny_balance, denny_given, last_check_in_day, check_in_streak, check_in_total\n         FROM user_economy ORDER BY user_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "exp",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "exp"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "denny_balance",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "denny_balance"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "denny_given",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "denny_given"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "last_check_in_day",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "last_check_in_day"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "check_in_streak",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "check_in_streak"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "check_in_total",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "user_economy",
+            "name": "check_in_total"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "650b617f1d811858132470db01c70effa1aa38537bc7e9842ff78531af485140"
+}

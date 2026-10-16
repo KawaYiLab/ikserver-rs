@@ -12,6 +12,19 @@ BEGIN
     END LOOP;
 END $$;
 
+-- Strapi blocks 富文本 → 纯文本：取每个块里全部文字节点（含链接里的），块之间用 sep 连接。
+CREATE OR REPLACE FUNCTION legacy.ik_blocks_text(blocks JSONB, sep TEXT) RETURNS TEXT
+LANGUAGE sql IMMUTABLE AS $$
+    SELECT coalesce(string_agg(par.text, sep ORDER BY blk.ord), '')
+    FROM jsonb_array_elements(CASE WHEN jsonb_typeof(blocks) = 'array' THEN blocks ELSE '[]'::jsonb END)
+         WITH ORDINALITY AS blk(block, ord)
+    CROSS JOIN LATERAL (
+        SELECT string_agg(t #>> '{}', '') AS text
+        FROM jsonb_path_query(blk.block, 'strict $.**.text') AS t
+        WHERE jsonb_typeof(t) = 'string'
+    ) par
+$$;
+
 -- 用户与作者一一对应（ACC-018）。旧系统的公开主页链接用作者的 documentId（RPTADM-015），
 -- 所以 users.legacy_id 优先取作者的 documentId，供旧链接 301 跳转。
 CREATE VIEW legacy.ik_user_authors AS
@@ -84,16 +97,7 @@ FROM named n;
 CREATE VIEW legacy.ik_profiles AS
 SELECT
     u.id AS user_id,
-    coalesce((
-        SELECT string_agg(par.text, E'\n' ORDER BY par.ord)
-        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(a.bio) = 'array' THEN a.bio ELSE '[]'::jsonb END)
-             WITH ORDINALITY AS blk(block, ord)
-        CROSS JOIN LATERAL (
-            SELECT blk.ord, string_agg(t #>> '{}', '') AS text
-            FROM jsonb_path_query(blk.block, 'strict $.**.text') AS t
-            WHERE jsonb_typeof(t) = 'string'
-        ) par
-    ), '') AS bio_text,
+    legacy.ik_blocks_text(a.bio, E'\n') AS bio_text,
     coalesce(u.profile_hidden, false) AS hidden,
     CASE WHEN jsonb_typeof(a.profile_pinned_articles) = 'array' THEN a.profile_pinned_articles END
         AS pinned_document_ids
@@ -274,3 +278,84 @@ CREATE VIEW legacy.ik_file_refs AS
 SELECT r.related_type, r.related_id, r.field, r.file_id, r."order"
 FROM legacy.files_related_mph r
 JOIN legacy.ik_media_digests d ON d.file_id = r.file_id AND d.error IS NULL;
+
+-- 经验动作：旧名 → 新名、每日上限桶（EXP-009）、是否按日去重（新代码里用 Dedup::Daily 的动作）。
+-- like_received / comment_received / favorite_received 只为保留历史流水（D-049）。
+CREATE VIEW legacy.ik_exp_actions (legacy_action, action, bucket, daily) AS VALUES
+    ('check_in', 'check_in', 'active', true),
+    ('create_article', 'create_post', 'active', true),
+    ('create_comment', 'create_comment', 'active', true),
+    ('like_give', 'like_give', 'active', true),
+    ('comment_accepted', 'comment_accepted', 'active', false),
+    ('like_received', 'like_received', 'passive', false),
+    ('comment_received', 'comment_received', 'passive', false),
+    ('favorite_received', 'favorite_received', 'passive', false),
+    ('denny_received', 'denny_received', 'passive', false),
+    ('exam_passed', 'exam_passed', 'exempt', false),
+    ('admin_grant', 'admin_grant', 'exempt', false);
+
+-- 丁尼动作：旧名 → 新名。
+CREATE VIEW legacy.ik_denny_actions (legacy_action, action) AS VALUES
+    ('daily_login', 'check_in'),
+    ('give_post', 'gift_sent'),
+    ('receive_post_give', 'gift_received'),
+    ('spend_rename', 'spend_rename'),
+    ('spend_avatar', 'spend_avatar'),
+    ('spend_delete_post', 'spend_delete_post'),
+    ('refund', 'refund'),
+    ('admin_grant', 'admin_grant'),
+    ('exam_passed', 'exam_passed'),
+    ('level_up', 'level_up');
+
+-- 流水与签到的账号（关系在链接表里）。
+CREATE VIEW legacy.ik_exp_log_users AS
+SELECT DISTINCT ON (l.experience_log_id) l.experience_log_id AS log_id, l.user_id
+FROM legacy.experience_logs_user_lnk l ORDER BY l.experience_log_id, l.id;
+CREATE VIEW legacy.ik_denny_log_users AS
+SELECT DISTINCT ON (l.denny_log_id) l.denny_log_id AS log_id, l.user_id
+FROM legacy.denny_logs_user_lnk l ORDER BY l.denny_log_id, l.id;
+CREATE VIEW legacy.ik_check_in_users AS
+SELECT DISTINCT ON (l.check_in_log_id) l.check_in_log_id AS log_id, l.user_id
+FROM legacy.check_in_logs_user_lnk l ORDER BY l.check_in_log_id, l.id;
+
+-- 题库：题型、选项（trim、去空、key 去重）、正确答案（只留选项里有的 key）。不合格的题不导入
+-- （选项少于 2 个或多于 26 个、没有正确答案、题干为空或超过 2000 字），预检里报告。
+CREATE VIEW legacy.ik_exam_questions AS
+WITH opts AS (
+    SELECT q.id,
+           coalesce((
+               SELECT jsonb_agg(jsonb_build_object('key', o.key, 'text', o.text) ORDER BY o.ord)
+               FROM (
+                   SELECT DISTINCT ON (btrim(e.value ->> 'key'))
+                          btrim(e.value ->> 'key') AS key, btrim(e.value ->> 'text') AS text, e.ord
+                   FROM jsonb_array_elements(CASE WHEN jsonb_typeof(q.options) = 'array'
+                                                  THEN q.options ELSE '[]'::jsonb END)
+                        WITH ORDINALITY AS e(value, ord)
+                   WHERE jsonb_typeof(e.value) = 'object'
+                     AND btrim(coalesce(e.value ->> 'key', '')) <> ''
+                     AND btrim(coalesce(e.value ->> 'text', '')) <> ''
+                   ORDER BY btrim(e.value ->> 'key'), e.ord
+               ) o
+           ), '[]'::jsonb) AS options
+    FROM legacy.exam_questions q
+)
+SELECT
+    q.*,
+    o.options AS new_options,
+    CASE WHEN q.type IN ('single', 'multiple', 'boolean') THEN q.type ELSE 'single' END AS kind,
+    coalesce((
+        SELECT array_agg(DISTINCT btrim(k #>> '{}') ORDER BY btrim(k #>> '{}'))
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(q.correct_keys) = 'array'
+                                       THEN q.correct_keys ELSE '[]'::jsonb END) AS k
+        WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(o.options) x
+                      WHERE x ->> 'key' = btrim(k #>> '{}'))
+    ), '{}') AS new_correct_keys
+FROM legacy.exam_questions q
+JOIN opts o ON o.id = q.id;
+
+-- 装扮的图片（只认摘要读取成功的文件）。
+CREATE VIEW legacy.ik_cosmetic_images AS
+SELECT DISTINCT ON (r.related_type, r.related_id) r.related_type, r.related_id, r.file_id
+FROM legacy.ik_file_refs r
+WHERE r.field = 'image' AND r.related_type IN ('api::avatar.avatar', 'api::business-card.business-card')
+ORDER BY r.related_type, r.related_id, r."order", r.file_id;

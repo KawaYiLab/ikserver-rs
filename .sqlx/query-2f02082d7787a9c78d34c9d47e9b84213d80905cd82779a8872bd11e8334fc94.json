@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO exp_logs (id, user_id, action, amount, requested, bucket, biz_day, dedup_key,\n                                 created_at)\n           SELECT k.id, k.user_id, k.action, k.amount, k.requested, k.bucket, k.biz_day,\n                  CASE WHEN k.rn = 1 AND k.candidate IS NOT NULL THEN k.candidate\n                       ELSE 'legacy:' || k.id END,\n                  k.at\n           FROM (\n               SELECT d.*,\n                      row_number() OVER (PARTITION BY d.user_id, d.action, d.candidate\n                                         ORDER BY d.at, d.id) AS rn\n               FROM (\n                   SELECT t.*,\n                          CASE WHEN t.daily THEN 'day:' || to_char(t.biz_day, 'YYYY-MM-DD')\n                               WHEN t.action = 'comment_accepted' AND t.related_id ~ '^comment:\\d+$'\n                               THEN 'ref:' || t.related_id\n                          END AS candidate\n                   FROM (\n                       SELECT e.id, lu.user_id, m.action, m.bucket, m.daily, e.related_id,\n                              e.exp AS amount,\n                              greatest(coalesce(substring(e.description FROM 'Experience change: -?\\d+/(\\d+)')::int,\n                                                e.exp), e.exp) AS requested,\n                              coalesce(e.created_at AT TIME ZONE $1, $2) AS at,\n                              ((coalesce(e.created_at AT TIME ZONE $1, $2) AT TIME ZONE 'Asia/Shanghai')\n                               - interval '4 hours')::date AS biz_day\n                       FROM legacy.experience_logs e\n                       JOIN legacy.ik_exp_log_users lu ON lu.log_id = e.id\n                       JOIN users u ON u.id = lu.user_id\n                       JOIN legacy.ik_exp_actions m ON m.legacy_action = e.action\n                       WHERE e.exp > 0\n                   ) t\n               ) d\n           ) k",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2f02082d7787a9c78d34c9d47e9b84213d80905cd82779a8872bd11e8334fc94"
+}

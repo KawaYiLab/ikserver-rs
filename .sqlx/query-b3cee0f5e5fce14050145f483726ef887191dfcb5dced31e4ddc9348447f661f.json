@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO check_in_days (day, count)\n           SELECT day, greatest(count(*), max(rank))::int FROM check_ins GROUP BY day",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b3cee0f5e5fce14050145f483726ef887191dfcb5dced31e4ddc9348447f661f"
+}

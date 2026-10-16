@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM (\n               SELECT a.id FROM legacy.avatars a\n               WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_cosmetic_images i\n                                 WHERE i.related_type = 'api::avatar.avatar' AND i.related_id = a.id)\n               UNION ALL\n               SELECT c.id FROM legacy.business_cards c\n               WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_cosmetic_images i\n                                 WHERE i.related_type = 'api::business-card.business-card'\n                                   AND i.related_id = c.id)\n           ) x",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9a9b62fa085511630bc6ff65449324268562ca32ce9f37c118b9d688a73da29f"
+}

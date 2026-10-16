@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO exam_questions (id, question, kind, options, correct_keys, explanation, weight,\n                                       enabled, tag, legacy_id, created_at, updated_at)\n           SELECT q.id, btrim(q.question), q.kind, q.new_options, q.new_correct_keys,\n                  nullif(btrim(q.explanation), ''), greatest(coalesce(q.weight, 1), 1),\n                  q.enabled IS DISTINCT FROM false, nullif(btrim(q.tag), ''), q.document_id,\n                  coalesce(q.created_at AT TIME ZONE $1, $2),\n                  coalesce(q.updated_at AT TIME ZONE $1, q.created_at AT TIME ZONE $1, $2)\n           FROM legacy.ik_exam_questions q\n           WHERE char_length(btrim(coalesce(q.question, ''))) BETWEEN 1 AND 2000\n             AND jsonb_array_length(q.new_options) BETWEEN 2 AND 26\n             AND cardinality(q.new_correct_keys) >= 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ee4adfcce5fd7dc58e816aba069f8bbe36ba6f4ee4693da734201415abc7d363"
+}

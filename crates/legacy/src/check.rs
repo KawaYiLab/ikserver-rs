@@ -41,6 +41,8 @@ pub async fn check(db: &PgPool) -> anyhow::Result<Vec<Finding>> {
     accounts(db, &mut out).await?;
     media(db, &mut out).await?;
     content(db, &mut out).await?;
+    economy(db, &mut out).await?;
+    catalog(db, &mut out).await?;
     out.retain(|f| f.severity == Severity::Info || f.count > 0);
     Ok(out)
 }
@@ -258,6 +260,104 @@ async fn content(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
         Severity::Fixed,
         comments.long_body,
         "评论超过 2000 字，截断",
+    ));
+    Ok(())
+}
+
+async fn economy(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
+    let rich = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM legacy.up_users WHERE denny > 9999 OR denny < 0"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "economy.balance_clamped",
+        Severity::Fixed,
+        rich,
+        "丁尼余额超出 0–9999，截到范围内（旧系统入账同样封顶 9999，DENNY-006）",
+    ));
+
+    let exp = sqlx::query!(
+        r#"SELECT count(*) AS "n!", string_agg(DISTINCT e.action, ', ') AS actions
+           FROM legacy.experience_logs e
+           WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_exp_actions m WHERE m.legacy_action = e.action)"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "economy.exp_unknown_action",
+        Severity::Fixed,
+        exp.n,
+        format!(
+            "经验流水里不认识的动作，不导入：{}",
+            exp.actions.as_deref().unwrap_or("")
+        ),
+    ));
+
+    let denny = sqlx::query!(
+        r#"SELECT count(*) AS "n!", string_agg(DISTINCT d.action, ', ') AS actions
+           FROM legacy.denny_logs d
+           WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_denny_actions m WHERE m.legacy_action = d.action)"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "economy.denny_unknown_action",
+        Severity::Fixed,
+        denny.n,
+        format!(
+            "丁尼流水里不认识的动作，不导入：{}",
+            denny.actions.as_deref().unwrap_or("")
+        ),
+    ));
+    Ok(())
+}
+
+async fn catalog(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
+    let questions = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM legacy.ik_exam_questions q
+           WHERE NOT (char_length(btrim(coalesce(q.question, ''))) BETWEEN 1 AND 2000
+                      AND jsonb_array_length(q.new_options) BETWEEN 2 AND 26
+                      AND cardinality(q.new_correct_keys) >= 1)"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "exam.invalid_questions",
+        Severity::Fixed,
+        questions,
+        "不合格的题（选项不足 2 个或超过 26 个、没有有效的正确答案、题干为空或过长）不导入",
+    ));
+
+    let attempts = sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM legacy.exam_attempts"#)
+        .fetch_one(db)
+        .await?;
+    out.push(Finding::new(
+        "exam.attempts_skipped",
+        Severity::Info,
+        attempts,
+        "考试场次不导入（通过状态已在账号上；没通过的人切换后重新开考）",
+    ));
+
+    let cosmetics = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM (
+               SELECT a.id FROM legacy.avatars a
+               WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_cosmetic_images i
+                                 WHERE i.related_type = 'api::avatar.avatar' AND i.related_id = a.id)
+               UNION ALL
+               SELECT c.id FROM legacy.business_cards c
+               WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_cosmetic_images i
+                                 WHERE i.related_type = 'api::business-card.business-card'
+                                   AND i.related_id = c.id)
+           ) x"#
+    )
+    .fetch_one(db)
+    .await?;
+    out.push(Finding::new(
+        "cosmetics.no_image",
+        Severity::Fixed,
+        cosmetics,
+        "没有可用图片的系统头像 / 名片不导入（装备着它们的账号随之卸下）",
     ));
     Ok(())
 }

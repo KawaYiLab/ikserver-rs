@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\", string_agg(DISTINCT d.action, ', ') AS actions\n           FROM legacy.denny_logs d\n           WHERE NOT EXISTS (SELECT 1 FROM legacy.ik_denny_actions m WHERE m.legacy_action = d.action)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "actions",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "91a909e71017bb46a899cbbb2ae361028f12cb9222b87854b8f0f8fa430a75b6"
+}

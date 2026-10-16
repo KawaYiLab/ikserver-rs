@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users u SET equipped_card_id = c.id\n           FROM legacy.up_users_equipped_card_lnk l\n           JOIN business_cards c ON c.id = l.business_card_id\n           WHERE u.id = l.user_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e58b47511d18e777853678c9ede7567647ab441dee44ad11aa47f372b1c2db98"
+}

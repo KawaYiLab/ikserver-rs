@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO system_avatars (id, name, kind, image_media_id, created_at, updated_at)\n           SELECT DISTINCT ON (left(btrim(a.name), 50))\n                  a.id, left(btrim(a.name), 50),\n                  CASE WHEN a.type IN ('character', 'city', 'news') THEN a.type ELSE 'character' END,\n                  i.file_id,\n                  coalesce(a.created_at AT TIME ZONE $1, $2),\n                  coalesce(a.updated_at AT TIME ZONE $1, a.created_at AT TIME ZONE $1, $2)\n           FROM legacy.avatars a\n           JOIN legacy.ik_cosmetic_images i\n             ON i.related_type = 'api::avatar.avatar' AND i.related_id = a.id\n           JOIN media_files m ON m.id = i.file_id\n           WHERE btrim(coalesce(a.name, '')) <> ''\n           ORDER BY left(btrim(a.name), 50), a.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d317b8307691b8fe18b8e266fd107bddcc21c64db02d7a41e9c06d970c43f495"
+}
