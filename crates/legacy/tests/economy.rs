@@ -3,14 +3,10 @@
 mod common;
 
 use chrono::NaiveDate;
-use common::{import, setup};
+use common::{day, import, setup};
 use sqlx::PgPool;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
-
-fn day(y: i32, m: u32, d: u32) -> NaiveDate {
-    NaiveDate::from_ymd_opt(y, m, d).unwrap()
-}
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn economy_is_imported(db: PgPool) {

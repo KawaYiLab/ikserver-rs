@@ -2,7 +2,7 @@
 
 #![allow(dead_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use sqlx::PgPool;
 
 pub const NOW: DateTime<Utc> = DateTime::from_timestamp_nanos(1_790_000_000_000_000_000);
@@ -29,4 +29,8 @@ pub async fn import(db: &PgPool, zone: &str) -> ik_legacy::ImportReport {
 
 pub fn at(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(y, mo, d, h, mi, 0).unwrap()
+}
+
+pub fn day(y: i32, m: u32, d: u32) -> NaiveDate {
+    NaiveDate::from_ymd_opt(y, m, d).unwrap()
 }
