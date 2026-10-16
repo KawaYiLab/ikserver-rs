@@ -89,7 +89,31 @@ jobs:
         run: cargo test --workspace --doc --locked
       - name: OpenAPI document builds
         run: cargo run -q -p ik-server --locked -- openapi > openapi.json
+      # 管理后台的接口类型从 admin/openapi.json 生成；后端改了接口要一起更新。
+      - name: Admin OpenAPI snapshot is current
+        run: diff -u admin/openapi.json openapi.json
       - uses: actions/upload-artifact@v4
         with:
           name: openapi
           path: openapi.json
+
+  admin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: admin/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: admin/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: API types match admin/openapi.json
+        run: pnpm gen:api && git diff --exit-code app/types/api.d.ts
+      - run: pnpm typecheck
+      - run: pnpm build

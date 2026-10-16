@@ -118,6 +118,12 @@ cargo nextest run -p ik-search
 
 没有设置 `IK_TEST_MEILI_URL` 时这些用例直接通过（数据库兜底的用例照常运行）。每个用例用独立的索引前缀，结束时删除索引。
 
+### 管理后台
+
+`admin/` 是独立的 Nuxt 4 子项目（Node 22 + pnpm 10），开发、生成接口类型和部署都写在
+[`admin/README.md`](../admin/README.md) 里。后端接口改了以后，要重新生成 `admin/openapi.json`
+和 `admin/app/types/api.d.ts`，然后运行 `pnpm typecheck`。
+
 ## 目录约定
 
 - `.sqlx/`：编译期查询缓存（**提交**，CI 用 `SQLX_OFFLINE=true`）。
