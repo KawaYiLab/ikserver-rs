@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE categories SET slug = $2, name = $3, description = $4, sort_order = $5,\n             is_active = $6, admin_only = $7, allow_comment_accept = $8, updated_at = $9\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d1702a8f784cdb9d44c72164b4121061f8b85c07a4d30d3ba8a17f9db09b98b7"
+}

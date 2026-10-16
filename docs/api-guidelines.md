@@ -98,6 +98,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | UPLOAD_CHECKSUM_MISMATCH | 400 | 上传的文件内容与声明的哈希不符 | |
 | UPLOAD_NOT_IMAGE | 400 | 上传的文件不是支持的图片格式 | 按文件头嗅探，只认 jpeg/png/gif/webp/avif |
 | DM_SELF | 400 | 不能给自己发私信 | |
+| CANNOT_CHANGE_SELF | 400 | 不能修改自己的角色 | 管理后台改角色 |
 | DM_AI_SESSION_REQUIRED | 400 | 与 AI 对话请新建 AI 会话 | `POST /v1/dm/direct` 的对方是 AI 账号；用 `POST /v1/ai/sessions` |
 | NOT_AI_SESSION | 400 | 只有 AI 会话支持此操作 | 改标题 / 模型、重置记忆用在普通私聊上（TRIG-025、CTX-020/032） |
 | NOT_AI_REPLY | 400 | 这条消息不是 AI 回复 | 停止、重新生成的目标不是（未撤回的）AI 回复（GEN-010/013） |
@@ -124,7 +125,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
 | MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |
 | MIHOYO_DELETE_ACCOUNT_MISMATCH | 403 | 扫码的米游社账号与当前账号不一致，请使用当前账号绑定的米游社扫码 | MHY-017 |
-| CANNOT_SANCTION_STAFF | 403 | 不能封禁版主或管理员 | 审核结案 `block_user` |
+| CANNOT_SANCTION_STAFF | 403 | 不能封禁版主或管理员 | 审核结案 `block_user`、后台直接封禁 |
 | MIHOYO_UNBIND_FORBIDDEN | 403 | 当前账号只能通过米游社扫码登录，请先绑定邮箱 | 没有邮箱的账号解绑会把自己锁在外面（MHY-014） |
 | MIHOYO_NOT_BOUND | 404 | 当前账号未绑定米游社 | |
 | AI_CHARACTER_NOT_FOUND | 404 | AI 角色不存在或未开放私信 | 新建 AI 会话时角色停用、不开放私信或绑定账号不可用（TRIG-024） |
@@ -133,6 +134,10 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | IDENTITY_CONFLICT | 409 | 这个米游社账号关联了多个绳网账号，请联系管理员 | aid 与 mid 指向不同账号（历史数据），运维处理 |
 | QR_SESSION_CONSUMED | 409 | 这次扫码登录已经失效，请重新扫码 | 同一个二维码登录的会话已登出或过期，不会另起新会话 |
 | ACCOUNT_CHANGED | 409 | 账号信息已变更，请重新验证 | 核验之后邮箱或密码被改过（修改密码、注销），DEL-005 |
+| CATEGORY_IN_USE | 409 | 分区下还有帖子，不能删除，请改为停用 | 管理后台删除分区 |
+| ACCOUNT_UNAVAILABLE | 409 | 该账号已封禁、注销或不存在，不能调整 | 管理后台调整丁尼、经验，手动通过考试 |
+| REINDEX_RUNNING | 409 | 索引正在重建，请稍后再试 | |
+| SEARCH_ENGINE_NOT_CONFIGURED | 409 | 没有配置搜索引擎 | 重建索引时 |
 | AI_MODEL_IS_DEFAULT | 409 | 默认模型不能删除，请先把其他模型设为默认 | 管理后台删除模型 |
 | AI_NOT_LATEST_REPLY | 409 | 只能重新生成最后一条 AI 回复 | GEN-013 |
 | AI_TRIGGER_WITHDRAWN | 409 | 触发这条回复的消息已撤回 | 重新生成时（GEN-014） |
@@ -298,4 +303,9 @@ GET /v1/posts?cursor=eyJ...&limit=20
 - 已有：举报处理 `/v1/admin/reports*`、解封 `/v1/admin/users/{id}/unblock`；入站题库
   `/v1/admin/exam/questions`（列表、新建）、`…/stats`、`…/{id}`（详情、整体覆盖）、`…/{id}/toggle`、
   `…/bulk-delete`；AI 配置 `/v1/admin/ai/settings`、`/v1/admin/ai/models[/{key}]`（PUT 新建或修改，DELETE）、
-  `/v1/admin/ai/characters[/{slug}]`、任务审计 `/v1/admin/ai/jobs`（`status=failed` 即死信）。
+  `/v1/admin/ai/characters[/{slug}]`、任务审计 `/v1/admin/ai/jobs`（`status=failed` 即死信）；
+  分区 `/v1/admin/categories[/{id}]`（有帖子的不能删，请停用）、标签 `/v1/admin/tags`、`PATCH /v1/admin/tags/{id}`
+  （改名、封禁）；装扮 `/v1/admin/cosmetics/avatars[/{id}]`、`/v1/admin/cosmetics/cards[/{id}]`；
+  账号 `/v1/admin/users`、`…/{id}`、`…/{id}/role`、`…/{id}/ai-agent`、`…/{id}/exam-pass`、`…/{id}/denny`、
+  `…/{id}/exp`、`…/{id}/block`、`…/{id}/unblock`；仪表盘 `/v1/admin/dashboard`；搜索索引 `/v1/admin/search`、
+  `POST /v1/admin/search/reindex`（后台执行，202）；审计日志 `/v1/admin/audit`。

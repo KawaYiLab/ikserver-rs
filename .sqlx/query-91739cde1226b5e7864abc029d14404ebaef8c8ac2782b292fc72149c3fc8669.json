@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(DISTINCT (target_type, target_id)) FILTER (WHERE status = 'pending') AS \"pending!\",\n                  count(DISTINCT (target_type, target_id)) FILTER (WHERE status = 'reviewing') AS \"reviewing!\"\n           FROM reports WHERE status IN ('pending', 'reviewing')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "reviewing!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "91739cde1226b5e7864abc029d14404ebaef8c8ac2782b292fc72149c3fc8669"
+}

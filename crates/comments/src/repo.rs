@@ -689,3 +689,17 @@ pub(crate) async fn moderation_states(
     .fetch_all(conn)
     .await
 }
+
+pub(crate) async fn comment_counts(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> sqlx::Result<(i64, i64)> {
+    let row = sqlx::query!(
+        r#"SELECT count(*) AS "total!", count(*) FILTER (WHERE created_at >= $1) AS "since!"
+           FROM comments"#,
+        since,
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok((row.total, row.since))
+}

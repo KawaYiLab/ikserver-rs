@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO tags (id, name, slug) VALUES (1, '零号空洞', '零号空洞'), (2, 'C++', 'c++')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e01f3a8dfea296d27af21b3058515fad0be2086e8cc8bd89721ae0b0e1a1408b"
+}

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::FromRef;
+use ik_admin::AdminState;
 use ik_ai::AiState;
 use ik_auth::{AuthSettings, AuthState};
 use ik_comments::CommentsState;
@@ -52,6 +53,7 @@ pub struct AppState {
     pub mihoyo: MihoyoState,
     pub moderation: ModerationState,
     pub ai: AiState,
+    pub admin: AdminState,
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
 }
 
@@ -129,7 +131,15 @@ impl AppState {
         };
         let ai = AiState::from_config(messaging.clone(), forum, &config.ai)?;
         ai.install_hooks();
+        let admin = AdminState::new(
+            content.clone(),
+            exam.clone(),
+            ai.clone(),
+            moderation.clone(),
+            search.clone(),
+        );
         Ok(Self {
+            admin,
             ai,
             moderation,
             cosmetics,
@@ -256,5 +266,11 @@ impl FromRef<AppState> for AiState {
 impl FromRef<AppState> for MediaState {
     fn from_ref(state: &AppState) -> Self {
         state.media.clone()
+    }
+}
+
+impl FromRef<AppState> for AdminState {
+    fn from_ref(state: &AppState) -> Self {
+        state.admin.clone()
     }
 }

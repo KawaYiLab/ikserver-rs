@@ -88,6 +88,19 @@ impl SearchState {
         engine.settle().await
     }
 
+    /// 是否配置了搜索引擎（没有时全部查询走数据库兜底）。
+    pub fn engine_configured(&self) -> bool {
+        self.engine.is_some()
+    }
+
+    /// 索引里的帖子数、评论数（管理后台对账，ADMINCRUD-007）。没有配置搜索引擎时为 None。
+    pub async fn document_counts(&self) -> anyhow::Result<Option<(usize, usize)>> {
+        match &self.engine {
+            Some(engine) => Ok(Some(engine.document_counts().await?)),
+            None => Ok(None),
+        }
+    }
+
     /// 测试用：删除索引（每个测试用独立的索引前缀）。
     #[doc(hidden)]
     pub async fn drop_indexes(&self) -> anyhow::Result<()> {

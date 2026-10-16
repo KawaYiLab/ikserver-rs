@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO posts (id, author_id, title, body, status, category_id, published_at,\n                            first_published_at, bumped_at)\n         VALUES (900, 1, '帖', '正文', 'published', $1, now(), now(), now())",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f294cbd7ddfd8002498019ce7914461ef2fea57929ec53e907f7b5aff51de495"
+}

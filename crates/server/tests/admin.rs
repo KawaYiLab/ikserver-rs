@@ -373,3 +373,473 @@ async fn ai_config_is_admin_only_and_round_trips(db: PgPool) {
         ]
     );
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn categories_and_tags(db: PgPool) {
+    let app = setup(&db).await;
+    let input = json!({ "slug": "guide", "name": "攻略区", "description": "攻略", "sortOrder": 2,
+                        "allowCommentAccept": true });
+    assert_eq!(
+        call(
+            &app,
+            MODERATOR,
+            "POST",
+            "/v1/admin/categories",
+            input.clone()
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, created) = call(&app, ADMIN, "POST", "/v1/admin/categories", input.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["postCount"], 0);
+    let id = created["id"].as_str().unwrap().to_owned();
+    let (status, body) = call(&app, ADMIN, "POST", "/v1/admin/categories", input).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // 停用：公开分区列表里消失，后台仍能看到。
+    let (status, updated) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("/v1/admin/categories/{id}"),
+        json!({ "slug": "guide", "name": "攻略", "isActive": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["isActive"], false);
+    let (_, public) = call(&app, USER, "GET", "/v1/categories", Value::Null).await;
+    assert!(public.to_string().find("guide").is_none(), "{public}");
+    let (_, all) = call(&app, MODERATOR, "GET", "/v1/admin/categories", Value::Null).await;
+    assert_eq!(all[0]["name"], "攻略");
+
+    // 有帖子的分区不能删。
+    sqlx::query!(
+        "INSERT INTO posts (id, author_id, title, body, status, category_id, published_at,
+                            first_published_at, bumped_at)
+         VALUES (900, 1, '帖', '正文', 'published', $1, now(), now(), now())",
+        id.parse::<i64>().unwrap()
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        &format!("/v1/admin/categories/{id}"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "CATEGORY_IN_USE");
+    sqlx::query!("DELETE FROM posts WHERE id = 900")
+        .execute(&db)
+        .await
+        .unwrap();
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        &format!("/v1/admin/categories/{id}"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // 标签：改名时 slug 随名称重新派生；封禁。
+    sqlx::query!(
+        "INSERT INTO tags (id, name, slug) VALUES (1, '零号空洞', '零号空洞'), (2, 'C++', 'c++')"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (status, tag) = call(
+        &app,
+        ADMIN,
+        "PATCH",
+        "/v1/admin/tags/1",
+        json!({ "name": "  零号  空洞 " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{tag}");
+    assert_eq!(
+        (tag["name"].as_str(), tag["slug"].as_str()),
+        (Some("零号 空洞"), Some("零号-空洞"))
+    );
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "PATCH",
+        "/v1/admin/tags/2",
+        json!({ "name": "零号空洞" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "PATCH",
+        "/v1/admin/tags/1",
+        json!({ "name": "零号空洞" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    let (_, tag) = call(
+        &app,
+        ADMIN,
+        "PATCH",
+        "/v1/admin/tags/1",
+        json!({ "isBlocked": true }),
+    )
+    .await;
+    assert_eq!(tag["isBlocked"], true);
+    let (_, page) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/tags?blocked=true",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(page["total"], 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn users_roles_economy_and_bans(db: PgPool) {
+    let app = setup(&db).await;
+    sqlx::query!(
+        "INSERT INTO users (id, username, email, role, level) VALUES (5, 'newbie', 'newbie@example.com', 'user', 0)"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    // 邮箱只有管理员看到全文。
+    let (_, page) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/users?q=newbie",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["items"][0]["email"], "n***@example.com");
+    let (_, page) = call(&app, ADMIN, "GET", "/v1/admin/users?q=5", Value::Null).await;
+    assert_eq!(page["items"][0]["email"], "newbie@example.com");
+    let (_, page) = call(
+        &app,
+        ADMIN,
+        "GET",
+        "/v1/admin/users?role=moderator",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(page["items"][0]["username"], "mod");
+
+    // 角色：不能改自己；版主不能改别人。
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/1/role",
+        json!({ "role": "user" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["code"], "CANNOT_CHANGE_SELF");
+    assert_eq!(
+        call(
+            &app,
+            MODERATOR,
+            "PUT",
+            "/v1/admin/users/5/role",
+            json!({ "role": "admin" })
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    let (_, detail) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/5/role",
+        json!({ "role": "moderator" }),
+    )
+    .await;
+    assert_eq!(detail["user"]["role"], "moderator");
+    call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/5/role",
+        json!({ "role": "user" }),
+    )
+    .await;
+    let (_, detail) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/5/ai-agent",
+        json!({ "isAiAgent": true }),
+    )
+    .await;
+    assert_eq!(detail["user"]["isAiAgent"], true);
+    call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/5/ai-agent",
+        json!({ "isAiAgent": false }),
+    )
+    .await;
+
+    // 手动通过考试：等级不再锁 0。
+    let (status, detail) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/5/exam-pass",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["user"]["examPassedAt"].is_string());
+    assert!(detail["user"]["level"].as_i64().unwrap() >= 1);
+
+    // 丁尼：发放、扣除、余额不足；经验发放不占每日上限。
+    let (status, economy) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/5/denny",
+        json!({ "amount": 100, "reason": "活动奖励" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economy}");
+    let after_grant = economy["denny"].as_i64().unwrap();
+    let (_, economy) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/5/denny",
+        json!({ "amount": -50, "reason": "误发" }),
+    )
+    .await;
+    assert_eq!(economy["denny"].as_i64().unwrap(), after_grant - 50);
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/5/denny",
+        json!({ "amount": -9999, "reason": "扣光" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYMENT_REQUIRED, "{body}");
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/5/denny",
+        json!({ "amount": 0, "reason": "x" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, economy) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/5/exp",
+        json!({ "amount": 5000, "reason": "补发" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{economy}");
+    assert_eq!(economy["exp"], 5000);
+    assert!(economy["level"].as_i64().unwrap() > 1);
+    let logs: Vec<String> = sqlx::query_scalar!(
+        "SELECT action FROM denny_logs WHERE user_id = 5 ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(logs, vec!["admin_grant", "admin_deduct"]);
+
+    // 封禁：立即下线；不能封禁员工；解封。
+    let (status, body) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/block",
+        json!({ "note": "刷屏" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["blocked"], true);
+    assert_eq!(
+        call(&app, USER, "GET", "/v1/me", Value::Null).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, body) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/block",
+        json!({}),
+    )
+    .await;
+    assert_eq!(body["blocked"], false);
+    let (status, body) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/1/block",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "CANNOT_SANCTION_STAFF");
+    let (_, body) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/unblock",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(body["unblocked"], true);
+
+    // 审计日志：只有管理员能看，带操作者名字；可按动作前缀筛选。
+    assert_eq!(
+        call(&app, MODERATOR, "GET", "/v1/admin/audit", Value::Null)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    let (_, audit) = call(
+        &app,
+        ADMIN,
+        "GET",
+        "/v1/admin/audit?action=user.block&limit=5",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(audit["total"], 1);
+    assert_eq!(audit["items"][0]["actorName"], "mod");
+    assert_eq!(audit["items"][0]["targetId"], "3");
+    let (_, audit) = call(
+        &app,
+        ADMIN,
+        "GET",
+        "/v1/admin/audit?targetType=user&targetId=5",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(audit["total"], 8);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn cosmetics_dashboard_and_search_ops(db: PgPool) {
+    let app = setup(&db).await;
+    sqlx::query!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (70, 'a/70.png', 'image/png', 10, repeat('a', 64), repeat('c', 64)),
+                (71, 'a/71.png', 'image/png', 10, repeat('b', 64), repeat('d', 64))"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (status, avatar) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/cosmetics/avatars",
+        json!({ "name": "邦布", "kind": "character", "imageId": "70" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{avatar}");
+    let avatar_id = avatar["id"].as_str().unwrap().to_owned();
+    // 有人装备着它：换图同步，删除时卸下。
+    sqlx::query!(
+        "UPDATE users SET equipped_avatar_id = $1, equipped_avatar_media_id = 70 WHERE id = 3",
+        avatar_id.parse::<i64>().unwrap()
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("/v1/admin/cosmetics/avatars/{avatar_id}"),
+        json!({ "name": "邦布", "kind": "city", "imageId": "71" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let media: Option<i64> =
+        sqlx::query_scalar!("SELECT equipped_avatar_media_id FROM users WHERE id = 3")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(media, Some(71));
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/cosmetics/avatars",
+        json!({ "name": "缺图", "imageId": "999" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        &format!("/v1/admin/cosmetics/avatars/{avatar_id}"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let equipped: Option<i64> =
+        sqlx::query_scalar!("SELECT equipped_avatar_id FROM users WHERE id = 3")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(equipped, None);
+
+    let (status, card) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/cosmetics/cards",
+        json!({ "name": "新艾利都", "kind": "city", "description": "城市", "story": "# 故事", "imageId": "70" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{card}");
+    let (_, cards) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/cosmetics/cards",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(cards[0]["story"], "# 故事");
+
+    let (status, dashboard) =
+        call(&app, MODERATOR, "GET", "/v1/admin/dashboard", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{dashboard}");
+    assert_eq!(dashboard["users"]["total"], 4);
+    assert_eq!(dashboard["reports"]["pending"], 0);
+    assert!(dashboard["exam"]["questionCount"].is_number());
+    assert_eq!(dashboard["ai"]["globalEnabled"], true);
+
+    let (_, search) = call(&app, ADMIN, "GET", "/v1/admin/search", Value::Null).await;
+    assert_eq!(search["engineConfigured"], false);
+    assert_eq!(search["indexedPosts"], Value::Null);
+    let (status, body) = call(&app, ADMIN, "POST", "/v1/admin/search/reindex", Value::Null).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "SEARCH_ENGINE_NOT_CONFIGURED");
+}

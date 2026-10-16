@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE business_cards SET name = $2, kind = $3, description = $4, story = $5,\n             image_media_id = $6, updated_at = now()\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "18f40e339f00c90aa9cc0bef4cc67e32219c70d18dba4aaef769da7feddd5925"
+}

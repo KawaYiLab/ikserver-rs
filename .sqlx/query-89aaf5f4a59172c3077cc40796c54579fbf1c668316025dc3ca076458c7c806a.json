@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT (EXISTS (SELECT 1 FROM posts WHERE category_id = c.id)\n                   OR EXISTS (SELECT 1 FROM post_drafts WHERE category_id = c.id)) AS \"used!\"\n           FROM categories c WHERE c.id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "used!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "89aaf5f4a59172c3077cc40796c54579fbf1c668316025dc3ca076458c7c806a"
+}

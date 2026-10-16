@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET equipped_card_id = NULL WHERE equipped_card_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1806aea289b03092b50ec57511dfcae9c484fde39c3569da4c9cf135f1164b61"
+}

@@ -389,3 +389,11 @@ pub async fn hidden_states(
         .map(|r| (r.id, r.hidden))
         .collect())
 }
+
+/// 已发布的帖子总数与 `since` 之后首次发布的数量（管理后台仪表盘）。
+pub async fn post_counts(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> Result<(i64, i64), Problem> {
+    Ok(repo::post_counts(conn, since).await?)
+}

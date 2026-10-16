@@ -29,6 +29,7 @@ ik-mihoyo = { path = "crates/mihoyo" }
 ik-account = { path = "crates/account" }
 ik-moderation = { path = "crates/moderation" }
 ik-ai = { path = "crates/ai" }
+ik-admin = { path = "crates/admin" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }

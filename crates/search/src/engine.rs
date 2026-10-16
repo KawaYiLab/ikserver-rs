@@ -523,6 +523,18 @@ impl Engine {
         })
     }
 
+    /// 两个索引里的文档数（管理后台对账，ADMINCRUD-007）。
+    pub(crate) async fn document_counts(&self) -> anyhow::Result<(usize, usize)> {
+        let posts = within(self.write_timeout(), "读取索引统计", self.posts.get_stats()).await?;
+        let comments = within(
+            self.write_timeout(),
+            "读取索引统计",
+            self.comments.get_stats(),
+        )
+        .await?;
+        Ok((posts.number_of_documents, comments.number_of_documents))
+    }
+
     /// 测试用：删除两个索引。
     #[doc(hidden)]
     pub(crate) async fn drop_indexes(&self) -> anyhow::Result<()> {

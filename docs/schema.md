@@ -327,3 +327,8 @@
 - `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、
   `action`（`<域>.<对象>.<动作>`）、`target_type` / `target_id`（id、key 或 slug，批量操作为 NULL）、
   `details`（参数摘要，不含密钥类字段）、`ip`（INET）、`user_agent`。举报结案另有业务上的 `moderation_log`，两者并存。
+
+## 管理后台调整丁尼与经验（`20261031000002_admin_economy_actions.sql`）
+
+- `denny_logs.action` 增加 `admin_deduct`（管理员扣除；发放沿用 `admin_grant`，DENNY-020 的枚举第一次有写入方）；
+  `exp_logs.action` 增加 `admin_grant`（豁免每日上限，去重键 `ref:admin:<雪花 id>`，每次发放一行）。

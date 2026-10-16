@@ -353,3 +353,11 @@ pub async fn insert_ai_reply(
     effects.publish(crate::service::bumped_event(post.id)?);
     Ok(Some(id))
 }
+
+/// 评论总数与 `since` 之后的数量（管理后台仪表盘）。
+pub async fn comment_counts(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> Result<(i64, i64), Problem> {
+    Ok(repo::comment_counts(conn, since).await?)
+}

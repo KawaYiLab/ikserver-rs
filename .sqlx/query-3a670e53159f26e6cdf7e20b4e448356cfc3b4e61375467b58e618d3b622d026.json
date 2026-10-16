@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT equipped_avatar_id FROM users WHERE id = 3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "equipped_avatar_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_avatar_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "3a670e53159f26e6cdf7e20b4e448356cfc3b4e61375467b58e618d3b622d026"
+}

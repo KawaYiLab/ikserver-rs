@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET is_ai_agent = $2, updated_at = $3\n         WHERE id = $1 AND status IN ('active', 'blocked')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0d8c423b358b34234a2a8fefe3e89125cd67bbe40fb40e310173e2b42230806d"
+}

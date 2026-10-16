@@ -75,6 +75,8 @@ pub enum ExpAction {
     CommentAccepted,
     DennyReceived,
     ExamPassed,
+    /// 管理员手动发放（不占每日上限）。
+    AdminGrant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +114,7 @@ impl ExpAction {
             Self::CommentAccepted => "comment_accepted",
             Self::DennyReceived => "denny_received",
             Self::ExamPassed => "exam_passed",
+            Self::AdminGrant => "admin_grant",
         }
     }
 
@@ -119,7 +122,7 @@ impl ExpAction {
     const fn bucket(self) -> Bucket {
         match self {
             Self::DennyReceived => Bucket::Passive,
-            Self::ExamPassed => Bucket::Exempt,
+            Self::ExamPassed | Self::AdminGrant => Bucket::Exempt,
             Self::CheckIn
             | Self::CreatePost
             | Self::CreateComment
@@ -277,6 +280,8 @@ pub enum DennyAction {
     SpendAvatar,
     ExamPassed,
     AdminGrant,
+    /// 管理员手动扣除。
+    AdminDeduct,
 }
 
 impl DennyAction {
@@ -289,6 +294,7 @@ impl DennyAction {
             Self::SpendAvatar => "spend_avatar",
             Self::ExamPassed => "exam_passed",
             Self::AdminGrant => "admin_grant",
+            Self::AdminDeduct => "admin_deduct",
         }
     }
 }
@@ -803,7 +809,7 @@ fn bucket_of(action: &str) -> Option<Bucket> {
         "denny_received" | "like_received" | "comment_received" | "favorite_received" => {
             Some(Bucket::Passive)
         }
-        "exam_passed" => Some(Bucket::Exempt),
+        "exam_passed" | "admin_grant" => Some(Bucket::Exempt),
         "check_in" | "create_post" | "create_comment" | "like_give" | "comment_accepted" => {
             Some(Bucket::Active)
         }

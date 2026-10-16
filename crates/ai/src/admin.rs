@@ -415,6 +415,35 @@ pub async fn jobs(state: &AiState, query: JobQuery) -> Result<Paged<AdminJob>, P
     })
 }
 
+/// AI 今日概况（管理后台仪表盘）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AiOverview {
+    pub global_enabled: bool,
+    /// 全站今日已用加权 token（含在飞预占）。
+    pub site_used_today: i64,
+    /// 全站每日上限，0 不限制。
+    pub site_limit: i64,
+    /// 最近 24 小时最终失败的任务数。
+    pub failed_last_24h: i64,
+}
+
+pub async fn overview(state: &AiState) -> Result<AiOverview, Problem> {
+    let now = Utc::now();
+    let current = settings(state).await?;
+    let mut conn = state.db.acquire().await?;
+    let used = crate::quota::read(&mut conn, crate::quota::SITE, now)
+        .await?
+        .used;
+    let failed = repo::failed_jobs_since(&mut conn, now - chrono::Duration::hours(24)).await?;
+    Ok(AiOverview {
+        global_enabled: current.global_enabled,
+        site_used_today: used,
+        site_limit: current.daily_tokens,
+        failed_last_24h: failed,
+    })
+}
+
 // ---------- HTTP ----------
 
 pub fn router<S>() -> OpenApiRouter<S>

@@ -1129,3 +1129,176 @@ pub(crate) async fn list_audit(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 管理后台：账号 ----------
+
+pub(crate) struct AdminUserRow {
+    pub id: i64,
+    pub username: String,
+    pub email: Option<String>,
+    pub status: String,
+    pub role: Role,
+    pub is_ai_agent: bool,
+    pub exam_passed_at: Option<DateTime<Utc>>,
+    pub level: i16,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) struct UserFilter {
+    /// 用户名或邮箱包含（ILIKE 模式，已转义）。
+    pub pattern: Option<String>,
+    /// 精确 id（关键词是数字时）。
+    pub id: Option<i64>,
+    pub role: Option<String>,
+    pub status: Option<String>,
+    pub ai: Option<bool>,
+}
+
+pub(crate) async fn count_admin_users(
+    conn: &mut PgConnection,
+    f: &UserFilter,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM users
+           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2)
+             AND ($3::text IS NULL OR role = $3)
+             AND ($4::text IS NULL OR status = $4)
+             AND ($5::bool IS NULL OR is_ai_agent = $5)"#,
+        f.pattern,
+        f.id,
+        f.role,
+        f.status,
+        f.ai,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) async fn list_admin_users(
+    conn: &mut PgConnection,
+    f: &UserFilter,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AdminUserRow>> {
+    sqlx::query_as!(
+        AdminUserRow,
+        r#"SELECT id, username, email, status, role AS "role: Role", is_ai_agent, exam_passed_at,
+                  level, created_at
+           FROM users
+           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2)
+             AND ($3::text IS NULL OR role = $3)
+             AND ($4::text IS NULL OR status = $4)
+             AND ($5::bool IS NULL OR is_ai_agent = $5)
+           ORDER BY created_at DESC, id DESC
+           LIMIT $6 OFFSET $7"#,
+        f.pattern,
+        f.id,
+        f.role,
+        f.status,
+        f.ai,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn admin_user(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<AdminUserRow>> {
+    sqlx::query_as!(
+        AdminUserRow,
+        r#"SELECT id, username, email, status, role AS "role: Role", is_ai_agent, exam_passed_at,
+                  level, created_at
+           FROM users WHERE id = $1"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 改角色（只改未注销、未合并的账号）。
+pub(crate) async fn set_role(
+    conn: &mut PgConnection,
+    id: i64,
+    role: Role,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET role = $2, updated_at = $3
+         WHERE id = $1 AND status IN ('active', 'blocked')",
+        id,
+        role as Role,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn set_ai_agent(
+    conn: &mut PgConnection,
+    id: i64,
+    on: bool,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET is_ai_agent = $2, updated_at = $3
+         WHERE id = $1 AND status IN ('active', 'blocked')",
+        id,
+        on,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 删除系统头像前卸下（外键不级联）。
+pub(crate) async fn unequip_system_avatar(
+    conn: &mut PgConnection,
+    avatar_id: i64,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "UPDATE users SET equipped_avatar_id = NULL, equipped_avatar_media_id = NULL
+         WHERE equipped_avatar_id = $1",
+        avatar_id,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 删除名片前卸下。
+pub(crate) async fn unequip_card(conn: &mut PgConnection, card_id: i64) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "UPDATE users SET equipped_card_id = NULL WHERE equipped_card_id = $1",
+        card_id,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+pub(crate) struct UserCountsRow {
+    pub total: i64,
+    pub blocked: i64,
+    pub new_since: i64,
+}
+
+pub(crate) async fn user_counts(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> sqlx::Result<UserCountsRow> {
+    sqlx::query_as!(
+        UserCountsRow,
+        r#"SELECT count(*) FILTER (WHERE status IN ('active', 'blocked')) AS "total!",
+                  count(*) FILTER (WHERE status = 'blocked') AS "blocked!",
+                  count(*) FILTER (WHERE created_at >= $1 AND status IN ('active', 'blocked')) AS "new_since!"
+           FROM users"#,
+        since,
+    )
+    .fetch_one(conn)
+    .await
+}

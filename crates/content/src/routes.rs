@@ -31,6 +31,7 @@ where
     ContentState: FromRef<S>,
 {
     OpenApiRouter::new()
+        .merge(crate::admin::router())
         .routes(routes!(list_categories))
         .routes(routes!(suggest_tags))
         .routes(routes!(feed, create_post))

@@ -16,9 +16,9 @@ use sqlx::PgConnection;
 
 use crate::ModerationState;
 use crate::dto::{
-    Action, ClaimResult, GroupPage, GroupQuery, Reason, ReportGroup, ReportRow, ReportStatus,
-    Resolution, ResolveRequest, ResolveResult, Tab, TargetType, TargetView, UnblockResult,
-    UnclaimResult, UserRef,
+    Action, BlockRequest, BlockResult, ClaimResult, GroupPage, GroupQuery, Reason, ReportGroup,
+    ReportRow, ReportStatus, Resolution, ResolveRequest, ResolveResult, Tab, TargetType,
+    TargetView, UnblockResult, UnclaimResult, UserRef,
 };
 use crate::repo::{self, Closing, GroupFilter, GroupRow, NewLog, OpenRow};
 use crate::service::{Snapshot, post_of};
@@ -571,13 +571,13 @@ pub async fn resolve(
     })
 }
 
-/// 解封（D-057，至少方案 B）。只有封禁中的账号会解封；写审核日志。
+/// 解封（D-057，至少方案 B）。只有封禁中的账号会解封；写审核日志与后台审计。
 pub async fn unblock(
     state: &ModerationState,
-    principal: &Principal,
+    op: &ik_auth::Operator,
     user_id: i64,
 ) -> Result<UnblockResult, Problem> {
-    require_staff(principal)?;
+    require_staff(&op.principal)?;
     let now = Utc::now();
     let mut tx = state.db.begin().await?;
     let unblocked = ik_auth::interop::unblock_user(&mut tx, user_id, now).await?;
@@ -586,7 +586,7 @@ pub async fn unblock(
             &mut tx,
             NewLog {
                 id: state.ids.next_raw(),
-                actor_id: Some(principal.user_id.get()),
+                actor_id: Some(op.user_id()),
                 action: "unblock_user",
                 target_type: "user",
                 target_id: user_id,
@@ -596,9 +596,90 @@ pub async fn unblock(
             },
         )
         .await?;
+        ik_auth::admin::record(
+            &mut tx,
+            &state.ids,
+            op,
+            ik_auth::admin::Audit {
+                action: "user.unblock",
+                target_type: "user",
+                target_id: Some(user_id.to_string()),
+                details: serde_json::json!({}),
+            },
+            now,
+        )
+        .await?;
     }
     tx.commit().await?;
     Ok(UnblockResult { unblocked })
+}
+
+/// 直接封禁（不经举报，管理后台用户页）：立即下线（D-059 方案 A）；不能封禁版主与管理员；
+/// 已封禁的不重复记录。写审核日志与后台审计。
+pub async fn block(
+    state: &ModerationState,
+    op: &ik_auth::Operator,
+    user_id: i64,
+    request: BlockRequest,
+) -> Result<BlockResult, Problem> {
+    require_staff(&op.principal)?;
+    let note = clean_note(request.note);
+    let now = Utc::now();
+    let mut effects = Effects::new();
+    let mut tx = state.db.begin().await?;
+    let blocked = match ik_auth::interop::block_user(&mut tx, user_id, now).await? {
+        BlockOutcome::Staff => {
+            return Err(Problem::new(
+                StatusCode::FORBIDDEN,
+                "CANNOT_SANCTION_STAFF",
+                "不能封禁版主或管理员",
+            ));
+        }
+        BlockOutcome::Gone => return Err(Problem::not_found()),
+        BlockOutcome::AlreadyBlocked => false,
+        BlockOutcome::Blocked => {
+            effects.publish(ik_auth::service::sessions_changed_event(user_id)?);
+            true
+        }
+    };
+    if blocked {
+        repo::log(
+            &mut tx,
+            NewLog {
+                id: state.ids.next_raw(),
+                actor_id: Some(op.user_id()),
+                action: "block_user",
+                target_type: "user",
+                target_id: user_id,
+                report_count: 0,
+                note: note.as_deref(),
+                now,
+            },
+        )
+        .await?;
+        ik_auth::admin::record(
+            &mut tx,
+            &state.ids,
+            op,
+            ik_auth::admin::Audit {
+                action: "user.block",
+                target_type: "user",
+                target_id: Some(user_id.to_string()),
+                details: serde_json::json!({ "note": note }),
+            },
+            now,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
+    Ok(BlockResult { blocked })
+}
+
+/// 待处理、复核中的举报目标数（管理后台仪表盘）。
+pub async fn open_counts(state: &ModerationState) -> Result<(i64, i64), Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::open_target_counts(&mut conn).await?)
 }
 
 #[cfg(test)]

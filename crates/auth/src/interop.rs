@@ -252,6 +252,19 @@ pub async fn refresh_equipped_avatar(
     Ok(repo::refresh_equipped_avatar(conn, avatar_id, media_id).await?)
 }
 
+/// 系统头像被删除：所有装备着它的账号卸下（回到自定义头像或默认头像）。返回卸下的账号数。
+pub async fn unequip_system_avatar(
+    conn: &mut PgConnection,
+    avatar_id: i64,
+) -> Result<u64, Problem> {
+    Ok(repo::unequip_system_avatar(conn, avatar_id).await?)
+}
+
+/// 名片被删除：所有装备着它的账号卸下。返回卸下的账号数。
+pub async fn unequip_card(conn: &mut PgConnection, card_id: i64) -> Result<u64, Problem> {
+    Ok(repo::unequip_card(conn, card_id).await?)
+}
+
 /// 建一个没有邮箱、没有密码的账号（米游社首登，ACC-013、MHY-010）。用户名已被占用时返回 false，
 /// 调用方换一个名字重试。注册开关由调用方检查。
 pub async fn insert_user_without_email(

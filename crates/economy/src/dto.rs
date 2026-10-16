@@ -43,7 +43,7 @@ pub struct WalletView {
 #[serde(rename_all = "camelCase")]
 pub struct DennyLogView {
     /// `check_in` | `gift_sent` | `gift_received` | `spend_rename` | `spend_avatar` |
-    /// `exam_passed` | `admin_grant`（以及迁移来的历史动作）
+    /// `exam_passed` | `admin_grant` | `admin_deduct`（以及迁移来的历史动作）
     pub action: String,
     /// 有符号：入账为正，出账为负。
     pub amount: i32,

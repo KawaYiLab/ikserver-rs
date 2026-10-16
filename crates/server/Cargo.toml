@@ -33,6 +33,7 @@ ik-mihoyo.workspace = true
 ik-account.workspace = true
 ik-moderation.workspace = true
 ik-ai.workspace = true
+ik-admin.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

@@ -44,8 +44,8 @@ crates/
              AI 私聊会话（触发、流式回复、停止 / 重新生成 / 重置记忆，经 messaging 的钩子与 interop）、
              AI 评论回复（@ 触发、按帖子与评论者的记忆、沉浸守卫，经 comments 的钩子与 interop）、
              12 个只读论坛工具与工具调用循环、工作流时间线与多气泡分段
+  admin/     管理后台的跨域部分：账号管理、仪表盘、搜索索引运维、审计日志查看（各域的后台接口在各自 crate）
   server/    二进制入口：组装路由、中间件、任务、CLI
-  （后续按业务域新增：admin）
 docs/
   architecture.md     架构与模块边界
   api-guidelines.md   接口设计规范（含错误码登记表）

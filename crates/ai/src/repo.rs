@@ -807,3 +807,15 @@ pub(crate) async fn list_jobs(
     .fetch_all(conn)
     .await
 }
+
+pub(crate) async fn failed_jobs_since(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM ai_jobs WHERE status = 'failed' AND updated_at >= $1"#,
+        since,
+    )
+    .fetch_one(conn)
+    .await
+}

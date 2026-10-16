@@ -369,3 +369,15 @@ pub(crate) async fn rows_of(
     .fetch_all(conn)
     .await
 }
+
+/// 待处理、复核中的举报目标数（按目标聚合，仪表盘）。
+pub(crate) async fn open_target_counts(conn: &mut PgConnection) -> sqlx::Result<(i64, i64)> {
+    let row = sqlx::query!(
+        r#"SELECT count(DISTINCT (target_type, target_id)) FILTER (WHERE status = 'pending') AS "pending!",
+                  count(DISTINCT (target_type, target_id)) FILTER (WHERE status = 'reviewing') AS "reviewing!"
+           FROM reports WHERE status IN ('pending', 'reviewing')"#,
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok((row.pending, row.reviewing))
+}

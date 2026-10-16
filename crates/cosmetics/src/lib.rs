@@ -5,6 +5,7 @@
 //! 所以其他域展示作者时不必依赖本 crate（见 `ik_auth::service::Author::avatar_media_id`）。
 //! 所有头像、名片免费、对所有人开放；装备不要求通过考试（COMMON-006）。
 
+pub mod admin;
 pub mod dto;
 mod repo;
 mod routes;

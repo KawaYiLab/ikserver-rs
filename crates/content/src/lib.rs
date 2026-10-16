@@ -4,6 +4,7 @@
 //! 业务规则：`docs/business-rules/posts.md`、`docs/business-rules/social-economy.md` 第 1、2、5 节。
 //! 评论在 comments 模块，关注与拉黑在 social 模块，通知在 notify 模块。
 
+pub mod admin;
 pub mod anonymous;
 pub mod dto;
 pub mod interop;

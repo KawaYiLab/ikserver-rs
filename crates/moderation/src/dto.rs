@@ -434,6 +434,21 @@ pub struct UnclaimResult {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct BlockResult {
+    /// 这次由正常改为封禁（原本就封禁时为 false）。
+    pub blocked: bool,
+}
+
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BlockRequest {
+    /// 处理备注（只进审核日志，超过 500 字截断）。
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct UnblockResult {
     /// 原本是封禁状态、现在已经解封。
     pub unblocked: bool,

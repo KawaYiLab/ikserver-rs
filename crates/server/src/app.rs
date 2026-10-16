@@ -106,6 +106,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_account::router())
         .merge(ik_moderation::router())
         .merge(ik_ai::router())
+        .merge(ik_admin::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。

@@ -208,3 +208,199 @@ pub async fn list(
         limit,
     })
 }
+
+// ---------- 账号 ----------
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct UserQuery {
+    /// 用户名或邮箱包含；是数字时也按 id 精确匹配。
+    pub q: Option<String>,
+    /// `user` | `moderator` | `admin`。
+    pub role: Option<String>,
+    /// `active` | `blocked` | `deleted` | `merged`。
+    pub status: Option<String>,
+    /// 只看（或排除）AI 账号。
+    pub ai: Option<bool>,
+    pub page: Option<u32>,
+    /// 默认 20，最大 100。
+    pub limit: Option<u32>,
+}
+
+/// 后台看到的账号。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUser {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub username: String,
+    /// 只有管理员看得到；版主看到的是打码后的形式。
+    pub email: Option<String>,
+    pub status: String,
+    pub role: ik_kernel::Role,
+    pub is_ai_agent: bool,
+    pub exam_passed_at: Option<DateTime<Utc>>,
+    pub level: i16,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 邮箱打码：保留首字符与域名。
+fn mask_email(email: &str) -> String {
+    match email.split_once('@') {
+        Some((local, domain)) => {
+            let first: String = local.chars().take(1).collect();
+            format!("{first}***@{domain}")
+        }
+        None => "***".to_owned(),
+    }
+}
+
+fn user_view(row: repo::AdminUserRow, full_email: bool) -> AdminUser {
+    AdminUser {
+        id: Id::new(row.id),
+        username: row.username,
+        email: row
+            .email
+            .map(|e| if full_email { e } else { mask_email(&e) }),
+        status: row.status,
+        role: row.role,
+        is_ai_agent: row.is_ai_agent,
+        exam_passed_at: row.exam_passed_at,
+        level: row.level,
+        created_at: row.created_at,
+    }
+}
+
+fn pattern(q: &str) -> String {
+    let mut out = String::with_capacity(q.len() + 2);
+    out.push('%');
+    for c in q.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('%');
+    out
+}
+
+/// 账号列表，新注册的在前。
+pub async fn list_users(
+    conn: &mut PgConnection,
+    viewer: &Principal,
+    query: UserQuery,
+) -> Result<Paged<AdminUser>, Problem> {
+    let (page, limit, offset) = page_window(query.page, query.limit, 20);
+    let q = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
+    let clean = |v: Option<String>| v.map(|s| s.trim().to_owned()).filter(|s| !s.is_empty());
+    let filter = repo::UserFilter {
+        pattern: q.map(pattern),
+        id: q.and_then(|q| q.parse::<i64>().ok()),
+        role: clean(query.role),
+        status: clean(query.status),
+        ai: query.ai,
+    };
+    let total = repo::count_admin_users(conn, &filter).await?;
+    let rows = repo::list_admin_users(conn, &filter, i64::from(limit), offset).await?;
+    let full = viewer.role.is_admin();
+    Ok(Paged {
+        items: rows.into_iter().map(|r| user_view(r, full)).collect(),
+        total,
+        page,
+        limit,
+    })
+}
+
+pub async fn user(
+    conn: &mut PgConnection,
+    viewer: &Principal,
+    id: i64,
+) -> Result<AdminUser, Problem> {
+    repo::admin_user(conn, id)
+        .await?
+        .map(|r| user_view(r, viewer.role.is_admin()))
+        .ok_or_else(Problem::not_found)
+}
+
+/// 改角色（只有管理员；不能改自己，避免把最后一个管理员降级）。
+pub async fn set_role(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    op: &Operator,
+    id: i64,
+    role: ik_kernel::Role,
+) -> Result<(), Problem> {
+    if id == op.user_id() {
+        return Err(Problem::new(
+            StatusCode::BAD_REQUEST,
+            "CANNOT_CHANGE_SELF",
+            "不能修改自己的角色",
+        ));
+    }
+    let now = Utc::now();
+    if !repo::set_role(conn, id, role, now).await? {
+        return Err(Problem::not_found());
+    }
+    record(
+        conn,
+        ids,
+        op,
+        Audit {
+            action: "user.role.set",
+            target_type: "user",
+            target_id: Some(id.to_string()),
+            details: serde_json::json!({ "role": role.as_str() }),
+        },
+        now,
+    )
+    .await
+}
+
+/// 标记 / 取消 AI 账号（ADMINCRUD：设 AI 账号）。
+pub async fn set_ai_agent(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    op: &Operator,
+    id: i64,
+    on: bool,
+) -> Result<(), Problem> {
+    let now = Utc::now();
+    if !repo::set_ai_agent(conn, id, on, now).await? {
+        return Err(Problem::not_found());
+    }
+    record(
+        conn,
+        ids,
+        op,
+        Audit {
+            action: "user.ai_agent.set",
+            target_type: "user",
+            target_id: Some(id.to_string()),
+            details: serde_json::json!({ "isAiAgent": on }),
+        },
+        now,
+    )
+    .await
+}
+
+/// 账号数（仪表盘）：现存账号、封禁中、`since` 之后注册的。
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserCounts {
+    pub total: i64,
+    pub blocked: i64,
+    pub new_today: i64,
+}
+
+pub async fn user_counts(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> Result<UserCounts, Problem> {
+    let row = repo::user_counts(conn, since).await?;
+    Ok(UserCounts {
+        total: row.total,
+        blocked: row.blocked,
+        new_today: row.new_since,
+    })
+}

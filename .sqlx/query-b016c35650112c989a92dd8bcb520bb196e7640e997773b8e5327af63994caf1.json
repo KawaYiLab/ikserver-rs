@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET equipped_avatar_id = NULL, equipped_avatar_media_id = NULL\n         WHERE equipped_avatar_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b016c35650112c989a92dd8bcb520bb196e7640e997773b8e5327af63994caf1"
+}

@@ -1,8 +1,9 @@
-//! HTTP 接口：`/v1/reports*`、`/v1/me/reports`、`/v1/admin/reports*`、`/v1/admin/users/{id}/unblock`。
+//! HTTP 接口：`/v1/reports*`、`/v1/me/reports`、`/v1/admin/reports*`、`/v1/admin/users/{id}/block`、
+//! `/v1/admin/users/{id}/unblock`。
 
 use axum::extract::{FromRef, State};
 use http::StatusCode;
-use ik_auth::{AuthState, CurrentUser};
+use ik_auth::{AuthState, CurrentUser, StaffOperator};
 use ik_kernel::cursor::Page;
 use ik_kernel::error::ProblemBody;
 use ik_kernel::extract::{Json, Path, Query};
@@ -13,9 +14,9 @@ use utoipa_axum::routes;
 
 use crate::ModerationState;
 use crate::dto::{
-    CheckQuery, CheckResult, ClaimResult, CreateReportRequest, GroupPage, GroupQuery, MyReport,
-    PageQuery, ReportCreated, ReportGroup, ResolveRequest, ResolveResult, TargetType,
-    UnblockResult, UnclaimResult,
+    BlockRequest, BlockResult, CheckQuery, CheckResult, ClaimResult, CreateReportRequest,
+    GroupPage, GroupQuery, MyReport, PageQuery, ReportCreated, ReportGroup, ResolveRequest,
+    ResolveResult, TargetType, UnblockResult, UnclaimResult,
 };
 use crate::{admin, service};
 
@@ -35,6 +36,7 @@ where
         .routes(routes!(unclaim))
         .routes(routes!(resolve))
         .routes(routes!(unblock))
+        .routes(routes!(block))
 }
 
 /// 举报
@@ -257,10 +259,35 @@ async fn resolve(
 )]
 async fn unblock(
     State(state): State<ModerationState>,
-    CurrentUser(principal): CurrentUser,
+    StaffOperator(op): StaffOperator,
     Path(user_id): Path<Id<User>>,
 ) -> Result<Json<UnblockResult>, Problem> {
+    Ok(Json(admin::unblock(&state, &op, user_id.get()).await?))
+}
+
+/// 封禁用户（审核，不经举报）
+///
+/// 立即下线；不能封禁版主与管理员（403 `CANNOT_SANCTION_STAFF`）。已封禁时 `blocked: false`。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/users/{id}/block",
+    tag = "moderation",
+    params(("id" = String, Path, description = "用户 id")),
+    request_body = BlockRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = BlockResult),
+        (status = 403, description = "FORBIDDEN / CANNOT_SANCTION_STAFF", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn block(
+    State(state): State<ModerationState>,
+    StaffOperator(op): StaffOperator,
+    Path(user_id): Path<Id<User>>,
+    Json(request): Json<BlockRequest>,
+) -> Result<Json<BlockResult>, Problem> {
     Ok(Json(
-        admin::unblock(&state, &principal, user_id.get()).await?,
+        admin::block(&state, &op, user_id.get(), request).await?,
     ))
 }

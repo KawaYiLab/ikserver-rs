@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)\n         VALUES (70, 'a/70.png', 'image/png', 10, repeat('a', 64), repeat('c', 64)),\n                (71, 'a/71.png', 'image/png', 10, repeat('b', 64), repeat('d', 64))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e1aa8417e9cbc48625b3ff17e351bca8de7ee22f75bf7ee2a3f9fa36e6e32223"
+}

@@ -18,6 +18,16 @@ use ik_moderation::dto::{
 use ik_moderation::{ModerationState, admin, service};
 use sqlx::PgPool;
 
+fn operator(principal: &Principal) -> ik_auth::Operator {
+    ik_auth::Operator {
+        principal: principal.clone(),
+        meta: ik_auth::service::RequestMeta {
+            ip: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            user_agent: None,
+        },
+    }
+}
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 struct Harness {
@@ -618,13 +628,13 @@ async fn resolve_actions(db: PgPool) {
     );
 
     assert!(
-        admin::unblock(&h.state, &other_staff, 1)
+        admin::unblock(&h.state, &operator(&other_staff), 1)
             .await
             .unwrap()
             .unblocked
     );
     assert!(
-        !admin::unblock(&h.state, &other_staff, 1)
+        !admin::unblock(&h.state, &operator(&other_staff), 1)
             .await
             .unwrap()
             .unblocked

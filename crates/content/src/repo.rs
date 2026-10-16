@@ -1586,3 +1586,195 @@ pub(crate) async fn moderation_states(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 管理后台：分区与标签 ----------
+
+pub(crate) struct AdminCategoryRow {
+    pub id: i64,
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    pub sort_order: i32,
+    pub is_active: bool,
+    pub admin_only: bool,
+    pub allow_comment_accept: bool,
+    pub post_count: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 全部分区（含停用的），附已发布帖子数。
+pub(crate) async fn admin_categories(
+    conn: &mut PgConnection,
+) -> sqlx::Result<Vec<AdminCategoryRow>> {
+    sqlx::query_as!(
+        AdminCategoryRow,
+        r#"SELECT c.id, c.slug, c.name, c.description, c.sort_order, c.is_active, c.admin_only,
+                  c.allow_comment_accept, c.created_at, c.updated_at,
+                  (SELECT count(*) FROM posts p WHERE p.category_id = c.id) AS "post_count!"
+           FROM categories c ORDER BY c.sort_order, c.id"#,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct CategoryUpdate<'a> {
+    pub id: i64,
+    pub slug: &'a str,
+    pub name: &'a str,
+    pub description: &'a str,
+    pub sort_order: i32,
+    pub is_active: bool,
+    pub admin_only: bool,
+    pub allow_comment_accept: bool,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn update_category(
+    conn: &mut PgConnection,
+    c: &CategoryUpdate<'_>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE categories SET slug = $2, name = $3, description = $4, sort_order = $5,
+             is_active = $6, admin_only = $7, allow_comment_accept = $8, updated_at = $9
+         WHERE id = $1",
+        c.id,
+        c.slug,
+        c.name,
+        c.description,
+        c.sort_order,
+        c.is_active,
+        c.admin_only,
+        c.allow_comment_accept,
+        c.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 删除没有帖子（含草稿）的分区。返回 None 表示不存在，Some(false) 表示还有帖子。
+pub(crate) async fn delete_empty_category(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<bool>> {
+    let Some(used) = sqlx::query_scalar!(
+        r#"SELECT (EXISTS (SELECT 1 FROM posts WHERE category_id = c.id)
+                   OR EXISTS (SELECT 1 FROM post_drafts WHERE category_id = c.id)) AS "used!"
+           FROM categories c WHERE c.id = $1 FOR UPDATE"#,
+        id,
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(None);
+    };
+    if used {
+        return Ok(Some(false));
+    }
+    sqlx::query!("DELETE FROM categories WHERE id = $1", id)
+        .execute(conn)
+        .await?;
+    Ok(Some(true))
+}
+
+pub(crate) struct AdminTagRow {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+    pub is_blocked: bool,
+    pub post_count: i64,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn count_admin_tags(
+    conn: &mut PgConnection,
+    pattern: Option<&str>,
+    blocked: Option<bool>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM tags
+           WHERE ($1::text IS NULL OR name ILIKE $1 OR slug ILIKE $1)
+             AND ($2::bool IS NULL OR is_blocked = $2)"#,
+        pattern,
+        blocked,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 标签，按使用次数倒序。
+pub(crate) async fn admin_tags(
+    conn: &mut PgConnection,
+    pattern: Option<&str>,
+    blocked: Option<bool>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AdminTagRow>> {
+    sqlx::query_as!(
+        AdminTagRow,
+        r#"SELECT t.id, t.name, t.slug, t.is_blocked, t.created_at,
+                  (SELECT count(*) FROM post_tags pt WHERE pt.tag_id = t.id) AS "post_count!"
+           FROM tags t
+           WHERE ($1::text IS NULL OR t.name ILIKE $1 OR t.slug ILIKE $1)
+             AND ($2::bool IS NULL OR t.is_blocked = $2)
+           ORDER BY "post_count!" DESC, t.id DESC
+           LIMIT $3 OFFSET $4"#,
+        pattern,
+        blocked,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn update_tag(
+    conn: &mut PgConnection,
+    id: i64,
+    name: &str,
+    slug: &str,
+    is_blocked: bool,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE tags SET name = $2, slug = $3, is_blocked = $4 WHERE id = $1",
+        id,
+        name,
+        slug,
+        is_blocked,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn admin_tag(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<AdminTagRow>> {
+    sqlx::query_as!(
+        AdminTagRow,
+        r#"SELECT t.id, t.name, t.slug, t.is_blocked, t.created_at,
+                  (SELECT count(*) FROM post_tags pt WHERE pt.tag_id = t.id) AS "post_count!"
+           FROM tags t WHERE t.id = $1"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 已发布的帖子总数与 `since` 之后首次发布的数量（仪表盘）。
+pub(crate) async fn post_counts(
+    conn: &mut PgConnection,
+    since: DateTime<Utc>,
+) -> sqlx::Result<(i64, i64)> {
+    let row = sqlx::query!(
+        r#"SELECT count(*) FILTER (WHERE published_at IS NOT NULL) AS "total!",
+                  count(*) FILTER (WHERE first_published_at >= $1) AS "since!"
+           FROM posts"#,
+        since,
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok((row.total, row.since))
+}

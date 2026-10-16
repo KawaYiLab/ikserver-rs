@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE tags SET name = $2, slug = $3, is_blocked = $4 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "62085def1c0df7c3da3b2277c8447a7615dc812a7ce3203a7d7e434f10d8ffa0"
+}
