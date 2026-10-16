@@ -12,6 +12,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
+  # 只留行号表：完整调试信息让测试二进制总计十几 GB，会把 runner 的磁盘写满（链接器 Bus error）。
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
   RUST_BACKTRACE: short
   RUST_VERSION: "1.99.0"
   SQLX_VERSION: "0.9.0"

@@ -1,12 +1,10 @@
 //! 账号导入：状态 / 邮箱 / 用户名的规范化、密码、资料、时区换算。
 
-mod common;
-
+use crate::common::{import, setup};
 use chrono::{TimeZone, Utc};
-use common::{import, setup};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 const BCRYPT: &str = "$2a$10$abcdefghijklmnopqrstuuMXZf3w0pQ4c1H9Q8a9oQ1lH1o9e5W1e";
 
@@ -81,7 +79,7 @@ async fn accounts_are_normalized(db: PgPool) {
     assert_eq!(mihoyo.email, None, "米游社占位邮箱置空");
     assert_eq!(
         mihoyo.exam_passed_at,
-        Some(common::NOW),
+        Some(crate::common::NOW),
         "存量豁免用导入时刻"
     );
     assert_eq!(mihoyo.updated_at, mihoyo.created_at);
@@ -157,7 +155,7 @@ async fn duplicate_emails_block_the_import(db: PgPool) {
         (ik_legacy::Severity::Blocking, 1)
     );
 
-    let error = ik_legacy::import(&db, &common::options("UTC"))
+    let error = ik_legacy::import(&db, &crate::common::options("UTC"))
         .await
         .unwrap_err();
     assert!(
@@ -174,7 +172,7 @@ async fn duplicate_emails_block_the_import(db: PgPool) {
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn refuses_unknown_timezone_and_non_empty_target(db: PgPool) {
     setup(&db).await;
-    let error = ik_legacy::import(&db, &common::options("Mars/Base"))
+    let error = ik_legacy::import(&db, &crate::common::options("Mars/Base"))
         .await
         .unwrap_err();
     assert!(error.to_string().contains("未知的时区"), "{error}");
@@ -183,7 +181,7 @@ async fn refuses_unknown_timezone_and_non_empty_target(db: PgPool) {
         .execute(&db)
         .await
         .unwrap();
-    let error = ik_legacy::import(&db, &common::options("UTC"))
+    let error = ik_legacy::import(&db, &crate::common::options("UTC"))
         .await
         .unwrap_err();
     assert!(error.to_string().contains("全新的库"), "{error}");

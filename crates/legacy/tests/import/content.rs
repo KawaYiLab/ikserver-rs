@@ -1,11 +1,9 @@
 //! 媒体与内容导入：草稿行 / 发布行合并、待发布修改、封面、标签合并、评论楼层与楼中楼、采纳、精选。
 
-mod common;
-
-use common::{at, import, setup};
+use crate::common::{at, import, setup};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 const SHA: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 

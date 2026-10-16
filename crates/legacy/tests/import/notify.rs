@@ -1,11 +1,9 @@
 //! 通知与举报：匿名通知改为系统通知、自己给自己的不导入、举报的状态与处理人。
 
-mod common;
-
-use common::{import, setup};
+use crate::common::{import, setup};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn notifications_and_reports(db: PgPool) {

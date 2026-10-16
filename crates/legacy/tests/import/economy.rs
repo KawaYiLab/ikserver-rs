@@ -1,12 +1,10 @@
 //! 经济导入：余额截断、经验与丁尼流水的动作映射与去重键、签到连签重算。
 
-mod common;
-
+use crate::common::{day, import, setup};
 use chrono::NaiveDate;
-use common::{day, import, setup};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn economy_is_imported(db: PgPool) {

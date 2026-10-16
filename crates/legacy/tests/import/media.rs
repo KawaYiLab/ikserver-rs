@@ -1,7 +1,5 @@
 //! 媒体摘要预取：需要 `IK_TEST_S3_URL`（moto 或 MinIO）；没有设置时直接通过。
 
-mod common;
-
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ik_kernel::config::{Secret, Storage as StorageConfig};
@@ -10,7 +8,7 @@ use ik_media::storage::Storage;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 fn storage() -> Option<Storage> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -50,7 +48,7 @@ async fn digests_are_read_from_storage_and_resumable(db: PgPool) {
         .await
         .unwrap();
 
-    common::setup(&db).await;
+    crate::common::setup(&db).await;
     sqlx::query!(
         "INSERT INTO legacy.files (id, name, url) VALUES
            (1, 'a.png', 'https://im.tiwat.cn/uploads/a.png'),

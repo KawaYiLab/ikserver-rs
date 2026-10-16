@@ -1,11 +1,9 @@
 //! 私信导入：重复私聊合并、群聊与残缺会话跳过、图片消息、撤回、引用、AI 会话与重置后的上下文。
 
-mod common;
-
-use common::{at, import, setup};
+use crate::common::{at, import, setup};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn conversations_and_messages(db: PgPool) {

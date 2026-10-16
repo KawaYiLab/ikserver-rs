@@ -1,11 +1,9 @@
 //! 题库、装扮与装备、米游社绑定。
 
-mod common;
-
-use common::{import, setup};
+use crate::common::{import, setup};
 use sqlx::PgPool;
 
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+use crate::MIGRATOR;
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn catalog_is_imported(db: PgPool) {
