@@ -24,8 +24,8 @@ where
     OpenApiRouter::new().routes(routes!(realtime))
 }
 
-/// 用 Cookie 鉴权的网页连接必须来自白名单来源，防止跨站 WebSocket 劫持
-/// （握手是 GET，不经过 CSRF 中间件）。Bearer 令牌不会被浏览器自动携带，不受此限制。
+/// 用 Cookie 鉴权的网页连接必须来自同源页面或白名单来源，防止跨站 WebSocket 劫持
+/// （握手是 GET，不经过 CSRF 中间件；RL-005）。Bearer 令牌不会被浏览器自动携带，不受此限制。
 fn check_origin(state: &RealtimeState, headers: &HeaderMap) -> Result<(), Problem> {
     if headers.contains_key(header::AUTHORIZATION) {
         return Ok(());
@@ -33,12 +33,24 @@ fn check_origin(state: &RealtimeState, headers: &HeaderMap) -> Result<(), Proble
     match headers.get(header::ORIGIN).map(|v| v.to_str()) {
         None => Ok(()),
         Some(Ok(origin)) if state.allowed_origins.iter().any(|o| o == origin) => Ok(()),
+        Some(Ok(origin)) if same_origin(origin, headers) => Ok(()),
         Some(_) => Err(Problem::new(
             StatusCode::FORBIDDEN,
             "CSRF_REJECTED",
             "跨站请求被拒绝",
         )),
     }
+}
+
+/// `Origin` 的主机（含端口）与请求的 `Host` 相同：页面和接口挂在同一个域名下。
+/// 经反向代理时要求代理原样转发 `Host`（见 deploy/nginx）。
+fn same_origin(origin: &str, headers: &HeaderMap) -> bool {
+    let Some(host) = headers.get(header::HOST).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    origin
+        .split_once("://")
+        .is_some_and(|(_, authority)| authority.eq_ignore_ascii_case(host))
 }
 
 /// 实时通道（WebSocket）

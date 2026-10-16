@@ -262,6 +262,23 @@ async fn guest_connection_protocol() {
 }
 
 #[tokio::test]
+async fn same_origin_page_may_connect() {
+    let server = start_without_db().await;
+    // 页面与接口同源（例如经反向代理挂在同一域名下、或 /admin 后台）时不需要进白名单（RL-005）。
+    let own = format!("http://{}", server.addr);
+    let mut ws = server.connect(&[("origin", own.as_str())]).await.unwrap();
+    assert_eq!(next_json(&mut ws).await["op"], "hello");
+
+    // 只是主机名前缀相同不算同源。
+    let lookalike = format!("http://{}.evil.example", server.addr.ip());
+    let error = server
+        .connect(&[("origin", lookalike.as_str())])
+        .await
+        .unwrap_err();
+    assert_eq!(http_status(error), 403);
+}
+
+#[tokio::test]
 async fn handshake_rejections() {
     let server = start_without_db().await;
     // 跨站页面发起的（Cookie 或游客）连接被拒绝，防止跨站 WebSocket 劫持。
