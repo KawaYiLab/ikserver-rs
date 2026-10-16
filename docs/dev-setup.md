@@ -133,7 +133,8 @@ cargo nextest run -p ik-search
 ### 管理后台
 
 `admin/` 是独立的 Nuxt 4 子项目（Node 22 + pnpm 10），开发、生成接口类型和部署都写在
-[`admin/README.md`](../admin/README.md) 里。后端接口改了以后，要重新生成 `admin/openapi.json`
+[`admin/README.md`](../admin/README.md) 里。它的构建产物在编译 release 版时嵌进 `ik-server`（发布流程见
+[`deploy/README.md`](../deploy/README.md)）；没构建后台时后端照常编译，`/admin` 返回 404。后端接口改了以后，要重新生成 `admin/openapi.json`
 和 `admin/app/types/api.d.ts`，然后运行 `pnpm typecheck`。
 
 ## 目录约定

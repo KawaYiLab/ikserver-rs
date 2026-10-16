@@ -400,6 +400,11 @@ async fn serve() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("监听 {addr} 失败"))?;
     tracing::info!(%addr, "ik-server 已启动");
+    if !ik_server::admin_ui::is_bundled() {
+        tracing::warn!(
+            "这个版本没有打包管理后台，/admin 不可用（发布前先在 admin/ 下 pnpm build）"
+        );
+    }
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),

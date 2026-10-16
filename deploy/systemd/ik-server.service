@@ -1,0 +1,48 @@
+# ik-server 的 systemd 服务。deploy/release.sh 每次发布都会把它装到 /etc/systemd/system/，
+# 本机要改的设置不要直接改这个文件，用 `systemctl edit ik-server` 写在覆盖文件里。
+
+[Unit]
+Description=InterKnot backend (ik-server)
+Wants=network-online.target
+After=network-online.target postgresql.service
+
+[Service]
+Type=exec
+User=interknot
+Group=interknot
+WorkingDirectory=/opt/interknot
+# 全部配置（数据库、密钥、对象存储……）都在这个文件里，只有 root 和 interknot 能读。
+EnvironmentFile=/etc/interknot/ik-server.env
+ExecStart=/opt/interknot/ik-server serve
+Restart=on-failure
+RestartSec=3
+# 收到 SIGTERM 后停止接新请求、关闭实时连接、等后台任务收尾，再退出。
+KillSignal=SIGTERM
+TimeoutStopSec=60
+LimitNOFILE=65536
+
+# 加固：进程只需要监听端口、连数据库和对外发 HTTPS，不写本地文件（日志走 journald）。
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

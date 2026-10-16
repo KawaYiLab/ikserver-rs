@@ -1,6 +1,6 @@
 # 绳网管理后台（admin/）
 
-Nuxt 4 SPA + shadcn-vue + Tailwind v4。它是一个独立的子项目，构建产物由 nginx 托管在 `/admin`。
+Nuxt 4 SPA + shadcn-vue + Tailwind v4。它是一个独立的子项目，构建产物在编译时嵌进 `ik-server`，由后端在 `/admin` 下提供。
 接口走同源的 `/v1/admin/*`，用论坛账号的网页会话（Cookie）登录，只有版主和管理员能进。
 
 ## 权限
@@ -51,15 +51,16 @@ pnpm build            # nuxt generate → .output/public
 ## 部署
 
 后台挂在后端域名下：`https://ik.tiwat.cn/admin/`，与 `/v1` 同源（见
-[ADR 0002](../docs/adr/0002-same-origin-web-api.md)）。
+[ADR 0002](../docs/adr/0002-same-origin-web-api.md)）。不需要单独发布：`pnpm build` 的产物
+（`.output/public`）在编译 release 版 `ik-server` 时整个嵌进可执行文件，由
+[`crates/server/src/admin_ui.rs`](../crates/server/src/admin_ui.rs) 提供。所以发布顺序固定是
+**先 `pnpm build`，再编译 ik-server**，[`deploy/release.sh`](../deploy/release.sh) 已经按这个顺序做好，见
+[`deploy/README.md`](../deploy/README.md)。
 
-```bash
-pnpm install --frozen-lockfile && pnpm build
-rsync -a --delete .output/public/ server:/srv/interknot/admin/
-```
-
-nginx 配置在 [`deploy/nginx/ik.tiwat.cn.conf`](../deploy/nginx/ik.tiwat.cn.conf)。预渲染的路由按
-`<路由>/index.html` 返回，其余路径回退到 `200.html`；带哈希的 `_nuxt/` 资源长期缓存。
+- 预渲染的路由按 `<路由>/index.html` 返回，其余页面路径回退到 `200.html`；缺失的脚本、样式是 404。
+- 带哈希的 `_nuxt/` 资源长期缓存，入口页和 `_nuxt/builds/` 每次协商（ETag）。
+- 没先构建后台就编译的 ik-server 照常运行，只是 `/admin` 是 404，启动日志里有警告。
+- 调试构建（`cargo run`）不嵌入，运行时从 `admin/.output/public` 读，重新 `pnpm build` 后刷新即可。
 
 后台里「查看帖子 / 主页」会链接到主站，地址在构建时用 `NUXT_PUBLIC_SITE_URL` 设置（默认 `https://interk.net`）。
 

@@ -16,7 +16,7 @@ InterKnot 论坛的新一代后端：Rust 模块化单体，替代旧 Strapi 5 �
 - 认证：不透明会话令牌（DB 存哈希）+ Argon2id（旧 bcrypt 哈希兼容校验）
 - OpenAPI：utoipa 6 + utoipa-axum（代码即文档，禁止手写 spec）
 - 大模型：async-openai（OpenAI 兼容协议）+ 进程内工具调用循环
-- 管理后台：`admin/`（Nuxt 4 SPA + shadcn-vue + Tailwind v4，独立子项目）
+- 管理后台：`admin/`（Nuxt 4 SPA + shadcn-vue + Tailwind v4，独立子项目；release 构建时嵌进 `ik-server`，见 deploy/README.md）
 
 ## 目录结构
 

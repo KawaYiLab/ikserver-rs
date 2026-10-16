@@ -1,0 +1,38 @@
+name: Release
+
+# 手动触发（Actions 页面的「Run workflow」）或推 v* 标签时，编出嵌好管理后台的 ik-server，
+# 作为产物上传。下载后用 `deploy/release.sh --binary ik-server root@服务器` 发布（见 deploy/README.md）。
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_VERSION: "1.99.0"
+
+jobs:
+  build:
+    # 固定发行版：可执行文件依赖编译机的 glibc，服务器的发行版不能比它旧。
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: admin/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: admin/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      - run: deploy/release.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ik-server-${{ github.ref_name }}-${{ github.sha }}
+          path: target/release/ik-server
+          if-no-files-found: error

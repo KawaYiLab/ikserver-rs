@@ -265,3 +265,15 @@ async fn auth_routes_are_rate_limited_per_route() {
     let (status, _, _) = send_to(&app, post_json("/v1/auth/login/email-code", "{")).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn admin_pages_are_served_under_admin() {
+    // 后台有没有打包都成立（CI 不构建后台）：目录入口跳转，缺失的资源是 404 而不是回退成页面。
+    let (status, headers, _) = send(get("/admin")).await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(headers.get(header::LOCATION).unwrap(), "/admin/");
+
+    let (status, _, body) = send(get("/admin/_nuxt/missing.js")).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["status"], 404);
+}

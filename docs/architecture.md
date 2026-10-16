@@ -3,7 +3,7 @@
 ## 总览
 
 模块化单体：一个 `ik-server` 进程承担 HTTP API、WebSocket 网关、后台任务与定时任务、
-AI 编排。外部依赖只有 PostgreSQL、Meilisearch、S3 兼容对象存储、SMTP/Brevo、米游社 API、
+AI 编排，并提供编进可执行文件的管理后台页面（`/admin`）。外部依赖只有 PostgreSQL、Meilisearch、S3 兼容对象存储、SMTP/Brevo、米游社 API、
 大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
 
 ```mermaid
@@ -11,7 +11,7 @@ flowchart LR
   web[网页 Nuxt] --> ng[nginx]
   adm[管理后台 /admin] --> ng
   app[安卓 App] --> ng
-  ng -->|/v1 与 /v1/realtime| srv[ik-server]
+  ng -->|/v1、/v1/realtime、/admin| srv[ik-server]
   srv --> pg[(PostgreSQL)]
   srv --> ms[Meilisearch]
   srv --> s3[R2/S3 + CDN]

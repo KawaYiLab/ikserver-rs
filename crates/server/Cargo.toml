@@ -57,6 +57,7 @@ chrono.workspace = true
 sha2.workspace = true
 governor.workspace = true
 moka.workspace = true
+rust-embed.workspace = true
 
 [dev-dependencies]
 futures-util.workspace = true

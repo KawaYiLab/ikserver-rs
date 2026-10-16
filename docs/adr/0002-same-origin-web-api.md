@@ -14,7 +14,7 @@ ik-server。浏览器只和自己的域名通信。
 | 域名 | 内容 | 接口 |
 | --- | --- | --- |
 | `interk.net` | 主站（Nuxt） | `interk.net/v1` → ik-server |
-| `ik.tiwat.cn` | 管理后台 `/admin`（静态 SPA）；安卓 App 的接口地址 | `ik.tiwat.cn/v1` → ik-server |
+| `ik.tiwat.cn` | 管理后台 `/admin`（SPA，编进 ik-server）；安卓 App 的接口地址 | `ik.tiwat.cn/v1` → ik-server |
 
 配置示例在 `deploy/nginx/`。
 

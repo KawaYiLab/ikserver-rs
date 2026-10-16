@@ -42,6 +42,8 @@ tower-http = { version = "0.7", features = ["trace", "cors", "request-id", "time
 http = "1.5"
 http-body-util = "0.1"
 futures-util = "0.3"
+# 管理后台静态文件编进可执行文件（发布构建嵌入，调试构建读磁盘）
+rust-embed = { version = "8.13", features = ["mime-guess"] }
 async-trait = "0.1"
 
 # 数据库（不启用 TLS：本机与生产都走本地/内网连接，避免引入 C 依赖）

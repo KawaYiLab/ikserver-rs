@@ -1,6 +1,6 @@
 import tailwindcss from '@tailwindcss/vite'
 
-// 管理后台是纯 SPA：nginx 在 API 域名（ik.tiwat.cn）的 /admin 下托管 `nuxt generate` 的产物，
+// 管理后台是纯 SPA：`nuxt generate` 的产物编进 ik-server，在 API 域名（ik.tiwat.cn）的 /admin 下提供，
 // 接口走同源的 /v1（会话 Cookie）。
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-01',

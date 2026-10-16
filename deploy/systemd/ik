@@ -1,0 +1,12 @@
+#!/bin/sh
+# 在服务器上运行 ik-server 的运维命令，用和服务完全相同的用户与配置文件。
+# deploy/release.sh 会把它装到 /usr/local/bin/ik。需要 root：
+#
+#   sudo ik migrate
+#   sudo ik user set-role someone@example.com admin
+#   sudo ik legacy check
+exec systemd-run --quiet --wait --pipe --collect \
+    -p User=interknot -p Group=interknot \
+    -p WorkingDirectory=/opt/interknot \
+    -p EnvironmentFile=/etc/interknot/ik-server.env \
+    "${IK_BIN:-/opt/interknot/ik-server}" "$@"

@@ -8,9 +8,9 @@
 | `ik-upstream.conf` | `/etc/nginx/conf.d/` | ik-server 上游，WebSocket 的 `Connection` 映射 |
 | `ik-api.inc` | `/etc/nginx/snippets/` | `/v1` 与 `/v1/realtime` 的反代，每个网页域名都 include |
 | `interk.net.conf` | `/etc/nginx/sites-enabled/` | 主站：Nuxt + 同源 `/v1` |
-| `ik.tiwat.cn.conf` | `/etc/nginx/sites-enabled/` | 后端域名：App 接口 + `/admin` 管理后台 |
+| `ik.tiwat.cn.conf` | `/etc/nginx/sites-enabled/` | 后端域名：App 接口 + `/admin` 管理后台（页面由 ik-server 提供，nginx 只转发） |
 
-后端相应的环境变量：
+后端相应的环境变量（完整模板见 [`../ik-server.env.example`](../ik-server.env.example)）：
 
 ```
 IK_HTTP__TRUSTED_PROXY_HOPS=1   # 只有 nginx 一层；nginx 前面还有 CDN 时设为 2

@@ -128,6 +128,7 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
     if !config.env.is_prod() {
         router = router.merge(Scalar::with_url("/docs", doc));
     }
+    router = router.merge(crate::admin_ui::router());
 
     let mut csrf = CsrfLayer::new();
     for origin in &config.http.allowed_origins {
