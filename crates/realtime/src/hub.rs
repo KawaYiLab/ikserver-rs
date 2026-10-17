@@ -141,7 +141,7 @@ impl Hub {
             .collect();
         let guests = registry.anonymous;
         drop(registry);
-        users.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        users.sort_unstable_by_key(|(newest, _)| std::cmp::Reverse(*newest));
         Presence {
             user_ids: users.into_iter().map(|(_, user_id)| user_id).collect(),
             guests,

@@ -694,22 +694,6 @@ pub async fn mention_candidates(
         .collect())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn username_rules() {
-        assert_eq!(validate_username("  绳网小明 ").unwrap(), "绳网小明");
-        assert!(validate_username("ab").is_err());
-        assert!(validate_username(&"字".repeat(21)).is_err());
-        assert!(validate_username(&"字".repeat(20)).is_ok());
-        assert!(validate_username("a@bcd").is_err());
-        assert!(validate_username("abc\u{0007}d").is_err());
-        assert!(validate_username("Alice Smith").is_ok());
-    }
-}
-
 /// 头像堆叠最多展示几个（PRES-005）。
 const PRESENCE_AVATARS: usize = 8;
 
@@ -750,4 +734,20 @@ pub async fn presence(state: &ProfileState) -> Result<PresenceView, Problem> {
         .await
         .map_err(|error| Problem::clone(&error))?;
     Ok(PresenceView::clone(&view))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn username_rules() {
+        assert_eq!(validate_username("  绳网小明 ").unwrap(), "绳网小明");
+        assert!(validate_username("ab").is_err());
+        assert!(validate_username(&"字".repeat(21)).is_err());
+        assert!(validate_username(&"字".repeat(20)).is_ok());
+        assert!(validate_username("a@bcd").is_err());
+        assert!(validate_username("abc\u{0007}d").is_err());
+        assert!(validate_username("Alice Smith").is_ok());
+    }
 }
