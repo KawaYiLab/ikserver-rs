@@ -94,6 +94,7 @@ fn harness_with(db: PgPool, registration_open: bool) -> Harness {
         AuthSettings {
             cookie_name: "ik_session".into(),
             cookie_secure: false,
+            cookie_cross_site: false,
             session_ttl: chrono::Duration::days(30),
             session_max_lifetime: chrono::Duration::days(180),
             registration_open,
