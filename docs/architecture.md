@@ -40,7 +40,7 @@ flowchart LR
 | 7 | `feed` | `auth, content, comments` |
 |   | `search` | `auth, social, content, comments` |
 |   | `moderation` | `auth, content, comments, notify, media` |
-|   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo` |
+|   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo, realtime` |
 | 8 | `account` | `auth, mihoyo, profile` |
 |   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy` |
 | 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai` |
@@ -64,6 +64,9 @@ flowchart LR
   只调用各域的 service / interop；依赖它的只有 `account`（注销）与 `ai`（工具读主页）。
 - `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）是事件总线的唯一订阅者，按受众转发；
   会话吊销由 auth 发内部事件 `auth.sessions_changed`，网关收到后复查该用户的连接。
+  在线人数：每个实例每 15 秒把连接快照（登录用户、游客连接数）写进 `realtime_presence`，读时合并 45 秒内的行
+  （`ik_realtime::presence`），多实例下同一用户只算一次；对外的 `GET /v1/presence` 在 profile 里（要按隐藏主页筛头像，
+  所以 `profile → realtime`）。
 - `messaging → auth, social`：私聊会话与消息。位于 notify 之下：对方发来的通知要在通知的事务里推进收件人的私聊排序
   （`ik_messaging::interop::touch_direct`）。统一收件箱（私聊会话与通知分组混排、已读）在 `notify` 里组合两边的数据，
   所以实际依赖是 `notify → auth, social, messaging`。WS 的 `typing` 帧由 server 把 `ik_messaging::service::typing`

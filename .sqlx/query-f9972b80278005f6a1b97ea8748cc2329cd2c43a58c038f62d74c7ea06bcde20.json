@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO realtime_presence (node_id, user_ids, guests, updated_at) VALUES\n             (2, '{7, 5}', 3, now()),\n             (3, '{8, 7}', 1, now() - interval '10 seconds'),\n             (4, '{9}', 50, now() - interval '1 minute')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f9972b80278005f6a1b97ea8748cc2329cd2c43a58c038f62d74c7ea06bcde20"
+}

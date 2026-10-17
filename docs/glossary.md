@@ -27,6 +27,7 @@
 | 头像（装扮） | avatar | 商城头像，区别于用户上传头像 |
 | 表情 | emote | 自定义表情组 |
 | 相关推荐 | related posts | 帖子详情页底部，按相关度排序 |
+| 在线人数 | presence | 按实时连接计算 |
 | 拉黑 | user_block | 双向生效 |
 | 举报 | report | 目标 article/comment/user |
 | 处罚 | sanction | 禁言（mute）/封禁（ban），带到期时间 |

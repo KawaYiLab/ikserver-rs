@@ -75,6 +75,15 @@ impl Registry {
     }
 }
 
+/// 本实例的在线快照。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Presence {
+    /// 有连接的登录用户，最近建立连接的在前。
+    pub user_ids: Vec<i64>,
+    /// 游客连接数（游客没有身份，每条连接各算一个）。
+    pub guests: usize,
+}
+
 pub struct Hub {
     registry: Mutex<Registry>,
     next_id: AtomicU64,
@@ -119,6 +128,24 @@ impl Hub {
             registry.conns.len() - registry.anonymous,
             registry.anonymous,
         )
+    }
+
+    /// 在线快照：已登录用户（按最近一次建立连接倒序）与游客连接数。
+    pub fn presence(&self) -> Presence {
+        let registry = self.lock();
+        // 连接 id 单调递增，每个用户队列的最后一个就是他最新的连接。
+        let mut users: Vec<(u64, i64)> = registry
+            .by_user
+            .iter()
+            .filter_map(|(user_id, queue)| queue.back().map(|newest| (*newest, *user_id)))
+            .collect();
+        let guests = registry.anonymous;
+        drop(registry);
+        users.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        Presence {
+            user_ids: users.into_iter().map(|(_, user_id)| user_id).collect(),
+            guests,
+        }
     }
 
     /// 停机：通知所有连接以 1001 关闭，并拒绝新连接。
@@ -366,6 +393,32 @@ mod tests {
         assert_eq!(hub.connection_counts(), (6, 0), "注销由连接任务自己完成");
         hub.unregister(regs[0].id);
         assert_eq!(hub.connection_counts(), (5, 0));
+    }
+
+    #[test]
+    fn presence_lists_users_by_latest_connection() {
+        let hub = Hub::new();
+        let a1 = hub.register(Some((1, 11))).unwrap();
+        let _b = hub.register(Some((2, 21))).unwrap();
+        let _a2 = hub.register(Some((1, 12))).unwrap();
+        let g = hub.register(None).unwrap();
+        let _g2 = hub.register(None).unwrap();
+        assert_eq!(
+            hub.presence(),
+            Presence {
+                user_ids: vec![1, 2],
+                guests: 2
+            }
+        );
+        hub.unregister(a1.id);
+        hub.unregister(g.id);
+        assert_eq!(
+            hub.presence(),
+            Presence {
+                user_ids: vec![1, 2],
+                guests: 1
+            }
+        );
     }
 
     #[test]

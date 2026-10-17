@@ -6,10 +6,11 @@
 
 mod conn;
 mod hub;
+pub mod presence;
 pub mod protocol;
 mod routes;
 mod state;
 
-pub use hub::Hub;
+pub use hub::{Hub, Presence};
 pub use routes::router;
 pub use state::{RealtimeState, TypingFuture, TypingHandler};

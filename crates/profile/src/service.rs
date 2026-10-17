@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use chrono::Utc;
 use governor::clock::{Clock, DefaultClock};
@@ -17,8 +18,9 @@ use sqlx::PgConnection;
 use crate::ProfileState;
 use crate::dto::{
     AvatarResult, MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, PostsScope,
-    ProfilePostsPage, ProfilePostsQuery, ProfileStats, ProfileView, RenameRequest, RenameResult,
-    SearchQuery, SetAvatarRequest, UpdateProfileRequest, UserSearchItem,
+    PresenceUser, PresenceView, ProfilePostsPage, ProfilePostsQuery, ProfileStats, ProfileView,
+    RenameRequest, RenameResult, SearchQuery, SetAvatarRequest, UpdateProfileRequest,
+    UserSearchItem,
 };
 use crate::repo::{self, ProfileRow};
 
@@ -706,4 +708,46 @@ mod tests {
         assert!(validate_username("abc\u{0007}d").is_err());
         assert!(validate_username("Alice Smith").is_ok());
     }
+}
+
+/// 头像堆叠最多展示几个（PRES-005）。
+const PRESENCE_AVATARS: usize = 8;
+
+/// 在线人数与最近在线用户的头像（PRES-005）。全站共享，缓存 10 秒。
+///
+/// 只展示设置了头像的用户；隐藏了主页的用户不出现（旧系统不过滤，这里按「隐藏主页」的意愿处理）。
+pub async fn presence(state: &ProfileState) -> Result<PresenceView, Problem> {
+    let view = state
+        .presence
+        .try_get_with((), async {
+            let online = ik_realtime::presence::online(&state.db).await?;
+            let mut candidates = online.recent_user_ids;
+            if !candidates.is_empty() {
+                let mut conn = state.db.acquire().await?;
+                let hidden = repo::hidden_among(&mut conn, &candidates).await?;
+                drop(conn);
+                candidates.retain(|id| !hidden.contains(id));
+            }
+            let authors = ik_auth::service::authors(&state.db, &candidates).await?;
+            let avatars = state.media.avatar_urls(authors.values()).await?;
+            let users = candidates
+                .iter()
+                .filter_map(|id| {
+                    let author = authors.get(id)?;
+                    Some(PresenceUser {
+                        id: author.id,
+                        username: author.username.clone(),
+                        avatar_url: avatars.get(id)?.clone(),
+                    })
+                })
+                .take(PRESENCE_AVATARS)
+                .collect();
+            Ok::<_, Problem>(Arc::new(PresenceView {
+                online: online.count,
+                users,
+            }))
+        })
+        .await
+        .map_err(|error| Problem::clone(&error))?;
+    Ok(PresenceView::clone(&view))
 }

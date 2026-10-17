@@ -1,13 +1,20 @@
 use std::net::IpAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
 
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_comments::CommentsState;
 use ik_content::ContentState;
 use ik_kernel::Snowflake;
 use ik_media::MediaState;
+use moka::future::Cache;
 use sqlx::PgPool;
+
+use crate::dto::PresenceView;
+
+/// 在线人数全站共享，缓存 10 秒。
+const PRESENCE_TTL: Duration = Duration::from_secs(10);
 
 /// 用户搜索与 @ 候选：登录用户每秒 10 次（PROFILE-023/024）。
 const SEARCHES_PER_SECOND_USER: NonZeroU32 = match NonZeroU32::new(10) {
@@ -30,6 +37,7 @@ pub struct ProfileState {
     /// 装备的系统头像与名片的展示数据。
     pub cosmetics: ik_cosmetics::CosmeticsState,
     pub(crate) limits: Arc<SearchLimits>,
+    pub(crate) presence: Cache<(), Arc<PresenceView>>,
 }
 
 pub(crate) struct SearchLimits {
@@ -56,6 +64,10 @@ impl ProfileState {
                 per_user: RateLimiter::keyed(Quota::per_second(SEARCHES_PER_SECOND_USER)),
                 per_ip: RateLimiter::keyed(Quota::per_second(SEARCHES_PER_SECOND_IP)),
             }),
+            presence: Cache::builder()
+                .max_capacity(1)
+                .time_to_live(PRESENCE_TTL)
+                .build(),
         }
     }
 }

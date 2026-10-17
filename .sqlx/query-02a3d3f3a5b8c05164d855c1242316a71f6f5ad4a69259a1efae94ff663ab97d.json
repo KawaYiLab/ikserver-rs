@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH live AS (\n               SELECT user_ids, guests FROM realtime_presence\n               WHERE updated_at > now() - make_interval(secs => $1)\n           ),\n           users AS (\n               SELECT u.user_id, min(u.n) AS rank\n               FROM live, unnest(live.user_ids) WITH ORDINALITY AS u(user_id, n)\n               GROUP BY u.user_id\n           )\n           SELECT (SELECT count(*) FROM users) + (SELECT coalesce(sum(guests), 0) FROM live)\n                      AS \"count!\",\n                  coalesce((SELECT array_agg(user_id ORDER BY rank, user_id)\n                            FROM (SELECT user_id, rank FROM users ORDER BY rank, user_id LIMIT $2) r),\n                           '{}') AS \"recent!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "recent!",
+        "type_info": "Int8Array",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "02a3d3f3a5b8c05164d855c1242316a71f6f5ad4a69259a1efae94ff663ab97d"
+}

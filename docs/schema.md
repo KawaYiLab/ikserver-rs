@@ -337,3 +337,10 @@
 
 - `denny_logs.action` 增加 `admin_deduct`（管理员扣除；发放沿用 `admin_grant`，DENNY-020 的枚举第一次有写入方）；
   `exp_logs.action` 增加 `admin_grant`（豁免每日上限，去重键 `ref:admin:<雪花 id>`，每次发放一行）。
+
+## 在线人数（`20261102000001_realtime_presence.sql`）
+
+- `realtime_presence`（ik-realtime）：每个实例一行（`node_id` = `IK_NODE_ID`），每 15 秒写入本实例实时连接的快照：
+  登录用户 id 数组（最近建立连接的在前）与游客连接数。读时只合并 45 秒内更新过的行（PRES-003 的在线窗口），
+  登录用户跨实例去重；实例宕机后它的行自然过期，正常停机时删掉自己的行。
+- `UNLOGGED`：数据只有几十秒的意义，不写 WAL，崩溃后清空也无妨。没有外键（快照不需要引用完整性）。

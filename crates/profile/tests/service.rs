@@ -715,3 +715,28 @@ async fn custom_avatar_costs_10_denny_and_must_be_own_upload(db: PgPool) {
             .is_none()
     );
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn presence_shows_count_and_visible_avatars(db: PgPool) {
+    let h = harness(db);
+    for (id, name) in [(1, "有头像"), (2, "隐藏主页"), (3, "没头像")] {
+        h.user(id, name).await;
+    }
+    h.sql(&format!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (900, 'c/900.png', 'image/png', 1, '{}', 'r900');
+         INSERT INTO system_avatars (id, name, image_media_id) VALUES (1, '头像', 900);
+         UPDATE users SET equipped_avatar_id = 1, equipped_avatar_media_id = 900 WHERE id IN (1, 2);
+         INSERT INTO user_profiles (user_id, hidden) VALUES (2, TRUE);
+         INSERT INTO realtime_presence (node_id, user_ids, guests, updated_at)
+         VALUES (1, '{{3, 2, 1}}', 4, now());",
+        "f".repeat(64)
+    ))
+    .await;
+
+    let view = service::presence(&h.state).await.unwrap();
+    assert_eq!(view.online, 3 + 4);
+    let names: Vec<&str> = view.users.iter().map(|u| u.username.as_str()).collect();
+    assert_eq!(names, vec!["有头像"]);
+    assert!(!view.users[0].avatar_url.is_empty());
+}

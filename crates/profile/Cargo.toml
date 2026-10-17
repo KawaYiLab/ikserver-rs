@@ -16,6 +16,7 @@ ik-comments.workspace = true
 ik-media.workspace = true
 ik-cosmetics.workspace = true
 ik-mihoyo.workspace = true
+ik-realtime.workspace = true
 tokio.workspace = true
 axum.workspace = true
 http.workspace = true
@@ -27,6 +28,7 @@ utoipa-axum.workspace = true
 tracing.workspace = true
 chrono.workspace = true
 governor.workspace = true
+moka.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
