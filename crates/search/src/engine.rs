@@ -95,6 +95,27 @@ pub(crate) struct SuggestHit {
     pub excerpt: Option<String>,
 }
 
+/// 等设置生效（索引重建）的上限。
+const SETTINGS_WAIT: Duration = Duration::from_secs(600);
+
+/// 我们推送的几项设置是否与线上一致。可过滤、可排序字段不讲顺序，其余讲顺序。
+fn settings_match(want: &Settings, have: &Settings) -> bool {
+    fn unordered<T: Serialize>(list: &Option<Vec<T>>) -> Option<Vec<String>> {
+        list.as_ref().map(|items| {
+            let mut keys: Vec<String> = items
+                .iter()
+                .map(|item| serde_json::to_string(item).unwrap_or_default())
+                .collect();
+            keys.sort();
+            keys
+        })
+    }
+    want.searchable_attributes == have.searchable_attributes
+        && want.ranking_rules == have.ranking_rules
+        && unordered(&want.filterable_attributes) == unordered(&have.filterable_attributes)
+        && unordered(&want.sortable_attributes) == unordered(&have.sortable_attributes)
+}
+
 pub(crate) struct Engine {
     client: Client,
     posts: Index,
@@ -162,7 +183,10 @@ impl Engine {
         self.timeout.max(Duration::from_secs(10))
     }
 
-    /// 建索引（已存在则跳过）并推送设置（SRCH-050：配置是唯一事实来源，每次启动都推）。
+    /// 建索引（已存在则跳过）并推送设置（SRCH-050：配置是唯一事实来源，每次启动都核对）。
+    ///
+    /// 同名索引若主键不是 `id`，说明是别的系统的（例如旧站），直接报错，不碰它。
+    /// 设置与线上一致就不推：Meilisearch 收到设置就会重建整个索引，几万条文档要几十秒。
     pub(crate) async fn ensure(&self) -> anyhow::Result<()> {
         let wait = Some(Duration::from_secs(30));
         for index in [&self.posts, &self.comments] {
@@ -183,6 +207,19 @@ impl Engine {
                 if error.error_code != ErrorCode::IndexAlreadyExists {
                     anyhow::bail!("建索引 {} 失败：{error}", index.uid);
                 }
+            }
+            let existing = within(
+                self.write_timeout(),
+                "读取索引",
+                self.client.get_index(&index.uid),
+            )
+            .await?;
+            if existing.primary_key.as_deref() != Some("id") {
+                anyhow::bail!(
+                    "索引 {} 的主键是 {:?}，不是本系统建的；请设置 IK_SEARCH__INDEX_PREFIX 换一个索引名",
+                    index.uid,
+                    existing.primary_key
+                );
             }
         }
         let post_settings = Settings::new()
@@ -215,16 +252,22 @@ impl Engine {
             (&self.posts, post_settings),
             (&self.comments, comment_settings),
         ] {
+            let current = within(self.write_timeout(), "读取设置", index.get_settings()).await?;
+            if settings_match(&settings, &current) {
+                continue;
+            }
+            tracing::info!(index = %index.uid, "推送搜索索引设置（会重建索引）");
             let task = within(
                 self.write_timeout(),
                 "推送设置",
                 index.set_settings(&settings),
             )
             .await?;
+            // 重建整个索引：文档多时要几十秒到几分钟。
             let done = within(
-                Duration::from_secs(35),
+                SETTINGS_WAIT + Duration::from_secs(5),
                 "推送设置",
-                task.wait_for_completion(&self.client, None, wait),
+                task.wait_for_completion(&self.client, None, Some(SETTINGS_WAIT)),
             )
             .await?;
             if done.is_failure() {
@@ -559,6 +602,25 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_compare_ignores_order_of_sets_only() {
+        let want = Settings::new()
+            .with_searchable_attributes(["title", "text"])
+            .with_filterable_attributes(["a", "b"])
+            .with_sortable_attributes(["x", "y"])
+            .with_ranking_rules(["words", "sort"]);
+        let same = Settings::new()
+            .with_searchable_attributes(["title", "text"])
+            .with_filterable_attributes(["b", "a"])
+            .with_sortable_attributes(["y", "x"])
+            .with_ranking_rules(["words", "sort"]);
+        assert!(settings_match(&want, &same));
+        let reordered = same.clone().with_searchable_attributes(["text", "title"]);
+        assert!(!settings_match(&want, &reordered));
+        let changed = same.with_filterable_attributes(["a"]);
+        assert!(!settings_match(&want, &changed));
+    }
 
     #[test]
     fn author_exclusion_filter_quotes_ids() {
