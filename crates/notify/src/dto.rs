@@ -124,6 +124,12 @@ pub struct InboxEntry {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub conversation_id: Option<Id<Conversation>>,
+    /// 私聊会话的类型：`direct`（一对一私聊）| `ai`（AI 会话）。通知分组没有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversation_kind: Option<String>,
+    /// AI 会话的标题。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     /// 对方。系统通知的名字固定为「Fairy」，没有 id。
     pub peer: SenderView,
     /// 排序时间：最后一条私信或通知的时间。

@@ -4220,6 +4220,8 @@ export interface components {
              */
             activityAt: string;
             conversationId?: string | null;
+            /** @description 私聊会话的类型：`direct`（一对一私聊）| `ai`（AI 会话）。通知分组没有。 */
+            conversationKind?: string | null;
             /** @description `dm-<会话 id>` | `user-<发送者 id>` | `system`。 */
             key: string;
             /** @description `conversation` | `notifications` */
@@ -4229,6 +4231,8 @@ export interface components {
             peer: components["schemas"]["SenderView"];
             pinned: boolean;
             preview?: components["schemas"]["InboxPreview"] | null;
+            /** @description AI 会话的标题。 */
+            title?: string | null;
             /**
              * Format: int64
              * @description 未读私信 + 未读通知。
