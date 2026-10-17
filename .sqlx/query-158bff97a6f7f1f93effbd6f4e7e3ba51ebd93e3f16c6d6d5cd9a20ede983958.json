@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE emotes SET name = $2, group_id = $3, image_media_id = $4, sort_order = $5, active = $6,\n                updated_at = now()\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "158bff97a6f7f1f93effbd6f4e7e3ba51ebd93e3f16c6d6d5cd9a20ede983958"
+}

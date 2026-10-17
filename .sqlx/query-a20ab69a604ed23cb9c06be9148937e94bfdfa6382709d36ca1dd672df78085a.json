@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH members AS (SELECT count(*) AS n FROM emotes WHERE group_id = $1)\n           DELETE FROM emote_groups WHERE id = $1\n           RETURNING (SELECT n FROM members) AS \"n!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a20ab69a604ed23cb9c06be9148937e94bfdfa6382709d36ca1dd672df78085a"
+}

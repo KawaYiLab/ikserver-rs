@@ -80,6 +80,7 @@ flowchart LR
 - `cosmetics → auth, media`：系统头像、论坛名片的目录。装备状态写在账号上（`ik_auth::interop::equip_*`），
   系统头像的图片 id 也冗余在账号上，所以 `ik_auth::service::authors` 直接给出「装备头像优先，其次自定义头像」，
   展示作者的各域不依赖 cosmetics。目录换图时 cosmetics 在同一事务里调用 `refresh_equipped_avatar` 同步。
+  表情包（`emote_groups`、`emotes`）也归 cosmetics：公开清单进程内缓存，后台修改后立即失效；评论域只按文本存 `:ik-xxx:`，不依赖它。
 - `mail → kernel`：发信通道（SMTP、Brevo）与双通道调度，实现 `ik_kernel::mail::Mailer`，只由 server 装配；
   业务代码只依赖 `Mailer`（验证码邮件在 auth 里事务提交后发送）。
 - `mihoyo → auth`：米游社身份（`mihoyo_bindings`）与扫码会话（`mihoyo_qr_logins`，替代旧系统的 Redis 键）。

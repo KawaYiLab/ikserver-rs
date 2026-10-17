@@ -323,3 +323,124 @@ async fn cards_page_by_kind_and_equip(db: PgPool) {
     .unwrap_err();
     assert_eq!(err.code(), "ACCOUNT_BLOCKED");
 }
+
+fn operator(principal: &Principal) -> ik_auth::Operator {
+    ik_auth::Operator {
+        principal: principal.clone(),
+        meta: ik_auth::service::RequestMeta {
+            ip: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            user_agent: None,
+        },
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn emote_manifest_follows_admin_changes(db: PgPool) {
+    use ik_cosmetics::emotes::{self, EmoteGroupInput, EmoteInput};
+
+    let h = harness(db);
+    let admin = operator(&h.user(1).await);
+    h.media(10).await;
+    h.media(11).await;
+
+    let empty = emotes::manifest(&h.state).await.unwrap();
+    assert!(empty.emotes.is_empty() && empty.groups.is_empty());
+
+    let group = emotes::save_group(
+        &h.state,
+        &admin,
+        None,
+        EmoteGroupInput {
+            name: "绳网".into(),
+            sort_order: 0,
+            icon_id: None,
+            active: true,
+        },
+    )
+    .await
+    .unwrap();
+    let fields = |name: &str, image: i64| EmoteInput {
+        name: name.into(),
+        group_id: Some(group.id),
+        image_id: Id::new(image),
+        sort_order: 0,
+        active: true,
+    };
+    let smile = emotes::save_emote(&h.state, &admin, None, Some("ik-smile"), fields("笑", 10))
+        .await
+        .unwrap();
+    emotes::save_emote(&h.state, &admin, None, Some("ik-cry"), fields("哭", 11))
+        .await
+        .unwrap();
+
+    // 不合法的代码、重复的代码、不存在的图片与分组。
+    let code = |r: Result<emotes::AdminEmote, ik_kernel::Problem>| r.unwrap_err().code();
+    assert_eq!(
+        code(emotes::save_emote(&h.state, &admin, None, Some("smile"), fields("x", 10)).await),
+        "VALIDATION_FAILED"
+    );
+    assert_eq!(
+        code(emotes::save_emote(&h.state, &admin, None, Some("ik-smile"), fields("x", 10)).await),
+        "ALREADY_EXISTS"
+    );
+    assert_eq!(
+        code(emotes::save_emote(&h.state, &admin, None, Some("ik-x"), fields("x", 99)).await),
+        "VALIDATION_FAILED"
+    );
+    let mut orphan = fields("x", 10);
+    orphan.group_id = Some(Id::new(12345));
+    assert_eq!(
+        code(emotes::save_emote(&h.state, &admin, None, Some("ik-x"), orphan).await),
+        "VALIDATION_FAILED"
+    );
+
+    let listed = emotes::manifest(&h.state).await.unwrap();
+    let codes: Vec<&str> = listed.emotes.iter().map(|e| e.code.as_str()).collect();
+    assert_eq!(codes, vec!["ik-smile", "ik-cry"]);
+    assert!(
+        listed
+            .emotes
+            .iter()
+            .all(|e| e.selectable && e.group_id == Some(group.id))
+    );
+    assert_eq!(listed.groups.len(), 1);
+
+    // 下架：仍在清单里（旧评论照常显示），只是不出现在面板；版本随之变化。
+    let mut hidden = fields("笑", 10);
+    hidden.active = false;
+    emotes::save_emote(&h.state, &admin, Some(smile.id.get()), None, hidden)
+        .await
+        .unwrap();
+    let after = emotes::manifest(&h.state).await.unwrap();
+    assert_ne!(after.version, listed.version);
+    let smile_view = after.emotes.iter().find(|e| e.code == "ik-smile").unwrap();
+    assert!(!smile_view.selectable);
+
+    // 删除分组：表情留下、变成未分组。
+    emotes::delete_group(&h.state, &admin, group.id.get())
+        .await
+        .unwrap();
+    let ungrouped = emotes::manifest(&h.state).await.unwrap();
+    assert!(ungrouped.groups.is_empty());
+    assert!(ungrouped.emotes.iter().all(|e| e.group_id.is_none()));
+    let cry = ungrouped
+        .emotes
+        .iter()
+        .find(|e| e.code == "ik-cry")
+        .unwrap();
+    assert!(cry.selectable);
+
+    // 删除表情：从清单里消失。
+    emotes::delete_emote(&h.state, &admin, smile.id.get())
+        .await
+        .unwrap();
+    let left = emotes::manifest(&h.state).await.unwrap();
+    assert_eq!(left.emotes.len(), 1);
+    assert_eq!(
+        emotes::delete_emote(&h.state, &admin, smile.id.get())
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+}

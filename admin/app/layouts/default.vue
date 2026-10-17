@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useColorMode } from '@vueuse/core'
 import {
-  Bot, ClipboardList, FileText, Flag, LayoutDashboard, LogOut, Menu, Moon, Palette, Search, ShieldCheck, Sun, Tags, Users,
+  Bot, ClipboardList, FileText, Flag, LayoutDashboard, LogOut, Menu, Moon, Palette, Search, ShieldCheck, Smile, Sun, Tags, Users,
 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
@@ -20,6 +20,7 @@ const nav = computed(() => [
   { to: '/exam', label: '入站题库', icon: ClipboardList, show: true },
   { to: '/content', label: '分区与标签', icon: Tags, show: true },
   { to: '/cosmetics', label: '装扮', icon: Palette, show: true },
+  { to: '/emotes', label: '表情包', icon: Smile, show: true },
   { to: '/ai', label: 'AI 助手', icon: Bot, show: isAdmin.value },
   { to: '/search', label: '搜索索引', icon: Search, show: isAdmin.value },
   { to: '/audit', label: '审计日志', icon: FileText, show: isAdmin.value },

@@ -1,6 +1,6 @@
 [package]
 name = "ik-cosmetics"
-description = "装扮：系统头像与论坛名片的目录、装备"
+description = "装扮：系统头像与论坛名片的目录、装备；表情包"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -18,6 +18,8 @@ utoipa.workspace = true
 utoipa-axum.workspace = true
 chrono.workspace = true
 http.workspace = true
+moka.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
