@@ -422,6 +422,18 @@ async fn lock_own_post(
     Ok(row)
 }
 
+/// 发布过一次就不能再切换匿名，下线回到草稿也一样：新帖通知与看过的人都能把匿名名对上真人（隐私红线）。
+fn ensure_anonymity_unchanged(row: &PostRow, is_anonymous: bool) -> Result<(), Problem> {
+    if row.first_published_at.is_some() && is_anonymous != row.is_anonymous {
+        return Err(Problem::field(
+            "isAnonymous",
+            "LOCKED",
+            "发布过的委托不能切换匿名",
+        ));
+    }
+    Ok(())
+}
+
 /// 匿名切换：开启时复用已有种子（POST-053），关闭时保留种子以便再次开启时名字不变（种子永不下发）。
 fn seed_for(is_anonymous: bool, existing: Option<&str>) -> Result<Option<String>, Problem> {
     match (is_anonymous, existing) {
@@ -540,13 +552,7 @@ pub async fn save_draft(
     let mut tx = state.db.begin().await?;
     let row = lock_own_post(&mut tx, principal, post_id).await?;
     ensure_revision(&row, expected_revision)?;
-    if row.status == "published" && prepared.is_anonymous != row.is_anonymous {
-        return Err(Problem::field(
-            "isAnonymous",
-            "LOCKED",
-            "发布后不能切换匿名",
-        ));
-    }
+    ensure_anonymity_unchanged(&row, prepared.is_anonymous)?;
     let existing = existing_covers(&mut tx, &row).await?;
     let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
     if row.status == "published" {
@@ -619,15 +625,8 @@ pub async fn publish(
     let row = lock_own_post(&mut tx, principal, post_id).await?;
     ensure_revision(&row, expected_revision)?;
     let was_published = row.status == "published";
-    if let Some(prepared) = &prepared
-        && was_published
-        && prepared.is_anonymous != row.is_anonymous
-    {
-        return Err(Problem::field(
-            "isAnonymous",
-            "LOCKED",
-            "发布后不能切换匿名",
-        ));
+    if let Some(prepared) = &prepared {
+        ensure_anonymity_unchanged(&row, prepared.is_anonymous)?;
     }
 
     let mut changed = false;

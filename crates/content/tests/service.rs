@@ -351,6 +351,36 @@ async fn anonymity_toggle_in_draft_keeps_the_same_name(db: PgPool) {
     assert!(seeds.is_some());
 }
 
+/// 实名发布过的帖子下线后也不能改成匿名再发：粉丝的新帖通知、看过的人都能把匿名名对上真人。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn anonymity_stays_locked_after_unpublish(db: PgPool) {
+    let h = harness(db);
+    let me = h.writer(1).await;
+    let mut post = input("实名");
+    let id = service::create(&h.state, &me, post.clone(), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    service::unpublish(&h.state, &me, id, false).await.unwrap();
+
+    post.is_anonymous = true;
+    let err = service::save_draft(&h.state, &me, id, post.clone(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "VALIDATION_FAILED");
+    let err = service::publish(&h.state, &me, id, Some(post), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "VALIDATION_FAILED");
+
+    let anonymous = sqlx::query_scalar!("SELECT is_anonymous FROM posts WHERE id = $1", id)
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert!(!anonymous);
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn unpublish_keeps_or_discards_pending_edits(db: PgPool) {
     let h = harness(db);
