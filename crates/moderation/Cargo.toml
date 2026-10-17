@@ -22,11 +22,9 @@ utoipa.workspace = true
 utoipa-axum.workspace = true
 chrono.workspace = true
 governor.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
-futures-util.workspace = true
 
 [lints]
 workspace = true
