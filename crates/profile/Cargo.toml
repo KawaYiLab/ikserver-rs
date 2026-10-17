@@ -25,7 +25,6 @@ serde_json.workspace = true
 sqlx.workspace = true
 utoipa.workspace = true
 utoipa-axum.workspace = true
-tracing.workspace = true
 chrono.workspace = true
 governor.workspace = true
 moka.workspace = true
