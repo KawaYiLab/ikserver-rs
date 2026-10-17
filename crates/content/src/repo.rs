@@ -525,6 +525,26 @@ pub(crate) struct CardRow {
     pub category_name: Option<String>,
 }
 
+pub(crate) struct VideoRow {
+    pub id: i64,
+    pub videos: serde_json::Value,
+}
+
+/// 这些帖子里嵌了视频的（卡片展示视频摘要）。
+pub(crate) async fn videos_for_posts(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<VideoRow>> {
+    sqlx::query_as!(
+        VideoRow,
+        r#"SELECT id, external_videos AS videos FROM posts
+           WHERE id = ANY($1) AND external_videos <> '[]'::jsonb"#,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
 pub(crate) struct FeedFilter {
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,
@@ -1285,6 +1305,80 @@ pub(crate) async fn public_cards_by_ids(
              AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))"#,
         ids,
         excluded_authors,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+// ---------- 相关推荐 ----------
+
+pub(crate) struct RelatedRow {
+    pub id: i64,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+}
+
+pub(crate) struct RelatedQuery<'a> {
+    pub seed_id: i64,
+    pub seed_category: Option<i64>,
+    pub viewer: Option<i64>,
+    pub excluded_authors: &'a [i64],
+    pub limit: i64,
+}
+
+/// 相关推荐的候选，按相关度从高到低。
+///
+/// 候选池 = 与种子帖共享标签的帖子 ∪ 同分区最近活跃的 300 篇 ∪ 全站最近活跃的 300 篇（都只看公开帖子），
+/// 限一年内发布、去掉种子帖与观众自己的帖子（含自己的匿名帖，SUGG-003）、拉黑过滤（匿名帖放行）。
+/// 相关度 = 3 × 共享标签数 + 2 × 同分区 + 2 × 观众没读过 + 新鲜度（30 天衰减，0–1）+ 热度（0–1）。
+pub(crate) async fn related_candidates(
+    conn: &mut PgConnection,
+    q: &RelatedQuery<'_>,
+) -> sqlx::Result<Vec<RelatedRow>> {
+    sqlx::query_as!(
+        RelatedRow,
+        r#"WITH tagged AS (
+               SELECT pt.post_id AS id, count(*) AS shared
+               FROM post_tags pt
+               WHERE pt.tag_id IN (SELECT tag_id FROM post_tags WHERE post_id = $1)
+                 AND pt.post_id <> $1
+               GROUP BY pt.post_id
+           ),
+           pool AS (
+               SELECT id FROM tagged
+               UNION
+               (SELECT id FROM posts
+                WHERE category_id = $2 AND status = 'published' AND hidden_at IS NULL
+                ORDER BY bumped_at DESC, id DESC LIMIT 300)
+               UNION
+               (SELECT id FROM posts
+                WHERE status = 'published' AND hidden_at IS NULL
+                ORDER BY bumped_at DESC, id DESC LIMIT 300)
+           )
+           SELECT p.id, p.author_id, p.is_anonymous
+           FROM pool
+           JOIN posts p ON p.id = pool.id
+           LEFT JOIN tagged t ON t.id = p.id
+           WHERE p.id <> $1 AND p.status = 'published' AND p.hidden_at IS NULL
+             AND p.published_at > now() - interval '365 days'
+             AND ($3::bigint IS NULL OR p.author_id <> $3)
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($4)))
+           ORDER BY
+               3.0 * coalesce(t.shared, 0)
+             + CASE WHEN $2::bigint IS NOT NULL AND p.category_id = $2 THEN 2.0 ELSE 0.0 END
+             + CASE WHEN $3::bigint IS NOT NULL AND NOT EXISTS (
+                         SELECT 1 FROM post_reads r WHERE r.user_id = $3 AND r.post_id = p.id)
+                    THEN 2.0 ELSE 0.0 END
+             + exp(-extract(epoch FROM now() - p.bumped_at) / (30.0 * 86400.0))
+             + least(1.0, ln(1.0 + p.like_count + 2 * p.comment_count + p.favorite_count) / ln(101.0))
+               DESC,
+               p.bumped_at DESC, p.id DESC
+           LIMIT $5"#,
+        q.seed_id,
+        q.seed_category,
+        q.viewer,
+        q.excluded_authors,
+        q.limit,
     )
     .fetch_all(conn)
     .await

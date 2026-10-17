@@ -153,3 +153,48 @@ pub enum CatalogItem {
         image_id: Id<ik_kernel::id::marker::Media>,
     },
 }
+
+// ---------- 表情包 ----------
+
+/// 表情清单。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EmoteManifest {
+    /// 清单内容的摘要，与 `ETag` 相同；内容不变它就不变。
+    pub version: String,
+    /// 启用中的分组，按面板顺序。
+    pub groups: Vec<EmoteGroupView>,
+    /// 全部表情（含已下架的），按面板顺序。
+    pub emotes: Vec<EmoteView>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EmoteGroupView {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+    /// 分组图标；没有时用组里第一个表情。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EmoteView {
+    /// 含 `ik-` 前缀；评论里写作 `:ik-xxx:`。
+    pub code: String,
+    pub name: String,
+    /// 所在分组；未分组（或分组已停用）时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub group_id: Option<Id>,
+    /// 原图（动图保持动画）。
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<i32>,
+    /// 是否出现在表情面板里。已下架或所在分组停用的为 false，但旧评论里照常按图片显示。
+    pub selectable: bool,
+}

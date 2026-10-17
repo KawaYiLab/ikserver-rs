@@ -210,3 +210,23 @@ pub struct AvatarResult {
     /// 操作后的丁尼余额。换成同一张图或清除头像时不扣费。
     pub balance: i32,
 }
+
+/// 在线人数与最近在线用户的头像。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceView {
+    /// 在线人数：开着网页或 App 的登录用户（去重）加游客连接数。
+    pub online: i64,
+    /// 最近上线、设置了头像的用户（最多 8 个，新的在前）。隐藏了主页的用户不出现。
+    pub users: Vec<PresenceUser>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PresenceUser {
+    #[schema(value_type = String)]
+    pub id: Id<User>,
+    pub username: String,
+    /// 头像（360 宽缩略图）。
+    pub avatar_url: String,
+}

@@ -147,6 +147,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REPORT_CLOSED | 409 | 该举报已结案 | 领取、结案时这个目标已经没有未结案的举报 |
 | REPORT_ALREADY_CLAIMED | 409 | 该举报已被 <名字> 领取，仅处理人可以处理 | 组里有被别人领取的举报；不做部分领取 |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
+| VIDEO_NOT_FOUND | 404 | 视频不存在或已失效 | `GET /v1/videos/resolve`：B 站说视频不存在、被删除或不可见 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
@@ -176,6 +177,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | MAIL_SEND_FAILED | 503 | 验证码邮件发送失败，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | EXAM_NOT_AVAILABLE | 503 | 题库暂未配置，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | MIHOYO_UPSTREAM_ERROR | 502 | 米游社服务暂时不可用，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
+| VIDEO_UPSTREAM_ERROR | 502 | B 站服务暂时不可用，请稍后再试 | 视频预览时 B 站超时或报错；5xx 统一文案，客户端按 code 区分。保存帖子不受影响 |
 | MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | `IK_MIHOYO__ENABLED=false`；5xx 统一文案 |
 
 ## 限流
@@ -190,6 +192,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 - 具体接口另有更严的限流（两者都生效）：登录/验证码类按 IP 每路由 20/min，评论、私信、拉黑、上传签名等见各域代码。
 - 计数在进程内（不使用 Redis），多实例时每个实例各自计。
 - 搜索（`/v1/search/*`）：登录用户每秒 10 次，游客每 IP 每秒 5 次。
+- 视频预览（`/v1/videos/resolve`，会访问 B 站）：每人每分钟 30 次；结果在进程内缓存 10 分钟。
 
 ## 实时（WebSocket `/v1/realtime`）
 

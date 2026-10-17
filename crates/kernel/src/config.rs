@@ -71,6 +71,7 @@ pub struct Config {
     pub rate_limit: RateLimit,
     pub bus: Bus,
     pub mihoyo: Mihoyo,
+    pub video: Video,
     pub moderation: Moderation,
     pub ai: Ai,
 }
@@ -160,6 +161,24 @@ impl Default for Mihoyo {
             passport_base_url: "https://passport-api.miyoushe.com".to_owned(),
             takumi_base_url: "https://api-takumi.mihoyo.com".to_owned(),
             timeout_secs: 10,
+        }
+    }
+}
+
+/// 外部视频（B 站）信息查询：发帖时取标题、封面、时长。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Video {
+    pub bilibili_base_url: String,
+    /// 上游请求超时（1–30 秒）。保存帖子时会等它，所以不宜太长。
+    pub timeout_secs: u64,
+}
+
+impl Default for Video {
+    fn default() -> Self {
+        Self {
+            bilibili_base_url: "https://api.bilibili.com".to_owned(),
+            timeout_secs: 5,
         }
     }
 }
@@ -381,6 +400,7 @@ impl Default for Config {
             rate_limit: RateLimit::default(),
             bus: Bus::default(),
             mihoyo: Mihoyo::default(),
+            video: Video::default(),
             moderation: Moderation::default(),
             ai: Ai::default(),
         }
@@ -852,6 +872,11 @@ impl Config {
         {
             return Err(ConfigError::Invalid(
                 "mihoyo 配置不合法：timeout_secs 1–60，上游地址须为 http(s)://".to_owned(),
+            ));
+        }
+        if !(1..=30).contains(&self.video.timeout_secs) || !base_ok(&self.video.bilibili_base_url) {
+            return Err(ConfigError::Invalid(
+                "video 配置不合法：timeout_secs 1–30，bilibili_base_url 须为 http(s)://".to_owned(),
             ));
         }
         self.mail.validate()?;

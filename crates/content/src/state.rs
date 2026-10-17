@@ -10,11 +10,18 @@ use ik_media::MediaState;
 use moka::future::Cache;
 use sqlx::PgPool;
 
+use crate::bilibili::{Disabled, VideoApi, Videos};
+
 /// 同一观众对同一帖子的浏览量冷却（POST-080）。
 const VIEW_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const VIEW_COOLDOWN_CAPACITY: u64 = 200_000;
 /// 每个观众每分钟最多计 30 次浏览（POST-080）。
 const VIEWS_PER_MINUTE: NonZeroU32 = match NonZeroU32::new(30) {
+    Some(n) => n,
+    None => NonZeroU32::MIN,
+};
+/// 视频预览每人每分钟最多 30 次（会访问 B 站）。
+const VIDEO_LOOKUPS_PER_MINUTE: NonZeroU32 = match NonZeroU32::new(30) {
     Some(n) => n,
     None => NonZeroU32::MIN,
 };
@@ -28,6 +35,9 @@ pub struct ContentState {
     pub media: MediaState,
     pub jobs: Jobs,
     pub(crate) views: Arc<ViewGuard>,
+    /// B 站视频信息（带缓存）。默认不访问网络，server 用 [`ContentState::with_video_api`] 接上真实上游。
+    pub(crate) videos: Videos,
+    pub(crate) video_lookups: Arc<DefaultKeyedRateLimiter<i64>>,
 }
 
 impl ContentState {
@@ -45,7 +55,18 @@ impl ContentState {
                     .build(),
                 limiter: RateLimiter::keyed(Quota::per_minute(VIEWS_PER_MINUTE)),
             }),
+            videos: Videos::new(Arc::new(Disabled)),
+            video_lookups: Arc::new(RateLimiter::keyed(Quota::per_minute(
+                VIDEO_LOOKUPS_PER_MINUTE,
+            ))),
         }
+    }
+
+    /// 换上查询 B 站视频信息的上游（生产用 [`crate::bilibili::HttpBilibili`]，测试用假实现）。
+    #[must_use]
+    pub fn with_video_api(mut self, api: Arc<dyn VideoApi>) -> Self {
+        self.videos = Videos::new(api);
+        self
     }
 }
 

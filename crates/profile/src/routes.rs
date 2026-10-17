@@ -1,5 +1,5 @@
 //! HTTP 接口：`/v1/users/{id}`（作者主页及其帖子、评论）、`/v1/users/search`、
-//! `/v1/users/mention-candidates`、`/v1/me/profile*`、`/v1/me/username`。
+//! `/v1/users/mention-candidates`、`/v1/me/profile*`、`/v1/me/username`、`/v1/presence`。
 
 use axum::extract::{FromRef, State};
 use ik_auth::{AuthState, ClientMeta, CurrentUser, MaybeUser};
@@ -15,9 +15,9 @@ use utoipa_axum::routes;
 
 use crate::ProfileState;
 use crate::dto::{
-    AvatarResult, MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, ProfilePostsPage,
-    ProfilePostsQuery, ProfileView, RenameRequest, RenameResult, SearchQuery, SetAvatarRequest,
-    UpdateProfileRequest, UserSearchItem,
+    AvatarResult, MentionCandidate, MyProfileView, PageQuery, PinnedPostsRequest, PresenceView,
+    ProfilePostsPage, ProfilePostsQuery, ProfileView, RenameRequest, RenameResult, SearchQuery,
+    SetAvatarRequest, UpdateProfileRequest, UserSearchItem,
 };
 use crate::service;
 
@@ -29,6 +29,7 @@ where
 {
     OpenApiRouter::new()
         .routes(routes!(profile))
+        .routes(routes!(presence))
         .routes(routes!(profile_posts))
         .routes(routes!(profile_comments))
         .routes(routes!(search))
@@ -318,4 +319,18 @@ async fn clear_avatar(
     CurrentUser(principal): CurrentUser,
 ) -> Result<Json<AvatarResult>, Problem> {
     Ok(Json(service::clear_avatar(&state, &principal).await?))
+}
+
+/// 在线人数
+///
+/// 开着网页或 App（连着 `/v1/realtime`）的登录用户去重，加游客连接数；附最近上线用户的头像。
+/// 全站共享，最多延迟约 25 秒。
+#[utoipa::path(
+    get,
+    path = "/v1/presence",
+    tag = "profile",
+    responses((status = 200, body = PresenceView))
+)]
+async fn presence(State(state): State<ProfileState>) -> Result<Json<PresenceView>, Problem> {
+    Ok(Json(service::presence(&state).await?))
 }

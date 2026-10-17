@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO emote_groups (id, name, sort_order, icon_media_id, active, created_at, updated_at)\n           SELECT DISTINCT ON (left(btrim(g.name), 20))\n                  g.id, left(btrim(g.name), 20), greatest(coalesce(g.\"order\", 0), 0),\n                  (SELECT m.id FROM legacy.ik_file_refs r JOIN media_files m ON m.id = r.file_id\n                   WHERE r.related_type = 'api::emote-group.emote-group' AND r.related_id = g.id\n                     AND r.field = 'icon'\n                   ORDER BY r.\"order\", r.file_id LIMIT 1),\n                  true,\n                  coalesce(g.created_at AT TIME ZONE $1, $2),\n                  coalesce(g.updated_at AT TIME ZONE $1, g.created_at AT TIME ZONE $1, $2)\n           FROM legacy.emote_groups g\n           WHERE btrim(coalesce(g.name, '')) <> '' AND g.is_active IS DISTINCT FROM false\n           ORDER BY left(btrim(g.name), 20), g.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e560030761a548229345e9d696bcca6a4f372c81f1c55081ffa6f9c69bf0990f"
+}

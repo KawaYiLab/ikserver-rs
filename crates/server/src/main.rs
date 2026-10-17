@@ -377,6 +377,9 @@ async fn serve() -> anyhow::Result<()> {
         .search
         .start_indexer(&state.bus, &state.config.search)?;
     let hub = state.realtime.hub.clone();
+    let node_id = state.config.node_id;
+    let presence_db = state.db.clone();
+    let presence = ik_realtime::presence::spawn_publisher(state.db.clone(), node_id, hub.clone());
     let worker = if state.config.jobs.run_worker {
         let worker = std::sync::Arc::new(
             ik_server::jobs::worker_options(&state)?
@@ -415,6 +418,10 @@ async fn serve() -> anyhow::Result<()> {
         hub.shutdown();
     })
     .await?;
+    presence.abort();
+    if let Err(error) = ik_realtime::presence::withdraw(&presence_db, node_id).await {
+        tracing::warn!(%error, "撤下在线快照失败（45 秒后自然过期）");
+    }
     if let Some((worker, handle)) = worker {
         // 不再领取新任务，等在途任务做完。
         worker.request_shutdown();

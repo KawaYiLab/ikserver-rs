@@ -50,6 +50,43 @@ pub struct TagSuggestQuery {
     pub limit: Option<u32>,
 }
 
+// ---------- 相关推荐 ----------
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RelatedPostsQuery {
+    /// 默认 6，最大 10。
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RelatedPosts {
+    /// 按相关度从高到低。
+    pub items: Vec<PostCard>,
+}
+
+// ---------- 外部视频 ----------
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct VideoResolveQuery {
+    /// B 站视频链接、BV 号或 av 号（与发帖时 `externalVideos` 的写法相同）。
+    pub source: String,
+}
+
+/// 视频预览（发帖编辑器添加视频时）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoPreview {
+    /// 与保存帖子后存下的形态相同。
+    pub video: ExternalVideo,
+    /// 全部分 P（单 P 视频也有一项）。
+    pub pages: Vec<crate::bilibili::VideoPage>,
+    /// UP 主昵称。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+}
+
 // ---------- 写入 ----------
 
 /// 帖子的完整工作副本。保存草稿与发布都整份提交（PUT 语义）。
@@ -116,6 +153,22 @@ pub struct AuthorView {
     pub avatar_url: Option<String>,
 }
 
+/// 卡片上的视频摘要。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CardVideo {
+    /// 目前只有 `bilibili`。
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// B 站图床地址，加载时用 `referrerpolicy="no-referrer"`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_url: Option<String>,
+    /// 秒。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration: Option<u32>,
+}
+
 /// 信息流卡片。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -128,6 +181,9 @@ pub struct PostCard {
     /// 第一张封面（卡片只展示一张）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<MediaView>,
+    /// 帖子嵌入的视频。没有封面图时客户端可以用视频封面代替（OPS-004）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<CardVideo>,
     pub author: AuthorView,
     pub category: Option<CategoryRef>,
     pub tags: Vec<TagRef>,
@@ -232,6 +288,8 @@ pub struct PostEditView {
     pub is_anonymous: bool,
     /// 作者原始输入的视频链接，编辑时原样回填。
     pub external_videos: Vec<String>,
+    /// 与 `externalVideos` 一一对应的完整视频信息（标题、封面等），编辑器展示预览用。
+    pub videos: Vec<ExternalVideo>,
     /// 封面（有序）。编辑时把 `id` 原样回填到 `coverIds`。
     pub covers: Vec<MediaView>,
     #[schema(value_type = Option<Object>)]

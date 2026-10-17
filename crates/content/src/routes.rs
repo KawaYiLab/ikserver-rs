@@ -1,5 +1,5 @@
 //! HTTP 接口：`/v1/categories`、`/v1/tags/*`、`/v1/posts*`（含赞、藏、投币、三连）、
-//! `/v1/me/posts`、`/v1/me/likes`、`/v1/me/favorites`。
+//! `/v1/me/posts`、`/v1/me/likes`、`/v1/me/favorites`、`/v1/videos/resolve`。
 
 use axum::extract::{FromRef, State};
 use axum::response::{IntoResponse, Response};
@@ -19,8 +19,9 @@ use utoipa_axum::routes;
 use crate::ContentState;
 use crate::dto::{
     CategoryView, CreatePostQuery, FavoriteResult, FeedPage, FeedQuery, GiftRequest, GiftResult,
-    LikeResult, MyPostItem, MyPostsQuery, PostDetail, PostEditView, PostInput, SavedPost,
-    SavedQuery, TagRef, TagSuggestQuery, TripleResult, ViewResult,
+    LikeResult, MyPostItem, MyPostsQuery, PostDetail, PostEditView, PostInput, RelatedPosts,
+    RelatedPostsQuery, SavedPost, SavedQuery, TagRef, TagSuggestQuery, TripleResult, VideoPreview,
+    VideoResolveQuery, ViewResult,
 };
 use crate::service;
 
@@ -34,6 +35,8 @@ where
         .merge(crate::admin::router())
         .routes(routes!(list_categories))
         .routes(routes!(suggest_tags))
+        .routes(routes!(resolve_video))
+        .routes(routes!(related_posts))
         .routes(routes!(feed, create_post))
         .routes(routes!(post_detail, delete_post))
         .routes(routes!(edit_view))
@@ -114,6 +117,61 @@ async fn suggest_tags(
 ) -> Result<Json<Vec<TagRef>>, Problem> {
     Ok(Json(
         service::suggest_tags(&state, &query.q, query.limit).await?,
+    ))
+}
+
+/// 相关推荐
+///
+/// 帖子详情页底部的推荐：与这篇共享标签越多、同分区、自己没读过、越新越热的越靠前；
+/// 同一作者最多 2 篇，不含这篇本身与自己的帖子。可见性与帖子详情相同。
+#[utoipa::path(
+    get,
+    path = "/v1/posts/{id}/related",
+    tag = "content",
+    params(("id" = String, Path), RelatedPostsQuery),
+    responses(
+        (status = 200, body = RelatedPosts),
+        (status = 403, description = "USER_BLOCKED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "NOT_FOUND", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn related_posts(
+    State(state): State<ContentState>,
+    MaybeUser(viewer): MaybeUser,
+    Path(id): Path<Id<Post>>,
+    Query(query): Query<RelatedPostsQuery>,
+) -> Result<Json<RelatedPosts>, Problem> {
+    Ok(Json(RelatedPosts {
+        items: service::related(&state, viewer.as_ref(), id.get(), query.limit).await?,
+    }))
+}
+
+/// 视频预览（B 站）
+///
+/// 发帖编辑器添加视频时调用：解析链接 / BV 号 / av 号，返回标题、封面、时长与分 P。
+/// 保存帖子时服务端会自己查询并存下同样的信息，客户端不需要提交这些字段。每人每分钟 30 次。
+#[utoipa::path(
+    get,
+    path = "/v1/videos/resolve",
+    tag = "content",
+    params(VideoResolveQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = VideoPreview),
+        (status = 400, description = "VALIDATION_FAILED（无法识别、没有这个分 P）", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 401, description = "UNAUTHORIZED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "VIDEO_NOT_FOUND", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 429, description = "RATE_LIMITED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 502, description = "VIDEO_UPSTREAM_ERROR", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn resolve_video(
+    State(state): State<ContentState>,
+    CurrentUser(principal): CurrentUser,
+    Query(query): Query<VideoResolveQuery>,
+) -> Result<Json<VideoPreview>, Problem> {
+    Ok(Json(
+        service::resolve_video(&state, &principal, &query.source).await?,
     ))
 }
 

@@ -27,6 +27,7 @@ where
         .routes(routes!(cards))
         .routes(routes!(equip_card))
         .merge(crate::admin::router())
+        .merge(crate::emotes::router())
 }
 
 /// 系统头像

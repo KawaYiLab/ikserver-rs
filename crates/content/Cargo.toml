@@ -29,6 +29,10 @@ governor.workspace = true
 moka.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
+async-trait.workspace = true
+reqwest.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
 
 [dev-dependencies]
 graphile_worker.workspace = true

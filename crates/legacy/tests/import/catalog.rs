@@ -1,4 +1,4 @@
-//! 题库、装扮与装备、米游社绑定。
+//! 题库、装扮与装备、表情包、米游社绑定。
 
 use crate::common::{import, setup};
 use sqlx::PgPool;
@@ -19,16 +19,26 @@ async fn catalog_is_imported(db: PgPool) {
           (2, 'q2', '坏题', 'single', '[{"key":"A","text":"只有一个"}]', '["A"]', 1, true),
           (3, 'q3', '没答案', 'weird', '[{"key":"A","text":"x"},{"key":"B","text":"y"}]', '["Q"]', 2, false);
 
-        INSERT INTO legacy.files (id, name, url) VALUES (1, 'a.png', 'x'), (2, 'b.png', 'y');
+        INSERT INTO legacy.files (id, name, url) VALUES (1, 'a.png', 'x'), (2, 'b.png', 'y'),
+          (3, 'smile.gif', 'z'), (4, 'icon.png', 'w');
         INSERT INTO legacy.ik_media_digests (file_id, object_key, sha256, mime, size_bytes) VALUES
-          (1, 'k/a.png', repeat('a', 64), 'image/png', 1), (2, 'k/b.png', repeat('b', 64), 'image/png', 1);
+          (1, 'k/a.png', repeat('a', 64), 'image/png', 1), (2, 'k/b.png', repeat('b', 64), 'image/png', 1),
+          (3, 'k/smile.gif', repeat('c', 64), 'image/gif', 1), (4, 'k/icon.png', repeat('d', 64), 'image/png', 1);
         INSERT INTO legacy.avatars (id, name, type) VALUES (5, '妮可', 'character'), (6, '无图', 'city');
         INSERT INTO legacy.business_cards (id, name, description, story, type) VALUES
           (7, '新艾利都', '城市', '[{"type":"paragraph","children":[{"type":"text","text":"第一段"}]},
                                   {"type":"paragraph","children":[{"type":"text","text":"第二段"}]}]', 'mystery');
         INSERT INTO legacy.files_related_mph (id, file_id, related_id, related_type, field, "order") VALUES
           (1, 1, 5, 'api::avatar.avatar', 'image', 1),
-          (2, 2, 7, 'api::business-card.business-card', 'image', 1);
+          (2, 2, 7, 'api::business-card.business-card', 'image', 1),
+          (3, 3, 1, 'api::emote.emote', 'image', 1), (4, 3, 2, 'api::emote.emote', 'image', 1),
+          (5, 3, 3, 'api::emote.emote', 'image', 1), (6, 3, 5, 'api::emote.emote', 'image', 1),
+          (7, 4, 1, 'api::emote-group.emote-group', 'icon', 1);
+        INSERT INTO legacy.emote_groups (id, name, "order", is_active) VALUES (1, ' 常用 ', 2, true), (2, '旧', 1, false);
+        INSERT INTO legacy.emotes (id, code, name, "order", is_active) VALUES
+          (1, ' IK-Smile ', '笑', 3, true), (2, 'ik-smile', '重复', 0, true), (3, 'bad code', '坏', 0, true),
+          (4, 'ik-noimg', '没图', 0, true), (5, 'ik-old', '', 0, false);
+        INSERT INTO legacy.emotes_group_lnk (id, emote_id, emote_group_id) VALUES (1, 1, 1), (2, 5, 2);
         INSERT INTO legacy.up_users_equipped_avatar_lnk (id, user_id, avatar_id) VALUES (1, 1, 5), (2, 3, 6);
         INSERT INTO legacy.up_users_equipped_card_lnk (id, user_id, business_card_id) VALUES (1, 1, 7);
 
@@ -121,4 +131,46 @@ async fn catalog_is_imported(db: PgPool) {
         .map(|b| (b.user_id, b.aid.as_str()))
         .collect();
     assert_eq!(bindings, vec![(1, "1001")]);
+
+    // 表情：代码统一小写、去重；不合格式与没图的不导入；停用分组不导入，组里的表情变成未分组。
+    let groups = sqlx::query!("SELECT id, name, sort_order, icon_media_id FROM emote_groups")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert_eq!(groups.len(), 1);
+    assert_eq!(
+        (
+            groups[0].id,
+            groups[0].name.as_str(),
+            groups[0].sort_order,
+            groups[0].icon_media_id
+        ),
+        (1, "常用", 2, Some(4))
+    );
+    let emotes = sqlx::query!(
+        "SELECT id, code, name, group_id, image_media_id, active FROM emotes ORDER BY id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    let emotes: Vec<_> = emotes
+        .iter()
+        .map(|e| {
+            (
+                e.id,
+                e.code.as_str(),
+                e.name.as_str(),
+                e.group_id,
+                e.image_media_id,
+                e.active,
+            )
+        })
+        .collect();
+    assert_eq!(
+        emotes,
+        vec![
+            (1, "ik-smile", "笑", Some(1), 3, true),
+            (5, "ik-old", "ik-old", None, 3, false),
+        ]
+    );
 }

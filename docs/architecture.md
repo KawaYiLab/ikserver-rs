@@ -4,7 +4,7 @@
 
 模块化单体：一个 `ik-server` 进程承担 HTTP API、WebSocket 网关、后台任务与定时任务、
 AI 编排，并提供编进可执行文件的管理后台页面（`/admin`）。外部依赖只有 PostgreSQL、Meilisearch、S3 兼容对象存储、SMTP/Brevo、米游社 API、
-大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
+B 站视频信息接口、大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
 
 ```mermaid
 flowchart LR
@@ -17,6 +17,7 @@ flowchart LR
   srv --> s3[R2/S3 + CDN]
   srv --> mail[SMTP / Brevo]
   srv --> mhy[米游社 API]
+  srv --> bili[B 站视频信息]
   srv --> llm[大模型 API]
 ```
 
@@ -39,7 +40,7 @@ flowchart LR
 | 7 | `feed` | `auth, content, comments` |
 |   | `search` | `auth, social, content, comments` |
 |   | `moderation` | `auth, content, comments, notify, media` |
-|   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo` |
+|   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo, realtime` |
 | 8 | `account` | `auth, mihoyo, profile` |
 |   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy` |
 | 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai` |
@@ -57,10 +58,15 @@ flowchart LR
   上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
 - `feed → auth, content, comments`：热榜要合并点赞（content）与评论（comments）两类活动，所以在两者之上；
   各种信息流的 SQL 仍在 content（帖子表归它），feed 只负责热度计算与组合（把展示位 id 交给 content）。
+  相关推荐（`GET /v1/posts/{id}/related`）只看帖子、标签、阅读记录，所以整个在 content 里。
+  B 站视频信息（`ik_content::bilibili`，trait 抽象，测试用假实现）在保存帖子的事务之前查询，进程内缓存 10 分钟。
 - `profile`：作者主页要汇总账号、关系、经验、帖子与评论、装扮与米游社绑定，所以在各内容域之上，
   只调用各域的 service / interop；依赖它的只有 `account`（注销）与 `ai`（工具读主页）。
 - `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）是事件总线的唯一订阅者，按受众转发；
   会话吊销由 auth 发内部事件 `auth.sessions_changed`，网关收到后复查该用户的连接。
+  在线人数：每个实例每 15 秒把连接快照（登录用户、游客连接数）写进 `realtime_presence`，读时合并 45 秒内的行
+  （`ik_realtime::presence`），多实例下同一用户只算一次；对外的 `GET /v1/presence` 在 profile 里（要按隐藏主页筛头像，
+  所以 `profile → realtime`）。
 - `messaging → auth, social`：私聊会话与消息。位于 notify 之下：对方发来的通知要在通知的事务里推进收件人的私聊排序
   （`ik_messaging::interop::touch_direct`）。统一收件箱（私聊会话与通知分组混排、已读）在 `notify` 里组合两边的数据，
   所以实际依赖是 `notify → auth, social, messaging`。WS 的 `typing` 帧由 server 把 `ik_messaging::service::typing`
@@ -74,6 +80,7 @@ flowchart LR
 - `cosmetics → auth, media`：系统头像、论坛名片的目录。装备状态写在账号上（`ik_auth::interop::equip_*`），
   系统头像的图片 id 也冗余在账号上，所以 `ik_auth::service::authors` 直接给出「装备头像优先，其次自定义头像」，
   展示作者的各域不依赖 cosmetics。目录换图时 cosmetics 在同一事务里调用 `refresh_equipped_avatar` 同步。
+  表情包（`emote_groups`、`emotes`）也归 cosmetics：公开清单进程内缓存，后台修改后立即失效；评论域只按文本存 `:ik-xxx:`，不依赖它。
 - `mail → kernel`：发信通道（SMTP、Brevo）与双通道调度，实现 `ik_kernel::mail::Mailer`，只由 server 装配；
   业务代码只依赖 `Mailer`（验证码邮件在 auth 里事务提交后发送）。
 - `mihoyo → auth`：米游社身份（`mihoyo_bindings`）与扫码会话（`mihoyo_qr_logins`，替代旧系统的 Redis 键）。

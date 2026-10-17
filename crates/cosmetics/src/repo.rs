@@ -232,3 +232,163 @@ pub(crate) async fn delete_card(conn: &mut PgConnection, id: i64) -> sqlx::Resul
         .rows_affected()
         > 0)
 }
+
+// ---------- 表情包 ----------
+
+pub(crate) struct EmoteGroupRow {
+    pub id: i64,
+    pub name: String,
+    pub sort_order: i32,
+    pub icon_media_id: Option<i64>,
+    pub active: bool,
+}
+
+pub(crate) struct EmoteRow {
+    pub id: i64,
+    pub code: String,
+    pub name: String,
+    pub group_id: Option<i64>,
+    pub image_media_id: i64,
+    pub sort_order: i32,
+    pub active: bool,
+}
+
+/// 全部分组，按面板顺序。
+pub(crate) async fn emote_groups(conn: &mut PgConnection) -> sqlx::Result<Vec<EmoteGroupRow>> {
+    sqlx::query_as!(
+        EmoteGroupRow,
+        "SELECT id, name, sort_order, icon_media_id, active FROM emote_groups ORDER BY sort_order, id"
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 全部表情，按面板顺序。
+pub(crate) async fn emotes(conn: &mut PgConnection) -> sqlx::Result<Vec<EmoteRow>> {
+    sqlx::query_as!(
+        EmoteRow,
+        "SELECT id, code, name, group_id, image_media_id, sort_order, active
+         FROM emotes ORDER BY sort_order, id"
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct NewEmoteGroup<'a> {
+    pub id: i64,
+    pub name: &'a str,
+    pub sort_order: i32,
+    pub icon_media_id: Option<i64>,
+    pub active: bool,
+}
+
+pub(crate) async fn insert_emote_group(
+    conn: &mut PgConnection,
+    g: &NewEmoteGroup<'_>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO emote_groups (id, name, sort_order, icon_media_id, active) VALUES ($1, $2, $3, $4, $5)",
+        g.id,
+        g.name,
+        g.sort_order,
+        g.icon_media_id,
+        g.active,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn update_emote_group(
+    conn: &mut PgConnection,
+    g: &NewEmoteGroup<'_>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE emote_groups SET name = $2, sort_order = $3, icon_media_id = $4, active = $5,
+                updated_at = now()
+         WHERE id = $1",
+        g.id,
+        g.name,
+        g.sort_order,
+        g.icon_media_id,
+        g.active,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 删除分组；组里的表情变成未分组（外键 ON DELETE SET NULL）。返回组里原有的表情数。
+pub(crate) async fn delete_emote_group(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        r#"WITH members AS (SELECT count(*) AS n FROM emotes WHERE group_id = $1)
+           DELETE FROM emote_groups WHERE id = $1
+           RETURNING (SELECT n FROM members) AS "n!""#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct NewEmote<'a> {
+    pub id: i64,
+    pub code: &'a str,
+    pub name: &'a str,
+    pub group_id: Option<i64>,
+    pub image_media_id: i64,
+    pub sort_order: i32,
+    pub active: bool,
+}
+
+pub(crate) async fn insert_emote(conn: &mut PgConnection, e: &NewEmote<'_>) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO emotes (id, code, name, group_id, image_media_id, sort_order, active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        e.id,
+        e.code,
+        e.name,
+        e.group_id,
+        e.image_media_id,
+        e.sort_order,
+        e.active,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 修改表情。`code` 不能改（旧评论靠它渲染），这里不更新它。
+pub(crate) async fn update_emote(conn: &mut PgConnection, e: &NewEmote<'_>) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE emotes SET name = $2, group_id = $3, image_media_id = $4, sort_order = $5, active = $6,
+                updated_at = now()
+         WHERE id = $1",
+        e.id,
+        e.name,
+        e.group_id,
+        e.image_media_id,
+        e.sort_order,
+        e.active,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub(crate) async fn delete_emote(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<String>> {
+    sqlx::query_scalar!("DELETE FROM emotes WHERE id = $1 RETURNING code", id)
+        .fetch_optional(conn)
+        .await
+}
+
+pub(crate) async fn emote_group_exists(conn: &mut PgConnection, id: i64) -> sqlx::Result<bool> {
+    Ok(
+        sqlx::query_scalar!("SELECT 1 AS \"one!\" FROM emote_groups WHERE id = $1", id)
+            .fetch_optional(conn)
+            .await?
+            .is_some(),
+    )
+}

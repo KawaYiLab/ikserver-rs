@@ -1,4 +1,4 @@
-//! 装扮：系统头像、论坛名片（COSMETIC-001～009）。
+//! 装扮：系统头像、论坛名片（COSMETIC-001～009），以及表情包（评论里的 `:ik-xxx:`，见 [`emotes`]）。
 //!
 //! 业务规则：`docs/business-rules/social-economy.md` 第 10 节。目录（`system_avatars`、`business_cards`）
 //! 归本 crate；装备状态是账号上的列，经 `ik_auth::interop` 写入。系统头像的图片 id 冗余在账号上，
@@ -7,6 +7,7 @@
 
 pub mod admin;
 pub mod dto;
+pub mod emotes;
 mod repo;
 mod routes;
 pub mod service;

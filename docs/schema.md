@@ -71,6 +71,10 @@
 - `anonymous_seed`：TEXT，与旧系统同格式（32 位 hex），迁移后匿名展示名保持不变。
 - `revision`：乐观并发版本号，每次改工作副本 +1，对外以 `ETag: "rev:<n>"` 暴露。
 - 计数器（浏览、点赞、评论、收藏、丁尼）只由服务端维护，`CHECK >= 0`。
+- `external_videos`：JSONB 数组，最多 1 项（CHECK）。每项是 `ik_content::ExternalVideo`：编号（`bvid` / `aid` / `page` / `cid`）、
+  作者原始输入 `source`，以及服务端保存时向 B 站查到的 `title`、`coverUrl`（只认 `*.hdslb.com`）、`duration`；
+  查询失败时沿用之前存下的、没有就省略。读取时逐项宽松解析（`video::decode_stored`）：旧系统导入的行字段不同
+  （`p`、没有 `source`、客户端提交的 `embedUrl` / `coverUrl`），播放器地址一律按编号重建，封面不合规就丢弃。
 - `updated_at` 只在内容变化时刷新（计数器不动它）；搜索索引的增量扫描按 `posts_updated_idx (updated_at, id)` 取改动的帖子（`20261101000001_posts_updated_idx.sql`）。
 - 删除是物理删除，`post_tags`、`post_drafts` 级联删除；后续的评论、点赞等表同样级联。
 
@@ -333,3 +337,17 @@
 
 - `denny_logs.action` 增加 `admin_deduct`（管理员扣除；发放沿用 `admin_grant`，DENNY-020 的枚举第一次有写入方）；
   `exp_logs.action` 增加 `admin_grant`（豁免每日上限，去重键 `ref:admin:<雪花 id>`，每次发放一行）。
+
+## 在线人数（`20261102000001_realtime_presence.sql`）
+
+- `realtime_presence`（ik-realtime）：每个实例一行（`node_id` = `IK_NODE_ID`），每 15 秒写入本实例实时连接的快照：
+  登录用户 id 数组（最近建立连接的在前）与游客连接数。读时只合并 45 秒内更新过的行（PRES-003 的在线窗口），
+  登录用户跨实例去重；实例宕机后它的行自然过期，正常停机时删掉自己的行。
+- `UNLOGGED`：数据只有几十秒的意义，不写 WAL，崩溃后清空也无妨。没有外键（快照不需要引用完整性）。
+
+## 表情包（`20261102000002_emotes.sql`）
+
+- `emote_groups`、`emotes` 归 ik-cosmetics，只由管理员维护。评论正文里写作 `:ik-<code>:`，`code` 的 CHECK 与评论里的
+  匹配正则一致（CMT-008），唯一且建好后不能改（旧评论靠它渲染）。
+- `active = false`：下架，不出现在表情面板，但仍在公开清单里（`selectable = false`），旧评论照常显示成图片。
+- 删除分组时组里的表情变成未分组（`ON DELETE SET NULL`）；表情与分组图标引用 `media_files`（不级联，图片不会被单独删除）。

@@ -20,11 +20,11 @@ tracing.workspace = true
 chrono.workspace = true
 anyhow.workspace = true
 futures-util.workspace = true
+sqlx.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 async-trait.workspace = true
-sqlx.workspace = true
 # 与 axum 的 ws 特性使用同一版本，避免重复编译。
 tokio-tungstenite = "0.29"
 

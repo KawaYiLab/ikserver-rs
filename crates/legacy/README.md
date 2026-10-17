@@ -81,7 +81,7 @@ psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 | 文章草稿行 + 发布行 | 一条 `posts` | 帖子 id 取该文档最小的行 id；有发布行 → `published`、内容取发布行，否则 `draft` |
 | 草稿行（与发布行不同时） | `post_drafts` | 已发布帖子的待发布修改 |
 | `title` / `text` | `title` / `body` | 截到 50 / 16000 字；正文里的 `image.tiwat.cn` 改为 `im.tiwat.cn`（CDN-001） |
-| `externalVideos` | `external_videos` | 只留第一个 |
+| `externalVideos` | `external_videos` | 只留第一个，按原样保存；读取时宽松解析（`p` 当分 P、按编号重建播放器地址、封面只认 B 站图床 `*.hdslb.com`） |
 | `cover` | `cover_ids` | 只认读取成功的文件，最多 40 张 |
 | `isHidden` | `hidden_at` | `true` → 隐藏（时间取更新时间），`NULL` 视为可见（D-012） |
 | `bumpedAt` | `bumped_at` | 缺失时用发布时间（POST-061） |
@@ -108,10 +108,12 @@ psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 | `denny_logs` | `denny_logs` | 动作映射（`daily_login` → `check_in`、`give_post` → `gift_sent`、`receive_post_give` → `gift_received`），金额为 0 的不收；余额截到 0–9999 |
 | `check_in_logs` | `check_ins`、`check_in_days` | 每人每天一行；连签天数由连续的签到日重算；当天的奖励取同一业务日的签到流水；每日人数取人数与最大排名中较大者 |
 
-### 题库、装扮、米游社
+### 题库、装扮、表情包、米游社
 
 - 题库：选项 trim、去空、key 去重；正确答案只留选项里有的 key；不合格的题不导入。考试场次不导入（通过状态已在账号上）。
 - 系统头像、论坛名片：没有可用图片的不导入；名片的背景故事从 blocks 富文本取文字；装备状态随之导入。
+- 表情包：代码统一小写，不合 `ik-[a-z0-9-]{1,32}` 的不导入（评论里本来也匹配不到）；同一代码只留 id 最小的；没有可用图片的不导入。
+  停用的分组不导入，组里的表情导入为未分组（旧系统把它们放进「通用」照常展示）；下架状态原样保留。
 - 米游社绑定：每个账号、每个 aid 各留最早的一条；注销 / 合并的账号不带绑定（DEL-006）。
 
 ### 私信
@@ -135,7 +137,7 @@ psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 
 ### 不迁移
 
-登录会话（所有人重新登录）、验证码、登录尝试、扫码状态、考试场次、表情包（新系统没有）、AI 配置与任务
+登录会话（所有人重新登录）、验证码、登录尝试、扫码状态、考试场次、AI 配置与任务
 （切换后用 `ik-server ai import` 重新配置人格与模型；AI 账号本身作为普通账号导入并保留 AI 标记）、
 热榜 UV 与阅读去重表（D-023）、通知桶（写入时聚合）、Strapi 后台账号与权限、操作队列。
 

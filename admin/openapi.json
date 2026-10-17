@@ -1161,6 +1161,353 @@
         ]
       }
     },
+    "/v1/admin/emotes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "表情与分组（后台）",
+        "operationId": "admin_emotes",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmotes"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "新建表情",
+        "operationId": "post_emote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmoteCreateInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmote"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ALREADY_EXISTS",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/emotes/groups": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "新建表情分组",
+        "operationId": "post_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmoteGroupInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmoteGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ALREADY_EXISTS",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/emotes/groups/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "修改表情分组",
+        "operationId": "put_group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmoteGroupInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmoteGroup"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ALREADY_EXISTS",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "删除表情分组（组里的表情变成未分组）",
+        "operationId": "remove_group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/emotes/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "修改表情（代码不能改）",
+        "operationId": "put_emote",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmoteInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminEmote"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "删除表情（旧评论里只剩文字；想保留显示请改为下架）",
+        "operationId": "remove_emote",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/exam/questions": {
       "get": {
         "tags": [
@@ -4757,6 +5104,37 @@
             "bearer": []
           }
         ]
+      }
+    },
+    "/v1/emotes": {
+      "get": {
+        "tags": [
+          "cosmetics"
+        ],
+        "summary": "表情清单",
+        "description": "全部表情（含已下架的，用于渲染旧评论）与启用中的分组，按面板顺序。表情面板只展示 `selectable` 的；\n评论里的 `:ik-xxx:` 按 `code` 查表渲染，查不到的原样显示文字。\n带 `ETag`，客户端用 `If-None-Match` 重新验证（没变时 304）；可以缓存 60 秒。",
+        "operationId": "get_manifest",
+        "responses": {
+          "200": {
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmoteManifest"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "清单没有变化"
+          }
+        }
       }
     },
     "/v1/exam": {
@@ -9239,6 +9617,68 @@
         ]
       }
     },
+    "/v1/posts/{id}/related": {
+      "get": {
+        "tags": [
+          "content"
+        ],
+        "summary": "相关推荐",
+        "description": "帖子详情页底部的推荐：与这篇共享标签越多、同分区、自己没读过、越新越热的越靠前；\n同一作者最多 2 篇，不含这篇本身与自己的帖子。可见性与帖子详情相同。",
+        "operationId": "related_posts",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "默认 6，最大 10。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelatedPosts"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "USER_BLOCKED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/posts/{id}/triple": {
       "post": {
         "tags": [
@@ -9405,6 +9845,27 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/presence": {
+      "get": {
+        "tags": [
+          "profile"
+        ],
+        "summary": "在线人数",
+        "description": "开着网页或 App（连着 `/v1/realtime`）的登录用户去重，加游客连接数；附最近上线用户的头像。\n全站共享，最多延迟约 25 秒。",
+        "operationId": "presence",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PresenceView"
                 }
               }
             }
@@ -10639,6 +11100,96 @@
           }
         }
       }
+    },
+    "/v1/videos/resolve": {
+      "get": {
+        "tags": [
+          "content"
+        ],
+        "summary": "视频预览（B 站）",
+        "description": "发帖编辑器添加视频时调用：解析链接 / BV 号 / av 号，返回标题、封面、时长与分 P。\n保存帖子时服务端会自己查询并存下同样的信息，客户端不需要提交这些字段。每人每分钟 30 次。",
+        "operationId": "resolve_video",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "description": "B 站视频链接、BV 号或 av 号（与发帖时 `externalVideos` 的写法相同）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VideoPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED（无法识别、没有这个分 P）",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "VIDEO_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "RATE_LIMITED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "VIDEO_UPSTREAM_ERROR",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -10902,6 +11453,115 @@
               "null"
             ],
             "description": "绑定账号的用户名（账号已不存在时为空）。"
+          }
+        }
+      },
+      "AdminEmote": {
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "name",
+          "imageId",
+          "sortOrder",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MediaView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imageId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AdminEmoteGroup": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "sortOrder",
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "icon": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MediaView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "iconId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "AdminEmotes": {
+        "type": "object",
+        "required": [
+          "groups",
+          "emotes"
+        ],
+        "properties": {
+          "emotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminEmote"
+            }
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminEmoteGroup"
+            }
           }
         }
       },
@@ -11867,6 +12527,41 @@
             }
           },
           "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CardVideo": {
+        "type": "object",
+        "description": "卡片上的视频摘要。",
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "coverUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "B 站图床地址，加载时用 `referrerpolicy=\"no-referrer\"`。"
+          },
+          "duration": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "秒。",
+            "minimum": 0
+          },
+          "provider": {
+            "type": "string",
+            "description": "目前只有 `bilibili`。"
+          },
+          "title": {
             "type": [
               "string",
               "null"
@@ -12969,6 +13664,199 @@
         },
         "additionalProperties": false
       },
+      "EmoteCreateInput": {
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "imageId"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "string",
+            "description": "`ik-` 开头，后面 1–32 个小写字母、数字或连字符。建好后不能改。"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "1–30 字（面板里的提示文字）。"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmoteGroupInput": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "iconId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "分组图标（媒体 id），不设时客户端用组里第一个表情。"
+          },
+          "name": {
+            "type": "string",
+            "description": "1–20 字，不能重名。"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32",
+            "description": "小的在前。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmoteGroupView": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "iconUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "分组图标；没有时用组里第一个表情。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "EmoteInput": {
+        "type": "object",
+        "required": [
+          "name",
+          "imageId"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "下架后不出现在面板里，旧评论照常显示。"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "imageId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "1–30 字（面板里的提示文字）。"
+          },
+          "sortOrder": {
+            "type": "integer",
+            "format": "int32",
+            "description": "小的在前。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EmoteManifest": {
+        "type": "object",
+        "description": "表情清单。",
+        "required": [
+          "version",
+          "groups",
+          "emotes"
+        ],
+        "properties": {
+          "emotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmoteView"
+            },
+            "description": "全部表情（含已下架的），按面板顺序。"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmoteGroupView"
+            },
+            "description": "启用中的分组，按面板顺序。"
+          },
+          "version": {
+            "type": "string",
+            "description": "清单内容的摘要，与 `ETag` 相同；内容不变它就不变。"
+          }
+        }
+      },
+      "EmoteView": {
+        "type": "object",
+        "required": [
+          "code",
+          "name",
+          "url",
+          "selectable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "含 `ik-` 前缀；评论里写作 `:ik-xxx:`。"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "所在分组；未分组（或分组已停用）时省略。"
+          },
+          "height": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "selectable": {
+            "type": "boolean",
+            "description": "是否出现在表情面板里。已下架或所在分组停用的为 false，但旧评论里照常按图片显示。"
+          },
+          "url": {
+            "type": "string",
+            "description": "原图（动图保持动画）。"
+          },
+          "width": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "EquipAvatarRequest": {
         "type": "object",
         "description": "装备系统头像；`avatarId` 为 null 表示卸下（之后显示自定义头像或默认头像）。",
@@ -13280,7 +14168,7 @@
       },
       "ExternalVideo": {
         "type": "object",
-        "description": "存进 `posts.external_videos` 的规范形态。`source` 是作者原始输入，编辑时原样回填。",
+        "description": "存进 `posts.external_videos` 的规范形态。`source` 是作者原始输入，编辑时原样回填。\n\n标题、封面、时长、`cid` 由服务端在保存时向 B 站查询后写入（不接受客户端提交）；\n查询失败时省略，播放器照常可用。",
         "required": [
           "provider",
           "embedUrl",
@@ -13301,6 +14189,31 @@
               "null"
             ]
           },
+          "cid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "该分 P 的 cid（播放器据此直接定位分 P）。",
+            "minimum": 0
+          },
+          "coverUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "封面（B 站图床 `*.hdslb.com` 的 https 地址；其他来源一律丢弃）。B 站图床校验 Referer，\n客户端加载时用 `referrerpolicy=\"no-referrer\"`。"
+          },
+          "duration": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "时长（秒）。有分 P 时是该分 P 的时长。",
+            "minimum": 0
+          },
           "embedUrl": {
             "type": "string"
           },
@@ -13319,6 +14232,12 @@
           },
           "source": {
             "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -15281,6 +16200,17 @@
                 "title": {
                   "type": "string"
                 },
+                "video": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CardVideo",
+                      "description": "帖子嵌入的视频。没有封面图时客户端可以用视频封面代替（OPS-004）。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "viewCount": {
                   "type": "integer",
                   "format": "int64"
@@ -16136,6 +17066,17 @@
           "title": {
             "type": "string"
           },
+          "video": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardVideo",
+                "description": "帖子嵌入的视频。没有封面图时客户端可以用视频封面代替（OPS-004）。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "viewCount": {
             "type": "integer",
             "format": "int64"
@@ -16307,6 +17248,7 @@
           "tags",
           "isAnonymous",
           "externalVideos",
+          "videos",
           "covers",
           "revision",
           "hasPendingChanges",
@@ -16390,6 +17332,13 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "videos": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExternalVideo"
+            },
+            "description": "与 `externalVideos` 一一对应的完整视频信息（标题、封面等），编辑器展示预览用。"
           }
         }
       },
@@ -16456,6 +17405,48 @@
           "draft",
           "published"
         ]
+      },
+      "PresenceUser": {
+        "type": "object",
+        "required": [
+          "id",
+          "username",
+          "avatarUrl"
+        ],
+        "properties": {
+          "avatarUrl": {
+            "type": "string",
+            "description": "头像（360 宽缩略图）。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "PresenceView": {
+        "type": "object",
+        "description": "在线人数与最近在线用户的头像。",
+        "required": [
+          "online",
+          "users"
+        ],
+        "properties": {
+          "online": {
+            "type": "integer",
+            "format": "int64",
+            "description": "在线人数：开着网页或 App 的登录用户（去重）加游客连接数。"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PresenceUser"
+            },
+            "description": "最近上线、设置了头像的用户（最多 8 个，新的在前）。隐藏了主页的用户不出现。"
+          }
+        }
       },
       "ProblemBody": {
         "type": "object",
@@ -17010,6 +18001,21 @@
           }
         },
         "additionalProperties": false
+      },
+      "RelatedPosts": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PostCard"
+            },
+            "description": "按相关度从高到低。"
+          }
+        }
       },
       "RelationView": {
         "type": "object",
@@ -17744,6 +18750,17 @@
                 },
                 "title": {
                   "type": "string"
+                },
+                "video": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CardVideo",
+                      "description": "帖子嵌入的视频。没有封面图时客户端可以用视频封面代替（OPS-004）。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "viewCount": {
                   "type": "integer",
@@ -18781,6 +19798,67 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "VideoPage": {
+        "type": "object",
+        "description": "分 P。",
+        "required": [
+          "cid",
+          "page",
+          "part",
+          "duration"
+        ],
+        "properties": {
+          "cid": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "duration": {
+            "type": "integer",
+            "format": "int32",
+            "description": "秒。",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "part": {
+            "type": "string",
+            "description": "分 P 标题。"
+          }
+        }
+      },
+      "VideoPreview": {
+        "type": "object",
+        "description": "视频预览（发帖编辑器添加视频时）。",
+        "required": [
+          "video",
+          "pages"
+        ],
+        "properties": {
+          "owner": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "UP 主昵称。"
+          },
+          "pages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VideoPage"
+            },
+            "description": "全部分 P（单 P 视频也有一项）。"
+          },
+          "video": {
+            "$ref": "#/components/schemas/ExternalVideo",
+            "description": "与保存帖子后存下的形态相同。"
           }
         }
       },

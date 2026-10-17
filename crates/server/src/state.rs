@@ -79,7 +79,12 @@ impl AppState {
             &config.storage,
             config.secrets.code_hmac_key.expose().as_bytes(),
         );
-        let content = ContentState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
+        let bilibili = ik_content::bilibili::HttpBilibili::new(
+            &config.video.bilibili_base_url,
+            std::time::Duration::from_secs(config.video.timeout_secs),
+        )?;
+        let content = ContentState::new(db.clone(), ids.clone(), publisher.clone(), media.clone())
+            .with_video_api(Arc::new(bilibili));
         let comments =
             CommentsState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
