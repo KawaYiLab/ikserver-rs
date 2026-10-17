@@ -297,6 +297,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/emotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 表情与分组（后台） */
+        get: operations["admin_emotes"];
+        put?: never;
+        /** 新建表情 */
+        post: operations["post_emote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/emotes/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 新建表情分组 */
+        post: operations["post_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/emotes/groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改表情分组 */
+        put: operations["put_group"];
+        post?: never;
+        /** 删除表情分组（组里的表情变成未分组） */
+        delete: operations["remove_group"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/emotes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改表情（代码不能改） */
+        put: operations["put_emote"];
+        post?: never;
+        /** 删除表情（旧评论里只剩文字；想保留显示请改为下架） */
+        delete: operations["remove_emote"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/exam/questions": {
         parameters: {
             query?: never;
@@ -1281,6 +1352,28 @@ export interface paths {
          * @description 只能编辑自己发的、5 分钟内、未撤回的文本消息。需要通过入站考试。
          */
         patch: operations["edit"];
+        trace?: never;
+    };
+    "/v1/emotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 表情清单
+         * @description 全部表情（含已下架的，用于渲染旧评论）与启用中的分组，按面板顺序。表情面板只展示 `selectable` 的；
+         *     评论里的 `:ik-xxx:` 按 `code` 查表渲染，查不到的原样显示文字。
+         *     带 `ETag`，客户端用 `If-None-Match` 重新验证（没变时 304）；可以缓存 60 秒。
+         */
+        get: operations["get_manifest"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/exam": {
@@ -2546,6 +2639,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/posts/{id}/related": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 相关推荐
+         * @description 帖子详情页底部的推荐：与这篇共享标签越多、同分区、自己没读过、越新越热的越靠前；
+         *     同一作者最多 2 篇，不含这篇本身与自己的帖子。可见性与帖子详情相同。
+         */
+        get: operations["related_posts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/posts/{id}/triple": {
         parameters: {
             query?: never;
@@ -2598,6 +2712,27 @@ export interface paths {
          * @description 同一人（登录用户按账号，游客按 IP）5 分钟内重复浏览同一帖子只计一次；每人每分钟最多计 30 次。
          */
         post: operations["record_view"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 在线人数
+         * @description 开着网页或 App（连着 `/v1/realtime`）的登录用户去重，加游客连接数；附最近上线用户的头像。
+         *     全站共享，最多延迟约 25 秒。
+         */
+        get: operations["presence"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2934,6 +3069,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/videos/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 视频预览（B 站）
+         * @description 发帖编辑器添加视频时调用：解析链接 / BV 号 / av 号，返回标题、封面、时长与分 P。
+         *     保存帖子时服务端会自己查询并存下同样的信息，客户端不需要提交这些字段。每人每分钟 30 次。
+         */
+        get: operations["resolve_video"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3008,6 +3164,30 @@ export interface components {
             userId: string;
             /** @description 绑定账号的用户名（账号已不存在时为空）。 */
             username?: string | null;
+        };
+        AdminEmote: {
+            active: boolean;
+            code: string;
+            groupId?: string | null;
+            id: string;
+            image?: components["schemas"]["MediaView"] | null;
+            imageId: string;
+            name: string;
+            /** Format: int32 */
+            sortOrder: number;
+        };
+        AdminEmoteGroup: {
+            active: boolean;
+            icon?: components["schemas"]["MediaView"] | null;
+            iconId?: string | null;
+            id: string;
+            name: string;
+            /** Format: int32 */
+            sortOrder: number;
+        };
+        AdminEmotes: {
+            emotes: components["schemas"]["AdminEmote"][];
+            groups: components["schemas"]["AdminEmoteGroup"][];
         };
         AdminJob: {
             aiUserId: string;
@@ -3326,6 +3506,19 @@ export interface components {
             equippedCard?: components["schemas"]["CardView"] | null;
             items: components["schemas"]["CardView"][];
             nextCursor?: string | null;
+        };
+        /** @description 卡片上的视频摘要。 */
+        CardVideo: {
+            /** @description B 站图床地址，加载时用 `referrerpolicy="no-referrer"`。 */
+            coverUrl?: string | null;
+            /**
+             * Format: int32
+             * @description 秒。
+             */
+            duration?: number | null;
+            /** @description 目前只有 `bilibili`。 */
+            provider: string;
+            title?: string | null;
         };
         /** @description 论坛名片。 */
         CardView: {
@@ -3712,6 +3905,72 @@ export interface components {
             /** @description 1～4000 字。 */
             content: string;
         };
+        EmoteCreateInput: {
+            active?: boolean;
+            /** @description `ik-` 开头，后面 1–32 个小写字母、数字或连字符。建好后不能改。 */
+            code: string;
+            groupId?: string | null;
+            imageId: string;
+            /** @description 1–30 字（面板里的提示文字）。 */
+            name: string;
+            /** Format: int32 */
+            sortOrder?: number;
+        };
+        EmoteGroupInput: {
+            active?: boolean;
+            /** @description 分组图标（媒体 id），不设时客户端用组里第一个表情。 */
+            iconId?: string | null;
+            /** @description 1–20 字，不能重名。 */
+            name: string;
+            /**
+             * Format: int32
+             * @description 小的在前。
+             */
+            sortOrder?: number;
+        };
+        EmoteGroupView: {
+            /** @description 分组图标；没有时用组里第一个表情。 */
+            iconUrl?: string | null;
+            id: string;
+            name: string;
+        };
+        EmoteInput: {
+            /** @description 下架后不出现在面板里，旧评论照常显示。 */
+            active?: boolean;
+            groupId?: string | null;
+            imageId: string;
+            /** @description 1–30 字（面板里的提示文字）。 */
+            name: string;
+            /**
+             * Format: int32
+             * @description 小的在前。
+             */
+            sortOrder?: number;
+        };
+        /** @description 表情清单。 */
+        EmoteManifest: {
+            /** @description 全部表情（含已下架的），按面板顺序。 */
+            emotes: components["schemas"]["EmoteView"][];
+            /** @description 启用中的分组，按面板顺序。 */
+            groups: components["schemas"]["EmoteGroupView"][];
+            /** @description 清单内容的摘要，与 `ETag` 相同；内容不变它就不变。 */
+            version: string;
+        };
+        EmoteView: {
+            /** @description 含 `ik-` 前缀；评论里写作 `:ik-xxx:`。 */
+            code: string;
+            /** @description 所在分组；未分组（或分组已停用）时省略。 */
+            groupId?: string | null;
+            /** Format: int32 */
+            height?: number | null;
+            name: string;
+            /** @description 是否出现在表情面板里。已下架或所在分组停用的为 false，但旧评论里照常按图片显示。 */
+            selectable: boolean;
+            /** @description 原图（动图保持动画）。 */
+            url: string;
+            /** Format: int32 */
+            width?: number | null;
+        };
         /** @description 装备系统头像；`avatarId` 为 null 表示卸下（之后显示自定义头像或默认头像）。 */
         EquipAvatarRequest: {
             avatarId?: string | null;
@@ -3829,11 +4088,31 @@ export interface components {
              */
             todayPassiveGained: number;
         };
-        /** @description 存进 `posts.external_videos` 的规范形态。`source` 是作者原始输入，编辑时原样回填。 */
+        /**
+         * @description 存进 `posts.external_videos` 的规范形态。`source` 是作者原始输入，编辑时原样回填。
+         *
+         *     标题、封面、时长、`cid` 由服务端在保存时向 B 站查询后写入（不接受客户端提交）；
+         *     查询失败时省略，播放器照常可用。
+         */
         ExternalVideo: {
             /** Format: int64 */
             aid?: number | null;
             bvid?: string | null;
+            /**
+             * Format: int64
+             * @description 该分 P 的 cid（播放器据此直接定位分 P）。
+             */
+            cid?: number | null;
+            /**
+             * @description 封面（B 站图床 `*.hdslb.com` 的 https 地址；其他来源一律丢弃）。B 站图床校验 Referer，
+             *     客户端加载时用 `referrerpolicy="no-referrer"`。
+             */
+            coverUrl?: string | null;
+            /**
+             * Format: int32
+             * @description 时长（秒）。有分 P 时是该分 P 的时长。
+             */
+            duration?: number | null;
             embedUrl: string;
             /**
              * Format: int32
@@ -3843,6 +4122,7 @@ export interface components {
             /** @description 目前只有 `bilibili`。 */
             provider: string;
             source: string;
+            title?: string | null;
         };
         FavoriteResult: {
             /** Format: int32 */
@@ -4439,6 +4719,7 @@ export interface components {
                 publishedAt: string;
                 tags: components["schemas"]["TagRef"][];
                 title: string;
+                video?: components["schemas"]["CardVideo"] | null;
                 /** Format: int64 */
                 viewCount: number;
             }[];
@@ -4720,6 +5001,7 @@ export interface components {
             publishedAt: string;
             tags: components["schemas"]["TagRef"][];
             title: string;
+            video?: components["schemas"]["CardVideo"] | null;
             /** Format: int64 */
             viewCount: number;
         };
@@ -4798,6 +5080,8 @@ export interface components {
             title: string;
             /** Format: date-time */
             updatedAt: string;
+            /** @description 与 `externalVideos` 一一对应的完整视频信息（标题、封面等），编辑器展示预览用。 */
+            videos: components["schemas"]["ExternalVideo"][];
         };
         /** @description 帖子的完整工作副本。保存草稿与发布都整份提交（PUT 语义）。 */
         PostInput: {
@@ -4822,6 +5106,22 @@ export interface components {
         };
         /** @enum {string} */
         PostStatus: "draft" | "published";
+        PresenceUser: {
+            /** @description 头像（360 宽缩略图）。 */
+            avatarUrl: string;
+            id: string;
+            username: string;
+        };
+        /** @description 在线人数与最近在线用户的头像。 */
+        PresenceView: {
+            /**
+             * Format: int64
+             * @description 在线人数：开着网页或 App 的登录用户（去重）加游客连接数。
+             */
+            online: number;
+            /** @description 最近上线、设置了头像的用户（最多 8 个，新的在前）。隐藏了主页的用户不出现。 */
+            users: components["schemas"]["PresenceUser"][];
+        };
         /** @description 序列化到响应体的形状（也用于 OpenAPI 文档）。 */
         ProblemBody: {
             code: string;
@@ -5004,6 +5304,10 @@ export interface components {
             code: string;
             email: string;
             password: string;
+        };
+        RelatedPosts: {
+            /** @description 按相关度从高到低。 */
+            items: components["schemas"]["PostCard"][];
         };
         /** @description 我与某个用户的关系。 */
         RelationView: {
@@ -5224,6 +5528,7 @@ export interface components {
                 publishedAt: string;
                 tags: components["schemas"]["TagRef"][];
                 title: string;
+                video?: components["schemas"]["CardVideo"] | null;
                 /** Format: int64 */
                 viewCount: number;
             }[];
@@ -5566,6 +5871,32 @@ export interface components {
             /** Format: int32 */
             level: number;
             username: string;
+        };
+        /** @description 分 P。 */
+        VideoPage: {
+            /** Format: int64 */
+            cid: number;
+            /**
+             * Format: int32
+             * @description 秒。
+             */
+            duration: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /** @description 分 P 标题。 */
+            part: string;
+        };
+        /** @description 视频预览（发帖编辑器添加视频时）。 */
+        VideoPreview: {
+            /** @description UP 主昵称。 */
+            owner?: string | null;
+            /** @description 全部分 P（单 P 视频也有一项）。 */
+            pages: components["schemas"]["VideoPage"][];
+            /** @description 与保存帖子后存下的形态相同。 */
+            video: components["schemas"]["ExternalVideo"];
         };
         ViewResult: {
             /** @description 这次是否计数（同一人 5 分钟内重复浏览、或请求过于频繁时不计）。 */
@@ -6355,6 +6686,242 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    admin_emotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmotes"];
+                };
+            };
+        };
+    };
+    post_emote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmoteCreateInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmote"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description ALREADY_EXISTS */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    post_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmoteGroupInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmoteGroup"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description ALREADY_EXISTS */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmoteGroupInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmoteGroup"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description ALREADY_EXISTS */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    remove_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_emote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EmoteInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminEmote"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    remove_emote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8731,6 +9298,33 @@ export interface operations {
                 content: {
                     "application/problem+json": components["schemas"]["ProblemBody"];
                 };
+            };
+        };
+    };
+    get_manifest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmoteManifest"];
+                };
+            };
+            /** @description 清单没有变化 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -11645,6 +12239,48 @@ export interface operations {
             };
         };
     };
+    related_posts: {
+        parameters: {
+            query?: {
+                /** @description 默认 6，最大 10。 */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RelatedPosts"];
+                };
+            };
+            /** @description USER_BLOCKED */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     triple: {
         parameters: {
             query?: never;
@@ -11752,6 +12388,25 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    presence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresenceView"];
                 };
             };
         };
@@ -12537,6 +13192,73 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    resolve_video: {
+        parameters: {
+            query: {
+                /** @description B 站视频链接、BV 号或 av 号（与发帖时 `externalVideos` 的写法相同）。 */
+                source: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoPreview"];
+                };
+            };
+            /** @description VALIDATION_FAILED（无法识别、没有这个分 P） */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description UNAUTHORIZED */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description VIDEO_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description RATE_LIMITED */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description VIDEO_UPSTREAM_ERROR */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };
