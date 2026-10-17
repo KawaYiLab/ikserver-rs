@@ -163,35 +163,48 @@ pub async fn send_code(
         }
     };
 
-    if let Some(latest) = repo::latest_open_code(&mut conn, &email, purpose.as_str()).await? {
-        let elapsed = (now - latest.sent_at).num_seconds();
-        if elapsed < SEND_COOLDOWN_SECS {
-            return match purpose {
-                CodePurpose::Login | CodePurpose::ResetPassword => Ok(accepted),
-                _ => Err(code_cooldown((SEND_COOLDOWN_SECS - elapsed).max(1))),
-            };
-        }
-    }
     if !eligible {
         return Ok(accepted);
     }
     drop(conn);
-    deliver_code(state, &email, purpose, &ip, now).await?;
-    Ok(accepted)
+    match deliver_code(state, &email, purpose, &ip, now).await? {
+        Delivery::Sent => Ok(accepted),
+        Delivery::Cooldown { retry_after_secs } => match purpose {
+            CodePurpose::Login | CodePurpose::ResetPassword => Ok(accepted),
+            _ => Err(code_cooldown(retry_after_secs)),
+        },
+    }
+}
+
+/// 发码结果：冷却期内的重复请求不发信，由调用方决定报错还是静默返回。
+enum Delivery {
+    Sent,
+    Cooldown { retry_after_secs: i64 },
 }
 
 /// 生成、保存并发出一条验证码（作废同邮箱同用途的旧码，CODE-005）。
+/// 冷却判断与写入新码在同一事务、同一把 (email, purpose) 锁下，并发请求冷却期内只发一封。
 async fn deliver_code(
     state: &AuthState,
     email: &str,
     purpose: CodePurpose,
     ip: &str,
     now: DateTime<Utc>,
-) -> Result<(), Problem> {
+) -> Result<Delivery, Problem> {
     let code = code::generate_code()?;
     let hash = code::code_hash(&state.settings.code_key, purpose, email, &code)?;
     let id = state.ids.next_raw();
     let mut tx = state.db.begin().await?;
+    repo::lock_code_slot(&mut tx, email, purpose.as_str()).await?;
+    if let Some(latest) = repo::latest_open_code(&mut tx, email, purpose.as_str()).await? {
+        // 等锁期间别人可能刚写入新码（sent_at 晚于 now），按 0 秒已过计。
+        let elapsed = (now - latest.sent_at).num_seconds().max(0);
+        if elapsed < SEND_COOLDOWN_SECS {
+            return Ok(Delivery::Cooldown {
+                retry_after_secs: (SEND_COOLDOWN_SECS - elapsed).max(1),
+            });
+        }
+    }
     repo::invalidate_open_codes(&mut tx, email, purpose.as_str(), now).await?;
     repo::insert_code(
         &mut tx,
@@ -220,7 +233,7 @@ async fn deliver_code(
         repo::force_consume_code(&mut conn, id, Utc::now()).await?;
         return Err(mail_failed());
     }
-    Ok(())
+    Ok(Delivery::Sent)
 }
 
 /// 需要登录的发码（绑定邮箱、注销）：每 IP 每小时上限与冷却都显式报错。
@@ -238,14 +251,12 @@ async fn send_own_code(
     {
         return Err(Problem::rate_limited());
     }
-    if let Some(latest) = repo::latest_open_code(&mut conn, email, purpose.as_str()).await? {
-        let elapsed = (now - latest.sent_at).num_seconds();
-        if elapsed < SEND_COOLDOWN_SECS {
-            return Err(code_cooldown((SEND_COOLDOWN_SECS - elapsed).max(1)));
-        }
-    }
     drop(conn);
-    deliver_code(state, email, purpose, &ip, now).await?;
+    if let Delivery::Cooldown { retry_after_secs } =
+        deliver_code(state, email, purpose, &ip, now).await?
+    {
+        return Err(code_cooldown(retry_after_secs));
+    }
     Ok(SendCodeResponse {
         sent: true,
         expires_in_secs: CODE_TTL_SECS,
