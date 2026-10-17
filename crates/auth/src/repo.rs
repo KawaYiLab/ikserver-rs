@@ -6,6 +6,23 @@ use sqlx::PgConnection;
 
 // ---------- 邮箱验证码 ----------
 
+/// 事务级咨询锁：串行化同一 (email, purpose) 的发码，让冷却判断与写入新码之间不会插进并发请求。
+/// 哈希碰撞只会让无关的两个邮箱偶尔排队，不影响正确性。
+pub(crate) async fn lock_code_slot(
+    conn: &mut PgConnection,
+    email: &str,
+    purpose: &str,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtextextended('ik:email_code:' || $1 || ':' || $2, 0))",
+        purpose,
+        email,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
 pub(crate) struct OpenCode {
     pub id: i64,
     pub code_hash: Vec<u8>,

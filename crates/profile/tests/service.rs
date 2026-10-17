@@ -459,6 +459,32 @@ async fn concurrent_renames_to_the_same_name(db: PgPool) {
     );
 }
 
+/// 同一个人连点两次改成同一个名字：只扣一次 10 丁尼。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn double_submitted_rename_charges_once(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1, "alice").await;
+    let rename = || {
+        let state = h.state.clone();
+        let me = me.clone();
+        tokio::spawn(async move {
+            service::rename(
+                &state,
+                &me,
+                RenameRequest {
+                    username: "新名字".into(),
+                },
+            )
+            .await
+        })
+    };
+    let (ra, rb) = tokio::join!(rename(), rename());
+    assert!(ra.unwrap().is_ok());
+    assert!(rb.unwrap().is_ok());
+    assert_eq!(h.username(1).await, "新名字");
+    assert_eq!(h.balance(1).await, 20, "只扣一次");
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn pinned_posts_are_filtered_ordered_and_capped(db: PgPool) {
     let h = harness(db);

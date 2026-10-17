@@ -449,6 +449,34 @@ async fn active_sessions_are_capped_at_100(db: PgPool) {
     assert!(h.is_active(&newest.token).await);
 }
 
+/// 同一邮箱同时发很多个发码请求：冷却期内只发出一封（CODE-004）。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn concurrent_sends_respect_the_cooldown(db: PgPool) {
+    let h = harness(db);
+    let tasks: Vec<_> = (0..8)
+        .map(|_| {
+            let state = h.state.clone();
+            let meta = h.meta.clone();
+            tokio::spawn(async move {
+                let request: SendCodeRequest = serde_json::from_value(
+                    serde_json::json!({ "email": "flood@example.com", "purpose": "register" }),
+                )
+                .unwrap();
+                service::send_code(&state, request, &meta).await.map(|_| ())
+            })
+        })
+        .collect();
+    let mut sent = 0;
+    for task in tasks {
+        match task.await.unwrap() {
+            Ok(()) => sent += 1,
+            Err(err) => assert_eq!(err.code(), "CODE_COOLDOWN"),
+        }
+    }
+    assert_eq!(sent, 1);
+    assert_eq!(h.mailer.count(), 1);
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn failed_mail_does_not_hold_the_cooldown(db: PgPool) {
     let h = harness(db);

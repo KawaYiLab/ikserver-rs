@@ -409,7 +409,7 @@ fn validate_username(raw: &str) -> Result<String, Problem> {
 }
 
 /// 改名：每次 10 丁尼（含第一次），与原名相同时直接成功、不扣费（PROFILE-002～006）。
-/// 先改名（拿到用户行的排他锁，名字冲突时立即失败），再扣费；任一步失败整体回滚，不扣费。
+/// 先锁用户行、改名（名字冲突时立即失败），再扣费；任一步失败整体回滚，不扣费。
 pub async fn rename(
     state: &ProfileState,
     principal: &Principal,
@@ -419,6 +419,10 @@ pub async fn rename(
     let user_id = principal.user_id.get();
     let now = Utc::now();
     let mut tx = state.db.begin().await?;
+    // 锁住用户行，串行化同一用户的改名：连点两次时第二次等第一次提交，读到新名字后走「同名不扣费」。
+    ik_auth::interop::lock_active_user(&mut tx, user_id)
+        .await?
+        .ok_or_else(ik_auth::service::account_blocked)?;
     let current = ik_auth::interop::profile_user(&mut tx, user_id)
         .await?
         .ok_or_else(Problem::unauthorized)?;

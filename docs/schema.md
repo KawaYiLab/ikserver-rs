@@ -71,6 +71,7 @@
 - `anonymous_seed`：TEXT，与旧系统同格式（32 位 hex），迁移后匿名展示名保持不变。
 - `revision`：乐观并发版本号，每次改工作副本 +1，对外以 `ETag: "rev:<n>"` 暴露。
 - 计数器（浏览、点赞、评论、收藏、丁尼）只由服务端维护，`CHECK >= 0`。
+- `updated_at` 只在内容变化时刷新（计数器不动它）；搜索索引的增量扫描按 `posts_updated_idx (updated_at, id)` 取改动的帖子（`20261101000001_posts_updated_idx.sql`）。
 - 删除是物理删除，`post_tags`、`post_drafts` 级联删除；后续的评论、点赞等表同样级联。
 
 ## 评论域（`20261008000003_comments.sql`）

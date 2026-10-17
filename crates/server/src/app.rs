@@ -8,7 +8,7 @@ use axum::response::IntoResponse;
 use http::{HeaderName, HeaderValue, Method, StatusCode, header};
 use ik_kernel::Problem;
 use tower_http::catch_panic::CatchPanicLayer;
-use tower_http::compression::CompressionLayer;
+use tower_http::compression::{CompressionLayer, CompressionLevel};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::csrf::CsrfLayer;
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
@@ -155,7 +155,8 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
             Duration::from_secs(config.http.request_timeout_secs),
         )))
         .layer(DefaultBodyLimit::max(config.http.body_limit_bytes))
-        .layer(CompressionLayer::new())
+        // 动态响应用中低档：brotli 默认是最高档 11，每个响应多花几十毫秒 CPU；4 档体积只大一点、快一个数量级。
+        .layer(CompressionLayer::new().quality(CompressionLevel::Precise(4)))
         .layer(csrf)
         // 在 CORS 之内：429 也带 CORS 头，浏览器才读得到 Retry-After。
         .layer(rate_limit)
