@@ -1329,6 +1329,64 @@ pub async fn unread_feed(
     feed_page(items, scope.limit)
 }
 
+const RELATED_DEFAULT: u32 = 6;
+const RELATED_MAX: u32 = 10;
+/// 同一作者最多占几个位置（匿名帖不参与，否则能从「谁被挤掉」反推匿名作者，同 HOT-007）。
+const RELATED_PER_AUTHOR: usize = 2;
+
+/// 相关推荐（帖子详情页底部）：按共享标签、同分区、没读过、新鲜度、热度综合排序，同一作者最多 2 篇。
+/// 种子帖的可见性与详情相同：不存在、草稿、被隐藏 404；与作者有拉黑关系的非匿名帖 403。
+pub async fn related(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    post_id: i64,
+    limit: Option<u32>,
+) -> Result<Vec<PostCard>, Problem> {
+    let limit = usize::try_from(limit.unwrap_or(RELATED_DEFAULT).clamp(1, RELATED_MAX))
+        .unwrap_or(RELATED_DEFAULT as usize);
+    let viewer_id = viewer.map(|p| p.user_id.get());
+    let mut conn = state.db.acquire().await?;
+    let seed = repo::get_post(&mut conn, post_id)
+        .await?
+        .ok_or_else(post_not_found)?;
+    let is_owner = viewer_id == Some(seed.author_id);
+    if seed.status != "published" || (seed.hidden_at.is_some() && !is_owner) {
+        return Err(post_not_found());
+    }
+    let excluded_authors = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
+    if !seed.is_anonymous && excluded_authors.contains(&seed.author_id) {
+        return Err(blocked_post());
+    }
+    let candidates = repo::related_candidates(
+        &mut conn,
+        &repo::RelatedQuery {
+            seed_id: seed.id,
+            seed_category: seed.category_id,
+            viewer: viewer_id,
+            excluded_authors: &excluded_authors,
+            limit: i64::try_from(limit * 4).unwrap_or(40),
+        },
+    )
+    .await?;
+    let mut per_author: HashMap<i64, usize> = HashMap::new();
+    let ids: Vec<i64> = candidates
+        .into_iter()
+        .filter(|c| {
+            if c.is_anonymous {
+                return true;
+            }
+            let n = per_author.entry(c.author_id).or_default();
+            *n += 1;
+            *n <= RELATED_PER_AUTHOR
+        })
+        .map(|c| c.id)
+        .take(limit)
+        .collect();
+    let mut rows = repo::public_cards_by_ids(&mut conn, &ids, &excluded_authors).await?;
+    rows.sort_by_key(|row| ids.iter().position(|id| *id == row.id));
+    cards(state, &mut conn, viewer, rows).await
+}
+
 /// 按给定顺序取公开、且不被拉黑过滤的帖子卡片；不可见的跳过（热门榜：先过滤再分页，EDGE-006）。
 pub async fn public_cards_in_order(
     state: &ContentState,

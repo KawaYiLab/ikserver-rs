@@ -50,6 +50,21 @@ pub struct TagSuggestQuery {
     pub limit: Option<u32>,
 }
 
+// ---------- 相关推荐 ----------
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RelatedPostsQuery {
+    /// 默认 6，最大 10。
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RelatedPosts {
+    /// 按相关度从高到低。
+    pub items: Vec<PostCard>,
+}
+
 // ---------- 外部视频 ----------
 
 #[derive(Debug, Deserialize, IntoParams)]

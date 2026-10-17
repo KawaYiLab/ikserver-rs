@@ -1711,3 +1711,74 @@ async fn videos_get_metadata_on_save_and_keep_it_when_upstream_fails(db: PgPool)
     assert_eq!(legacy.external_videos[0].cover_url, None);
     assert_eq!(legacy.external_videos[0].title.as_deref(), Some("旧"));
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn related_posts_rank_by_tags_category_and_unread(db: PgPool) {
+    let h = harness(db);
+    let me = h.writer(1).await;
+    let a2 = h.writer(2).await;
+    let a3 = h.writer(3).await;
+    let a4 = h.writer(4).await;
+    let cat = h.category("guide", false).await;
+    let post =
+        |author: Principal, tags: &'static [&'static str], category: bool, anonymous: bool| {
+            let state = h.state.clone();
+            async move {
+                let mut input = input("帖子");
+                input.tags = tags.iter().map(|t| (*t).to_owned()).collect();
+                input.category_id = category.then(|| Id::new(cat));
+                input.is_anonymous = anonymous;
+                service::create(&state, &author, input, true)
+                    .await
+                    .unwrap()
+                    .id
+                    .get()
+            }
+        };
+    let seed = post(a2.clone(), &["x", "y"], true, false).await;
+    let p1 = post(a3.clone(), &["x", "y"], false, false).await;
+    // a3 的第三篇：被同一作者最多 2 篇的上限挤掉。
+    let _p2 = post(a3.clone(), &["x"], false, false).await;
+    let p3 = post(a3.clone(), &["x"], false, false).await;
+    let p4 = post(a4.clone(), &[], true, false).await;
+    let p5 = post(a4.clone(), &[], false, false).await;
+    let p6 = post(me.clone(), &["x", "y"], false, false).await;
+    let p7 = post(a2.clone(), &["x"], false, true).await;
+    let ids = |cards: Vec<ik_content::dto::PostCard>| -> Vec<i64> {
+        cards.iter().map(|c| c.id.get()).collect()
+    };
+
+    // 游客：共享标签多的在前，同分区其次；同一作者（a3）最多 2 篇；匿名帖不受作者上限影响。
+    let guest = service::related(&h.state, None, seed, None).await.unwrap();
+    assert_eq!(ids(guest), vec![p6, p1, p7, p3, p4, p5]);
+
+    // 登录：不含自己的帖子；读过的往后排。
+    service::mark_read(
+        &h.state,
+        &me,
+        ik_content::dto::MarkReadRequest {
+            post_ids: vec![p4.to_string()],
+        },
+    )
+    .await
+    .unwrap();
+    let mine = service::related(&h.state, Some(&me), seed, None)
+        .await
+        .unwrap();
+    assert_eq!(ids(mine), vec![p1, p7, p3, p5, p4]);
+
+    assert_eq!(
+        ids(service::related(&h.state, None, seed, Some(2))
+            .await
+            .unwrap())
+        .len(),
+        2
+    );
+    assert_eq!(
+        service::related(&h.state, None, 12345, None)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+}

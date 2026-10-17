@@ -58,6 +58,7 @@ flowchart LR
   上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
 - `feed → auth, content, comments`：热榜要合并点赞（content）与评论（comments）两类活动，所以在两者之上；
   各种信息流的 SQL 仍在 content（帖子表归它），feed 只负责热度计算与组合（把展示位 id 交给 content）。
+  相关推荐（`GET /v1/posts/{id}/related`）只看帖子、标签、阅读记录，所以整个在 content 里。
   B 站视频信息（`ik_content::bilibili`，trait 抽象，测试用假实现）在保存帖子的事务之前查询，进程内缓存 10 分钟。
 - `profile`：作者主页要汇总账号、关系、经验、帖子与评论、装扮与米游社绑定，所以在各内容域之上，
   只调用各域的 service / interop；依赖它的只有 `account`（注销）与 `ai`（工具读主页）。

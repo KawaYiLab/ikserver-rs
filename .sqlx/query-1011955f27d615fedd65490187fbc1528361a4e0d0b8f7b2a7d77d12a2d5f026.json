@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH tagged AS (\n               SELECT pt.post_id AS id, count(*) AS shared\n               FROM post_tags pt\n               WHERE pt.tag_id IN (SELECT tag_id FROM post_tags WHERE post_id = $1)\n                 AND pt.post_id <> $1\n               GROUP BY pt.post_id\n           ),\n           pool AS (\n               SELECT id FROM tagged\n               UNION\n               (SELECT id FROM posts\n                WHERE category_id = $2 AND status = 'published' AND hidden_at IS NULL\n                ORDER BY bumped_at DESC, id DESC LIMIT 300)\n               UNION\n               (SELECT id FROM posts\n                WHERE status = 'published' AND hidden_at IS NULL\n                ORDER BY bumped_at DESC, id DESC LIMIT 300)\n           )\n           SELECT p.id, p.author_id, p.is_anonymous\n           FROM pool\n           JOIN posts p ON p.id = pool.id\n           LEFT JOIN tagged t ON t.id = p.id\n           WHERE p.id <> $1 AND p.status = 'published' AND p.hidden_at IS NULL\n             AND p.published_at > now() - interval '365 days'\n             AND ($3::bigint IS NULL OR p.author_id <> $3)\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($4)))\n           ORDER BY\n               3.0 * coalesce(t.shared, 0)\n             + CASE WHEN $2::bigint IS NOT NULL AND p.category_id = $2 THEN 2.0 ELSE 0.0 END\n             + CASE WHEN $3::bigint IS NOT NULL AND NOT EXISTS (\n                         SELECT 1 FROM post_reads r WHERE r.user_id = $3 AND r.post_id = p.id)\n                    THEN 2.0 ELSE 0.0 END\n             + exp(-extract(epoch FROM now() - p.bumped_at) / (30.0 * 86400.0))\n             + least(1.0, ln(1.0 + p.like_count + 2 * p.comment_count + p.favorite_count) / ln(101.0))\n               DESC,\n               p.bumped_at DESC, p.id DESC\n           LIMIT $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "is_anonymous"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8Array",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1011955f27d615fedd65490187fbc1528361a4e0d0b8f7b2a7d77d12a2d5f026"
+}
