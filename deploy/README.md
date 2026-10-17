@@ -17,6 +17,7 @@
 | [`systemd/ik`](systemd/ik) | 在服务器上跑运维命令的包装（发布时装到 `/usr/local/bin/ik`） |
 | [`ik-server.env.example`](ik-server.env.example) | 生产配置模板 |
 | [`nginx/`](nginx/) | 两个域名的 nginx 配置 |
+| [`legacy-prepare.sh`](legacy-prepare.sh) | 旧数据导入的准备：导出旧库、恢复到新库的 legacy schema、迁移、预检（见 crates/legacy/README.md） |
 
 ## 服务器一次性准备
 
