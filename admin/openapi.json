@@ -3413,7 +3413,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionView"
+                  "$ref": "#/components/schemas/AiSessionView"
                 }
               }
             }
@@ -3481,7 +3481,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionView"
+                  "$ref": "#/components/schemas/AiSessionView"
                 }
               }
             }
@@ -11991,6 +11991,38 @@
           }
         }
       },
+      "AiSessionView": {
+        "type": "object",
+        "description": "AI 会话的设置。OpenAPI 里叫 `AiSessionView`，与登录会话的 `SessionView` 区分。",
+        "required": [
+          "conversationId"
+        ],
+        "properties": {
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "角色已下线时为 null。"
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "modelKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "会话级模型选择；null 表示跟随角色卡默认。"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "AssistantView": {
         "type": "object",
         "description": "个人助手（AI-024，二期占位）。",
@@ -14484,6 +14516,13 @@
               "null"
             ]
           },
+          "conversationKind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "私聊会话的类型：`direct`（一对一私聊）| `ai`（AI 会话）。通知分组没有。"
+          },
           "key": {
             "type": "string",
             "description": "`dm-<会话 id>` | `user-<发送者 id>` | `system`。"
@@ -14511,6 +14550,13 @@
                 "type": "null"
               }
             ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "AI 会话的标题。"
           },
           "unreadCount": {
             "type": "integer",

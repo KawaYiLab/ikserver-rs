@@ -229,6 +229,41 @@ async fn conversations_and_buckets_interleave_and_merge_by_peer(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn conversation_entries_carry_kind_and_ai_title(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1).await;
+    h.user(2).await;
+    h.user(3).await;
+    h.post(10, 1).await;
+    let direct = h.conversation(&h.user_ref(2), 1, 10).await;
+    let ai = h.conversation(&h.user_ref(3), 1, 20).await;
+    sqlx::query!(
+        "UPDATE conversations SET kind = 'ai', title = '攻略问答' WHERE id = $1",
+        ai
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    h.like(1, 2, 10, 30).await;
+
+    let page = inbox::list(&h.notify, &me, first()).await.unwrap();
+    let direct = find(&page.items, &format!("dm-{direct}"));
+    assert_eq!(direct.conversation_kind.as_deref(), Some("direct"));
+    assert_eq!(direct.title, None);
+    let ai = find(&page.items, &format!("dm-{ai}"));
+    assert_eq!(ai.conversation_kind.as_deref(), Some("ai"));
+    assert_eq!(ai.title.as_deref(), Some("攻略问答"));
+
+    // 通知分组不是会话：两个字段都没有。
+    h.user(4).await;
+    h.like(1, 4, 10, 40).await;
+    let page = inbox::list(&h.notify, &me, first()).await.unwrap();
+    let bucket = find(&page.items, "user-4");
+    assert_eq!(bucket.conversation_kind, None);
+    assert_eq!(bucket.title, None);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn pagination_across_sources_is_stable_with_ties(db: PgPool) {
     let h = harness(db);
     let me = h.user(1).await;

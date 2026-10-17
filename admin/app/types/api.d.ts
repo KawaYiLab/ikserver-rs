@@ -3339,6 +3339,15 @@ export interface components {
             /** @description 工作流时间线（WF-003，已脱敏；定稿后才有）。生成中的事件经 `dm.message.workflow` 实时推送。 */
             workflow?: components["schemas"]["WorkflowEvent"][] | null;
         };
+        /** @description AI 会话的设置。OpenAPI 里叫 `AiSessionView`，与登录会话的 `SessionView` 区分。 */
+        AiSessionView: {
+            /** @description 角色已下线时为 null。 */
+            character?: string | null;
+            conversationId: string;
+            /** @description 会话级模型选择；null 表示跟随角色卡默认。 */
+            modelKey?: string | null;
+            title?: string | null;
+        };
         /** @description 个人助手（AI-024，二期占位）。 */
         AssistantView: {
             enabled: boolean;
@@ -4211,6 +4220,8 @@ export interface components {
              */
             activityAt: string;
             conversationId?: string | null;
+            /** @description 私聊会话的类型：`direct`（一对一私聊）| `ai`（AI 会话）。通知分组没有。 */
+            conversationKind?: string | null;
             /** @description `dm-<会话 id>` | `user-<发送者 id>` | `system`。 */
             key: string;
             /** @description `conversation` | `notifications` */
@@ -4220,6 +4231,8 @@ export interface components {
             peer: components["schemas"]["SenderView"];
             pinned: boolean;
             preview?: components["schemas"]["InboxPreview"] | null;
+            /** @description AI 会话的标题。 */
+            title?: string | null;
             /**
              * Format: int64
              * @description 未读私信 + 未读通知。
@@ -8062,7 +8075,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionView"];
+                    "application/json": components["schemas"]["AiSessionView"];
                 };
             };
             /** @description NOT_AI_SESSION */
@@ -8106,7 +8119,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionView"];
+                    "application/json": components["schemas"]["AiSessionView"];
                 };
             };
             /** @description NOT_AI_SESSION / AI_MODEL_UNAVAILABLE / AI_MODEL_NOT_ALLOWED */
