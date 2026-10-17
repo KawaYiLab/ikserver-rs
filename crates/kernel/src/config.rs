@@ -632,6 +632,10 @@ impl Default for Database {
 pub struct Session {
     pub cookie_name: String,
     pub cookie_secure: bool,
+    /// 网页与接口不在同一个站点时打开（主站 interk.net 直接跨站调用 ik.tiwat.cn）：
+    /// Cookie 改为 `SameSite=None; Partitioned`，只在主站页面里随请求发出（按顶层站点分区）。
+    /// 跨站写请求仍由 CSRF 白名单（`http.allowed_origins`）把关。要求 `cookie_secure`。
+    pub cookie_cross_site: bool,
     /// 滑动有效期：活跃时自动续期到 now + ttl。
     pub ttl_days: i64,
     /// 绝对上限：自创建起最多存活这么久，到期必须重新登录。
@@ -643,6 +647,7 @@ impl Default for Session {
         Self {
             cookie_name: "ik_session".to_owned(),
             cookie_secure: true,
+            cookie_cross_site: false,
             ttl_days: 30,
             max_lifetime_days: 180,
         }
@@ -880,6 +885,12 @@ impl Config {
             ));
         }
         self.mail.validate()?;
+        if self.session.cookie_cross_site && !self.session.cookie_secure {
+            return Err(ConfigError::Invalid(
+                "session.cookie_cross_site 需要同时开启 session.cookie_secure（浏览器只接受 Secure 的跨站 Cookie）"
+                    .to_owned(),
+            ));
+        }
         if self.env.is_prod() {
             if self.secrets.code_hmac_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__CODE_HMAC_KEY"));
@@ -1034,6 +1045,19 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn cross_site_cookie_requires_secure() {
+        let cross_site = |secure: bool| {
+            with(&[("database.url", "postgres://x")])
+                .merge(Serialized::default("session.cookie_secure", secure))
+                .merge(Serialized::default("session.cookie_cross_site", true))
+        };
+        let err = Config::from_figment(cross_site(false)).unwrap_err();
+        assert!(matches!(err, ConfigError::Invalid(_)));
+        let config = Config::from_figment(cross_site(true)).unwrap();
+        assert!(config.session.cookie_cross_site);
     }
 
     #[test]

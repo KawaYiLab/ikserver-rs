@@ -21,7 +21,9 @@ CI 比对生成结果与 `admin/openapi.json`（管理后台的类型由它生�
 
 ## 认证
 
-- 网页：`HttpOnly; Secure; SameSite=Lax` 会话 Cookie（`ik_session`）。
+- 网页：`HttpOnly; Secure; SameSite=Lax` 会话 Cookie（`ik_session`）。主站跨站直连接口时
+  （`IK_SESSION__COOKIE_CROSS_SITE=true`）改为 `SameSite=None; Partitioned`：Cookie 按顶层站点分区，
+  只在主站页面里随请求发出；跨站写请求由 `allowed_origins` 白名单把关。
 - App/脚本：`Authorization: Bearer <token>`。
 - 不透明令牌（256 位随机，DB 存 SHA-256 哈希），30 天有效、活跃自动续期、最长 180 天。
 - 会话可单独吊销；吊销即时生效并断开对应 WebSocket。

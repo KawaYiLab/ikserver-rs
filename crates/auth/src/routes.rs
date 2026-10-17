@@ -42,19 +42,34 @@ where
 }
 
 fn session_cookie(settings: &AuthSettings, token: String, max_age_secs: i64) -> Cookie<'static> {
-    Cookie::build((settings.cookie_name.clone(), token))
+    let mut cookie = Cookie::build((settings.cookie_name.clone(), token))
         .http_only(true)
         .secure(settings.cookie_secure)
-        .same_site(SameSite::Lax)
         .path("/")
         .max_age(cookie::time::Duration::seconds(max_age_secs.max(0)))
-        .build()
+        .build();
+    apply_site_policy(settings, &mut cookie);
+    cookie
 }
 
 fn removal_cookie(settings: &AuthSettings) -> Cookie<'static> {
-    Cookie::build(settings.cookie_name.clone())
+    let mut cookie = Cookie::build(settings.cookie_name.clone())
+        .secure(settings.cookie_secure)
         .path("/")
-        .build()
+        .build();
+    apply_site_policy(settings, &mut cookie);
+    cookie
+}
+
+/// 同站部署用 `SameSite=Lax`；跨站部署用 `SameSite=None; Partitioned`。分区 Cookie 只能被带同样
+/// `Partitioned` 属性的 Set-Cookie 覆盖，所以写入与删除必须走同一套属性。
+fn apply_site_policy(settings: &AuthSettings, cookie: &mut Cookie<'static>) {
+    if settings.cookie_cross_site {
+        cookie.set_same_site(SameSite::None);
+        cookie.set_partitioned(true);
+    } else {
+        cookie.set_same_site(SameSite::Lax);
+    }
 }
 
 /// 清掉会话 Cookie（登出、注销账号）。
@@ -406,4 +421,42 @@ async fn change_password(
     let issued = service::change_password(&state, &principal, request, &meta).await?;
     let (jar, body) = deliver(&state.settings, jar, issued, client);
     Ok((jar, Json(body)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings(cross_site: bool) -> AuthSettings {
+        AuthSettings {
+            cookie_name: "ik_session".into(),
+            cookie_secure: true,
+            cookie_cross_site: cross_site,
+            session_ttl: chrono::Duration::days(30),
+            session_max_lifetime: chrono::Duration::days(180),
+            registration_open: true,
+            trusted_proxy_hops: 0,
+            code_key: vec![0; 32],
+        }
+    }
+
+    #[test]
+    fn same_site_cookie_is_lax() {
+        let cookie = session_cookie(&settings(false), "t".into(), 60).to_string();
+        assert!(cookie.contains("SameSite=Lax"), "{cookie}");
+        assert!(!cookie.contains("Partitioned"), "{cookie}");
+    }
+
+    #[test]
+    fn cross_site_cookie_is_partitioned_and_removal_matches() {
+        let settings = settings(true);
+        for cookie in [
+            session_cookie(&settings, "t".into(), 60).to_string(),
+            removal_cookie(&settings).to_string(),
+        ] {
+            assert!(cookie.contains("SameSite=None"), "{cookie}");
+            assert!(cookie.contains("Partitioned"), "{cookie}");
+            assert!(cookie.contains("Secure"), "{cookie}");
+        }
+    }
 }

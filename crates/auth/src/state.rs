@@ -52,6 +52,8 @@ impl AuthState {
 pub struct AuthSettings {
     pub cookie_name: String,
     pub cookie_secure: bool,
+    /// 跨站 Cookie（`SameSite=None; Partitioned`），见 `ik_kernel::config::Session::cookie_cross_site`。
+    pub cookie_cross_site: bool,
     pub session_ttl: chrono::Duration,
     pub session_max_lifetime: chrono::Duration,
     pub registration_open: bool,
@@ -82,6 +84,7 @@ impl AuthSettings {
         Ok(Self {
             cookie_name: config.session.cookie_name.clone(),
             cookie_secure: config.session.cookie_secure,
+            cookie_cross_site: config.session.cookie_cross_site,
             session_ttl: chrono::Duration::days(config.session.ttl_days),
             session_max_lifetime: chrono::Duration::days(config.session.max_lifetime_days),
             registration_open: config.auth.registration_open,
