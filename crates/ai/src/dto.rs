@@ -192,8 +192,9 @@ pub struct CreateSessionRequest {
     pub title: Option<String>,
 }
 
-/// AI 会话的设置。
+/// AI 会话的设置。OpenAPI 里叫 `AiSessionView`，与登录会话的 `SessionView` 区分。
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AiSessionView)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionView {
     #[schema(value_type = String)]

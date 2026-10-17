@@ -3339,6 +3339,15 @@ export interface components {
             /** @description 工作流时间线（WF-003，已脱敏；定稿后才有）。生成中的事件经 `dm.message.workflow` 实时推送。 */
             workflow?: components["schemas"]["WorkflowEvent"][] | null;
         };
+        /** @description AI 会话的设置。OpenAPI 里叫 `AiSessionView`，与登录会话的 `SessionView` 区分。 */
+        AiSessionView: {
+            /** @description 角色已下线时为 null。 */
+            character?: string | null;
+            conversationId: string;
+            /** @description 会话级模型选择；null 表示跟随角色卡默认。 */
+            modelKey?: string | null;
+            title?: string | null;
+        };
         /** @description 个人助手（AI-024，二期占位）。 */
         AssistantView: {
             enabled: boolean;
@@ -8062,7 +8071,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionView"];
+                    "application/json": components["schemas"]["AiSessionView"];
                 };
             };
             /** @description NOT_AI_SESSION */
@@ -8106,7 +8115,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionView"];
+                    "application/json": components["schemas"]["AiSessionView"];
                 };
             };
             /** @description NOT_AI_SESSION / AI_MODEL_UNAVAILABLE / AI_MODEL_NOT_ALLOWED */
