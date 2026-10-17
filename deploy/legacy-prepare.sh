@@ -89,6 +89,16 @@ if [ "$(new psql -X -Atq -c "SELECT to_regclass('public.users') IS NOT NULL")" =
 fi
 
 new_db=$(new psql -X -Atq -c "SELECT current_database()")
+new_user=$(new psql -X -Atq -c "SELECT current_user")
+# 删 schema 要是它的属主，建 schema 要有库的 CREATE 权限；在动手之前查，免得删到一半停下。
+# 库归 postgres 所有时，public 的属主（pg_database_owner）就是 postgres，新库的账号删不掉它。
+not_owned=$(new psql -X -Atq -c "SELECT string_agg(nspname, ', ') FROM pg_namespace
+    WHERE nspname IN ('public', 'graphile_worker', 'legacy') AND NOT pg_has_role(current_user, nspowner, 'MEMBER')")
+[ -z "$not_owned" ] || die "账号 $new_user 不是新库里 $not_owned 的属主，删不掉。用超级用户执行：
+  sudo -u postgres psql -d $new_db -c 'ALTER SCHEMA public OWNER TO $new_user'（其余 schema 同理）"
+[ "$(new psql -X -Atq -c "SELECT has_database_privilege(current_database(), 'CREATE')")" = t ] \
+    || die "账号 $new_user 没有新库 $new_db 的 CREATE 权限。用超级用户执行：
+  sudo -u postgres psql -c 'GRANT CREATE ON DATABASE $new_db TO $new_user'"
 echo
 echo "接下来会清空新库 $new_db 里的全部数据（public、graphile_worker、legacy 三个 schema），旧库只读不动。"
 if [ -n "${CONFIRM:-}" ]; then
