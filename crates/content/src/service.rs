@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use governor::clock::{Clock, DefaultClock};
 use http::StatusCode;
 use ik_auth::Principal;
 use ik_auth::service::Author;
@@ -13,10 +14,11 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
 use crate::dto::{
-    AuthorView, CategoryRef, CategoryView, FavoriteResult, FeedPage, FeedQuery, GiftRequest,
-    GiftResult, HomeFeedPage, LikeResult, MarkReadRequest, MarkReadResult, MyPostItem,
+    AuthorView, CardVideo, CategoryRef, CategoryView, FavoriteResult, FeedPage, FeedQuery,
+    GiftRequest, GiftResult, HomeFeedPage, LikeResult, MarkReadRequest, MarkReadResult, MyPostItem,
     MyPostsQuery, MyPostsState, PinCandidate, PinCandidatesQuery, PostCard, PostDetail,
-    PostEditView, PostInput, PostStatus, SavedPost, SavedQuery, TagRef, TripleResult, ViewResult,
+    PostEditView, PostInput, PostStatus, SavedPost, SavedQuery, TagRef, TripleResult, VideoPreview,
+    ViewResult,
 };
 use crate::repo::{self, CardRow, Content, DraftRow, FeedFilter, PostRow};
 use crate::video::{self, ExternalVideo, MAX_EXTERNAL_VIDEOS};
@@ -87,7 +89,10 @@ struct Prepared {
     title: String,
     body: String,
     editor_state: Option<serde_json::Value>,
-    external_videos: serde_json::Value,
+    /// 解析后的视频；标题、封面等由 [`enrich_videos`] 在事务之前补上。
+    videos: Vec<ExternalVideo>,
+    /// 与 `videos` 一一对应：这次是否从 B 站查到了信息。
+    videos_fresh: Vec<bool>,
     category_id: Option<i64>,
     /// (归一化名称, slug)，已按 slug 去重、保序。
     tags: Vec<(String, String)>,
@@ -245,17 +250,54 @@ fn prepare(principal: &Principal, input: PostInput) -> Result<Prepared, Problem>
     if !errors.is_empty() {
         return Err(Problem::validation(errors));
     }
-    let external_videos = serde_json::to_value(&videos).map_err(|e| Problem::internal_from(&e))?;
     Ok(Prepared {
         cover_ids,
         title,
         body: input.body,
         editor_state: input.editor_state,
-        external_videos,
+        videos_fresh: vec![false; videos.len()],
+        videos,
         category_id: input.category_id.map(Id::get),
         tags: tag_list,
         is_anonymous: input.is_anonymous,
     })
+}
+
+/// 向 B 站查询视频的标题、封面、时长（事务之前，命中缓存时不访问网络）。
+/// 查不到或上游故障都不影响保存：在事务里沿用之前保存过的信息，没有就省略。
+async fn enrich_videos(state: &ContentState, prepared: &mut Prepared) {
+    for (video, fresh) in prepared.videos.iter_mut().zip(&mut prepared.videos_fresh) {
+        let Some(key) = video.key() else { continue };
+        match state.videos.get(&key).await {
+            Ok(Some(meta)) => {
+                video.apply(&meta);
+                *fresh = true;
+            }
+            Ok(None) => tracing::info!(?key, "B 站视频不存在或不可见，按原样保存"),
+            Err(error) => tracing::warn!(?key, %error, "查询 B 站视频信息失败，按原样保存"),
+        }
+    }
+}
+
+/// 帖子里已经用上的封面与视频（线上版本 + 待发布修改）。
+#[derive(Default)]
+struct Existing {
+    covers: Vec<i64>,
+    videos: Vec<ExternalVideo>,
+}
+
+async fn load_existing(conn: &mut PgConnection, row: &PostRow) -> Result<Existing, Problem> {
+    let mut existing = Existing {
+        covers: row.cover_ids.clone(),
+        videos: video::decode_stored(&row.external_videos),
+    };
+    if let Some(draft) = repo::pending_draft(conn, row.id).await? {
+        existing.covers.extend(draft.cover_ids);
+        existing
+            .videos
+            .extend(video::decode_stored(&draft.external_videos));
+    }
+    Ok(existing)
 }
 
 /// 分区必须存在且启用；管理员专属分区只有管理员能用（POST-032/033）。
@@ -366,18 +408,26 @@ async fn resolve(
     state: &ContentState,
     conn: &mut PgConnection,
     principal: &Principal,
-    prepared: Prepared,
-    existing_covers: &[i64],
+    mut prepared: Prepared,
+    existing: &Existing,
 ) -> Result<Content, Problem> {
     check_category(conn, principal, prepared.category_id).await?;
-    check_cover_owner(conn, principal, &prepared.cover_ids, existing_covers).await?;
+    check_cover_owner(conn, principal, &prepared.cover_ids, &existing.covers).await?;
     let tag_ids = resolve_tags(state, conn, &prepared.tags).await?;
+    // 这次没查到 B 站信息的视频沿用之前保存过的（上游临时故障时不丢封面）。
+    for (video, fresh) in prepared.videos.iter_mut().zip(&prepared.videos_fresh) {
+        if !fresh && let Some(previous) = existing.videos.iter().find(|v| v.same_video(video)) {
+            video.inherit(previous);
+        }
+    }
+    let external_videos =
+        serde_json::to_value(&prepared.videos).map_err(|e| Problem::internal_from(&e))?;
     Ok(Content {
         cover_ids: prepared.cover_ids,
         title: prepared.title,
         body: prepared.body,
         editor_state: prepared.editor_state,
-        external_videos: prepared.external_videos,
+        external_videos,
         category_id: prepared.category_id,
         tag_ids,
         is_anonymous: prepared.is_anonymous,
@@ -512,14 +562,15 @@ pub async fn create(
     publish: bool,
 ) -> Result<PostEditView, Problem> {
     principal.require_write()?;
-    let prepared = prepare(principal, input)?;
+    let mut prepared = prepare(principal, input)?;
+    enrich_videos(state, &mut prepared).await;
     let post_id = state.ids.next_raw();
     let author_id = principal.user_id.get();
     let now = Utc::now();
     let mut effects = Effects::new();
 
     let mut tx = state.db.begin().await?;
-    let content = resolve(state, &mut tx, principal, prepared, &[]).await?;
+    let content = resolve(state, &mut tx, principal, prepared, &Existing::default()).await?;
     let seed = seed_for(content.is_anonymous, None)?;
     repo::insert_post(&mut tx, post_id, author_id, &content, seed.as_deref(), now).await?;
     repo::set_post_tags(&mut tx, post_id, &content.tag_ids).await?;
@@ -546,14 +597,15 @@ pub async fn save_draft(
     expected_revision: Option<i32>,
 ) -> Result<PostEditView, Problem> {
     principal.require_write()?;
-    let prepared = prepare(principal, input)?;
+    let mut prepared = prepare(principal, input)?;
+    enrich_videos(state, &mut prepared).await;
     let now = Utc::now();
 
     let mut tx = state.db.begin().await?;
     let row = lock_own_post(&mut tx, principal, post_id).await?;
     ensure_revision(&row, expected_revision)?;
     ensure_anonymity_unchanged(&row, prepared.is_anonymous)?;
-    let existing = existing_covers(&mut tx, &row).await?;
+    let existing = load_existing(&mut tx, &row).await?;
     let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
     if row.status == "published" {
         repo::upsert_draft(&mut tx, post_id, &content, now).await?;
@@ -595,15 +647,6 @@ fn draft_content(row: &PostRow, draft: DraftRow) -> Content {
     }
 }
 
-/// 帖子里已经用上的封面（线上版本 + 待发布修改）。
-async fn existing_covers(conn: &mut PgConnection, row: &PostRow) -> Result<Vec<i64>, Problem> {
-    let mut ids = row.cover_ids.clone();
-    if let Some(draft) = repo::pending_draft(conn, row.id).await? {
-        ids.extend(draft.cover_ids);
-    }
-    Ok(ids)
-}
-
 /// 发布。可同时提交最新的工作副本（省一次保存请求）。
 ///
 /// - 草稿 → 发布：刷新信息流排序；从没发布过时算首次发布（POST-054/057）。
@@ -616,7 +659,10 @@ pub async fn publish(
     expected_revision: Option<i32>,
 ) -> Result<PostEditView, Problem> {
     principal.require_write()?;
-    let prepared = input.map(|i| prepare(principal, i)).transpose()?;
+    let mut prepared = input.map(|i| prepare(principal, i)).transpose()?;
+    if let Some(prepared) = &mut prepared {
+        enrich_videos(state, prepared).await;
+    }
     let now = Utc::now();
     let author_id = principal.user_id.get();
     let mut effects = Effects::new();
@@ -633,7 +679,7 @@ pub async fn publish(
     let mut category_id = row.category_id;
     let mut title = row.title.clone();
     if let Some(prepared) = prepared {
-        let existing = existing_covers(&mut tx, &row).await?;
+        let existing = load_existing(&mut tx, &row).await?;
         let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
         category_id = content.category_id;
         title.clone_from(&content.title);
@@ -980,6 +1026,26 @@ async fn cards(
     let authors = author_map(state, &rows.iter().collect::<Vec<_>>()).await?;
     let cover_ids: Vec<i64> = rows.iter().filter_map(|r| r.cover_id).collect();
     let mut covers = state.media.views(&cover_ids).await?;
+    let mut videos: HashMap<i64, CardVideo> = if ids.is_empty() {
+        HashMap::new()
+    } else {
+        repo::videos_for_posts(conn, &ids)
+            .await?
+            .into_iter()
+            .filter_map(|row| {
+                let video = video::decode_stored(&row.videos).into_iter().next()?;
+                Some((
+                    row.id,
+                    CardVideo {
+                        provider: video.provider,
+                        title: video.title,
+                        cover_url: video.cover_url,
+                        duration: video.duration,
+                    },
+                ))
+            })
+            .collect()
+    };
     let viewer_id = viewer.map(|p| p.user_id.get());
     // 游客不查阅读记录（CACHE-008）。
     let read: std::collections::HashSet<i64> = match viewer_id {
@@ -1001,6 +1067,7 @@ async fn cards(
             ),
             excerpt: excerpt(&row.excerpt_source),
             cover: row.cover_id.and_then(|id| covers.remove(&id)),
+            video: videos.remove(&row.id),
             title: row.title,
             category: match (row.category_id, row.category_slug, row.category_name) {
                 (Some(id), Some(slug), Some(name)) => Some(CategoryRef {
@@ -1366,8 +1433,7 @@ pub async fn detail(
         load_authors(&state.db, &state.media, &[row.author_id]).await?
     };
     let covers = media_in_order(state, &row.cover_ids).await?;
-    let external_videos: Vec<ExternalVideo> =
-        serde_json::from_value(row.external_videos.clone()).unwrap_or_default();
+    let external_videos = video::decode_stored(&row.external_videos);
     let denny_given = match viewer {
         Some(p) => !ik_economy::service::gifted_posts(&mut conn, p.user_id.get(), &[row.id])
             .await?
@@ -1499,12 +1565,10 @@ async fn build_edit_view(
             slug: t.slug.clone(),
         })
         .collect();
-    let external_videos = serde_json::from_value::<Vec<ExternalVideo>>(videos)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|v| v.source)
-        .collect();
+    let videos = video::decode_stored(&videos);
+    let external_videos = videos.iter().map(|v| v.source.clone()).collect();
     Ok(PostEditView {
+        videos,
         id: Id::new(row.id),
         status,
         title,
@@ -1606,6 +1670,55 @@ fn like_escape(s: &str) -> String {
         out.push(ch);
     }
     out
+}
+
+/// 视频预览：解析输入并向 B 站查询标题、封面、分 P（编辑器添加视频时）。每人每分钟 30 次。
+pub async fn resolve_video(
+    state: &ContentState,
+    principal: &Principal,
+    source: &str,
+) -> Result<VideoPreview, Problem> {
+    if let Err(denied) = state.video_lookups.check_key(&principal.user_id.get()) {
+        let wait = denied.wait_time_from(DefaultClock::default().now());
+        return Err(Problem::rate_limited().with_retry_after(wait.as_secs().saturating_add(1)));
+    }
+    let mut video = video::parse(source)
+        .ok_or_else(|| Problem::field("source", "INVALID", "无法识别的 B 站视频链接"))?;
+    let key = video.key().ok_or_else(Problem::internal)?;
+    let meta = match state.videos.get(&key).await {
+        Ok(Some(meta)) => meta,
+        Ok(None) => {
+            return Err(Problem::new(
+                StatusCode::NOT_FOUND,
+                "VIDEO_NOT_FOUND",
+                "视频不存在或已失效",
+            ));
+        }
+        Err(error) => {
+            tracing::warn!(?key, %error, "查询 B 站视频信息失败");
+            return Err(Problem::new(
+                StatusCode::BAD_GATEWAY,
+                "VIDEO_UPSTREAM_ERROR",
+                "B 站服务暂时不可用，请稍后再试",
+            ));
+        }
+    };
+    if let Some(page) = video.page
+        && !meta.pages.is_empty()
+        && !meta.pages.iter().any(|p| p.page == page)
+    {
+        return Err(Problem::field(
+            "source",
+            "PAGE_NOT_FOUND",
+            format!("这个视频没有第 {page} P"),
+        ));
+    }
+    video.apply(&meta);
+    Ok(VideoPreview {
+        video,
+        pages: meta.pages.clone(),
+        owner: meta.owner.clone(),
+    })
 }
 
 /// 标签联想（POST-028）：slug 子串匹配，排除停用标签。

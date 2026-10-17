@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET external_videos = '[{\"provider\":\"bilibili\",\"bvid\":\"BV1xx411c7mD\",\"p\":1,\n             \"coverUrl\":\"https://evil.example/x.jpg\",\"title\":\"旧\"}]'::jsonb WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "29cde842fe657bb9d78047414e1aff048d72ba61f3ba50157fb4e84033d23693"
+}

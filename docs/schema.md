@@ -71,6 +71,10 @@
 - `anonymous_seed`：TEXT，与旧系统同格式（32 位 hex），迁移后匿名展示名保持不变。
 - `revision`：乐观并发版本号，每次改工作副本 +1，对外以 `ETag: "rev:<n>"` 暴露。
 - 计数器（浏览、点赞、评论、收藏、丁尼）只由服务端维护，`CHECK >= 0`。
+- `external_videos`：JSONB 数组，最多 1 项（CHECK）。每项是 `ik_content::ExternalVideo`：编号（`bvid` / `aid` / `page` / `cid`）、
+  作者原始输入 `source`，以及服务端保存时向 B 站查到的 `title`、`coverUrl`（只认 `*.hdslb.com`）、`duration`；
+  查询失败时沿用之前存下的、没有就省略。读取时逐项宽松解析（`video::decode_stored`）：旧系统导入的行字段不同
+  （`p`、没有 `source`、客户端提交的 `embedUrl` / `coverUrl`），播放器地址一律按编号重建，封面不合规就丢弃。
 - `updated_at` 只在内容变化时刷新（计数器不动它）；搜索索引的增量扫描按 `posts_updated_idx (updated_at, id)` 取改动的帖子（`20261101000001_posts_updated_idx.sql`）。
 - 删除是物理删除，`post_tags`、`post_drafts` 级联删除；后续的评论、点赞等表同样级联。
 

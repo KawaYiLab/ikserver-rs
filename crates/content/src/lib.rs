@@ -6,6 +6,7 @@
 
 pub mod admin;
 pub mod anonymous;
+pub mod bilibili;
 pub mod dto;
 pub mod interop;
 pub mod jobs;

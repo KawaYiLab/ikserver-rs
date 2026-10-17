@@ -1594,3 +1594,120 @@ async fn fanout_skips_anonymous_and_withdrawn_posts(db: PgPool) {
     assert_eq!(h.follow_notices(anon.id.get()).await, 0);
     assert_eq!(h.follow_notices(withdrawn.id.get()).await, 0);
 }
+
+/// 假的 B 站：只认识一个视频。
+struct FakeBilibili;
+
+#[async_trait::async_trait]
+impl ik_content::bilibili::VideoApi for FakeBilibili {
+    async fn bilibili(
+        &self,
+        key: &ik_content::bilibili::VideoKey,
+    ) -> Result<Option<ik_content::bilibili::VideoMeta>, ik_content::bilibili::UpstreamError> {
+        use ik_content::bilibili::{VideoKey, VideoMeta, VideoPage};
+        match key {
+            VideoKey::Bvid(b) if b == "BV1xx411c7mD" => Ok(Some(VideoMeta {
+                bvid: b.clone(),
+                aid: 170_001,
+                title: "测试视频".into(),
+                cover_url: Some("http://i0.hdslb.com/bfs/archive/a.jpg".into()),
+                duration: 300,
+                cid: Some(11),
+                owner: Some("UP".into()),
+                pages: vec![VideoPage {
+                    cid: 11,
+                    page: 1,
+                    part: "P1".into(),
+                    duration: 300,
+                }],
+            })),
+            _ => Ok(None),
+        }
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn videos_get_metadata_on_save_and_keep_it_when_upstream_fails(db: PgPool) {
+    let h = harness(db.clone());
+    let online = h.state.clone().with_video_api(Arc::new(FakeBilibili));
+    let me = h.writer(1).await;
+
+    // 预览：解析 + 查询；不认识的视频 404，乱写的 400。
+    let preview =
+        service::resolve_video(&online, &me, "https://www.bilibili.com/video/BV1xx411c7mD")
+            .await
+            .unwrap();
+    assert_eq!(preview.video.title.as_deref(), Some("测试视频"));
+    assert_eq!(preview.owner.as_deref(), Some("UP"));
+    assert_eq!(
+        service::resolve_video(&online, &me, "BV1yy411c7mD")
+            .await
+            .unwrap_err()
+            .code(),
+        "VIDEO_NOT_FOUND"
+    );
+    assert_eq!(
+        service::resolve_video(&online, &me, "not a video")
+            .await
+            .unwrap_err()
+            .code(),
+        "VALIDATION_FAILED"
+    );
+    assert_eq!(
+        service::resolve_video(
+            &online,
+            &me,
+            "https://www.bilibili.com/video/BV1xx411c7mD?p=3"
+        )
+        .await
+        .unwrap_err()
+        .code(),
+        "VALIDATION_FAILED"
+    );
+
+    // 保存时服务端自己查询，存下标题与封面；卡片带视频摘要。
+    let mut with_video = input("视频帖");
+    with_video.external_videos = vec!["BV1xx411c7mD".into()];
+    let id = service::create(&online, &me, with_video.clone(), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let detail = service::detail(&online, None, id).await.unwrap();
+    let video = &detail.external_videos[0];
+    assert_eq!(
+        video.cover_url.as_deref(),
+        Some("https://i0.hdslb.com/bfs/archive/a.jpg")
+    );
+    assert_eq!(video.cid, Some(11));
+    assert_eq!(video.aid, Some(170_001));
+    let card = service::feed(&online, None, latest())
+        .await
+        .unwrap()
+        .items
+        .remove(0);
+    let card_video = card.video.expect("卡片带视频摘要");
+    assert_eq!(card_video.title.as_deref(), Some("测试视频"));
+    assert_eq!(card_video.duration, Some(300));
+
+    // 上游不可用时再保存：沿用之前存下的信息。
+    let edited = service::save_draft(&h.state, &me, id, with_video, None)
+        .await
+        .unwrap();
+    assert_eq!(edited.videos[0].title.as_deref(), Some("测试视频"));
+    assert_eq!(edited.external_videos, vec!["BV1xx411c7mD".to_owned()]);
+
+    // 旧系统导入的行（`p`、没有 `source`、客户端提交的封面）照样能读出来，封面只认 B 站图床。
+    sqlx::query!(
+        r#"UPDATE posts SET external_videos = '[{"provider":"bilibili","bvid":"BV1xx411c7mD","p":1,
+             "coverUrl":"https://evil.example/x.jpg","title":"旧"}]'::jsonb WHERE id = $1"#,
+        id,
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let legacy = service::detail(&online, None, id).await.unwrap();
+    assert_eq!(legacy.external_videos.len(), 1);
+    assert_eq!(legacy.external_videos[0].cover_url, None);
+    assert_eq!(legacy.external_videos[0].title.as_deref(), Some("旧"));
+}

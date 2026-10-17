@@ -4,7 +4,7 @@
 
 模块化单体：一个 `ik-server` 进程承担 HTTP API、WebSocket 网关、后台任务与定时任务、
 AI 编排，并提供编进可执行文件的管理后台页面（`/admin`）。外部依赖只有 PostgreSQL、Meilisearch、S3 兼容对象存储、SMTP/Brevo、米游社 API、
-大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
+B 站视频信息接口、大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
 
 ```mermaid
 flowchart LR
@@ -17,6 +17,7 @@ flowchart LR
   srv --> s3[R2/S3 + CDN]
   srv --> mail[SMTP / Brevo]
   srv --> mhy[米游社 API]
+  srv --> bili[B 站视频信息]
   srv --> llm[大模型 API]
 ```
 
@@ -57,6 +58,7 @@ flowchart LR
   上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
 - `feed → auth, content, comments`：热榜要合并点赞（content）与评论（comments）两类活动，所以在两者之上；
   各种信息流的 SQL 仍在 content（帖子表归它），feed 只负责热度计算与组合（把展示位 id 交给 content）。
+  B 站视频信息（`ik_content::bilibili`，trait 抽象，测试用假实现）在保存帖子的事务之前查询，进程内缓存 10 分钟。
 - `profile`：作者主页要汇总账号、关系、经验、帖子与评论、装扮与米游社绑定，所以在各内容域之上，
   只调用各域的 service / interop；依赖它的只有 `account`（注销）与 `ai`（工具读主页）。
 - `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）是事件总线的唯一订阅者，按受众转发；

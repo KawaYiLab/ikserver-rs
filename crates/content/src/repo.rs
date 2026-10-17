@@ -525,6 +525,26 @@ pub(crate) struct CardRow {
     pub category_name: Option<String>,
 }
 
+pub(crate) struct VideoRow {
+    pub id: i64,
+    pub videos: serde_json::Value,
+}
+
+/// 这些帖子里嵌了视频的（卡片展示视频摘要）。
+pub(crate) async fn videos_for_posts(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<VideoRow>> {
+    sqlx::query_as!(
+        VideoRow,
+        r#"SELECT id, external_videos AS videos FROM posts
+           WHERE id = ANY($1) AND external_videos <> '[]'::jsonb"#,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
 pub(crate) struct FeedFilter {
     pub category_id: Option<i64>,
     pub tag_id: Option<i64>,

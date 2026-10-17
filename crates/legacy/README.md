@@ -81,7 +81,7 @@ psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 | 文章草稿行 + 发布行 | 一条 `posts` | 帖子 id 取该文档最小的行 id；有发布行 → `published`、内容取发布行，否则 `draft` |
 | 草稿行（与发布行不同时） | `post_drafts` | 已发布帖子的待发布修改 |
 | `title` / `text` | `title` / `body` | 截到 50 / 16000 字；正文里的 `image.tiwat.cn` 改为 `im.tiwat.cn`（CDN-001） |
-| `externalVideos` | `external_videos` | 只留第一个 |
+| `externalVideos` | `external_videos` | 只留第一个，按原样保存；读取时宽松解析（`p` 当分 P、按编号重建播放器地址、封面只认 B 站图床 `*.hdslb.com`） |
 | `cover` | `cover_ids` | 只认读取成功的文件，最多 40 张 |
 | `isHidden` | `hidden_at` | `true` → 隐藏（时间取更新时间），`NULL` 视为可见（D-012） |
 | `bumpedAt` | `bumped_at` | 缺失时用发布时间（POST-061） |
