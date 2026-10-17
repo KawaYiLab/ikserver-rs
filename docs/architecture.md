@@ -22,38 +22,43 @@ flowchart LR
 
 ## crate 划分与依赖方向
 
-```
-kernel ◄── auth ◄── content ◄── feed
-           ▲         ▲            ▲
-           │         │            │
-  social ──┤    messaging ── notify
-  economy ─┤         ▲
-  exam ────┤         │
-  media    │        ai ── search
-  moderation       ▲
-   └───────────────┴──► server（唯一可依赖所有域的地方）
-```
+每个 crate 的职责见 `AGENTS.md`「目录结构」（只在那里维护）。这里只讲依赖方向：下层不知道上层，
+依赖只能从上往下。按层从下到上（同层之间不互相依赖，除非下面单独写明）：
 
-- `kernel`：不依赖任何业务域。提供配置、Problem 错误、ID、时间、游标、
-  `AuthCtx`（鉴权上下文）、`EventBus` trait、任务入队 helper、限流 helper。
-- 业务域 crate：`auth`、`content`（帖子/版块/标签/表情/帖子的赞藏与三连）、`comments`（评论与评论点赞）、
-  `feed`（信息流/热榜/搜索）、`social`（关注/拉黑）、`economy`（丁尼/经验/签到/权益/装扮）、`exam`、
-  `messaging`（私信）、`notify`（通知/收件箱）、`realtime`（WS 网关）、`media`（上传/文件）、
-  `search`、`moderation`（举报/处罚/审计）、`ai`（供应商/模型/角色/编排/额度）、`admin`。
-- 跨域只允许调用对方 `pub` 的 service；`repo` 层 `pub(crate)`，表归属唯一域。
+| 层 | crate | 直接依赖（省略 kernel） |
+|---|---|---|
+| 0 | `kernel`、`mail` | 无业务域 |
+| 1 | `auth` | — |
+| 2 | `economy`、`social`、`media`、`mihoyo`、`realtime` | `auth` |
+| 3 | `exam` | `auth, economy` |
+|   | `cosmetics` | `auth, media` |
+|   | `messaging` | `auth, social, media` |
+| 4 | `notify` | `auth, social, messaging, media` |
+| 5 | `content` | `auth, economy, social, notify, media` |
+| 6 | `comments` | `auth, economy, social, notify, content, media` |
+| 7 | `feed` | `auth, content, comments` |
+|   | `search` | `auth, social, content, comments` |
+|   | `moderation` | `auth, content, comments, notify, media` |
+|   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo` |
+| 8 | `account` | `auth, mihoyo, profile` |
+|   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy` |
+| 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai` |
+| — | `legacy` | `media`（一次性数据导入，模块边界的例外，见 ADR 0003） |
+| — | `server` | 全部（唯一组装所有域的地方） |
+
+- `kernel`：不依赖任何业务域。提供配置、Problem 错误、ID、时间、游标、鉴权上下文、
+  事件总线、任务入队、HTTP helper（客户端 IP、限流 key）。
+- 跨域只走对方 crate 的 `service` / `interop`；`repo` 层 `pub(crate)`，表归属唯一域。
 - 需要与调用方同一事务的跨域写入，由被调用方提供接收 `&mut PgConnection` 的 interop 函数
   （如 `ik_auth::interop`、`ik_content::interop`、`ik_economy::service::grant_exp`）。
-- 实际依赖：`economy → auth`；`social → auth`；`messaging → auth, social`；`notify → auth, social, messaging`；`search → auth, social, content, comments`；`media → auth`；`cosmetics → auth, media`；`mihoyo → auth`；`profile → …, cosmetics, mihoyo`；`account → auth, mihoyo, profile`；`moderation → auth, content, comments, notify, media`；`ai → auth, media, social, messaging, content, comments, economy, profile, feed, search`；content、comments、notify、messaging、profile 都依赖 media（封面、图片、头像）；
-  `content → economy, social, notify`（发帖经验、投币、拉黑判断、通知）；
-  `comments → content, economy, social, notify`；`exam → economy`（通过奖励）。economy 不能依赖 content，
-  所以投币的入口在 content，记账在 economy。
+- economy 不能依赖 content，所以投币的入口在 content，记账在 economy；`exam → economy` 是通过奖励。
 - 拉黑几乎在每个读写路径上生效，所以 `social` 只放用户之间的关系（关注、拉黑），位于 content 之下，
   由 `ik_social::interop` 提供「任一方向拉黑」判断与列表过滤的排除集合。点赞、收藏、三连是帖子和评论
   上的数据，分别归 content、comments 所有，这样详情和列表可以直接带上「我是否已赞」。
 - `feed → auth, content, comments`：热榜要合并点赞（content）与评论（comments）两类活动，所以在两者之上；
   各种信息流的 SQL 仍在 content（帖子表归它），feed 只负责热度计算与组合（把展示位 id 交给 content）。
-- `profile → auth, social, economy, content, comments`：作者主页要汇总账号、关系、经验、帖子与评论，
-  所以放在最上层，只调用各域的 service / interop；没有其他域依赖它。
+- `profile`：作者主页要汇总账号、关系、经验、帖子与评论、装扮与米游社绑定，所以在各内容域之上，
+  只调用各域的 service / interop；依赖它的只有 `account`（注销）与 `ai`（工具读主页）。
 - `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）是事件总线的唯一订阅者，按受众转发；
   会话吊销由 auth 发内部事件 `auth.sessions_changed`，网关收到后复查该用户的连接。
 - `messaging → auth, social`：私聊会话与消息。位于 notify 之下：对方发来的通知要在通知的事务里推进收件人的私聊排序

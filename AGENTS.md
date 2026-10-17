@@ -5,7 +5,8 @@ InterKnot 论坛的新一代后端：Rust 模块化单体，替代旧 Strapi 5 �
 
 ## 技术栈（不可擅自更换）
 
-- Rust stable（版本由 CI 固定；Windows 本机用 gnu 工具链 + MinGW-w64，见 `docs/dev-setup.md`），edition 2024
+- Rust stable（版本由 CI 的 `RUST_VERSION` 固定，本地用 `rustc --version` 对照；Windows 本机用 gnu 工具链 + MinGW-w64，
+  见 `docs/dev-setup.md`），edition 2024。不放 `rust-toolchain.toml`：它会让 Windows 上的 rustup 按默认 host 去装 msvc 工具链
 - Axum 0.8 + tower-http 0.7（含 `csrf` 中间件）
 - PostgreSQL 17/18 + SQLx 0.9（`query!` / `query_as!` 编译期检查宏）
 - 迁移：`sqlx migrate`，纯 SQL 文件，目录 `migrations/`
@@ -57,10 +58,12 @@ docs/
   business-rules/     从旧系统提取的业务规则（改行为前先读对应文件）
   adr/                架构决策记录
 migrations/           纯 SQL 迁移（时间戳命名，禁止修改已合并的迁移）
-.sqlx/                编译期查询缓存（提交到 git，CI 用 SQLX_OFFLINE=true）
-tests/                Schemathesis / k6 / WebSocket 端到端测试
+.sqlx/                编译期查询缓存（提交到 git；本地与 CI 默认都按它离线编译）
 deploy/               systemd、nginx、发布脚本
 ```
+
+模块清单只维护在这里；`docs/architecture.md` 讲依赖方向与设计理由，不再重复列出每个 crate 的职责。
+新增、合并、改名 crate 时同一个提交里更新这张表。
 
 ## 常用命令
 
@@ -68,19 +71,32 @@ deploy/               systemd、nginx、发布脚本
 # 数据库：远程开发库，连接串在 .env 的 DATABASE_URL（不入库）
 cargo sqlx migrate run            # 应用迁移
 
-# 日常开发（改动 SQL 前保证数据库在运行）
+# 日常开发（.cargo/config.toml 默认 SQLX_OFFLINE=true：按 .sqlx 缓存编译，不连数据库）
 cargo check --workspace           # 最快反馈
-cargo nextest run --workspace     # 全部测试
-cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run -p <crate> -E 'test(<测试名>)'   # 只跑相关测试（测试本身仍连 DATABASE_URL 建临时库）
 cargo fmt --all -- --check
+# 全量测试与 clippy 交给 CI，见下方「本地与 CI 的分工」
 
-# 改了 SQL 之后（会更新 .sqlx 缓存，必须提交）
-cargo sqlx prepare --workspace --check   # CI 门禁；本地去掉 --check 生成
+# 改了 SQL 之后（连开发库重新生成 .sqlx 缓存，必须提交；新查询在生成之前离线编译不过）
+cargo sqlx prepare --workspace -- --all-targets   # CI 用 --check 校验
 
 # 运行
 cargo run -p ik-server -- serve
 cargo run -p ik-server -- openapi > openapi.json
 ```
+
+### 本地与 CI 的分工
+
+本机磁盘小、开发库在远程（每个 `#[sqlx::test]` 都要在远程建库并跑全部迁移，单个测试约一分钟），
+所以本地只做快速检查，完整的 clippy 与全量测试交给 CI（自带 PostgreSQL 与 Meilisearch，推送后自动跑）。
+
+- 本地：`cargo check`、`cargo fmt`，以及**只跑本次改动相关的测试**：
+  `cargo nextest run -p <crate> -E 'test(<测试名>)'`。改 bug 时用它确认新测试在修之前失败、修之后通过。
+- 本地编译前设 `CARGO_INCREMENTAL=0`（增量缓存会占几个 GB）；`target/` 太大时 `cargo clean`。
+- 不在本地跑 `cargo nextest run --workspace`；推送后看 CI 结果，失败再修。
+- 改了 SQL 仍要在本地跑 `cargo sqlx prepare --workspace -- --all-targets` 并提交 `.sqlx/`
+  （需要开发库已执行 `cargo run -p ik-server -- migrate` 并加载旧表结构，见 `docs/dev-setup.md`）。
+- 规则只写能被检查的东西。能自动检查的（lint、测试、CI 步骤）就加检查；做不到也不打算做的，不写进本文件。
 
 ## 硬性规则（违反即 PR 不通过）
 
@@ -90,15 +106,23 @@ cargo run -p ik-server -- openapi > openapi.json
 2. **非测试代码禁止 `unwrap()` / `expect()` / `panic!` / `dbg!` / `todo!()` / `unimplemented!()`**
    （workspace lints 已设为 deny；测试豁免见 `clippy.toml`）。
 3. **错误统一走 `ik_kernel::error::Problem`**（RFC 9457）。每个对外错误码必须登记在
-   `docs/api-guidelines.md` 的错误码表里，附固定 HTTP 状态与中文 `detail`。
+   `docs/api-guidelines.md` 的错误码表里，附固定 HTTP 状态与中文 `detail`；错误码写成字符串字面量
+   （`crates/server/tests/error_codes.rs` 会检查是否登记）。
    5xx 只回 `{ type, title, status, requestId }`，内部细节只进日志。
 4. **迁移只增不改**：已合并进 main 的迁移文件禁止修改；变更一律新迁移。
    破坏性变更走 expand/contract（先加新列双写，后删旧列），保证新旧二进制可并行。
-5. **模块边界**：每个业务域 crate 只暴露 `service`（pub API）与 `routes`。
-   跨域调用走对方 service，禁止跨 crate 读写别人的表（编译期靠可见性约束，
-   `repo` 模块 `pub(crate)`）。
+   唯一例外：正式上线（生产库第一次执行迁移）之前，允许把全部迁移合并成一份干净的起点，只做一次。
+5. **模块边界**：每个业务域 crate 对外暴露 `service`、`routes`、`dto`、`state`，以及需要与调用方
+   同一事务时的 `interop`（接收 `&mut PgConnection`）。跨域调用只走这些入口，禁止跨 crate 读写
+   别人的表（编译期靠可见性约束，`repo` 模块 `pub(crate)`）。
 6. **事务纪律**：业务写入 + 计数更新 + 任务入队在同一事务；提交后再发实时事件；
    事务内禁止调用外部服务（HTTP/SMTP/S3/LLM）。
+   - **先查后写必须防并发**：「检查条件 → 再写入」（余额够不够、名字是否相同、冷却是否已过、
+     是否已领过）要么检查与写入在同一事务里并先加锁（行锁 `FOR UPDATE` / `FOR NO KEY UPDATE`，
+     或 `pg_advisory_xact_lock`），要么交给唯一约束兜底。事务外查、事务内写一律视为 bug。
+   - **一个请求同一时刻只占一个数据库连接**：持有连接或事务时，不要再去连接池要第二个
+     （包括调用会自己 `acquire` / `begin` 的函数）。需要时把 `&mut PgConnection` 传下去，或先释放再取。
+     否则并发一高，所有请求各拿一个连接等第二个，连接池耗尽后集体超时。
 7. **时间**：存储与计算用 `DateTime<Utc>`（timestamptz）；业务上的"一天"（签到、
    经验日、限额）一律用 `ik_kernel::time` 的北京时间 helper，禁止散落手写偏移。
 8. **ID**：对外 ID 是字符串形式的 64 位雪花 ID（`ik_kernel::id::Id<T>`）。
@@ -109,6 +133,8 @@ cargo run -p ik-server -- openapi > openapi.json
    key 推导用 `ik_kernel::http::client_ip`（按 `TRUSTED_PROXY_HOPS` 从右往左数 XFF）。
 10. **隐私红线**：匿名身份（anonymousSeed 派生的假名）与真实身份在任何接口、
     搜索索引、AI 工具输出中不得关联；拉黑过滤不适用于匿名内容（防反推）。
+    隐私判断按「是否曾经公开过」而不是「现在的状态」：内容一旦以某个身份公开过（发布、通知、
+    被搜索收录），下线、编辑、恢复都不能让它换成另一个身份。
 
 ## 新增一个接口的检查清单
 
@@ -118,20 +144,24 @@ cargo run -p ik-server -- openapi > openapi.json
 4. `routes.rs` 用 `utoipa_axum::router::OpenApiRouter` + `routes!` 注册，
    handler 上加 `#[utoipa::path(...)]`，错误响应引 `Problem`。
 5. 错误码登记进 `docs/api-guidelines.md`。
-6. 测试：service 层 `#[sqlx::test]`（真实 PG，独立临时库）+ 关键响应 insta 快照。
-7. `cargo sqlx prepare --workspace` 更新 `.sqlx/` 并随 PR 提交。
-8. 若接口属于 `/v1` 既有路径的变更，跑 `oasdiff`（CI 自动跑）确认无破坏性变更。
+6. 测试：service 层 `#[sqlx::test]`（真实 PG，独立临时库）；HTTP 层的鉴权、限流、状态码放在
+   `crates/server/tests/`。
+7. `cargo sqlx prepare --workspace -- --all-targets` 更新 `.sqlx/` 并同提交。
+8. 接口有变化时重新生成 `admin/openapi.json`（`cargo run -p ik-server -- openapi > admin/openapi.json`，
+   再在 `admin/` 下 `pnpm gen:api`）；CI 会比对两者。`/v1` 既有接口只做向后兼容的变更
+   （见 `docs/api-guidelines.md`「版本与兼容性」），目前没有自动的破坏性变更检查，自己逐条对照。
 
 ## 新增一个迁移的检查清单
 
 1. `cargo sqlx migrate add <snake_case_name>`。
 2. 索引：读多写少，优先复合索引；外键列必须有索引。
 3. 唯一性、非空、CHECK 约束尽量下沉到 DDL，代码只做友好错误映射。
-4. `sqlx migrate run` 通过；`cargo nextest run` 通过；`cargo sqlx prepare --workspace`。
+4. `cargo sqlx migrate run` 通过；相关测试通过；`cargo sqlx prepare --workspace -- --all-targets`。
+5. 在 `docs/schema.md` 写明新表 / 新索引的用途。
 
 ## 新增一个后台任务 / 实时事件
 
-- 任务：在 `jobs/` 定义 `TaskHandler`，payload 用 serde 结构体；入队必须在业务事务内
+- 任务：在所属 crate 的 `jobs.rs` 定义 `TaskHandler`，payload 用 serde 结构体；入队必须在业务事务内
   （`graphile_worker::WorkerUtilsWithExecutor`）。失败策略（重试次数/退避/死信）写在任务定义旁。
 - 实时事件：由业务域自己构造（`ik_kernel::bus::Event`），在 `docs/api-guidelines.md` 实时章节登记
   事件名、受众与载荷；放进 `Effects`，事务提交后发布；发布方不假设订阅方在线。
@@ -141,14 +171,16 @@ cargo run -p ik-server -- openapi > openapi.json
 
 - 纯函数（等级、热度公式、游标编解码、Markdown 派生）用单元测试 + proptest。
 - 任何带 SQL 的逻辑用 `#[sqlx::test]`（自动建独立库，并行安全），不许 mock 数据库。
-- 并发正确性（投币、经验、签到、会话轮换、举报认领）必须有并发测试。
-- 改 bug 必须先写失败测试再修。
+- 并发正确性必须有并发测试：凡是扣钱 / 发钱（丁尼、经验、奖励）、对外发送（邮件、短信、通知）、
+  一次性的领取 / 认领（签到、举报认领、首次奖励）、会话轮换，都要测同一请求并发提交两次以上的结果。
+- 改 bug 必须先写失败测试再修：本地只跑这一个测试，确认修之前失败、修之后通过。
 
 ## 提交规范
 
 - Conventional Commits：`feat(auth): ...` / `fix(content): ...` / `refactor(kernel): ...`。
 - 中文或英文 subject 均可，正文写清"为什么"。
-- 一个 PR 只做一件事；迁移与代码同 PR；`.sqlx/` 更新同 PR。
+- 一个提交只做一件事；同一类的小修复可以放进一个 PR，但每项单独一个提交。
+- 迁移、`.sqlx/`、受影响的文档（`docs/schema.md`、`docs/api-guidelines.md`、本文件）与代码同提交。
 
 ## 参考文档
 

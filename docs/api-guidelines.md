@@ -1,7 +1,7 @@
 # API 设计规范（/v1）
 
 本文件是 `/v1` 接口的唯一权威规范。OpenAPI 文档由 utoipa 从代码生成（`ik-server openapi`），
-CI 用 oasdiff 阻止破坏性变更。
+CI 比对生成结果与 `admin/openapi.json`（管理后台的类型由它生成）；破坏性变更目前没有自动检查，按下方「版本与兼容性」自查。
 
 ## 基础约定
 

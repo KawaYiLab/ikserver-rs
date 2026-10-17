@@ -1,0 +1,5 @@
+[env]
+# 默认按已提交的 .sqlx 缓存离线编译，不需要开发库在线、也不要求开发库的表结构是最新的。
+# 改了 SQL 时运行 `cargo sqlx prepare --workspace -- --all-targets`：它会临时设 SQLX_OFFLINE=false
+# 连库重新生成缓存（这里的值不会覆盖已经设置的环境变量）。
+SQLX_OFFLINE = "true"

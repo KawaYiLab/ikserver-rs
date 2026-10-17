@@ -24,7 +24,11 @@
 开发统一连远程开发库（PostgreSQL），本机不跑数据库。连接串只写在 `.env` 的
 `DATABASE_URL` 里（不入库），向维护者索取。
 
-- 开发账号需要 `CREATEDB` 权限：`#[sqlx::test]` 会为每个测试临时建库、测完删除。
+- 平时编译不连数据库：`.cargo/config.toml` 默认 `SQLX_OFFLINE=true`，SQL 宏按已提交的 `.sqlx/` 缓存检查。
+  只有改了 SQL、运行 `cargo sqlx prepare --workspace -- --all-targets` 时才连开发库，这时开发库必须是最新结构
+  （`cargo run -p ik-server -- migrate`，再加载一次旧表结构，见下文「旧数据导入」）。
+- 开发账号需要 `CREATEDB` 权限：`#[sqlx::test]` 会为每个测试临时建库、测完删除。库在远程，每个测试要建库并跑完
+  全部迁移，单个测试约一分钟，所以本地只跑相关的测试，全量交给 CI（见 `AGENTS.md`「本地与 CI 的分工」）。
 - 迁移：`cargo sqlx migrate run`（只管 `migrations/`）；`cargo run -p ik-server -- migrate` 还会建好后台任务队列的表
   （schema `graphile_worker`，`serve` 启动执行器时也会自动建）。
 - 测试里要入队任务的（例如有粉丝的作者发帖），先调用 `state.jobs.migrate()`；执行任务用
