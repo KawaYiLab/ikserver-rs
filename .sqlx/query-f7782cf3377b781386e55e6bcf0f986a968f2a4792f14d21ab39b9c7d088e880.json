@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT author_id, is_anonymous, title, status = 'published' AS \"published!\",\n                  hidden_at IS NOT NULL AS \"hidden!\", hidden_reason\n           FROM posts WHERE id = $1 FOR UPDATE",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "is_anonymous"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "published!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "hidden!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "hidden_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "f7782cf3377b781386e55e6bcf0f986a968f2a4792f14d21ab39b9c7d088e880"
+}

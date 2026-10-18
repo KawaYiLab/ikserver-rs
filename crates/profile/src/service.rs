@@ -389,7 +389,7 @@ pub async fn update_profile(
 }
 
 /// 用户名校验（D-018：区分大小写；字符集维持旧系统的宽松规则，只额外拒绝 `@` 与控制字符）。
-fn validate_username(raw: &str) -> Result<String, Problem> {
+pub fn validate_username(raw: &str) -> Result<String, Problem> {
     let name = raw.trim();
     let len = name.chars().count();
     let invalid = |detail: String| {

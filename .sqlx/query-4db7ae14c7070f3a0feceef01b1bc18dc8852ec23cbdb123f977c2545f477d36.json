@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reports (id, reporter_id, target_type, target_id, owner_user_id, reason, snapshot)\n           VALUES (700, 4, 'comment', 600, 3, 'spam', '{}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "4db7ae14c7070f3a0feceef01b1bc18dc8852ec23cbdb123f977c2545f477d36"
+}

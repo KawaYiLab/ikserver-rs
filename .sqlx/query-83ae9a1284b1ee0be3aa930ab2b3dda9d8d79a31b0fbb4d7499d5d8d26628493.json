@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO comments (id, post_id, author_id, floor, body, is_anonymous, anonymous_seed)\n         VALUES (600, 500, 3, 1, '普通评论', FALSE, NULL),\n                (601, 500, 3, 2, '匿名评论', TRUE, 'seed-601')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "83ae9a1284b1ee0be3aa930ab2b3dda9d8d79a31b0fbb4d7499d5d8d26628493"
+}

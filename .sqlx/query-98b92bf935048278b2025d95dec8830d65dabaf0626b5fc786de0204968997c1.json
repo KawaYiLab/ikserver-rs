@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT hidden_by, hidden_reason FROM posts WHERE id = 500",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hidden_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_by"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "hidden_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_reason"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "98b92bf935048278b2025d95dec8830d65dabaf0626b5fc786de0204968997c1"
+}

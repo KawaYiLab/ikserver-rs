@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { watchDebounced } from '@vueuse/core'
-import { RefreshCw } from '@lucide/vue'
+import { ExternalLink, FileSearch, Undo2 } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -13,7 +12,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
-import { actionLabel, formatTime, reasonLabel, reportStatusLabel, targetTypeLabel } from '~/lib/format'
+import type { RowAction } from '~/lib/actions'
+import { userPath } from '~/lib/links'
+import { actionLabel, formatTime, reasonLabel, reportStatusLabel, reportStatusVariant, targetTypeLabel } from '~/lib/format'
 
 type Group = Schemas['ReportGroup']
 type Tab = 'pending' | 'reviewing' | 'closed'
@@ -22,68 +23,44 @@ type Action = Schemas['Action']
 const { me } = useSession()
 const siteLink = useSiteLink()
 const { run, failure } = useNotify()
-
-const tab = ref<Tab>('pending')
-const targetType = ref<string>('all')
-const reason = ref<string>('all')
-const q = ref('')
-const from = ref('')
-const to = ref('')
-const mine = ref(true)
-const page = ref(1)
-const limit = 20
-const result = ref<Schemas['GroupPage'] | null>(null)
-const loading = ref(false)
+const badges = useBadges()
 
 /** 结束日期包含当天：取到次日 00:00（北京时间）。 */
 function dayBound(date: string, next = false) {
   if (!date) return undefined
   const at = new Date(`${date}T00:00:00+08:00`)
+  if (Number.isNaN(at.getTime())) return undefined
   if (next) at.setDate(at.getDate() + 1)
   return at.toISOString()
 }
 
-async function load() {
-  loading.value = true
-  try {
-    result.value = await unwrap(api.GET('/v1/admin/reports', {
-      params: {
-        query: {
-          tab: tab.value,
-          targetType: targetType.value === 'all' ? undefined : targetType.value as Schemas['TargetType'],
-          reason: reason.value === 'all' ? undefined : reason.value as Schemas['Reason'],
-          q: q.value.trim() || undefined,
-          from: dayBound(from.value),
-          to: dayBound(to.value, true),
-          mine: tab.value === 'reviewing' ? mine.value : undefined,
-          page: page.value,
-          limit,
-        },
+const list = useListQuery({
+  filters: { tab: 'pending', targetType: 'all', reason: 'all', q: '', from: '', to: '', mine: 'yes' },
+  text: ['q'],
+  persistent: ['tab', 'mine'],
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/reports', {
+    params: {
+      query: {
+        tab: f.tab as Tab,
+        targetType: optional<Schemas['TargetType']>(f.targetType),
+        reason: optional<Schemas['Reason']>(f.reason),
+        q: optional(f.q),
+        from: dayBound(f.from),
+        to: dayBound(f.to, true),
+        mine: f.tab === 'reviewing' ? f.mine === 'yes' : undefined,
+        page,
+        limit: 20,
       },
-    }))
-  }
-  catch (error) {
-    failure(error)
-  }
-  finally {
-    loading.value = false
-  }
-}
+    },
+  })),
+})
+const { filters, result, loading } = list
+const tab = computed(() => list.applied.value.filters.tab)
 
-watch(tab, () => {
-  page.value = 1
-  mine.value = true
-  load()
-})
-watch([targetType, reason, from, to, mine], () => {
-  page.value = 1
-  load()
-})
-watchDebounced(q, () => {
-  page.value = 1
-  load()
-}, { debounce: 400 })
-onMounted(load)
+function load() {
+  list.refresh()
+  badges.refresh()
+}
 
 function targetName(group: Group) {
   const t = group.target
@@ -96,8 +73,21 @@ function claimedByMe(group: Group) {
   return group.assignedTo?.id === me.value?.id
 }
 
-function statusVariant(status: string) {
-  return status === 'pending' ? 'destructive' : status === 'reviewing' ? 'secondary' : 'outline'
+function siteUrl(group: Group) {
+  if (!group.target.exists) return undefined
+  if (group.targetType === 'post') return siteLink(`/post/${group.targetId}`)
+  if (group.targetType === 'comment' && group.target.postId) return siteLink(`/post/${group.target.postId}?comment=${group.targetId}`)
+  if (group.targetType === 'user') return siteLink(`/profile/${group.targetId}`)
+  return undefined
+}
+
+function rowActions(group: Group): RowAction[] {
+  const url = siteUrl(group)
+  return [
+    { label: '查看举报明细', icon: FileSearch, onSelect: () => openDetail(group) },
+    { label: '在主站打开', icon: ExternalLink, href: url, hidden: !url },
+    { label: '释放（退回待处理）', icon: Undo2, hidden: !(group.status === 'reviewing' && claimedByMe(group)), onSelect: () => unclaim(group) },
+  ]
 }
 
 // ---------- 详情 ----------
@@ -179,12 +169,10 @@ async function resolve() {
 <template>
   <div>
     <AdminPageHeader title="举报处理" description="同一目标的多条举报会一并结案；处理结果会通过系统通知告知相关用户。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
-    <Tabs v-model="tab" class="mb-4">
+    <Tabs v-model="filters.tab" class="mb-4">
       <TabsList>
         <TabsTrigger value="pending">
           待处理<template v-if="tab === 'pending' && result"> ({{ result.total }})</template>
@@ -199,27 +187,27 @@ async function resolve() {
     </Tabs>
 
     <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-      <Select v-model="targetType">
+      <Select v-model="filters.targetType">
         <SelectTrigger class="w-full"><SelectValue placeholder="目标类型" /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部类型</SelectItem>
           <SelectItem v-for="(label, key) in targetTypeLabel" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Select v-model="reason">
+      <Select v-model="filters.reason">
         <SelectTrigger class="w-full"><SelectValue placeholder="举报理由" /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部理由</SelectItem>
           <SelectItem v-for="(label, key) in reasonLabel" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Input v-model="q" placeholder="目标标题 / 举报人 / 被举报人" class="lg:col-span-2" />
-      <Input v-model="from" type="date" aria-label="起始日期" />
-      <Input v-model="to" type="date" aria-label="结束日期" />
+      <Input v-model="filters.q" placeholder="目标标题 / 举报人 / 被举报人" class="lg:col-span-2" />
+      <Input v-model="filters.from" type="date" aria-label="起始日期" />
+      <Input v-model="filters.to" type="date" aria-label="结束日期" />
     </div>
     <div v-if="tab === 'reviewing'" class="mb-4 flex gap-2">
-      <Button size="sm" :variant="mine ? 'default' : 'outline'" @click="mine = true">只看我的</Button>
-      <Button size="sm" :variant="mine ? 'outline' : 'default'" @click="mine = false">查看全部</Button>
+      <Button size="sm" :variant="filters.mine === 'yes' ? 'default' : 'outline'" @click="filters.mine = 'yes'">只看我的</Button>
+      <Button size="sm" :variant="filters.mine === 'yes' ? 'outline' : 'default'" @click="filters.mine = 'no'">查看全部</Button>
     </div>
 
     <div class="rounded-md border">
@@ -250,29 +238,33 @@ async function resolve() {
             <TableCell class="hidden md:table-cell">{{ targetTypeLabel[group.targetType] }}</TableCell>
             <TableCell class="text-right tabular-nums">{{ group.reportCount }}</TableCell>
             <TableCell class="hidden md:table-cell">{{ formatTime(group.latestReportAt) }}</TableCell>
-            <TableCell><Badge :variant="statusVariant(group.status)">{{ reportStatusLabel[group.status] }}</Badge></TableCell>
+            <TableCell><Badge :variant="reportStatusVariant(group.status)">{{ reportStatusLabel[group.status] }}</Badge></TableCell>
             <TableCell class="hidden lg:table-cell">
               <template v-if="group.assignedTo">
                 {{ group.assignedTo.username }}<span v-if="claimedByMe(group)">（我）</span>
               </template>
               <span v-else class="text-muted-foreground">—</span>
             </TableCell>
-            <TableCell class="space-x-1 text-right whitespace-nowrap">
-              <template v-if="tab !== 'closed'">
-                <Button v-if="group.status === 'pending'" size="sm" variant="outline" @click="claim(group)">领取</Button>
-                <Button v-if="group.status === 'pending' || claimedByMe(group)" size="sm" @click="openResolve(group)">处理</Button>
-                <Button v-if="group.status === 'reviewing' && claimedByMe(group)" size="sm" variant="ghost" @click="unclaim(group)">释放</Button>
-                <span v-if="group.status === 'reviewing' && !claimedByMe(group)" class="text-xs text-muted-foreground">已被领取</span>
-              </template>
+            <TableCell class="text-right whitespace-nowrap">
+              <div class="flex items-center justify-end gap-1">
+                <template v-if="tab !== 'closed'">
+                  <Button v-if="group.status === 'pending'" size="sm" variant="outline" @click="claim(group)">领取</Button>
+                  <Button v-if="group.status === 'pending' || claimedByMe(group)" size="sm" @click="openResolve(group)">处理</Button>
+                  <span v-if="group.status === 'reviewing' && !claimedByMe(group)" class="text-xs text-muted-foreground">已被领取</span>
+                </template>
+                <AdminRowActions :actions="rowActions(group)" />
+              </div>
             </TableCell>
           </TableRow>
-          <TableRow v-if="result && result.items.length === 0">
-            <TableCell colspan="7" class="py-10 text-center text-muted-foreground">没有符合条件的举报</TableCell>
-          </TableRow>
+          <AdminListState
+            :colspan="7" :loading="loading" :failed="list.failed.value" :filtered="list.active.value"
+            :empty="!result?.items.length" :empty-text="tab === 'pending' ? '没有待处理的举报，都处理完了' : '没有举报'"
+            @retry="load" @reset="list.reset"
+          />
         </TableBody>
       </Table>
     </div>
-    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="个目标" @change="(p) => { page = p; load() }" />
+    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="个目标" @change="list.setPage" />
 
     <!-- 详情 -->
     <Sheet v-model:open="detailOpen">
@@ -281,7 +273,7 @@ async function resolve() {
           <SheetHeader>
             <div class="flex flex-wrap gap-2">
               <Badge variant="outline">{{ targetTypeLabel[detail.targetType] }}</Badge>
-              <Badge :variant="statusVariant(detail.status)">{{ reportStatusLabel[detail.status] }}</Badge>
+              <Badge :variant="reportStatusVariant(detail.status)">{{ reportStatusLabel[detail.status] }}</Badge>
               <Badge v-if="detail.reportCount > 1" variant="secondary">{{ detail.reportCount }} 人举报</Badge>
               <Badge v-if="detail.target.anonymous" variant="secondary">匿名</Badge>
             </div>
@@ -300,7 +292,21 @@ async function resolve() {
               </a>
               <a v-if="detail.target.postId" :href="siteLink(`/post/${detail.target.postId}?comment=${detail.targetId}`)" target="_blank" class="underline">查看评论</a>
               <a v-if="detail.targetType === 'user'" :href="siteLink(`/profile/${detail.targetId}`)" target="_blank" class="underline">查看主页</a>
-              <span v-if="detail.target.owner">作者：@{{ detail.target.owner.username }}</span>
+              <NuxtLink
+                v-if="detail.targetType === 'post' && detail.target.exists"
+                :to="{ path: '/comments', query: { postId: detail.targetId } }" class="underline"
+              >
+                该帖全部评论
+              </NuxtLink>
+              <NuxtLink
+                v-if="detail.targetType === 'comment' && detail.target.postId"
+                :to="{ path: '/comments', query: { postId: detail.target.postId } }" class="underline"
+              >
+                同帖其他评论
+              </NuxtLink>
+              <span v-if="detail.target.owner">
+                作者：<NuxtLink :to="userPath(detail.target.owner.id)" class="underline">@{{ detail.target.owner.username }}</NuxtLink>
+              </span>
             </div>
             <div>
               <h3 class="mb-2 text-sm font-medium">举报明细</h3>

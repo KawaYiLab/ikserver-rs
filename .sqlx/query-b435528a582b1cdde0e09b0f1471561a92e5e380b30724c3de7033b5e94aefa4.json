@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT width_bucket(first_published_at, $1::timestamptz[]) AS \"bucket!\", count(*) AS \"n!\"\n           FROM posts\n           WHERE first_published_at >= $2 AND first_published_at < $3\n           GROUP BY 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bucket!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TimestamptzArray",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "b435528a582b1cdde0e09b0f1471561a92e5e380b30724c3de7033b5e94aefa4"
+}

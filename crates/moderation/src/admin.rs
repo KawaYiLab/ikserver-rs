@@ -16,9 +16,10 @@ use sqlx::PgConnection;
 
 use crate::ModerationState;
 use crate::dto::{
-    Action, BlockRequest, BlockResult, ClaimResult, GroupPage, GroupQuery, Reason, ReportGroup,
-    ReportRow, ReportStatus, Resolution, ResolveRequest, ResolveResult, Tab, TargetType,
-    TargetView, UnblockResult, UnclaimResult, UserRef,
+    Action, BlockRequest, BlockResult, ClaimResult, ContentAction, ContentActionRequest,
+    ContentActionResult, GroupPage, GroupQuery, ModerationEntry, Reason, ReceivedReport,
+    ReceivedStats, ReportGroup, ReportRow, ReportStatus, Resolution, ResolveRequest, ResolveResult,
+    Tab, TargetType, TargetView, UnblockResult, UnclaimResult, UserModeration, UserRef,
 };
 use crate::repo::{self, Closing, GroupFilter, GroupRow, NewLog, OpenRow};
 use crate::service::{Snapshot, post_of};
@@ -559,6 +560,12 @@ pub async fn resolve(
             target_id,
             report_count: i32::try_from(resolved).unwrap_or(i32::MAX),
             note: note.as_deref(),
+            subject_user_id: if target_type == TargetType::User {
+                Some(target_id)
+            } else {
+                owner
+            },
+            subject_anonymous: target_type != TargetType::User && snapshot.anonymous,
             now,
         },
     )
@@ -592,6 +599,8 @@ pub async fn unblock(
                 target_id: user_id,
                 report_count: 0,
                 note: None,
+                subject_user_id: Some(user_id),
+                subject_anonymous: false,
                 now,
             },
         )
@@ -653,6 +662,8 @@ pub async fn block(
                 target_id: user_id,
                 report_count: 0,
                 note: note.as_deref(),
+                subject_user_id: Some(user_id),
+                subject_anonymous: false,
                 now,
             },
         )
@@ -674,6 +685,295 @@ pub async fn block(
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
     Ok(BlockResult { blocked })
+}
+
+/// 一次直接处置最多这么多条。
+const MAX_BATCH: usize = 50;
+
+/// 锁住的处置目标。
+struct Locked {
+    author_id: i64,
+    anonymous: bool,
+    /// 隐藏原因；未隐藏为 None。
+    hidden_reason: Option<String>,
+    /// 通知里关联的帖子（帖子本身或评论所在的帖子）。
+    post_id: i64,
+    label: String,
+}
+
+async fn lock_target(
+    conn: &mut PgConnection,
+    target_type: TargetType,
+    id: i64,
+) -> Result<Option<Locked>, Problem> {
+    Ok(match target_type {
+        TargetType::Post => ik_content::interop::lock_moderation_target(conn, id)
+            .await?
+            .map(|t| Locked {
+                author_id: t.author_id,
+                anonymous: t.is_anonymous,
+                hidden_reason: t.hidden_reason,
+                post_id: id,
+                label: format!("委托《{}》", t.title),
+            }),
+        TargetType::Comment => ik_comments::interop::lock_moderation_target(conn, id)
+            .await?
+            .map(|t| Locked {
+                author_id: t.author_id,
+                anonymous: t.is_anonymous,
+                hidden_reason: t.hidden_reason,
+                post_id: t.post_id,
+                label: format!("在委托《{}》下的评论", t.post_title),
+            }),
+        TargetType::User => None,
+    })
+}
+
+/// 不经举报直接隐藏、恢复、删除帖子或评论（管理后台的帖子 / 评论管理）。
+///
+/// - 按 id 升序逐条加锁后再判断状态，并发重复提交时后到的看到已是目标状态，不重复通知、不重复记录。
+/// - 有未结案举报的目标跳过（在 `pendingReports` 里返回），请到举报处理里结案。
+/// - 恢复可见对两种隐藏原因（版主隐藏、多人举报自动隐藏）都生效。
+/// - 每条改动写一行审核日志；后台审计每次请求一行（批量时 id 列表在 details 里）。
+/// - `notifyAuthor` 时给作者发系统通知（恢复可见不发），删除帖子后通知不再关联它。
+pub async fn act(
+    state: &ModerationState,
+    op: &ik_auth::Operator,
+    request: ContentActionRequest,
+) -> Result<ContentActionResult, Problem> {
+    require_staff(&op.principal)?;
+    let target_type = request.target_type;
+    if target_type == TargetType::User {
+        return Err(Problem::field(
+            "targetType",
+            "INVALID",
+            "只能处置帖子或评论",
+        ));
+    }
+    let mut ids: Vec<i64> = request.ids.iter().map(|id| id.get()).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() || ids.len() > MAX_BATCH {
+        return Err(Problem::field("ids", "INVALID", "一次处置 1–50 条"));
+    }
+    let action = request.action;
+    let note = clean_note(request.note);
+    let staff_id = op.user_id();
+    let now = Utc::now();
+    let mut effects = Effects::new();
+
+    let mut tx = state.db.begin().await?;
+    let open: std::collections::HashSet<i64> =
+        repo::open_targets(&mut tx, target_type.as_str(), &ids)
+            .await?
+            .into_iter()
+            .collect();
+    let mut affected = Vec::new();
+    let mut pending = Vec::new();
+    let mut unchanged = Vec::new();
+    for id in ids {
+        if open.contains(&id) {
+            pending.push(Id::new(id));
+            continue;
+        }
+        let Some(target) = lock_target(&mut tx, target_type, id).await? else {
+            unchanged.push(Id::new(id));
+            continue;
+        };
+        let moderator = ik_content::interop::HIDDEN_BY_MODERATOR;
+        let changed = match (action, target_type) {
+            (ContentAction::Hide, _) if target.hidden_reason.as_deref() == Some(moderator) => false,
+            (ContentAction::Hide, TargetType::Post) => {
+                ik_content::interop::hide_post(
+                    &mut tx,
+                    id,
+                    Some(staff_id),
+                    moderator,
+                    now,
+                    &mut effects,
+                )
+                .await?
+            }
+            (ContentAction::Hide, _) => {
+                ik_comments::interop::hide_comment(
+                    &mut tx,
+                    id,
+                    Some(staff_id),
+                    moderator,
+                    now,
+                    &mut effects,
+                )
+                .await?
+            }
+            (ContentAction::Unhide, _) => match target.hidden_reason.as_deref() {
+                None => false,
+                Some(reason) if target_type == TargetType::Post => {
+                    ik_content::interop::unhide_post(&mut tx, id, reason, &mut effects).await?
+                }
+                Some(reason) => {
+                    ik_comments::interop::unhide_comment(&mut tx, id, reason, &mut effects).await?
+                }
+            },
+            (ContentAction::Delete, TargetType::Post) => {
+                ik_content::interop::delete_post(&mut tx, id, &mut effects).await?
+            }
+            (ContentAction::Delete, _) => {
+                ik_comments::interop::delete_comment(&mut tx, id, &mut effects).await?
+            }
+        };
+        if !changed {
+            unchanged.push(Id::new(id));
+            continue;
+        }
+        repo::log(
+            &mut tx,
+            NewLog {
+                id: state.ids.next_raw(),
+                actor_id: Some(staff_id),
+                action: action.log_action(),
+                target_type: target_type.as_str(),
+                target_id: id,
+                report_count: 0,
+                note: note.as_deref(),
+                subject_user_id: Some(target.author_id),
+                subject_anonymous: target.anonymous,
+                now,
+            },
+        )
+        .await?;
+        let message = match action {
+            ContentAction::Hide => Some(format!(
+                "你的{}因违反绳网社区规范已被隐藏。如有异议请联系管理员。",
+                target.label
+            )),
+            ContentAction::Delete => Some(format!(
+                "你的{}因违反绳网社区规范已被删除。如有异议请联系管理员。",
+                target.label
+            )),
+            ContentAction::Unhide => None,
+        };
+        if let (true, Some(message)) = (request.notify_author, message) {
+            let deleted_post = action == ContentAction::Delete && target_type == TargetType::Post;
+            ik_notify::interop::system(
+                &mut tx,
+                &state.ids,
+                &[target.author_id],
+                &with_note(message, note.as_deref()),
+                (!deleted_post).then_some(target.post_id),
+                now,
+                &mut effects,
+            )
+            .await?;
+        }
+        affected.push(id);
+    }
+    if !affected.is_empty() {
+        let single = affected.len() == 1;
+        ik_auth::admin::record(
+            &mut tx,
+            &state.ids,
+            op,
+            ik_auth::admin::Audit {
+                action: match (target_type, action) {
+                    (TargetType::Post, ContentAction::Hide) => "content.post.hide",
+                    (TargetType::Post, ContentAction::Unhide) => "content.post.unhide",
+                    (TargetType::Post, ContentAction::Delete) => "content.post.delete",
+                    (_, ContentAction::Hide) => "content.comment.hide",
+                    (_, ContentAction::Unhide) => "content.comment.unhide",
+                    (_, ContentAction::Delete) => "content.comment.delete",
+                },
+                target_type: target_type.as_str(),
+                target_id: single.then(|| affected[0].to_string()),
+                details: serde_json::json!({
+                    "ids": if single { None } else {
+                        Some(affected.iter().map(i64::to_string).collect::<Vec<_>>())
+                    },
+                    "note": note,
+                    "notifyAuthor": request.notify_author,
+                }),
+            },
+            now,
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
+    Ok(ContentActionResult {
+        action,
+        affected: i64::try_from(affected.len()).unwrap_or(i64::MAX),
+        pending_reports: pending,
+        unchanged,
+    })
+}
+
+/// 账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律排除。
+pub async fn user_history(
+    state: &ModerationState,
+    user_id: i64,
+) -> Result<UserModeration, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let stats = repo::received_stats(&mut conn, user_id).await?;
+    let reports = repo::received_reports(&mut conn, user_id, 20).await?;
+    let logs = repo::subject_logs(&mut conn, user_id, 50).await?;
+    let mut actor_ids: Vec<i64> = logs.iter().filter_map(|l| l.actor_id).collect();
+    actor_ids.sort_unstable();
+    actor_ids.dedup();
+    let actors = ik_auth::interop::user_statuses(&mut conn, &actor_ids).await?;
+    Ok(UserModeration {
+        stats: ReceivedStats {
+            total: stats.total,
+            open: stats.open,
+            accepted: stats.accepted,
+            rejected: stats.rejected,
+        },
+        reports: reports
+            .into_iter()
+            .map(|r| ReceivedReport {
+                target_type: TargetType::parse(&r.target_type),
+                target_id: Id::new(r.target_id),
+                reason: Reason::parse(&r.reason),
+                detail: r.detail,
+                status: ReportStatus::parse(&r.status),
+                resolution: r.resolution.as_deref().map(Resolution::parse),
+                preview: Snapshot::parse(r.snapshot).preview(),
+                created_at: r.created_at,
+            })
+            .collect(),
+        actions: logs
+            .into_iter()
+            .map(|l| ModerationEntry {
+                action: l.action,
+                target_type: TargetType::parse(&l.target_type),
+                target_id: Id::new(l.target_id),
+                actor: l.actor_id.and_then(|id| actors.get(&id)).map(|u| UserRef {
+                    id: Id::new(u.id),
+                    username: u.username.clone(),
+                    status: u.status.clone(),
+                }),
+                report_count: l.report_count,
+                note: l.note,
+                created_at: l.created_at,
+            })
+            .collect(),
+    })
+}
+
+/// 每个业务日收到的举报条数，按 `bounds` 分桶（仪表盘趋势）。
+pub async fn daily_reports(
+    conn: &mut PgConnection,
+    bounds: &[chrono::DateTime<Utc>],
+) -> Result<Vec<i64>, Problem> {
+    let rows = repo::daily_reports(conn, bounds).await?;
+    Ok(ik_kernel::time::fill_buckets(
+        rows,
+        bounds.len().saturating_sub(1),
+    ))
+}
+
+/// 我领取了、还没结案的举报目标数（工作台待办）。
+pub async fn claimed_by(state: &ModerationState, staff_id: i64) -> Result<i64, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::claimed_open_count(&mut conn, staff_id).await?)
 }
 
 /// 待处理、复核中的举报目标数（管理后台仪表盘）。

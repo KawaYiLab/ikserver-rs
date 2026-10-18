@@ -453,3 +453,120 @@ pub struct UnblockResult {
     /// 原本是封禁状态、现在已经解封。
     pub unblocked: bool,
 }
+
+/// 后台直接处置的动作（不经举报）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentAction {
+    /// 隐藏（原因记为版主隐藏）。
+    Hide,
+    /// 恢复可见（不论是版主隐藏还是多人举报自动隐藏）。
+    Unhide,
+    /// 删除，不可恢复（评论连同回复）。
+    Delete,
+}
+
+impl ContentAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Hide => "hide",
+            Self::Unhide => "unhide",
+            Self::Delete => "delete",
+        }
+    }
+
+    pub(crate) fn log_action(self) -> &'static str {
+        match self {
+            Self::Hide => "hide_content",
+            Self::Unhide => "unhide_content",
+            Self::Delete => "delete_content",
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContentActionRequest {
+    /// `post` 或 `comment`。
+    pub target_type: TargetType,
+    /// 1–50 个。
+    #[schema(value_type = Vec<String>)]
+    pub ids: Vec<Id>,
+    pub action: ContentAction,
+    /// 处理备注（超过 500 字截断）：写入审核日志；通知作者时附在通知里。
+    #[serde(default)]
+    pub note: Option<String>,
+    /// 给作者发系统通知。恢复可见时不发。
+    #[serde(default)]
+    pub notify_author: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentActionResult {
+    pub action: ContentAction,
+    /// 实际改变了状态的条数。
+    pub affected: i64,
+    /// 有未结案的举报而跳过的：请在举报处理里结案，免得两边状态打架。
+    #[schema(value_type = Vec<String>)]
+    pub pending_reports: Vec<Id>,
+    /// 已经是目标状态（或已被删除）而没有改动的。
+    #[schema(value_type = Vec<String>)]
+    pub unchanged: Vec<Id>,
+}
+
+/// 某人收到的举报统计（不含匿名内容）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceivedStats {
+    pub total: i64,
+    /// 待处理与复核中。
+    pub open: i64,
+    pub accepted: i64,
+    pub rejected: i64,
+}
+
+/// 某人收到的一条举报（针对他的实名内容或账号本身）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceivedReport {
+    pub target_type: TargetType,
+    #[schema(value_type = String)]
+    pub target_id: Id,
+    pub reason: Reason,
+    pub detail: Option<String>,
+    pub status: ReportStatus,
+    pub resolution: Option<Resolution>,
+    /// 举报时的快照。
+    pub preview: TargetPreview,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 一条审核记录（处置、自动隐藏、封禁、解封）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModerationEntry {
+    /// `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |
+    /// `block_user` | `unblock_user`
+    pub action: String,
+    pub target_type: TargetType,
+    #[schema(value_type = String)]
+    pub target_id: Id,
+    /// 操作人；自动隐藏为 null。
+    pub actor: Option<UserRef>,
+    /// 一并结案的举报条数（直接处置为 0）。
+    pub report_count: i32,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律不出现（AGENTS.md 规则 10）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserModeration {
+    pub stats: ReceivedStats,
+    /// 最近 20 条收到的举报。
+    pub reports: Vec<ReceivedReport>,
+    /// 最近 50 条审核记录。
+    pub actions: Vec<ModerationEntry>,
+}

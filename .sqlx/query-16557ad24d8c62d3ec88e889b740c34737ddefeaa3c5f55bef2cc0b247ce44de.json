@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM comments c\n           WHERE ($1::text IS NULL OR c.body ILIKE $1 OR c.id = $2)\n             AND ($3::bigint IS NULL OR c.post_id = $3)\n             AND ($4::bigint IS NULL OR (c.author_id = $4 AND NOT c.is_anonymous))\n             AND ($5::bool IS NULL OR (c.hidden_at IS NOT NULL) = $5)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "16557ad24d8c62d3ec88e889b740c34737ddefeaa3c5f55bef2cc0b247ce44de"
+}

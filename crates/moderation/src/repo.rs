@@ -144,6 +144,22 @@ pub(crate) async fn lock_open(
     .await
 }
 
+/// 有未结案举报的目标（在 `ids` 之中）。
+pub(crate) async fn open_targets(
+    conn: &mut PgConnection,
+    target_type: &str,
+    ids: &[i64],
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT DISTINCT target_id FROM reports
+         WHERE target_type = $1 AND target_id = ANY($2) AND status IN ('pending', 'reviewing')",
+        target_type,
+        ids
+    )
+    .fetch_all(conn)
+    .await
+}
+
 /// 领取：待处理的，以及复核中但没人领取的（自动隐藏转入的）。
 pub(crate) async fn claim(
     conn: &mut PgConnection,
@@ -228,14 +244,18 @@ pub(crate) struct NewLog<'a> {
     pub target_id: i64,
     pub report_count: i32,
     pub note: Option<&'a str>,
+    /// 被处置的人（内容作者或被处置的用户）；查不到时为 None。
+    pub subject_user_id: Option<i64>,
+    /// 处置的是匿名内容：按人查询处罚记录时排除（AGENTS.md 规则 10）。
+    pub subject_anonymous: bool,
     pub now: DateTime<Utc>,
 }
 
 pub(crate) async fn log(conn: &mut PgConnection, l: NewLog<'_>) -> sqlx::Result<()> {
     sqlx::query!(
         "INSERT INTO moderation_log (id, actor_id, action, target_type, target_id, report_count, note,
-                                     created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                                     subject_user_id, subject_anonymous, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         l.id,
         l.actor_id,
         l.action,
@@ -243,6 +263,8 @@ pub(crate) async fn log(conn: &mut PgConnection, l: NewLog<'_>) -> sqlx::Result<
         l.target_id,
         l.report_count,
         l.note,
+        l.subject_user_id,
+        l.subject_anonymous,
         l.now
     )
     .execute(conn)
@@ -380,4 +402,127 @@ pub(crate) async fn open_target_counts(conn: &mut PgConnection) -> sqlx::Result<
     .fetch_one(conn)
     .await?;
     Ok((row.pending, row.reviewing))
+}
+
+// ---------- 管理后台：按人查处罚记录与收到的举报 ----------
+// 匿名内容的处置与举报都排除（AGENTS.md 规则 10）：否则能从一个人的记录反推出他的匿名内容。
+
+pub(crate) struct SubjectLogRow {
+    pub actor_id: Option<i64>,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: i64,
+    pub report_count: i32,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn subject_logs(
+    conn: &mut PgConnection,
+    user_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<SubjectLogRow>> {
+    sqlx::query_as!(
+        SubjectLogRow,
+        "SELECT actor_id, action, target_type, target_id, report_count, note, created_at
+         FROM moderation_log
+         WHERE subject_user_id = $1 AND NOT subject_anonymous
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2",
+        user_id,
+        limit
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct ReceivedStatsRow {
+    pub total: i64,
+    pub open: i64,
+    pub accepted: i64,
+    pub rejected: i64,
+}
+
+pub(crate) async fn received_stats(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<ReceivedStatsRow> {
+    sqlx::query_as!(
+        ReceivedStatsRow,
+        r#"SELECT count(*) AS "total!",
+                  count(*) FILTER (WHERE status IN ('pending', 'reviewing')) AS "open!",
+                  count(*) FILTER (WHERE status = 'accepted') AS "accepted!",
+                  count(*) FILTER (WHERE status = 'rejected') AS "rejected!"
+           FROM reports
+           WHERE owner_user_id = $1 AND NOT COALESCE((snapshot ->> 'anonymous')::boolean, FALSE)"#,
+        user_id
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) struct ReceivedRow {
+    pub target_type: String,
+    pub target_id: i64,
+    pub reason: String,
+    pub detail: Option<String>,
+    pub status: String,
+    pub resolution: Option<String>,
+    pub snapshot: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn received_reports(
+    conn: &mut PgConnection,
+    user_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<ReceivedRow>> {
+    sqlx::query_as!(
+        ReceivedRow,
+        "SELECT target_type, target_id, reason, detail, status, resolution, snapshot, created_at
+         FROM reports
+         WHERE owner_user_id = $1 AND NOT COALESCE((snapshot ->> 'anonymous')::boolean, FALSE)
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2",
+        user_id,
+        limit
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 每个业务日收到的举报条数（仪表盘趋势）。
+pub(crate) async fn daily_reports(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(created_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM reports
+           WHERE created_at >= $2 AND created_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}
+
+/// 某个版主领取了、还没结案的举报目标数。
+pub(crate) async fn claimed_open_count(
+    conn: &mut PgConnection,
+    staff_id: i64,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(DISTINCT (target_type, target_id)) AS "n!"
+           FROM reports WHERE status = 'reviewing' AND assigned_to = $1"#,
+        staff_id
+    )
+    .fetch_one(conn)
+    .await
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO post_drafts (post_id, title, body, category_id) VALUES (500, '公开帖', '新正文', 10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "61d58503dd8fd3b2bca28269b6830861425195ec495bf97357031712ea859996"
+}

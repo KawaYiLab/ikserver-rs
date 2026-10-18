@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reports (id, reporter_id, target_type, target_id, owner_user_id, reason, snapshot)\n           VALUES (710, 4, 'post', 500, 3, 'spam', '{\"title\":\"公开帖\"}'),\n                  (711, 4, 'post', 501, 3, 'spam', '{\"title\":\"匿名帖\",\"anonymous\":true}')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "132a8f665413f323bbc716cd764be524280848c5caa7040a4aa3345430f8f210"
+}

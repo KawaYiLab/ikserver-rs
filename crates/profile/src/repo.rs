@@ -100,3 +100,14 @@ pub(crate) async fn clear(conn: &mut PgConnection, user_id: i64) -> sqlx::Result
     .await?;
     Ok(())
 }
+
+/// 清空签名。返回原本是否有签名。
+pub(crate) async fn clear_bio(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE user_profiles SET bio = '', updated_at = now() WHERE user_id = $1 AND bio <> ''",
+        user_id
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}

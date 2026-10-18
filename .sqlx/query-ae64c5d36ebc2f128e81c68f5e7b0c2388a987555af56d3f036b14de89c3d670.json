@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE post_drafts SET category_id = $2 WHERE post_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ae64c5d36ebc2f128e81c68f5e7b0c2388a987555af56d3f036b14de89c3d670"
+}

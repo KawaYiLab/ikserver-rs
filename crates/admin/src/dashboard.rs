@@ -2,12 +2,12 @@
 
 use std::sync::atomic::Ordering;
 
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 use ik_auth::Operator;
 use ik_auth::admin::{self, Audit, UserCounts};
 use ik_kernel::Problem;
-use serde::Serialize;
-use utoipa::ToSchema;
+use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
 
@@ -26,6 +26,8 @@ pub struct ReportCounts {
     pub pending: i64,
     /// 复核中（已领取）的举报目标数。
     pub reviewing: i64,
+    /// 其中我领取了、还没结案的。
+    pub mine: i64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -39,7 +41,7 @@ pub struct Dashboard {
     pub ai: ik_ai::admin::AiOverview,
 }
 
-pub async fn dashboard(state: &AdminState) -> Result<Dashboard, Problem> {
+pub async fn dashboard(state: &AdminState, op: &Operator) -> Result<Dashboard, Problem> {
     let (start, _) = ik_kernel::time::biz_day_range(Utc::now());
     let mut conn = state.db.acquire().await?;
     let users = admin::user_counts(&mut conn, start).await?;
@@ -47,6 +49,7 @@ pub async fn dashboard(state: &AdminState) -> Result<Dashboard, Problem> {
     let (comments, comments_today) = ik_comments::interop::comment_counts(&mut conn, start).await?;
     drop(conn);
     let (pending, reviewing) = ik_moderation::admin::open_counts(&state.moderation).await?;
+    let mine = ik_moderation::admin::claimed_by(&state.moderation, op.user_id()).await?;
     Ok(Dashboard {
         users,
         posts: CountPair {
@@ -57,9 +60,52 @@ pub async fn dashboard(state: &AdminState) -> Result<Dashboard, Problem> {
             total: comments,
             today: comments_today,
         },
-        reports: ReportCounts { pending, reviewing },
+        reports: ReportCounts {
+            pending,
+            reviewing,
+            mine,
+        },
         exam: ik_exam::admin::stats(&state.exam).await?,
         ai: ik_ai::admin::overview(&state.ai).await?,
+    })
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct TrendQuery {
+    /// 7（默认）或 30；其他值按 7。
+    pub days: Option<u32>,
+}
+
+/// 按业务日（北京时间 04:00 切日）的趋势，旧的在前；最后一天是今天（还没过完）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Trends {
+    pub days: Vec<NaiveDate>,
+    /// 新注册的账号。
+    pub users: Vec<i64>,
+    /// 首次发布的帖子。
+    pub posts: Vec<i64>,
+    pub comments: Vec<i64>,
+    /// 收到的举报条数。
+    pub reports: Vec<i64>,
+}
+
+pub async fn trends(state: &AdminState, query: TrendQuery) -> Result<Trends, Problem> {
+    let days = if query.days == Some(30) { 30 } else { 7 };
+    let today = ik_kernel::time::biz_day(Utc::now());
+    let bounds = ik_kernel::time::biz_day_bounds(today, days);
+    let first = today - chrono::Duration::days(i64::from(days - 1));
+    let mut conn = state.db.acquire().await?;
+    Ok(Trends {
+        days: (0..i64::from(days))
+            .map(|i| first + chrono::Duration::days(i))
+            .collect(),
+        users: admin::daily_signups(&mut conn, &bounds).await?,
+        posts: ik_content::interop::daily_posts(&mut conn, &bounds).await?,
+        comments: ik_comments::interop::daily_comments(&mut conn, &bounds).await?,
+        reports: ik_moderation::admin::daily_reports(&mut conn, &bounds).await?,
     })
 }
 

@@ -1,0 +1,217 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id, p.title, p.category_id, c.name AS \"category_name?\", p.author_id,\n                  p.is_anonymous, p.anonymous_seed, p.first_published_at, p.edited_at, p.pinned_at,\n                  p.hidden_at, p.hidden_by, p.hidden_reason, p.view_count, p.like_count, p.comment_count\n           FROM posts p\n           LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.status = 'published'\n             AND ($1::text IS NULL OR p.title ILIKE $1 OR p.id = $2)\n             AND ($3::bigint IS NULL OR p.category_id = $3)\n             AND ($4::bigint IS NULL OR (p.author_id = $4 AND NOT p.is_anonymous))\n             AND ($5::bool IS NULL OR (p.hidden_at IS NOT NULL) = $5)\n             AND ($6::text IS NULL OR p.hidden_reason = $6)\n             AND ($7::bool IS NULL OR (p.pinned_at IS NOT NULL) = $7)\n             AND ($8::bool IS NULL OR p.is_anonymous = $8)\n           ORDER BY p.first_published_at DESC NULLS LAST, p.id DESC\n           LIMIT $9 OFFSET $10",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "category_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "category_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "category_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "categories",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "author_id"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "is_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "is_anonymous"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "anonymous_seed",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "anonymous_seed"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "first_published_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "first_published_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "edited_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "edited_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "pinned_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "pinned_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "hidden_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "hidden_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_by"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "hidden_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "hidden_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "view_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "view_count"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "like_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "like_count"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "comment_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "comment_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "90631506166d783a99cf8187e8dc8d2209109ded4a1fe94c9679aa4eea24a5a6"
+}

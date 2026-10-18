@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, RefreshCw } from '@lucide/vue'
+import { Plus } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -21,7 +21,7 @@ const { isAdmin } = useSession()
 const { run, failure } = useNotify()
 const confirm = useConfirm()
 
-const tab = ref<'avatars' | 'cards'>('avatars')
+const tab = useQueryParam<'avatars' | 'cards'>('tab', 'avatars')
 const avatars = ref<Avatar[] | null>(null)
 const cards = ref<BusinessCard[] | null>(null)
 const loading = ref(false)
@@ -116,9 +116,7 @@ async function remove(type: Draft['type'], item: Avatar | BusinessCard) {
 <template>
   <div>
     <AdminPageHeader title="装扮" description="系统头像与论坛名片的目录；用户在个人设置里装备。图片需要先上传。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading" @click="load" />
       <Button v-if="isAdmin" size="sm" @click="edit(tab === 'avatars' ? 'avatar' : 'card')">
         <Plus class="size-4" />{{ tab === 'avatars' ? '新建头像' : '新建名片' }}
       </Button>

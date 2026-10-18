@@ -375,6 +375,48 @@ pub async fn delete_post(
     Ok(true)
 }
 
+/// 后台直接处置时锁住的帖子（AGENTS.md 规则 6：先锁再判断状态）。
+#[derive(Debug, Clone)]
+pub struct ModerationTarget {
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub title: String,
+    pub published: bool,
+    /// 隐藏原因；未隐藏为 None。
+    pub hidden_reason: Option<String>,
+}
+
+/// 锁住帖子行并返回处置需要的信息；不存在时为 None。
+pub async fn lock_moderation_target(
+    conn: &mut PgConnection,
+    post_id: i64,
+) -> Result<Option<ModerationTarget>, Problem> {
+    Ok(repo::lock_moderation_target(conn, post_id)
+        .await?
+        .map(|row| ModerationTarget {
+            author_id: row.author_id,
+            is_anonymous: row.is_anonymous,
+            title: row.title,
+            published: row.published,
+            hidden_reason: if row.hidden {
+                Some(row.hidden_reason.unwrap_or_default())
+            } else {
+                None
+            },
+        }))
+}
+
+/// 帖子标题（不论是否公开、是否草稿；已删除的不出现）。后台评论列表用。
+pub async fn post_titles(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, String>, Problem> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    Ok(repo::titles(conn, ids).await?.into_iter().collect())
+}
+
 /// 帖子是否隐藏（按 id；已删除的不出现）。审核后台展示目标状态用。
 pub async fn hidden_states(
     conn: &mut PgConnection,
@@ -396,4 +438,16 @@ pub async fn post_counts(
     since: DateTime<Utc>,
 ) -> Result<(i64, i64), Problem> {
     Ok(repo::post_counts(conn, since).await?)
+}
+
+/// 每个业务日首次发布的帖子数，按 `bounds` 分桶（仪表盘趋势）。
+pub async fn daily_posts(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> Result<Vec<i64>, Problem> {
+    let rows = repo::daily_first_published(conn, bounds).await?;
+    Ok(ik_kernel::time::fill_buckets(
+        rows,
+        bounds.len().saturating_sub(1),
+    ))
 }

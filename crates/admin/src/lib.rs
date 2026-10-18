@@ -8,10 +8,11 @@ mod dashboard;
 mod routes;
 mod users;
 
-pub use dashboard::{Dashboard, SearchStatus};
+pub use dashboard::{Dashboard, SearchStatus, TrendQuery, Trends};
 pub use routes::router;
 pub use users::{
-    AdminUserDetail, AiAgentUpdate, DennyAdjustment, EconomyResult, ExpGrant, RoleUpdate,
+    AdminUserDetail, AiAgentUpdate, DennyAdjustment, EconomyResult, ExpGrant, LedgerQuery,
+    ProfileReset, ProfileResetResult, RevokeResult, RoleUpdate, UsernameUpdate,
 };
 
 use std::sync::Arc;

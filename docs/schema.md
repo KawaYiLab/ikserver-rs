@@ -285,6 +285,29 @@
 - 隐藏原因（`posts.hidden_reason`、`comments.hidden_reason`）：`auto_report`（多人举报自动隐藏，驳回时恢复）、
   `moderator`（版主隐藏）。
 
+## 管理后台的内容管理（`20261103000001_admin_content_management.sql`）
+
+- `posts_hidden_idx`、`comments_hidden_idx`：`(hidden_at DESC, id DESC) WHERE hidden_at IS NOT NULL`，后台「只看已隐藏」用。
+- `moderation_log.action` 增加 `unhide_content`（后台直接恢复可见）。版主不经举报直接隐藏、删除同样记 `hide_content`、
+  `delete_content`，`report_count = 0`。
+- `moderation_log.subject_user_id` / `subject_anonymous`：被处置的人（内容作者或被处置的用户）以及处置的是不是匿名内容。
+  匿名内容同样记录真实作者（与 `reports.owner_user_id` 一样只存不出），按人查询处罚记录时必须排除
+  `subject_anonymous`（AGENTS.md 规则 10）。旧记录在迁移里回填：用户类取 `target_id`，内容类取同一目标最近一条举报的
+  `owner_user_id` 与快照里的匿名标记，查不到的保持 NULL。索引 `moderation_log_subject_idx (subject_user_id, created_at DESC)`。
+
+## 管理后台的账号详情（`20261104000001_admin_user_detail.sql`）
+
+- `exp_logs_user_created_idx (user_id, created_at DESC, id DESC)`：账号详情的经验流水按时间翻页
+  （原有的 `(user_id, biz_day, bucket)` 只服务每日上限统计）。
+- `reports_owner_idx (owner_user_id, created_at DESC) WHERE owner_user_id IS NOT NULL`：某人收到的举报。
+  查询时按 `snapshot ->> 'anonymous'` 排除匿名内容的举报（AGENTS.md 规则 10）。
+
+## 管理后台工作台的趋势（`20261105000001_admin_dashboard_trends.sql`）
+
+- `users_created_idx`、`posts_first_published_idx`（部分索引）、`reports_created_idx`：按业务日统计新增账号、首次发布的帖子、
+  举报（评论复用 `comments_recent_idx`）。分桶用 `width_bucket(ts, $bounds)`，边界由 `ik_kernel::time::biz_day_bounds`
+  算好传进去，SQL 里不写时区偏移。
+
 ## AI 助手（`20261027000001_ai.sql`）
 
 - 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。

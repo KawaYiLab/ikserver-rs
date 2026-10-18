@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, RefreshCw } from '@lucide/vue'
+import { Plus } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -171,9 +171,7 @@ async function removeGroup(item: Group) {
 <template>
   <div>
     <AdminPageHeader title="表情包" description="评论里写作 :代码:，客户端按清单显示成图片。下架的表情不出现在面板里，旧评论照常显示。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading" @click="load" />
       <template v-if="isAdmin">
         <Button variant="outline" size="sm" @click="editGroup()">
           <Plus class="size-4" />新建分组

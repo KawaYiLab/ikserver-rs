@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT target_id, details FROM admin_audit_log WHERE action = 'content.post.unhide'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "target_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "admin_audit_log",
+            "name": "target_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "details",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "admin_audit_log",
+            "name": "details"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "b43e7d3b508a8d40c05ce90464642e2e1d667689d73e2d18673aea118cb536e6"
+}

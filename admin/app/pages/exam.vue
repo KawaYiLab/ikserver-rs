@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { watchDebounced } from '@vueuse/core'
-import { Plus, RefreshCw, Trash2, X } from '@lucide/vue'
+import { Pencil, Plus, Trash2, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -13,79 +12,55 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
+import type { RowAction } from '~/lib/actions'
 import { formatTime, kindLabel } from '~/lib/format'
 
 type Question = Schemas['AdminQuestion']
 type Kind = Schemas['QuestionKind']
 
 const { isAdmin } = useSession()
-const { run, failure, success } = useNotify()
+const { run, success } = useNotify()
 const confirm = useConfirm()
+const badges = useBadges()
 
 const stats = ref<Schemas['QuestionStats'] | null>(null)
-const kind = ref('all')
-const enabled = ref('all')
-const q = ref('')
-const page = ref(1)
-const limit = 20
-const result = ref<Schemas['Paged_AdminQuestion'] | null>(null)
-const loading = ref(false)
-const selected = ref<Set<string>>(new Set())
-
-async function load() {
-  loading.value = true
-  try {
-    const [list, counts] = await Promise.all([
+const list = useListQuery({
+  filters: { kind: 'all', enabled: 'all', q: '' },
+  text: ['q'],
+  fetch: async (f, page) => {
+    const [questions, counts] = await Promise.all([
       unwrap(api.GET('/v1/admin/exam/questions', {
         params: {
           query: {
-            type: kind.value === 'all' ? undefined : kind.value,
-            enabled: enabled.value === 'all' ? undefined : enabled.value === 'on',
-            q: q.value.trim() || undefined,
-            page: page.value,
-            limit,
+            type: optional(f.kind),
+            enabled: optionalBool(f.enabled, 'on'),
+            q: optional(f.q),
+            page,
+            limit: 20,
           },
         },
       })),
       unwrap(api.GET('/v1/admin/exam/questions/stats')),
     ])
-    result.value = list
     stats.value = counts
-    selected.value = new Set()
-  }
-  catch (error) {
-    failure(error)
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-watch([kind, enabled], () => {
-  page.value = 1
-  load()
+    return questions
+  },
 })
-watchDebounced(q, () => {
-  page.value = 1
-  load()
-}, { debounce: 400 })
-onMounted(load)
+const { filters, result, loading, selection } = list
+const select = useSelection(selection, () => result.value?.items.map(item => item.id) ?? [])
+
+function load() {
+  list.refresh()
+  badges.refresh()
+}
 
 const short = computed(() => !!stats.value && stats.value.enabled < stats.value.questionCount)
-const allSelected = computed(() => {
-  const items = result.value?.items ?? []
-  return items.length > 0 && items.every(item => selected.value.has(item.id))
-})
 
-function toggleAll(on: boolean | 'indeterminate') {
-  selected.value = on === true ? new Set(result.value?.items.map(item => item.id)) : new Set()
-}
-
-function toggleOne(id: string, on: boolean | 'indeterminate') {
-  const next = new Set(selected.value)
-  if (on === true) next.add(id)
-  else next.delete(id)
-  selected.value = next
+function rowActions(question: Question): RowAction[] {
+  return [
+    { label: '编辑', icon: Pencil, onSelect: () => edit(question) },
+    { label: '删除', icon: Trash2, destructive: true, onSelect: () => remove([question.id]) },
+  ]
 }
 
 async function toggle(question: Question) {
@@ -229,9 +204,7 @@ async function save() {
 <template>
   <div>
     <AdminPageHeader title="考试题库" description="入站考试从启用的题目里按权重抽题；考卷保存题目快照，改题不影响进行中的考试。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading" @click="load" />
       <Button v-if="isAdmin" size="sm" @click="edit()">
         <Plus class="size-4" />新建题目
       </Button>
@@ -251,14 +224,14 @@ async function save() {
     </div>
 
     <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-      <Select v-model="kind">
+      <Select v-model="filters.kind">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部题型</SelectItem>
           <SelectItem v-for="(label, key) in kindLabel" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Select v-model="enabled">
+      <Select v-model="filters.enabled">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部状态</SelectItem>
@@ -266,14 +239,7 @@ async function save() {
           <SelectItem value="off">已停用</SelectItem>
         </SelectContent>
       </Select>
-      <Input v-model="q" placeholder="搜索题干或标签" class="lg:col-span-2" />
-    </div>
-
-    <div v-if="isAdmin && selected.size" class="mb-3 flex items-center gap-3 text-sm">
-      <span>已选 {{ selected.size }} 题</span>
-      <Button size="sm" variant="destructive" @click="remove([...selected])">
-        <Trash2 class="size-4" />批量删除
-      </Button>
+      <Input v-model="filters.q" placeholder="搜索题干或标签" class="lg:col-span-2" />
     </div>
 
     <div class="rounded-md border">
@@ -281,7 +247,7 @@ async function save() {
         <TableHeader>
           <TableRow>
             <TableHead v-if="isAdmin" class="w-10">
-              <Checkbox :model-value="allSelected" aria-label="全选" @update:model-value="toggleAll" />
+              <Checkbox :model-value="select.all.value" aria-label="全选本页" @update:model-value="select.toggleAll" />
             </TableHead>
             <TableHead>题干</TableHead>
             <TableHead class="hidden md:table-cell">题型</TableHead>
@@ -289,13 +255,13 @@ async function save() {
             <TableHead class="hidden md:table-cell text-right">权重</TableHead>
             <TableHead>启用</TableHead>
             <TableHead class="hidden lg:table-cell">更新时间</TableHead>
-            <TableHead v-if="isAdmin" class="text-right">操作</TableHead>
+            <TableHead v-if="isAdmin" class="w-10"><span class="sr-only">操作</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           <TableRow v-for="item in result?.items ?? []" :key="item.id">
             <TableCell v-if="isAdmin">
-              <Checkbox :model-value="selected.has(item.id)" aria-label="选择" @update:model-value="(v) => toggleOne(item.id, v)" />
+              <Checkbox :model-value="select.has(item.id)" aria-label="选择" @update:model-value="(v) => select.toggle(item.id, v)" />
             </TableCell>
             <TableCell class="max-w-md">
               <button class="line-clamp-2 text-left hover:underline" @click="edit(item)">{{ item.question }}</button>
@@ -311,18 +277,23 @@ async function save() {
               <Badge v-else :variant="item.enabled ? 'default' : 'outline'">{{ item.enabled ? '启用' : '停用' }}</Badge>
             </TableCell>
             <TableCell class="hidden lg:table-cell">{{ formatTime(item.updatedAt) }}</TableCell>
-            <TableCell v-if="isAdmin" class="space-x-1 text-right whitespace-nowrap">
-              <Button size="sm" variant="outline" @click="edit(item)">编辑</Button>
-              <Button size="sm" variant="ghost" class="text-destructive" @click="remove([item.id])">删除</Button>
-            </TableCell>
+            <TableCell v-if="isAdmin" class="text-right"><AdminRowActions :actions="rowActions(item)" /></TableCell>
           </TableRow>
-          <TableRow v-if="result && result.items.length === 0">
-            <TableCell :colspan="isAdmin ? 8 : 6" class="py-10 text-center text-muted-foreground">没有符合条件的题目</TableCell>
-          </TableRow>
+          <AdminListState
+            :colspan="isAdmin ? 8 : 6" :loading="loading" :failed="list.failed.value" :filtered="list.active.value"
+            :empty="!result?.items.length" empty-text="题库还是空的"
+            @retry="load" @reset="list.reset"
+          />
         </TableBody>
       </Table>
     </div>
-    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="题" @change="(p) => { page = p; load() }" />
+    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="题" @change="list.setPage" />
+
+    <AdminBulkBar v-if="isAdmin" :count="selection.size" unit="题" @clear="select.clear">
+      <Button size="sm" variant="destructive" @click="remove([...selection])">
+        <Trash2 class="size-4" />批量删除
+      </Button>
+    </AdminBulkBar>
 
     <Dialog :open="!!draft" @update:open="(v) => { if (!v) draft = null }">
       <DialogScrollContent v-if="draft" class="sm:max-w-2xl">

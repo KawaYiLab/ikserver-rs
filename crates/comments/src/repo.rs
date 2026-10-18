@@ -703,3 +703,131 @@ pub(crate) async fn comment_counts(
     .await?;
     Ok((row.total, row.since))
 }
+
+// ---------- 管理后台：评论管理 ----------
+
+pub(crate) struct AdminCommentFilter<'a> {
+    /// 正文包含（ILIKE 模式，已转义）。
+    pub pattern: Option<&'a str>,
+    /// 关键词是数字时也按评论 id 匹配。
+    pub id: Option<i64>,
+    pub post_id: Option<i64>,
+    /// 按作者筛选时排除匿名评论（AGENTS.md 规则 10）。
+    pub author_id: Option<i64>,
+    pub hidden: Option<bool>,
+}
+
+pub(crate) struct AdminCommentRow {
+    pub id: i64,
+    pub post_id: i64,
+    pub parent_id: Option<i64>,
+    pub floor: Option<i32>,
+    pub author_id: i64,
+    pub body: String,
+    pub image_ids: Vec<i64>,
+    pub is_anonymous: bool,
+    pub anonymous_seed: Option<String>,
+    pub like_count: i32,
+    pub pinned_at: Option<DateTime<Utc>>,
+    pub accepted_at: Option<DateTime<Utc>>,
+    pub hidden_at: Option<DateTime<Utc>>,
+    pub hidden_by: Option<i64>,
+    pub hidden_reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn count_admin_comments(
+    conn: &mut PgConnection,
+    f: &AdminCommentFilter<'_>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM comments c
+           WHERE ($1::text IS NULL OR c.body ILIKE $1 OR c.id = $2)
+             AND ($3::bigint IS NULL OR c.post_id = $3)
+             AND ($4::bigint IS NULL OR (c.author_id = $4 AND NOT c.is_anonymous))
+             AND ($5::bool IS NULL OR (c.hidden_at IS NOT NULL) = $5)"#,
+        f.pattern,
+        f.id,
+        f.post_id,
+        f.author_id,
+        f.hidden,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 评论（含隐藏的），新的在前。
+pub(crate) async fn admin_comments(
+    conn: &mut PgConnection,
+    f: &AdminCommentFilter<'_>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AdminCommentRow>> {
+    sqlx::query_as!(
+        AdminCommentRow,
+        r#"SELECT c.id, c.post_id, c.parent_id, c.floor, c.author_id, c.body, c.image_ids, c.is_anonymous,
+                  c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.hidden_by,
+                  c.hidden_reason, c.created_at
+           FROM comments c
+           WHERE ($1::text IS NULL OR c.body ILIKE $1 OR c.id = $2)
+             AND ($3::bigint IS NULL OR c.post_id = $3)
+             AND ($4::bigint IS NULL OR (c.author_id = $4 AND NOT c.is_anonymous))
+             AND ($5::bool IS NULL OR (c.hidden_at IS NOT NULL) = $5)
+           ORDER BY c.created_at DESC, c.id DESC
+           LIMIT $6 OFFSET $7"#,
+        f.pattern,
+        f.id,
+        f.post_id,
+        f.author_id,
+        f.hidden,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct ModerationTargetRow {
+    pub author_id: i64,
+    pub post_id: i64,
+    pub is_anonymous: bool,
+    pub hidden: bool,
+    pub hidden_reason: Option<String>,
+}
+
+/// 审核用：锁住评论行，返回作者、所属帖子、是否匿名与隐藏状态。调用方先锁帖子行（与删除评论同序）。
+pub(crate) async fn lock_moderation_target(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<ModerationTargetRow>> {
+    sqlx::query_as!(
+        ModerationTargetRow,
+        r#"SELECT author_id, post_id, is_anonymous, hidden_at IS NOT NULL AS "hidden!", hidden_reason
+           FROM comments WHERE id = $1 FOR UPDATE"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 每个业务日发表的评论数（仪表盘趋势）。
+pub(crate) async fn daily_comments(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(created_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM comments
+           WHERE created_at >= $2 AND created_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}

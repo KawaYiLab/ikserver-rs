@@ -1872,3 +1872,203 @@ pub(crate) async fn post_counts(
     .await?;
     Ok((row.total, row.since))
 }
+
+// ---------- 管理后台：帖子管理 ----------
+
+pub(crate) struct AdminPostFilter<'a> {
+    /// 标题包含（ILIKE 模式，已转义）。
+    pub pattern: Option<&'a str>,
+    /// 关键词是数字时也按帖子 id 匹配。
+    pub id: Option<i64>,
+    pub category_id: Option<i64>,
+    /// 按作者筛选时排除匿名帖（AGENTS.md 规则 10）。
+    pub author_id: Option<i64>,
+    pub hidden: Option<bool>,
+    pub hidden_reason: Option<&'a str>,
+    pub pinned: Option<bool>,
+    pub anonymous: Option<bool>,
+}
+
+pub(crate) struct AdminPostRow {
+    pub id: i64,
+    pub title: String,
+    pub category_id: Option<i64>,
+    pub category_name: Option<String>,
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub anonymous_seed: Option<String>,
+    pub first_published_at: Option<DateTime<Utc>>,
+    pub edited_at: Option<DateTime<Utc>>,
+    pub pinned_at: Option<DateTime<Utc>>,
+    pub hidden_at: Option<DateTime<Utc>>,
+    pub hidden_by: Option<i64>,
+    pub hidden_reason: Option<String>,
+    pub view_count: i64,
+    pub like_count: i32,
+    pub comment_count: i32,
+}
+
+pub(crate) async fn count_admin_posts(
+    conn: &mut PgConnection,
+    f: &AdminPostFilter<'_>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM posts p
+           WHERE p.status = 'published'
+             AND ($1::text IS NULL OR p.title ILIKE $1 OR p.id = $2)
+             AND ($3::bigint IS NULL OR p.category_id = $3)
+             AND ($4::bigint IS NULL OR (p.author_id = $4 AND NOT p.is_anonymous))
+             AND ($5::bool IS NULL OR (p.hidden_at IS NOT NULL) = $5)
+             AND ($6::text IS NULL OR p.hidden_reason = $6)
+             AND ($7::bool IS NULL OR (p.pinned_at IS NOT NULL) = $7)
+             AND ($8::bool IS NULL OR p.is_anonymous = $8)"#,
+        f.pattern,
+        f.id,
+        f.category_id,
+        f.author_id,
+        f.hidden,
+        f.hidden_reason,
+        f.pinned,
+        f.anonymous,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 已发布的帖子（含隐藏的），新发的在前。草稿是作者私有的，不列。
+pub(crate) async fn admin_posts(
+    conn: &mut PgConnection,
+    f: &AdminPostFilter<'_>,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<AdminPostRow>> {
+    sqlx::query_as!(
+        AdminPostRow,
+        r#"SELECT p.id, p.title, p.category_id, c.name AS "category_name?", p.author_id,
+                  p.is_anonymous, p.anonymous_seed, p.first_published_at, p.edited_at, p.pinned_at,
+                  p.hidden_at, p.hidden_by, p.hidden_reason, p.view_count, p.like_count, p.comment_count
+           FROM posts p
+           LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.status = 'published'
+             AND ($1::text IS NULL OR p.title ILIKE $1 OR p.id = $2)
+             AND ($3::bigint IS NULL OR p.category_id = $3)
+             AND ($4::bigint IS NULL OR (p.author_id = $4 AND NOT p.is_anonymous))
+             AND ($5::bool IS NULL OR (p.hidden_at IS NOT NULL) = $5)
+             AND ($6::text IS NULL OR p.hidden_reason = $6)
+             AND ($7::bool IS NULL OR (p.pinned_at IS NOT NULL) = $7)
+             AND ($8::bool IS NULL OR p.is_anonymous = $8)
+           ORDER BY p.first_published_at DESC NULLS LAST, p.id DESC
+           LIMIT $9 OFFSET $10"#,
+        f.pattern,
+        f.id,
+        f.category_id,
+        f.author_id,
+        f.hidden,
+        f.hidden_reason,
+        f.pinned,
+        f.anonymous,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 锁住已发布的帖子，返回当前分区与是否公开。不存在或是草稿时为 None。
+pub(crate) async fn lock_published(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<(Option<i64>, bool)>> {
+    let row = sqlx::query!(
+        r#"SELECT category_id, hidden_at IS NULL AS "public!" FROM posts
+           WHERE id = $1 AND status = 'published' FOR UPDATE"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|r| (r.category_id, r.public)))
+}
+
+/// 把帖子移到另一个分区。待发布的修改（`post_drafts`）一并改，否则作者下次发布会改回去。
+/// 刷新 `updated_at`，搜索增量扫描据此更新索引里的分区。
+pub(crate) async fn move_post(
+    conn: &mut PgConnection,
+    id: i64,
+    category_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE posts SET category_id = $2, updated_at = $3 WHERE id = $1",
+        id,
+        category_id,
+        now,
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!(
+        "UPDATE post_drafts SET category_id = $2 WHERE post_id = $1",
+        id,
+        category_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 帖子标题（不论是否公开），评论管理列表用。
+pub(crate) async fn titles(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> sqlx::Result<Vec<(i64, String)>> {
+    let rows = sqlx::query!("SELECT id, title FROM posts WHERE id = ANY($1)", ids)
+        .fetch_all(conn)
+        .await?;
+    Ok(rows.into_iter().map(|r| (r.id, r.title)).collect())
+}
+
+/// 审核用：锁住帖子行，返回作者、是否匿名、标题、隐藏原因（未隐藏为 None）。
+pub(crate) async fn lock_moderation_target(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<ModerationTargetRow>> {
+    sqlx::query_as!(
+        ModerationTargetRow,
+        r#"SELECT author_id, is_anonymous, title, status = 'published' AS "published!",
+                  hidden_at IS NOT NULL AS "hidden!", hidden_reason
+           FROM posts WHERE id = $1 FOR UPDATE"#,
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct ModerationTargetRow {
+    pub author_id: i64,
+    pub is_anonymous: bool,
+    pub title: String,
+    pub published: bool,
+    pub hidden: bool,
+    pub hidden_reason: Option<String>,
+}
+
+/// 每个业务日首次发布的帖子数（仪表盘趋势）。
+pub(crate) async fn daily_first_published(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(first_published_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM posts
+           WHERE first_published_at >= $2 AND first_published_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}

@@ -1319,3 +1319,94 @@ pub(crate) async fn user_counts(
     .fetch_one(conn)
     .await
 }
+
+// ---------- 管理后台：账号详情 ----------
+
+/// 最近一次活跃（全部会话里最新的 `last_seen_at`，含已吊销的）。
+pub(crate) async fn last_seen(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar!(
+        "SELECT max(last_seen_at) FROM sessions WHERE user_id = $1",
+        user_id
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) struct LockedAccountRow {
+    pub username: String,
+    pub status: String,
+    pub role: Role,
+}
+
+/// 锁住账号行（不论状态）。
+pub(crate) async fn lock_account(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<Option<LockedAccountRow>> {
+    sqlx::query_as!(
+        LockedAccountRow,
+        r#"SELECT username, status, role AS "role: Role" FROM users WHERE id = $1 FOR UPDATE"#,
+        user_id
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+/// 后台强制改名：正常与封禁中的账号都能改（注销、合并的不改）。
+pub(crate) async fn force_rename(
+    conn: &mut PgConnection,
+    id: i64,
+    username: &str,
+    now: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET username = $2, updated_at = $3
+         WHERE id = $1 AND status IN ('active', 'blocked')",
+        id,
+        username,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 后台清除自定义头像：正常与封禁中的账号都能清。返回是否原本有自定义头像。
+pub(crate) async fn force_clear_avatar(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "UPDATE users SET avatar_media_id = NULL
+         WHERE id = $1 AND status IN ('active', 'blocked') AND avatar_media_id IS NOT NULL",
+        user_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// 每个业务日注册的账号数（仪表盘趋势；`bounds` 见 `ik_kernel::time::biz_day_bounds`）。
+pub(crate) async fn daily_signups(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(created_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM users
+           WHERE created_at >= $2 AND created_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}

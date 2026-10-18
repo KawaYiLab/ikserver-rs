@@ -24,6 +24,8 @@
   --destructive-foreground: oklch(0.985 0 0);
   --warning: oklch(0.769 0.188 70.08);
   --success: oklch(0.627 0.194 149.214);
+  /* 图表单系列色（dataviz 参考调色板第 1 槽，已按浅 / 深两种底色校验对比度）。 */
+  --chart-1: #2a78d6;
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
@@ -50,6 +52,7 @@
   --destructive-foreground: oklch(0.985 0 0);
   --warning: oklch(0.828 0.189 84.429);
   --success: oklch(0.723 0.219 149.579);
+  --chart-1: #3987e5;
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
@@ -80,6 +83,7 @@
   --color-destructive-foreground: var(--destructive-foreground);
   --color-warning: var(--warning);
   --color-success: var(--success);
+  --color-chart-1: var(--chart-1);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);

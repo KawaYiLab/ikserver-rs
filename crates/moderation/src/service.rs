@@ -343,6 +343,8 @@ async fn auto_hide(
             target_id,
             report_count: i32::try_from(moved).unwrap_or(i32::MAX),
             note: None,
+            subject_user_id: Some(target.owner_user_id),
+            subject_anonymous: target.snapshot.anonymous,
             now,
         },
     )
