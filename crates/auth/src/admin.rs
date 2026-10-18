@@ -541,3 +541,15 @@ pub async fn lock_for_profile_reset(
 pub async fn clear_avatar(conn: &mut PgConnection, user_id: i64) -> Result<bool, Problem> {
     Ok(repo::force_clear_avatar(conn, user_id).await?)
 }
+
+/// 每个业务日注册的账号数，按 `bounds` 分桶（仪表盘趋势）。
+pub async fn daily_signups(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> Result<Vec<i64>, Problem> {
+    let rows = repo::daily_signups(conn, bounds).await?;
+    Ok(ik_kernel::time::fill_buckets(
+        rows,
+        bounds.len().saturating_sub(1),
+    ))
+}

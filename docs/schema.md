@@ -302,6 +302,12 @@
 - `reports_owner_idx (owner_user_id, created_at DESC) WHERE owner_user_id IS NOT NULL`：某人收到的举报。
   查询时按 `snapshot ->> 'anonymous'` 排除匿名内容的举报（AGENTS.md 规则 10）。
 
+## 管理后台工作台的趋势（`20261105000001_admin_dashboard_trends.sql`）
+
+- `users_created_idx`、`posts_first_published_idx`（部分索引）、`reports_created_idx`：按业务日统计新增账号、首次发布的帖子、
+  举报（评论复用 `comments_recent_idx`）。分桶用 `width_bucket(ts, $bounds)`，边界由 `ik_kernel::time::biz_day_bounds`
+  算好传进去，SQL 里不写时区偏移。
+
 ## AI 助手（`20261027000001_ai.sql`）
 
 - 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。

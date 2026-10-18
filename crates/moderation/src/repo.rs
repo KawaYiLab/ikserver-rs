@@ -490,3 +490,39 @@ pub(crate) async fn received_reports(
     .fetch_all(conn)
     .await
 }
+
+/// 每个业务日收到的举报条数（仪表盘趋势）。
+pub(crate) async fn daily_reports(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(created_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM reports
+           WHERE created_at >= $2 AND created_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}
+
+/// 某个版主领取了、还没结案的举报目标数。
+pub(crate) async fn claimed_open_count(
+    conn: &mut PgConnection,
+    staff_id: i64,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(DISTINCT (target_type, target_id)) AS "n!"
+           FROM reports WHERE status = 'reviewing' AND assigned_to = $1"#,
+        staff_id
+    )
+    .fetch_one(conn)
+    .await
+}

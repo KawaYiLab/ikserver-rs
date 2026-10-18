@@ -1259,6 +1259,56 @@
         ]
       }
     },
+    "/v1/admin/dashboard/trends": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "仪表盘趋势：最近 7 或 30 个业务日每天的新增账号、首次发布的帖子、评论、举报",
+        "operationId": "get_trends",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "description": "7（默认）或 30；其他值按 7。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trends"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/emotes": {
       "get": {
         "tags": [
@@ -20034,9 +20084,15 @@
         "type": "object",
         "required": [
           "pending",
-          "reviewing"
+          "reviewing",
+          "mine"
         ],
         "properties": {
+          "mine": {
+            "type": "integer",
+            "format": "int64",
+            "description": "其中我领取了、还没结案的。"
+          },
           "pending": {
             "type": "integer",
             "format": "int64",
@@ -21496,6 +21552,57 @@
           }
         ],
         "description": "一级评论 + 前 3 条回复。"
+      },
+      "Trends": {
+        "type": "object",
+        "description": "按业务日（北京时间 04:00 切日）的趋势，旧的在前；最后一天是今天（还没过完）。",
+        "required": [
+          "days",
+          "users",
+          "posts",
+          "comments",
+          "reports"
+        ],
+        "properties": {
+          "comments": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          "days": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          "posts": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "首次发布的帖子。"
+          },
+          "reports": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "收到的举报条数。"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "新注册的账号。"
+          }
+        }
       },
       "TripleResult": {
         "type": "object",

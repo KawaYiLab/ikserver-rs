@@ -1388,3 +1388,25 @@ pub(crate) async fn force_clear_avatar(
     .await?;
     Ok(result.rows_affected() > 0)
 }
+
+/// 每个业务日注册的账号数（仪表盘趋势；`bounds` 见 `ik_kernel::time::biz_day_bounds`）。
+pub(crate) async fn daily_signups(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(created_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM users
+           WHERE created_at >= $2 AND created_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}

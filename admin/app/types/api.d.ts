@@ -314,6 +314,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/dashboard/trends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 仪表盘趋势：最近 7 或 30 个业务日每天的新增账号、首次发布的帖子、评论、举报 */
+        get: operations["get_trends"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/emotes": {
         parameters: {
             query?: never;
@@ -5941,6 +5958,11 @@ export interface components {
         ReportCounts: {
             /**
              * Format: int64
+             * @description 其中我领取了、还没结案的。
+             */
+            mine: number;
+            /**
+             * Format: int64
              * @description 待处理的举报目标数。
              */
             pending: number;
@@ -6388,6 +6410,17 @@ export interface components {
              * @description 可见回复总数。
              */
             replyCount: number;
+        };
+        /** @description 按业务日（北京时间 04:00 切日）的趋势，旧的在前；最后一天是今天（还没过完）。 */
+        Trends: {
+            comments: number[];
+            days: string[];
+            /** @description 首次发布的帖子。 */
+            posts: number[];
+            /** @description 收到的举报条数。 */
+            reports: number[];
+            /** @description 新注册的账号。 */
+            users: number[];
         };
         /** @description 一键三连：点赞、收藏一定成功（已有则保持）；投币失败不影响前两步，原因见 `dennyError`。 */
         TripleResult: {
@@ -7345,6 +7378,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Dashboard"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_trends: {
+        parameters: {
+            query?: {
+                /** @description 7（默认）或 30；其他值按 7。 */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trends"];
                 };
             };
             403: {

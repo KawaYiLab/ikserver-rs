@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO posts (id, author_id, title, body, status, published_at, first_published_at, bumped_at)\n         VALUES (800, 3, '昨天的帖', '正文', 'published', now() - interval '1 day',\n                 now() - interval '1 day', now() - interval '1 day')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "71d8b8f8dc60b54d4d31f45583cb9bbf3900f6f0856d3a50b726d39d0e7b3f98"
+}

@@ -399,3 +399,15 @@ pub async fn comment_counts(
 ) -> Result<(i64, i64), Problem> {
     Ok(repo::comment_counts(conn, since).await?)
 }
+
+/// 每个业务日发表的评论数，按 `bounds` 分桶（仪表盘趋势）。
+pub async fn daily_comments(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> Result<Vec<i64>, Problem> {
+    let rows = repo::daily_comments(conn, bounds).await?;
+    Ok(ik_kernel::time::fill_buckets(
+        rows,
+        bounds.len().saturating_sub(1),
+    ))
+}

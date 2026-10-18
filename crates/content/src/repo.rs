@@ -2050,3 +2050,25 @@ pub(crate) struct ModerationTargetRow {
     pub hidden: bool,
     pub hidden_reason: Option<String>,
 }
+
+/// 每个业务日首次发布的帖子数（仪表盘趋势）。
+pub(crate) async fn daily_first_published(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> sqlx::Result<Vec<(i32, i64)>> {
+    let (Some(first), Some(last)) = (bounds.first(), bounds.last()) else {
+        return Ok(Vec::new());
+    };
+    let rows = sqlx::query!(
+        r#"SELECT width_bucket(first_published_at, $1::timestamptz[]) AS "bucket!", count(*) AS "n!"
+           FROM posts
+           WHERE first_published_at >= $2 AND first_published_at < $3
+           GROUP BY 1"#,
+        bounds,
+        first,
+        last,
+    )
+    .fetch_all(conn)
+    .await?;
+    Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}

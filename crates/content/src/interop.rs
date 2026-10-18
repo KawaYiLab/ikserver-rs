@@ -439,3 +439,15 @@ pub async fn post_counts(
 ) -> Result<(i64, i64), Problem> {
     Ok(repo::post_counts(conn, since).await?)
 }
+
+/// 每个业务日首次发布的帖子数，按 `bounds` 分桶（仪表盘趋势）。
+pub async fn daily_posts(
+    conn: &mut PgConnection,
+    bounds: &[DateTime<Utc>],
+) -> Result<Vec<i64>, Problem> {
+    let rows = repo::daily_first_published(conn, bounds).await?;
+    Ok(ik_kernel::time::fill_buckets(
+        rows,
+        bounds.len().saturating_sub(1),
+    ))
+}

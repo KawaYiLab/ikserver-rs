@@ -958,6 +958,24 @@ pub async fn user_history(
     })
 }
 
+/// 每个业务日收到的举报条数，按 `bounds` 分桶（仪表盘趋势）。
+pub async fn daily_reports(
+    conn: &mut PgConnection,
+    bounds: &[chrono::DateTime<Utc>],
+) -> Result<Vec<i64>, Problem> {
+    let rows = repo::daily_reports(conn, bounds).await?;
+    Ok(ik_kernel::time::fill_buckets(
+        rows,
+        bounds.len().saturating_sub(1),
+    ))
+}
+
+/// 我领取了、还没结案的举报目标数（工作台待办）。
+pub async fn claimed_by(state: &ModerationState, staff_id: i64) -> Result<i64, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::claimed_open_count(&mut conn, staff_id).await?)
+}
+
 /// 待处理、复核中的举报目标数（管理后台仪表盘）。
 pub async fn open_counts(state: &ModerationState) -> Result<(i64, i64), Problem> {
     let mut conn = state.db.acquire().await?;

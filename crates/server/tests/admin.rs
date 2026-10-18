@@ -1523,3 +1523,74 @@ async fn force_logout_and_rename(db: PgPool) {
     .unwrap();
     assert_eq!(notices, 1);
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn dashboard_trends_bucket_by_business_day(db: PgPool) {
+    let app = setup(&db).await;
+    // setup 的 4 个账号都是现在注册的；再加两个两天前的、一个 40 天前的（不在 30 天里）。
+    sqlx::query!(
+        "INSERT INTO users (id, username, email, created_at)
+         VALUES (10, 'a', 'a@example.com', now() - interval '2 days'),
+                (11, 'b', 'b@example.com', now() - interval '2 days'),
+                (12, 'c', 'c@example.com', now() - interval '40 days')"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO posts (id, author_id, title, body, status, published_at, first_published_at, bumped_at)
+         VALUES (800, 3, '昨天的帖', '正文', 'published', now() - interval '1 day',
+                 now() - interval '1 day', now() - interval '1 day')"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        r#"INSERT INTO reports (id, reporter_id, target_type, target_id, owner_user_id, reason, snapshot,
+                                status, assigned_to, assigned_at)
+           VALUES (720, 4, 'post', 800, 3, 'spam', '{}', 'reviewing', 2, now())"#
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (status, week) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/dashboard/trends",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{week}");
+    assert_eq!(week["days"].as_array().unwrap().len(), 7);
+    assert_eq!(week["users"], json!([0, 0, 0, 0, 2, 0, 4]));
+    assert_eq!(week["posts"], json!([0, 0, 0, 0, 0, 1, 0]));
+    assert_eq!(week["reports"], json!([0, 0, 0, 0, 0, 0, 1]));
+    let (_, month) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/dashboard/trends?days=30",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(month["users"].as_array().unwrap().len(), 30);
+    assert_eq!(
+        month["users"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_i64().unwrap())
+            .sum::<i64>(),
+        6
+    );
+
+    let (_, mine) = call(&app, MODERATOR, "GET", "/v1/admin/dashboard", Value::Null).await;
+    assert_eq!(mine["reports"]["mine"], 1, "{mine}");
+    assert_eq!(mine["reports"]["reviewing"], 1);
+    let (_, other) = call(&app, ADMIN, "GET", "/v1/admin/dashboard", Value::Null).await;
+    assert_eq!(other["reports"]["mine"], 0);
+    let (status, _) = call(&app, USER, "GET", "/v1/admin/dashboard/trends", Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

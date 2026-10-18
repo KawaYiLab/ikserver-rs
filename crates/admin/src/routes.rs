@@ -13,7 +13,7 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::AdminState;
-use crate::dashboard::{self, Dashboard, SearchStatus};
+use crate::dashboard::{self, Dashboard, SearchStatus, TrendQuery, Trends};
 use crate::users::{
     self, AdminUserDetail, AiAgentUpdate, DennyAdjustment, EconomyResult, ExpGrant, LedgerQuery,
     ProfileReset, ProfileResetResult, RevokeResult, RoleUpdate, UsernameUpdate,
@@ -42,6 +42,7 @@ where
         .routes(routes!(put_username))
         .routes(routes!(reset_profile))
         .routes(routes!(get_dashboard))
+        .routes(routes!(get_trends))
         .routes(routes!(get_search))
         .routes(routes!(reindex))
         .routes(routes!(list_audit))
@@ -358,9 +359,29 @@ async fn reset_profile(
 )]
 async fn get_dashboard(
     State(state): State<AdminState>,
-    StaffOperator(_): StaffOperator,
+    StaffOperator(op): StaffOperator,
 ) -> Result<Json<Dashboard>, Problem> {
-    Ok(Json(dashboard::dashboard(&state).await?))
+    Ok(Json(dashboard::dashboard(&state, &op).await?))
+}
+
+/// 仪表盘趋势：最近 7 或 30 个业务日每天的新增账号、首次发布的帖子、评论、举报
+#[utoipa::path(
+    get,
+    path = "/v1/admin/dashboard/trends",
+    tag = "admin",
+    params(TrendQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Trends),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn get_trends(
+    State(state): State<AdminState>,
+    StaffOperator(_): StaffOperator,
+    Query(query): Query<TrendQuery>,
+) -> Result<Json<Trends>, Problem> {
+    Ok(Json(dashboard::trends(&state, query).await?))
 }
 
 /// 搜索索引状态（只有管理员）

@@ -2641,6 +2641,7 @@ dependencies = [
  "graphile_worker",
  "http",
  "parking_lot",
+ "proptest",
  "serde",
  "serde_json",
  "sqlx",
