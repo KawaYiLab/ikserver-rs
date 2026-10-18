@@ -7,7 +7,7 @@ Nuxt 4 SPA + shadcn-vue + Tailwind v4。它是一个独立的子项目，构建�
 
 | 页面 | 版主 | 管理员 |
 | --- | --- | --- |
-| 仪表盘、举报处理 | ✓ | ✓ |
+| 工作台、举报处理 | ✓ | ✓ |
 | 用户：查看、封禁 / 解封 | ✓ | ✓ |
 | 用户：角色、AI 账号、手动通过考试、丁尼 / 经验 | 只读 | ✓ |
 | 入站题库、分区与标签、装扮 | 只读 | ✓ |
@@ -71,5 +71,14 @@ pnpm build            # nuxt generate → .output/public
 - 调接口统一写成 `unwrap(api.GET(...))`，失败时抛 `ApiError`，遇到 401 会自动回到登录页。
   写操作用 `useNotify().run()` 包一层，统一弹提示；确认框用 `useConfirm()`，
   高危操作传 `typeToConfirm` 要求用户手动输入确认。
-- 时间一律按北京时间显示（`~/lib/format`）。
+- 列表页用 `useListQuery`：筛选和页码与 URL 查询参数双向同步（刷新、分享链接、从工作台带参数跳转都能还原），
+  文本筛选自动防抖，改筛选回到第 1 页；`optional()` / `optionalBool()` 把 `'all'`、空串转成「不筛选」。
+  页内标签页用 `useQueryParam('tab', 默认值)`。默认值不写进 URL。
+- 表格：行末操作放 `AdminRowActions`（「⋯」菜单，危险项自动分隔，不可用时写明原因）；
+  `<TableBody>` 末尾放 `AdminListState` 统一加载骨架、空状态（有筛选时提供「清除筛选」）和失败重试；
+  批量操作用 `useSelection` + `AdminBulkBar`（勾选后从底部浮出）。
+- 导航表在 `~/lib/nav.ts`，侧边栏和命令面板共用；菜单上的待办数来自 `useBadges()`（每分钟刷新，
+  标签页不可见时暂停），做完会改变待办数的操作后调用它的 `refresh()`。
+- `Ctrl+K` / `⌘K` 打开命令面板：跳转页面、按用户名 / 邮箱 / ID 找账号、切换深浅色。
+- 时间一律按北京时间显示（`~/lib/format`），状态徽标的配色也在这里（`userStatusVariant` 等）。
 - 上传图片用 `~/lib/upload` 的 `uploadImage`：先签名，再直传到对象存储，最后调用完成接口。

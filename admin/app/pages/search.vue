@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { RefreshCw } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -48,9 +47,7 @@ async function reindex() {
 <template>
   <div>
     <AdminPageHeader title="搜索索引" description="索引只收录公开内容，数量略少于数据库是正常的。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading" @click="load" />
       <Button size="sm" :disabled="!status?.engineConfigured || status.reindexing" @click="reindex">
         {{ status?.reindexing ? '重建中…' : '重建索引' }}
       </Button>

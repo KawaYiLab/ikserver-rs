@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { watchDebounced } from '@vueuse/core'
-import { RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -55,49 +53,24 @@ const auditTargets: Record<string, string> = {
   search: '搜索',
 }
 
-const { failure } = useNotify()
-const actorId = ref('')
-const action = ref('all')
-const targetType = ref('all')
-const targetId = ref('')
-const page = ref(1)
-const result = ref<Schemas['Paged_AuditEntry'] | null>(null)
-const loading = ref(false)
-const expanded = ref<string | null>(null)
-
-async function load() {
-  loading.value = true
-  try {
-    result.value = await unwrap(api.GET('/v1/admin/audit', {
-      params: {
-        query: {
-          actorId: actorId.value.trim() || undefined,
-          action: action.value === 'all' ? undefined : action.value,
-          targetType: targetType.value === 'all' ? undefined : targetType.value,
-          targetId: targetId.value.trim() || undefined,
-          page: page.value,
-          limit: 50,
-        },
+const list = useListQuery({
+  filters: { action: 'all', targetType: 'all', targetId: '', actorId: '' },
+  text: ['targetId', 'actorId'],
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/audit', {
+    params: {
+      query: {
+        actorId: optional(f.actorId),
+        action: optional(f.action),
+        targetType: optional(f.targetType),
+        targetId: optional(f.targetId),
+        page,
+        limit: 50,
       },
-    }))
-  }
-  catch (error) {
-    failure(error)
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-watch([action, targetType], () => {
-  page.value = 1
-  load()
+    },
+  })),
 })
-watchDebounced([actorId, targetId], () => {
-  page.value = 1
-  load()
-}, { debounce: 400 })
-onMounted(load)
+const { filters, result, loading } = list
+const expanded = ref<string | null>(null)
 
 function details(entry: Schemas['AuditEntry']) {
   return JSON.stringify(entry.details, null, 2)
@@ -112,28 +85,26 @@ function hasDetails(entry: Schemas['AuditEntry']) {
 <template>
   <div>
     <AdminPageHeader title="审计日志" description="后台的每一次修改都会记录操作人、时间、来源与变更内容。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading" @click="list.refresh" />
     </AdminPageHeader>
 
     <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-      <Select v-model="action">
+      <Select v-model="filters.action">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部动作</SelectItem>
           <SelectItem v-for="(label, key) in auditActions" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Select v-model="targetType">
+      <Select v-model="filters.targetType">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部对象</SelectItem>
           <SelectItem v-for="(label, key) in auditTargets" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Input v-model="targetId" placeholder="对象 ID" />
-      <Input v-model="actorId" placeholder="操作人 ID" />
+      <Input v-model="filters.targetId" placeholder="对象 ID" />
+      <Input v-model="filters.actorId" placeholder="操作人 ID" />
     </div>
 
     <div class="rounded-md border">
@@ -178,12 +149,14 @@ function hasDetails(entry: Schemas['AuditEntry']) {
               </TableCell>
             </TableRow>
           </template>
-          <TableRow v-if="result && result.items.length === 0">
-            <TableCell colspan="6" class="py-10 text-center text-muted-foreground">没有记录</TableCell>
-          </TableRow>
+          <AdminListState
+            :colspan="6" :loading="loading" :failed="list.failed.value" :filtered="list.active.value"
+            :empty="!result?.items.length" empty-text="还没有审计记录"
+            @retry="list.refresh" @reset="list.reset"
+          />
         </TableBody>
       </Table>
     </div>
-    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" @change="(p) => { page = p; load() }" />
+    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" @change="list.setPage" />
   </div>
 </template>

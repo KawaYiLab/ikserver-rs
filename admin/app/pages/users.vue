@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { watchDebounced } from '@vueuse/core'
-import { RefreshCw } from '@lucide/vue'
+import { ExternalLink, UserRound } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
-import { formatNumber, formatTime, roleLabel, statusLabel } from '~/lib/format'
+import type { RowAction } from '~/lib/actions'
+import { formatNumber, formatTime, roleLabel, roleVariant, statusLabel, userStatusVariant } from '~/lib/format'
 
 type User = Schemas['AdminUser']
 type Role = Schemas['Role']
@@ -23,51 +23,30 @@ const siteLink = useSiteLink()
 const { run, failure, success } = useNotify()
 const confirm = useConfirm()
 
-const q = ref('')
-const role = ref('all')
-const status = ref('all')
-const ai = ref('all')
-const page = ref(1)
-const limit = 20
-const result = ref<Schemas['Paged_AdminUser'] | null>(null)
-const loading = ref(false)
-
-async function load() {
-  loading.value = true
-  try {
-    result.value = await unwrap(api.GET('/v1/admin/users', {
-      params: {
-        query: {
-          q: q.value.trim() || undefined,
-          role: role.value === 'all' ? undefined : role.value,
-          status: status.value === 'all' ? undefined : status.value,
-          ai: ai.value === 'all' ? undefined : ai.value === 'yes',
-          page: page.value,
-          limit,
-        },
+const list = useListQuery({
+  filters: { q: '', role: 'all', status: 'all', ai: 'all' },
+  text: ['q'],
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/users', {
+    params: {
+      query: {
+        q: optional(f.q),
+        role: optional(f.role),
+        status: optional(f.status),
+        ai: optionalBool(f.ai),
+        page,
+        limit: 20,
       },
-    }))
-  }
-  catch (error) {
-    failure(error)
-  }
-  finally {
-    loading.value = false
-  }
-}
-
-watch([role, status, ai], () => {
-  page.value = 1
-  load()
+    },
+  })),
 })
-watchDebounced(q, () => {
-  page.value = 1
-  load()
-}, { debounce: 400 })
-onMounted(load)
+const { filters, result, loading } = list
+const load = list.refresh
 
-function statusVariant(value: string) {
-  return value === 'active' ? 'outline' : value === 'blocked' ? 'destructive' : 'secondary'
+function rowActions(user: User): RowAction[] {
+  return [
+    { label: '查看详情', icon: UserRound, onSelect: () => openDetail(user) },
+    { label: '在主站打开主页', icon: ExternalLink, href: siteLink(`/profile/${user.id}`) },
+  ]
 }
 
 // ---------- 详情 ----------
@@ -227,29 +206,27 @@ async function unblock() {
 
 <template>
   <div>
-    <AdminPageHeader title="用户管理" :description="isAdmin ? '调整角色、丁尼和经验都会记入审计日志。' : '版主可以查看用户并封禁 / 解封；其他调整需要管理员。'">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+    <AdminPageHeader title="账号" :description="isAdmin ? '调整角色、丁尼和经验都会记入审计日志。' : '版主可以查看账号并封禁 / 解封；其他调整需要管理员。'">
+      <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
     <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-      <Input v-model="q" placeholder="用户名 / 邮箱 / ID" class="lg:col-span-2" />
-      <Select v-model="role">
+      <Input v-model="filters.q" placeholder="用户名 / 邮箱 / ID" class="lg:col-span-2" />
+      <Select v-model="filters.role">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部角色</SelectItem>
           <SelectItem v-for="(label, key) in roleLabel" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Select v-model="status">
+      <Select v-model="filters.status">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部状态</SelectItem>
           <SelectItem v-for="(label, key) in statusLabel" :key="key" :value="key">{{ label }}</SelectItem>
         </SelectContent>
       </Select>
-      <Select v-model="ai">
+      <Select v-model="filters.ai">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="all">全部账号</SelectItem>
@@ -270,6 +247,7 @@ async function unblock() {
             <TableHead class="hidden md:table-cell">考试</TableHead>
             <TableHead>状态</TableHead>
             <TableHead class="hidden lg:table-cell">注册时间</TableHead>
+            <TableHead class="w-10"><span class="sr-only">操作</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -281,31 +259,34 @@ async function unblock() {
             </TableCell>
             <TableCell class="hidden lg:table-cell">{{ user.email ?? '—' }}</TableCell>
             <TableCell>
-              <Badge :variant="user.role === 'user' ? 'outline' : 'default'">{{ roleLabel[user.role] }}</Badge>
+              <Badge :variant="roleVariant(user.role)">{{ roleLabel[user.role] }}</Badge>
             </TableCell>
             <TableCell class="hidden md:table-cell text-right tabular-nums">Lv.{{ user.level }}</TableCell>
             <TableCell class="hidden md:table-cell">
               <span v-if="user.examPassedAt">已通过</span>
               <span v-else class="text-muted-foreground">未通过</span>
             </TableCell>
-            <TableCell><Badge :variant="statusVariant(user.status)">{{ statusLabel[user.status] ?? user.status }}</Badge></TableCell>
+            <TableCell><Badge :variant="userStatusVariant(user.status)">{{ statusLabel[user.status] ?? user.status }}</Badge></TableCell>
             <TableCell class="hidden lg:table-cell">{{ formatTime(user.createdAt) }}</TableCell>
+            <TableCell class="text-right"><AdminRowActions :actions="rowActions(user)" /></TableCell>
           </TableRow>
-          <TableRow v-if="result && result.items.length === 0">
-            <TableCell colspan="7" class="py-10 text-center text-muted-foreground">没有符合条件的用户</TableCell>
-          </TableRow>
+          <AdminListState
+            :colspan="8" :loading="loading" :failed="list.failed.value" :filtered="list.active.value"
+            :empty="!result?.items.length" empty-text="还没有账号"
+            @retry="load" @reset="list.reset"
+          />
         </TableBody>
       </Table>
     </div>
-    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="人" @change="(p) => { page = p; load() }" />
+    <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="人" @change="list.setPage" />
 
     <Sheet v-model:open="open">
       <SheetContent class="w-full overflow-y-auto sm:max-w-lg">
         <template v-if="detail">
           <SheetHeader>
             <div class="flex flex-wrap gap-2">
-              <Badge :variant="detail.user.role === 'user' ? 'outline' : 'default'">{{ roleLabel[detail.user.role] }}</Badge>
-              <Badge :variant="statusVariant(detail.user.status)">{{ statusLabel[detail.user.status] ?? detail.user.status }}</Badge>
+              <Badge :variant="roleVariant(detail.user.role)">{{ roleLabel[detail.user.role] }}</Badge>
+              <Badge :variant="userStatusVariant(detail.user.status)">{{ statusLabel[detail.user.status] ?? detail.user.status }}</Badge>
               <Badge v-if="detail.user.isAiAgent" variant="secondary">AI 账号</Badge>
             </div>
             <SheetTitle>@{{ detail.user.username }}</SheetTitle>

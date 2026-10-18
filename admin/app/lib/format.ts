@@ -42,3 +42,24 @@ export const actionLabel: Record<string, string> = {
 }
 export const kindLabel: Record<string, string> = { single: '单选', multiple: '多选', boolean: '判断' }
 export const cosmeticKindLabel: Record<string, string> = { character: '角色', city: '城市', news: '新闻' }
+
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+
+/** 账号状态徽标：封禁标红，注销 / 合并灰色。 */
+export function userStatusVariant(status: string): BadgeVariant {
+  return status === 'active' ? 'outline' : status === 'blocked' ? 'destructive' : 'secondary'
+}
+
+export function roleVariant(role: string): BadgeVariant {
+  return role === 'user' ? 'outline' : 'default'
+}
+
+/** 举报状态徽标：待处理标红。 */
+export function reportStatusVariant(status: string): BadgeVariant {
+  return status === 'pending' ? 'destructive' : status === 'reviewing' ? 'secondary' : 'outline'
+}
+
+/** 后台任务状态徽标：失败标红。 */
+export function jobStatusVariant(status: string): BadgeVariant {
+  return status === 'failed' ? 'destructive' : status === 'completed' ? 'outline' : 'secondary'
+}

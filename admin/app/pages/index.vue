@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { RefreshCw } from '@lucide/vue'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
 import { formatNumber } from '~/lib/format'
 
+const NuxtLink = resolveComponent('NuxtLink')
+const { isAdmin } = useSession()
+
 const { failure } = useNotify()
+const badges = useBadges()
 const data = ref<Schemas['Dashboard'] | null>(null)
 const loading = ref(false)
 
@@ -14,6 +16,7 @@ async function load() {
   loading.value = true
   try {
     data.value = await unwrap(api.GET('/v1/admin/dashboard'))
+    badges.dashboard.value = data.value
   }
   catch (error) {
     failure(error)
@@ -34,10 +37,8 @@ const aiPercent = computed(() => {
 
 <template>
   <div>
-    <AdminPageHeader title="仪表盘" description="今天的数字按北京时间业务日统计。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+    <AdminPageHeader title="工作台" description="今天的数字按北京时间业务日统计。">
+      <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
     <div v-if="!data" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -70,11 +71,13 @@ const aiPercent = computed(() => {
           :tone="data.ai.globalEnabled ? 'default' : 'warning'"
           :hint="aiPercent === null ? `今日全站用量 ${formatNumber(data.ai.siteUsedToday)}（不限）` : `今日全站额度已用 ${aiPercent}%`"
         />
-        <AdminStatCard
-          title="AI 失败任务（24 小时）" :value="formatNumber(data.ai.failedLast24h)"
-          :tone="data.ai.failedLast24h > 0 ? 'warning' : 'default'"
-          hint="在「AI 助手 → 任务」里查看原因"
-        />
+        <component :is="isAdmin ? NuxtLink : 'div'" :to="{ path: '/ai', query: { tab: 'jobs', jobStatus: 'failed' } }">
+          <AdminStatCard
+            title="AI 失败任务（24 小时）" :value="formatNumber(data.ai.failedLast24h)"
+            :tone="data.ai.failedLast24h > 0 ? 'warning' : 'default'"
+            hint="在「AI 助手 → 任务」里查看原因"
+          />
+        </component>
       </div>
     </div>
   </div>

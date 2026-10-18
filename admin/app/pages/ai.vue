@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, RefreshCw, X } from '@lucide/vue'
+import { Plus, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,7 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
-import { formatNumber, formatTime } from '~/lib/format'
+import { formatNumber, formatTime, jobStatusVariant } from '~/lib/format'
 
 definePageMeta({ admin: true })
 
@@ -24,7 +24,7 @@ type Character = Schemas['AdminCharacter']
 const siteLink = useSiteLink()
 const { run, failure } = useNotify()
 const confirm = useConfirm()
-const tab = ref('settings')
+const tab = useQueryParam<string>('tab', 'settings')
 const loading = ref(false)
 
 const settings = ref<Schemas['AdminSettings'] | null>(null)
@@ -46,7 +46,7 @@ async function loadConfig() {
 async function load() {
   loading.value = true
   try {
-    await Promise.all([loadConfig(), loadJobs()])
+    await loadConfig()
   }
   catch (error) {
     failure(error)
@@ -56,6 +56,12 @@ async function load() {
   }
 }
 onMounted(load)
+
+function refresh() {
+  load()
+  jobList.refresh()
+  badges.refresh()
+}
 
 // ---------- 全局设置 ----------
 const settingsForm = ref<Schemas['SettingsInput']>({ globalEnabled: false, dailyTokens: 0, dailyTokensPerUser: 0 })
@@ -241,46 +247,32 @@ async function removeCharacter(character: Character) {
 }
 
 // ---------- 任务 ----------
-const jobStatus = ref('all')
-const jobKind = ref('all')
-const jobPage = ref(1)
-const jobs = ref<Schemas['Paged_AdminJob'] | null>(null)
+const badges = useBadges()
 const jobStatusLabel: Record<string, string> = { queued: '排队', processing: '进行中', completed: '完成', failed: '失败', skipped: '跳过' }
 const jobKindLabel: Record<string, string> = { dm: '私聊', comment: '评论' }
 
-async function loadJobs() {
-  jobs.value = await unwrap(api.GET('/v1/admin/ai/jobs', {
+const jobList = useListQuery({
+  filters: { jobStatus: 'all', jobKind: 'all' },
+  pageKey: 'jobPage',
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/ai/jobs', {
     params: {
       query: {
-        status: jobStatus.value === 'all' ? undefined : jobStatus.value,
-        kind: jobKind.value === 'all' ? undefined : jobKind.value,
-        page: jobPage.value,
+        status: optional(f.jobStatus),
+        kind: optional(f.jobKind),
+        page,
         limit: 50,
       },
     },
-  }))
-}
-
-function reloadJobs() {
-  loadJobs().catch(failure)
-}
-
-watch([jobStatus, jobKind], () => {
-  jobPage.value = 1
-  reloadJobs()
+  })),
 })
-
-function jobVariant(status: string) {
-  return status === 'failed' ? 'destructive' : status === 'completed' ? 'outline' : 'secondary'
-}
+const jobs = jobList.result
+const jobFilters = jobList.filters
 </script>
 
 <template>
   <div>
     <AdminPageHeader title="AI 助手" description="修改在本实例立即生效，其他实例最长 60 秒后生效。">
-      <Button variant="outline" size="sm" :disabled="loading" @click="load">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loading }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loading || jobList.loading.value" @click="refresh" />
       <Button v-if="tab === 'models'" size="sm" @click="editModel()">
         <Plus class="size-4" />新建模型
       </Button>
@@ -424,14 +416,14 @@ function jobVariant(status: string) {
 
       <TabsContent value="jobs">
         <div class="mb-4 grid gap-2 sm:grid-cols-4">
-          <Select v-model="jobStatus">
+          <Select v-model="jobFilters.jobStatus">
             <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部状态</SelectItem>
               <SelectItem v-for="(label, key) in jobStatusLabel" :key="key" :value="key">{{ label }}</SelectItem>
             </SelectContent>
           </Select>
-          <Select v-model="jobKind">
+          <Select v-model="jobFilters.jobKind">
             <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部类型</SelectItem>
@@ -460,7 +452,7 @@ function jobVariant(status: string) {
                   <a v-if="job.postId" :href="siteLink(`/post/${job.postId}`)" target="_blank" class="ml-1 text-xs underline">帖子</a>
                 </TableCell>
                 <TableCell>
-                  <Badge :variant="jobVariant(job.status)">{{ jobStatusLabel[job.status] ?? job.status }}</Badge>
+                  <Badge :variant="jobStatusVariant(job.status)">{{ jobStatusLabel[job.status] ?? job.status }}</Badge>
                   <span v-if="job.attempts > 1" class="ml-1 text-xs text-muted-foreground">第 {{ job.attempts }} 次</span>
                 </TableCell>
                 <TableCell class="hidden md:table-cell font-mono text-xs">{{ job.modelKey ?? '—' }}</TableCell>
@@ -468,13 +460,15 @@ function jobVariant(status: string) {
                 <TableCell class="hidden lg:table-cell font-mono text-xs">{{ job.userId }} → {{ job.aiUserId }}</TableCell>
                 <TableCell class="max-w-xs truncate text-xs text-muted-foreground" :title="job.reason ?? ''">{{ job.reason ?? '' }}</TableCell>
               </TableRow>
-              <TableRow v-if="jobs && jobs.items.length === 0">
-                <TableCell colspan="7" class="py-10 text-center text-muted-foreground">没有任务</TableCell>
-              </TableRow>
+              <AdminListState
+                :colspan="7" :loading="jobList.loading.value" :failed="jobList.failed.value" :filtered="jobList.active.value"
+                :empty="!jobs?.items.length" empty-text="还没有 AI 任务"
+                @retry="jobList.refresh" @reset="jobList.reset"
+              />
             </TableBody>
           </Table>
         </div>
-        <AdminPager v-if="jobs" :page="jobs.page" :limit="jobs.limit" :total="jobs.total" unit="个任务" @change="(p) => { jobPage = p; reloadJobs() }" />
+        <AdminPager v-if="jobs" :page="jobs.page" :limit="jobs.limit" :total="jobs.total" unit="个任务" @change="jobList.setPage" />
       </TabsContent>
     </Tabs>
 

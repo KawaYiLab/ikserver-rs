@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { watchDebounced } from '@vueuse/core'
-import { Plus, RefreshCw } from '@lucide/vue'
+import { Ban, Pencil, Plus, RotateCcw, Trash2 } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -13,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
+import type { RowAction } from '~/lib/actions'
 import { formatNumber, formatTime } from '~/lib/format'
 
 type Category = Schemas['AdminCategory']
@@ -21,7 +21,7 @@ type Tag = Schemas['AdminTag']
 const { isAdmin } = useSession()
 const { run, failure } = useNotify()
 const confirm = useConfirm()
-const tab = ref('categories')
+const tab = useQueryParam<string>('tab', 'categories')
 
 // ---------- 分区 ----------
 const categories = ref<Category[] | null>(null)
@@ -99,42 +99,46 @@ async function removeCategory(category: Category) {
 }
 
 // ---------- 标签 ----------
-const tagQ = ref('')
-const tagBlocked = ref('all')
-const tagPage = ref(1)
-const tags = ref<Schemas['Paged_AdminTag'] | null>(null)
-const loadingTags = ref(false)
-
-async function loadTags() {
-  loadingTags.value = true
-  try {
-    tags.value = await unwrap(api.GET('/v1/admin/tags', {
-      params: {
-        query: {
-          q: tagQ.value.trim() || undefined,
-          blocked: tagBlocked.value === 'all' ? undefined : tagBlocked.value === 'yes',
-          page: tagPage.value,
-          limit: 50,
-        },
+const tagList = useListQuery({
+  filters: { tagQ: '', tagBlocked: 'all' },
+  text: ['tagQ'],
+  pageKey: 'tagPage',
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/tags', {
+    params: {
+      query: {
+        q: optional(f.tagQ),
+        blocked: optionalBool(f.tagBlocked),
+        page,
+        limit: 50,
       },
-    }))
-  }
-  catch (error) {
-    failure(error)
-  }
-  finally {
-    loadingTags.value = false
-  }
+    },
+  })),
+})
+const tags = tagList.result
+const tagFilters = tagList.filters
+const loadTags = tagList.refresh
+
+function categoryActions(category: Category): RowAction[] {
+  return [
+    { label: '编辑', icon: Pencil, onSelect: () => editCategory(category) },
+    {
+      label: '删除',
+      icon: Trash2,
+      destructive: true,
+      disabledReason: category.postCount > 0 && '还有帖子，只能停用',
+      onSelect: () => removeCategory(category),
+    },
+  ]
 }
 
-watch(tagBlocked, () => {
-  tagPage.value = 1
-  loadTags()
-})
-watchDebounced(tagQ, () => {
-  tagPage.value = 1
-  loadTags()
-}, { debounce: 400 })
+function tagActions(tag: Tag): RowAction[] {
+  return [
+    { label: '改名', icon: Pencil, onSelect: () => startRename(tag) },
+    tag.isBlocked
+      ? { label: '恢复', icon: RotateCcw, onSelect: () => setBlocked(tag, false) }
+      : { label: '屏蔽', icon: Ban, destructive: true, onSelect: () => setBlocked(tag, true) },
+  ]
+}
 
 async function setBlocked(tag: Tag, isBlocked: boolean) {
   const updated = await run(() => unwrap(api.PATCH('/v1/admin/tags/{id}', {
@@ -170,18 +174,13 @@ function refresh() {
   else loadTags()
 }
 
-onMounted(() => {
-  loadCategories()
-  loadTags()
-})
+onMounted(loadCategories)
 </script>
 
 <template>
   <div>
     <AdminPageHeader title="分区与标签">
-      <Button variant="outline" size="sm" :disabled="loadingCategories || loadingTags" @click="refresh">
-        <RefreshCw class="size-4" :class="{ 'animate-spin': loadingCategories || loadingTags }" />刷新
-      </Button>
+      <AdminRefreshButton :loading="loadingCategories || tagList.loading.value" @click="refresh" />
       <Button v-if="isAdmin && tab === 'categories'" size="sm" @click="editCategory()">
         <Plus class="size-4" />新建分区
       </Button>
@@ -203,7 +202,7 @@ onMounted(() => {
                 <TableHead class="hidden md:table-cell">slug</TableHead>
                 <TableHead class="text-right">帖子</TableHead>
                 <TableHead>属性</TableHead>
-                <TableHead v-if="isAdmin" class="text-right">操作</TableHead>
+                <TableHead v-if="isAdmin" class="w-10"><span class="sr-only">操作</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -222,14 +221,13 @@ onMounted(() => {
                     <Badge v-if="category.allowCommentAccept" variant="secondary">可采纳评论</Badge>
                   </div>
                 </TableCell>
-                <TableCell v-if="isAdmin" class="space-x-1 text-right whitespace-nowrap">
-                  <Button size="sm" variant="outline" @click="editCategory(category)">编辑</Button>
-                  <Button size="sm" variant="ghost" class="text-destructive" :disabled="category.postCount > 0" @click="removeCategory(category)">删除</Button>
-                </TableCell>
+                <TableCell v-if="isAdmin" class="text-right"><AdminRowActions :actions="categoryActions(category)" /></TableCell>
               </TableRow>
-              <TableRow v-if="categories && categories.length === 0">
-                <TableCell :colspan="isAdmin ? 6 : 5" class="py-10 text-center text-muted-foreground">还没有分区</TableCell>
-              </TableRow>
+              <AdminListState
+                :colspan="isAdmin ? 6 : 5" :loading="loadingCategories" :empty="!categories?.length"
+                :failed="!categories && !loadingCategories" empty-text="还没有分区"
+                @retry="loadCategories"
+              />
             </TableBody>
           </Table>
         </div>
@@ -237,8 +235,8 @@ onMounted(() => {
 
       <TabsContent value="tags">
         <div class="mb-4 grid gap-2 sm:grid-cols-3">
-          <Input v-model="tagQ" placeholder="搜索标签" class="sm:col-span-2" />
-          <Select v-model="tagBlocked">
+          <Input v-model="tagFilters.tagQ" placeholder="搜索标签" class="sm:col-span-2" />
+          <Select v-model="tagFilters.tagBlocked">
             <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">全部标签</SelectItem>
@@ -256,7 +254,7 @@ onMounted(() => {
                 <TableHead class="text-right">帖子</TableHead>
                 <TableHead class="hidden md:table-cell">创建时间</TableHead>
                 <TableHead>状态</TableHead>
-                <TableHead v-if="isAdmin" class="text-right">操作</TableHead>
+                <TableHead v-if="isAdmin" class="w-10"><span class="sr-only">操作</span></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -268,18 +266,17 @@ onMounted(() => {
                 <TableCell>
                   <Badge :variant="tag.isBlocked ? 'destructive' : 'outline'">{{ tag.isBlocked ? '已屏蔽' : '正常' }}</Badge>
                 </TableCell>
-                <TableCell v-if="isAdmin" class="space-x-1 text-right whitespace-nowrap">
-                  <Button size="sm" variant="outline" @click="startRename(tag)">改名</Button>
-                  <Button size="sm" variant="ghost" @click="setBlocked(tag, !tag.isBlocked)">{{ tag.isBlocked ? '恢复' : '屏蔽' }}</Button>
-                </TableCell>
+                <TableCell v-if="isAdmin" class="text-right"><AdminRowActions :actions="tagActions(tag)" /></TableCell>
               </TableRow>
-              <TableRow v-if="tags && tags.items.length === 0">
-                <TableCell :colspan="isAdmin ? 6 : 5" class="py-10 text-center text-muted-foreground">没有符合条件的标签</TableCell>
-              </TableRow>
+              <AdminListState
+                :colspan="isAdmin ? 6 : 5" :loading="tagList.loading.value" :failed="tagList.failed.value" :filtered="tagList.active.value"
+                :empty="!tags?.items.length" empty-text="还没有标签"
+                @retry="loadTags" @reset="tagList.reset"
+              />
             </TableBody>
           </Table>
         </div>
-        <AdminPager v-if="tags" :page="tags.page" :limit="tags.limit" :total="tags.total" unit="个标签" @change="(p) => { tagPage = p; loadTags() }" />
+        <AdminPager v-if="tags" :page="tags.page" :limit="tags.limit" :total="tags.total" unit="个标签" @change="tagList.setPage" />
       </TabsContent>
     </Tabs>
 
