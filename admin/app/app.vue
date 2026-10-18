@@ -17,4 +17,5 @@ installUnauthorizedRedirect()
   </TooltipProvider>
   <Toaster rich-colors position="top-center" />
   <AdminConfirmHost />
+  <AdminModerateHost />
 </template>

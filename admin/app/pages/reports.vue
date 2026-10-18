@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
 import type { RowAction } from '~/lib/actions'
+import { userPath } from '~/lib/links'
 import { actionLabel, formatTime, reasonLabel, reportStatusLabel, reportStatusVariant, targetTypeLabel } from '~/lib/format'
 
 type Group = Schemas['ReportGroup']
@@ -291,7 +292,21 @@ async function resolve() {
               </a>
               <a v-if="detail.target.postId" :href="siteLink(`/post/${detail.target.postId}?comment=${detail.targetId}`)" target="_blank" class="underline">查看评论</a>
               <a v-if="detail.targetType === 'user'" :href="siteLink(`/profile/${detail.targetId}`)" target="_blank" class="underline">查看主页</a>
-              <span v-if="detail.target.owner">作者：@{{ detail.target.owner.username }}</span>
+              <NuxtLink
+                v-if="detail.targetType === 'post' && detail.target.exists"
+                :to="{ path: '/comments', query: { postId: detail.targetId } }" class="underline"
+              >
+                该帖全部评论
+              </NuxtLink>
+              <NuxtLink
+                v-if="detail.targetType === 'comment' && detail.target.postId"
+                :to="{ path: '/comments', query: { postId: detail.target.postId } }" class="underline"
+              >
+                同帖其他评论
+              </NuxtLink>
+              <span v-if="detail.target.owner">
+                作者：<NuxtLink :to="userPath(detail.target.owner.id)" class="underline">@{{ detail.target.owner.username }}</NuxtLink>
+              </span>
             </div>
             <div>
               <h3 class="mb-2 text-sm font-medium">举报明细</h3>

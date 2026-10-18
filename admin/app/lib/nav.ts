@@ -1,6 +1,6 @@
 import type { Component } from 'vue'
 import {
-  Bot, ClipboardList, FileText, Flag, LayoutDashboard, Palette, Search, Smile, Tags, Users,
+  Bot, ClipboardList, FileText, Flag, LayoutDashboard, MessagesSquare, Newspaper, Palette, Search, Smile, Tags, Users,
 } from '@lucide/vue'
 
 /** 菜单上的待办提示：`count` 显示数字，`alert` 只显示一个警示点。 */
@@ -34,6 +34,8 @@ export const navGroups: NavGroup[] = [
     label: '审核',
     items: [
       { to: '/reports', label: '举报处理', icon: Flag, badge: 'reports', keywords: 'report 举报' },
+      { to: '/posts', label: '帖子', icon: Newspaper, keywords: 'post 委托 隐藏 删除 置顶' },
+      { to: '/comments', label: '评论', icon: MessagesSquare, keywords: 'comment 回复 隐藏 删除' },
       { to: '/users', label: '账号', icon: Users, keywords: 'user 用户 封禁' },
     ],
   },

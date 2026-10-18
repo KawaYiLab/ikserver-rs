@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onKeyStroke, useColorMode, watchDebounced } from '@vueuse/core'
-import { CornerDownLeft, Loader2, Moon, Search, User } from '@lucide/vue'
+import { CornerDownLeft, Hash, Loader2, Moon, Search, User } from '@lucide/vue'
 import { ListboxFilter } from 'reka-ui'
 import { Command, CommandGroup, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -38,6 +38,7 @@ watch(open, (value) => {
 })
 
 const keyword = computed(() => query.value.trim())
+const isId = computed(() => /^\d{1,20}$/.test(keyword.value))
 
 const pages = computed(() => {
   const all = visibleNav(isAdmin.value).flatMap(group => group.items.map(item => ({ ...item, group: group.label })))
@@ -84,7 +85,7 @@ function toggleTheme() {
   open.value = false
 }
 
-const nothing = computed(() => !!keyword.value && !searching.value && pages.value.length === 0 && users.value.length === 0)
+const nothing = computed(() => !!keyword.value && !searching.value && pages.value.length === 0 && users.value.length === 0 && !isId.value)
 </script>
 
 <template>
@@ -92,7 +93,7 @@ const nothing = computed(() => !!keyword.value && !searching.value && pages.valu
     <DialogContent class="top-[20%] translate-y-0 gap-0 overflow-hidden p-0 sm:max-w-lg" :show-close-button="false">
       <DialogHeader class="sr-only">
         <DialogTitle>命令面板</DialogTitle>
-        <DialogDescription>搜索账号、跳转到后台页面</DialogDescription>
+        <DialogDescription>搜索账号、按 ID 打开帖子或评论、跳转到后台页面</DialogDescription>
       </DialogHeader>
       <Command class="rounded-lg">
         <div class="flex h-12 items-center gap-2 border-b px-3">
@@ -100,16 +101,25 @@ const nothing = computed(() => !!keyword.value && !searching.value && pages.valu
           <ListboxFilter
             v-model="query"
             auto-focus
-            placeholder="输入页面名、用户名、邮箱或 ID…"
+            placeholder="输入页面名、用户名、邮箱，或帖子 / 评论 / 账号 ID…"
             class="h-full w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground"
           />
           <Loader2 v-if="searching" class="size-4 shrink-0 animate-spin opacity-50" />
         </div>
-        <AdminCommandAutoHighlight :watch="[users, pages]" />
+        <AdminCommandAutoHighlight :watch="[users, pages, isId]" />
         <CommandList class="max-h-[min(60vh,420px)]">
           <div v-if="nothing" class="py-8 text-center text-sm text-muted-foreground">
             没有找到「{{ keyword }}」相关的页面或账号
           </div>
+
+          <CommandGroup v-if="isId" heading="按 ID 打开">
+            <CommandItem :value="`id-post-${keyword}`" @select="go({ path: '/posts', query: { q: keyword } })">
+              <Hash />帖子 {{ keyword }}
+            </CommandItem>
+            <CommandItem :value="`id-comment-${keyword}`" @select="go({ path: '/comments', query: { q: keyword } })">
+              <Hash />评论 {{ keyword }}
+            </CommandItem>
+          </CommandGroup>
 
           <CommandGroup v-if="users.length" heading="账号">
             <CommandItem v-for="user in users" :key="user.id" :value="`user-${user.id}`" @select="openUser(user)">
