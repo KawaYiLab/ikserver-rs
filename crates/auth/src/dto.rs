@@ -114,6 +114,8 @@ pub struct AuthResponse {
 pub struct MeView {
     #[schema(value_type = String, example = "7385159247626227712")]
     pub id: Id<User>,
+    /// 会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。主键仍是 `id`。
+    pub member_no: i64,
     pub username: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,

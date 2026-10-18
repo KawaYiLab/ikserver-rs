@@ -190,6 +190,7 @@ pub async fn profile(
         equipped_card,
         zzz,
         id: Id::new(t.user.id),
+        member_no: t.user.member_no,
         username: t.user.username,
         level: t.user.level,
         is_ai_agent: t.user.is_ai_agent,

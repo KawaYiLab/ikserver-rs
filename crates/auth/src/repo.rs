@@ -383,6 +383,7 @@ pub(crate) async fn active_users(
 
 pub(crate) struct ProfileUserRow {
     pub id: i64,
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     pub status: String,
@@ -399,7 +400,7 @@ pub(crate) async fn profile_user(
 ) -> sqlx::Result<Option<ProfileUserRow>> {
     sqlx::query_as!(
         ProfileUserRow,
-        "SELECT id, username, level, status, is_ai_agent, created_at, avatar_media_id,
+        "SELECT id, member_no, username, level, status, is_ai_agent, created_at, avatar_media_id,
                 equipped_avatar_id, equipped_card_id
          FROM users WHERE id = $1",
         id,
@@ -500,6 +501,7 @@ pub(crate) async fn mark_exam_passed(
 
 pub(crate) struct MeRow {
     pub id: i64,
+    pub member_no: i64,
     pub username: String,
     pub email: Option<String>,
     pub role: Role,
@@ -512,7 +514,8 @@ pub(crate) struct MeRow {
 pub(crate) async fn me(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<MeRow>> {
     sqlx::query_as!(
         MeRow,
-        r#"SELECT id, username, email, role AS "role: Role", exam_passed_at, is_ai_agent, level, created_at
+        r#"SELECT id, member_no, username, email, role AS "role: Role", exam_passed_at, is_ai_agent,
+                  level, created_at
            FROM users WHERE id = $1"#,
         id,
     )
@@ -1151,6 +1154,7 @@ pub(crate) async fn list_audit(
 
 pub(crate) struct AdminUserRow {
     pub id: i64,
+    pub member_no: i64,
     pub username: String,
     pub email: Option<String>,
     pub status: String,
@@ -1164,7 +1168,7 @@ pub(crate) struct AdminUserRow {
 pub(crate) struct UserFilter {
     /// 用户名或邮箱包含（ILIKE 模式，已转义）。
     pub pattern: Option<String>,
-    /// 精确 id（关键词是数字时）。
+    /// 精确 id 或会员号（关键词是数字时）。
     pub id: Option<i64>,
     pub role: Option<String>,
     pub status: Option<String>,
@@ -1177,7 +1181,7 @@ pub(crate) async fn count_admin_users(
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
         r#"SELECT count(*) AS "n!" FROM users
-           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2)
+           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2 OR member_no = $2)
              AND ($3::text IS NULL OR role = $3)
              AND ($4::text IS NULL OR status = $4)
              AND ($5::bool IS NULL OR is_ai_agent = $5)"#,
@@ -1199,10 +1203,10 @@ pub(crate) async fn list_admin_users(
 ) -> sqlx::Result<Vec<AdminUserRow>> {
     sqlx::query_as!(
         AdminUserRow,
-        r#"SELECT id, username, email, status, role AS "role: Role", is_ai_agent, exam_passed_at,
-                  level, created_at
+        r#"SELECT id, member_no, username, email, status, role AS "role: Role", is_ai_agent,
+                  exam_passed_at, level, created_at
            FROM users
-           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2)
+           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2 OR member_no = $2)
              AND ($3::text IS NULL OR role = $3)
              AND ($4::text IS NULL OR status = $4)
              AND ($5::bool IS NULL OR is_ai_agent = $5)
@@ -1226,8 +1230,8 @@ pub(crate) async fn admin_user(
 ) -> sqlx::Result<Option<AdminUserRow>> {
     sqlx::query_as!(
         AdminUserRow,
-        r#"SELECT id, username, email, status, role AS "role: Role", is_ai_agent, exam_passed_at,
-                  level, created_at
+        r#"SELECT id, member_no, username, email, status, role AS "role: Role", is_ai_agent,
+                  exam_passed_at, level, created_at
            FROM users WHERE id = $1"#,
         id,
     )

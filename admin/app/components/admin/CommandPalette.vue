@@ -128,7 +128,7 @@ const nothing = computed(() => !!keyword.value && !searching.value && pages.valu
             <CommandItem v-for="user in users" :key="user.id" :value="`user-${user.id}`" @select="openUser(user)">
               <User />
               <span class="truncate">@{{ user.username }}</span>
-              <span class="truncate text-xs text-muted-foreground">{{ user.email ?? `ID ${user.id}` }}</span>
+              <span class="truncate text-xs text-muted-foreground">No.{{ user.memberNo }} · {{ user.email ?? user.id }}</span>
               <span class="ml-auto flex gap-1">
                 <Badge v-if="user.role !== 'user'" variant="secondary">{{ roleLabel[user.role] }}</Badge>
                 <Badge v-if="user.status !== 'active'" variant="outline">{{ statusLabel[user.status] ?? user.status }}</Badge>

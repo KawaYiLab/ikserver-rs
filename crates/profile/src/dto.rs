@@ -32,6 +32,8 @@ pub struct ProfileStats {
 pub struct ProfileView {
     #[schema(value_type = String)]
     pub id: Id<User>,
+    /// 会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。主键仍是 `id`。
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     pub is_ai_agent: bool,

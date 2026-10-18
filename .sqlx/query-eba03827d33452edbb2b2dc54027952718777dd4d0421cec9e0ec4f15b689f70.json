@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, email, role AS \"role: Role\", exam_passed_at, is_ai_agent, level, created_at\n           FROM users WHERE id = $1",
+  "query": "SELECT id, member_no, username, level, status, is_ai_agent, created_at, avatar_media_id,\n                equipped_avatar_id, equipped_card_id\n         FROM users WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,17 @@
       },
       {
         "ordinal": 1,
+        "name": "member_no",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "member_no"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "username",
         "type_info": "Text",
         "origin": {
@@ -26,35 +37,24 @@
         }
       },
       {
-        "ordinal": 2,
-        "name": "email",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "users",
-            "name": "email"
-          }
-        }
-      },
-      {
         "ordinal": 3,
-        "name": "role: Role",
-        "type_info": "Text",
+        "name": "level",
+        "type_info": "Int2",
         "origin": {
           "Table": {
             "table": "users",
-            "name": "role"
+            "name": "level"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "exam_passed_at",
-        "type_info": "Timestamptz",
+        "name": "status",
+        "type_info": "Text",
         "origin": {
           "Table": {
             "table": "users",
-            "name": "exam_passed_at"
+            "name": "status"
           }
         }
       },
@@ -71,23 +71,45 @@
       },
       {
         "ordinal": 6,
-        "name": "level",
-        "type_info": "Int2",
-        "origin": {
-          "Table": {
-            "table": "users",
-            "name": "level"
-          }
-        }
-      },
-      {
-        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "users",
             "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "avatar_media_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "avatar_media_id"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "equipped_avatar_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_avatar_id"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "equipped_card_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_card_id"
           }
         }
       }
@@ -100,13 +122,15 @@
     "nullable": [
       false,
       false,
-      true,
+      false,
+      false,
+      false,
+      false,
       false,
       true,
-      false,
-      false,
-      false
+      true,
+      true
     ]
   },
-  "hash": "594e45649b75e7c3a9f0324fdbd3bb6d48af853b9688986d8d4f0ee3f2ed65be"
+  "hash": "eba03827d33452edbb2b2dc54027952718777dd4d0421cec9e0ec4f15b689f70"
 }

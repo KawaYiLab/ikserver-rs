@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, email, status, role AS \"role: Role\", is_ai_agent, exam_passed_at,\n                  level, created_at\n           FROM users WHERE id = $1",
+  "query": "SELECT id, member_no, username, email, status, role AS \"role: Role\", is_ai_agent,\n                  exam_passed_at, level, created_at\n           FROM users\n           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2 OR member_no = $2)\n             AND ($3::text IS NULL OR role = $3)\n             AND ($4::text IS NULL OR status = $4)\n             AND ($5::bool IS NULL OR is_ai_agent = $5)\n           ORDER BY created_at DESC, id DESC\n           LIMIT $6 OFFSET $7",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,17 @@
       },
       {
         "ordinal": 1,
+        "name": "member_no",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "member_no"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "username",
         "type_info": "Text",
         "origin": {
@@ -26,7 +37,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "email",
         "type_info": "Text",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "status",
         "type_info": "Text",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "role: Role",
         "type_info": "Text",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "is_ai_agent",
         "type_info": "Bool",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "exam_passed_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "level",
         "type_info": "Int2",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -105,10 +116,17 @@
     ],
     "parameters": {
       "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Bool",
+        "Int8",
         "Int8"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       true,
@@ -120,5 +138,5 @@
       false
     ]
   },
-  "hash": "803dbfd1cc2375c3d40001b7e81bbc3efd1679989dcf5dd5ca98277b972b18ce"
+  "hash": "f3c6d7739eedcf6ef0e5dbae795ac879214dfa456ec84a6e9511c2e4829893aa"
 }

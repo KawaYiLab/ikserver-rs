@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM users\n           WHERE ($1::text IS NULL OR username ILIKE $1 OR email ILIKE $1 OR id = $2 OR member_no = $2)\n             AND ($3::text IS NULL OR role = $3)\n             AND ($4::text IS NULL OR status = $4)\n             AND ($5::bool IS NULL OR is_ai_agent = $5)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5c053aaa6cb8071784d43cfdc1f874543b61a032ef525ac9c8d5d08cdba3bcd0"
+}

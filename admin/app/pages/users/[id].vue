@@ -285,7 +285,7 @@ const stats = computed(() => {
             <Badge v-if="isSelf" variant="outline">我</Badge>
           </div>
           <p class="mt-1 text-sm text-muted-foreground">
-            ID <span class="font-mono">{{ user.id }}</span> · {{ user.email ?? '未绑定邮箱' }} ·
+            No.{{ user.memberNo }} · ID <span class="font-mono">{{ user.id }}</span> · {{ user.email ?? '未绑定邮箱' }} ·
             注册于 {{ formatTime(user.createdAt) }} · 最近活跃 {{ formatTime(detail.lastSeenAt) }}
           </p>
           <p v-if="detail.bio" class="mt-2 line-clamp-2 text-sm">「{{ detail.bio }}」</p>

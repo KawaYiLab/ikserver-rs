@@ -751,7 +751,7 @@ export interface paths {
         };
         /**
          * 账号列表
-         * @description 关键词匹配用户名或邮箱（数字时也按 id）；可按角色、状态、是否 AI 账号筛选。新注册的在前。
+         * @description 关键词匹配用户名或邮箱（数字时也按 id、会员号）；可按角色、状态、是否 AI 账号筛选。新注册的在前。
          *     邮箱只有管理员看到全文。
          */
         get: operations["list_users"];
@@ -3577,6 +3577,11 @@ export interface components {
             isAiAgent: boolean;
             /** Format: int32 */
             level: number;
+            /**
+             * Format: int64
+             * @description 会员号（按注册顺序的展示编号，旧账号沿用旧 UID）。
+             */
+            memberNo: number;
             role: components["schemas"]["Role"];
             status: string;
             username: string;
@@ -4701,6 +4706,11 @@ export interface components {
              * @description 等级 0–7（0 = 未通过入站考试）。
              */
             level: number;
+            /**
+             * Format: int64
+             * @description 会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。主键仍是 `id`。
+             */
+            memberNo: number;
             role: components["schemas"]["Role"];
             username: string;
         };
@@ -5382,6 +5392,11 @@ export interface components {
                 isAiAgent: boolean;
                 /** Format: int32 */
                 level: number;
+                /**
+                 * Format: int64
+                 * @description 会员号（按注册顺序的展示编号，旧账号沿用旧 UID）。
+                 */
+                memberNo: number;
                 role: components["schemas"]["Role"];
                 status: string;
                 username: string;
@@ -5783,6 +5798,11 @@ export interface components {
             joinedAt: string;
             /** Format: int32 */
             level: number;
+            /**
+             * Format: int64
+             * @description 会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。主键仍是 `id`。
+             */
+            memberNo: number;
             stats?: components["schemas"]["ProfileStats"] | null;
             username: string;
             zzz?: components["schemas"]["ZzzProfile"] | null;

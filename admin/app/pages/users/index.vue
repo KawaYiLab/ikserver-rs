@@ -52,7 +52,7 @@ function rowActions(user: User): RowAction[] {
     </AdminPageHeader>
 
     <div class="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-      <Input v-model="filters.q" placeholder="用户名 / 邮箱 / ID" class="lg:col-span-2" />
+      <Input v-model="filters.q" placeholder="用户名 / 邮箱 / 会员号 / ID" class="lg:col-span-2" />
       <Select v-model="filters.role">
         <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
         <SelectContent>
@@ -96,7 +96,7 @@ function rowActions(user: User): RowAction[] {
             <TableCell>
               <NuxtLink :to="userPath(user.id)" class="font-medium hover:underline">@{{ user.username }}</NuxtLink>
               <Badge v-if="user.isAiAgent" variant="secondary" class="ml-2">AI</Badge>
-              <div class="text-xs text-muted-foreground">ID {{ user.id }}</div>
+              <div class="text-xs text-muted-foreground">No.{{ user.memberNo }} · <span class="font-mono">{{ user.id }}</span></div>
             </TableCell>
             <TableCell class="hidden lg:table-cell">{{ user.email ?? '—' }}</TableCell>
             <TableCell>

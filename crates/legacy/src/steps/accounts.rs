@@ -15,13 +15,24 @@ pub async fn run(
     Ok(())
 }
 
+/// 会员号：旧账号沿用旧 id（用户以前看到的 UID），之后注册的接着最大的旧 id 往后排。
+/// 导入只对全新的库执行（`import` 开头检查），所以不会和已有账号撞号。
+async fn continue_member_numbers(conn: &mut PgConnection) -> anyhow::Result<()> {
+    sqlx::query!(
+        "SELECT setval('users_member_no_seq', (SELECT COALESCE(max(member_no), 0) FROM users) + 1, false)"
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok(())
+}
+
 /// 角色：旧的 `isAdmin` → admin（旧系统没有论坛内的版主角色，审核员是 Strapi 后台账号，D-062）。
 /// 考试：已通过的账号沿用通过时间，没有时间的（EXAM-014 存量豁免）用导入时刻。
 async fn users(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Result<u64> {
     let result = sqlx::query!(
-        r#"INSERT INTO users (id, username, email, status, role, is_ai_agent, exam_passed_at,
+        r#"INSERT INTO users (id, member_no, username, email, status, role, is_ai_agent, exam_passed_at,
                               legacy_id, level, created_at, updated_at)
-           SELECT u.id, u.username, u.email, u.status,
+           SELECT u.id, u.id, u.username, u.email, u.status,
                   CASE WHEN u.is_admin THEN 'admin' ELSE 'user' END,
                   coalesce(u.is_ai_agent, false),
                   CASE WHEN u.exam_passed THEN coalesce(u.exam_passed_at AT TIME ZONE $1, $2) END,
@@ -34,8 +45,9 @@ async fn users(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Resu
         options.legacy_timezone,
         options.now,
     )
-    .execute(conn)
+    .execute(&mut *conn)
     .await?;
+    continue_member_numbers(conn).await?;
     Ok(result.rows_affected())
 }
 

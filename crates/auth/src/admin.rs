@@ -234,6 +234,8 @@ pub struct UserQuery {
 pub struct AdminUser {
     #[schema(value_type = String)]
     pub id: Id,
+    /// 会员号（按注册顺序的展示编号，旧账号沿用旧 UID）。
+    pub member_no: i64,
     pub username: String,
     /// 只有管理员看得到；版主看到的是打码后的形式。
     pub email: Option<String>,
@@ -259,6 +261,7 @@ fn mask_email(email: &str) -> String {
 fn user_view(row: repo::AdminUserRow, full_email: bool) -> AdminUser {
     AdminUser {
         id: Id::new(row.id),
+        member_no: row.member_no,
         username: row.username,
         email: row
             .email

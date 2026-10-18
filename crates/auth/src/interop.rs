@@ -92,6 +92,8 @@ pub async fn active_users(
 #[derive(Debug, Clone)]
 pub struct ProfileUser {
     pub id: i64,
+    /// 会员号（展示编号）。
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     pub is_ai_agent: bool,
@@ -113,6 +115,7 @@ pub async fn profile_user(
         .await?
         .map(|row| ProfileUser {
             id: row.id,
+            member_no: row.member_no,
             gone: matches!(row.status.as_str(), "deleted" | "merged"),
             username: row.username,
             level: row.level,

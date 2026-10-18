@@ -952,6 +952,7 @@ pub async fn session(state: &AuthState, session_id: i64) -> Result<Option<Sessio
 fn me_view(row: MeRow) -> MeView {
     MeView {
         id: Id::new(row.id),
+        member_no: row.member_no,
         username: row.username,
         email: row.email,
         role: row.role,

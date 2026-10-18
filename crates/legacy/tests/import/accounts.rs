@@ -186,3 +186,46 @@ async fn refuses_unknown_timezone_and_non_empty_target(db: PgPool) {
         .unwrap_err();
     assert!(error.to_string().contains("全新的库"), "{error}");
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn member_numbers_keep_old_uids(db: PgPool) {
+    setup(&db).await;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        r#"
+        INSERT INTO legacy.up_users (id, document_id, username, email, provider, account_status, password,
+                                     blocked, is_admin, exam_passed, created_at, updated_at) VALUES
+          (1, 'u1', 'one', 'one@example.com', 'local', 'active', '{BCRYPT}', false, false, true,
+           '2025-01-01 08:00:00', '2025-01-01 08:00:00'),
+          (7, 'u7', 'seven', 'seven@example.com', 'local', 'active', '{BCRYPT}', false, false, true,
+           '2025-02-01 08:00:00', '2025-02-01 08:00:00');
+        "#
+    )))
+    .execute(&db)
+    .await
+    .unwrap();
+
+    import(&db, "Asia/Shanghai").await;
+
+    // 旧账号沿用旧 UID；导入之后新注册的接着最大的旧 id 往后排。
+    sqlx::query!(
+        "INSERT INTO users (id, username, email) VALUES (105188348552810497, 'late', 'late@example.com')"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let numbers = sqlx::query!("SELECT username, member_no FROM users ORDER BY member_no")
+        .fetch_all(&db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.username, r.member_no))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        numbers,
+        vec![
+            ("one".to_owned(), 1),
+            ("seven".to_owned(), 7),
+            ("late".to_owned(), 8),
+        ]
+    );
+}

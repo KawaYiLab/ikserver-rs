@@ -3017,7 +3017,7 @@
           "admin"
         ],
         "summary": "账号列表",
-        "description": "关键词匹配用户名或邮箱（数字时也按 id）；可按角色、状态、是否 AI 账号筛选。新注册的在前。\n邮箱只有管理员看到全文。",
+        "description": "关键词匹配用户名或邮箱（数字时也按 id、会员号）；可按角色、状态、是否 AI 账号筛选。新注册的在前。\n邮箱只有管理员看到全文。",
         "operationId": "list_users",
         "parameters": [
           {
@@ -12988,6 +12988,7 @@
         "description": "后台看到的账号。",
         "required": [
           "id",
+          "memberNo",
           "username",
           "status",
           "role",
@@ -13023,6 +13024,11 @@
           "level": {
             "type": "integer",
             "format": "int32"
+          },
+          "memberNo": {
+            "type": "integer",
+            "format": "int64",
+            "description": "会员号（按注册顺序的展示编号，旧账号沿用旧 UID）。"
           },
           "role": {
             "$ref": "#/components/schemas/Role"
@@ -16099,6 +16105,7 @@
         "description": "当前登录用户的自我视图（含邮箱，只返回给本人）。",
         "required": [
           "id",
+          "memberNo",
           "username",
           "role",
           "examPassed",
@@ -16131,6 +16138,11 @@
             "type": "integer",
             "format": "int32",
             "description": "等级 0–7（0 = 未通过入站考试）。"
+          },
+          "memberNo": {
+            "type": "integer",
+            "format": "int64",
+            "description": "会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。主键仍是 `id`。"
           },
           "role": {
             "$ref": "#/components/schemas/Role"
@@ -18394,6 +18406,7 @@
               "description": "后台看到的账号。",
               "required": [
                 "id",
+                "memberNo",
                 "username",
                 "status",
                 "role",
@@ -18429,6 +18442,11 @@
                 "level": {
                   "type": "integer",
                   "format": "int32"
+                },
+                "memberNo": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "会员号（按注册顺序的展示编号，旧账号沿用旧 UID）。"
                 },
                 "role": {
                   "$ref": "#/components/schemas/Role"
@@ -19462,6 +19480,7 @@
         "description": "作者主页。\n\n- 双方存在拉黑（任一方向）时：签名为空，`stats`、`exp` 省略，关注数为 0（PROFILE-021）。\n- 对方隐藏了主页时：签名为空，`stats`、`exp` 省略，`isHidden` 为 true，关注数照常返回（PROFILE-022）。\n- 拉黑优先于隐藏判断。本人看自己永远是完整视图。",
         "required": [
           "id",
+          "memberNo",
           "username",
           "level",
           "isAiAgent",
@@ -19556,6 +19575,11 @@
           "level": {
             "type": "integer",
             "format": "int32"
+          },
+          "memberNo": {
+            "type": "integer",
+            "format": "int64",
+            "description": "会员号：按注册顺序递增的展示编号（旧账号沿用旧 UID）。主键仍是 `id`。"
           },
           "stats": {
             "oneOf": [

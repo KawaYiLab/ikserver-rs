@@ -1594,3 +1594,35 @@ async fn dashboard_trends_bucket_by_business_day(db: PgPool) {
     let (status, _) = call(&app, USER, "GET", "/v1/admin/dashboard/trends", Value::Null).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn member_numbers_are_shown_and_searchable(db: PgPool) {
+    let app = setup(&db).await;
+    // setup 按顺序插入了 4 个账号，会员号依次是 1–4；再注册一个雪花 id 的新账号。
+    sqlx::query!(
+        "INSERT INTO users (id, username, email) VALUES (105188348552810496, 'newbie', 'newbie@example.com')"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (status, me) = call(&app, USER, "GET", "/v1/me", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["memberNo"], 3);
+    let (status, profile) = call(
+        &app,
+        USER,
+        "GET",
+        "/v1/users/105188348552810496",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{profile}");
+    assert_eq!(profile["memberNo"], 5);
+    assert_eq!(profile["id"], "105188348552810496");
+
+    let (_, found) = call(&app, MODERATOR, "GET", "/v1/admin/users?q=5", Value::Null).await;
+    assert_eq!(found["total"], 1, "{found}");
+    assert_eq!(found["items"][0]["username"], "newbie");
+    assert_eq!(found["items"][0]["memberNo"], 5);
+}
