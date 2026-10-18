@@ -136,3 +136,34 @@ pub struct CheckInResult {
     pub balance: i32,
     pub next_eligible_at: DateTime<Utc>,
 }
+
+/// 经验流水（管理后台）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExpLogView {
+    /// `check_in` | `create_post` | `create_comment` | `like_give` | `comment_accepted` |
+    /// `denny_received` | `exam_passed` | `admin_grant`（以及迁移来的历史动作）
+    pub action: String,
+    /// 实际发放量（被每日上限截断后）。
+    pub amount: i32,
+    /// 申请的量。
+    pub requested: i32,
+    /// 每日上限桶：`active` / `passive` / `exempt`（不计上限）。
+    pub bucket: String,
+    /// 业务日（北京时间 04:00 切日）。
+    pub biz_day: NaiveDate,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 一个账号的经济概况（管理后台）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EconomySummary {
+    pub denny: i32,
+    /// 累计投出的丁尼。
+    pub denny_given: i32,
+    pub exp: i64,
+    pub check_in_streak: i32,
+    pub check_in_total: i32,
+    pub last_check_in_day: Option<NaiveDate>,
+}

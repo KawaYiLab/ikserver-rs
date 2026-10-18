@@ -1248,3 +1248,278 @@ async fn pinning_and_moving_posts(db: PgPool) {
         ]
     );
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn user_detail_ledgers_and_profile(db: PgPool) {
+    let app = setup(&db).await;
+    sqlx::query!("INSERT INTO user_profiles (user_id, bio) VALUES (3, '广告位招租 加群 123')")
+        .execute(&db)
+        .await
+        .unwrap();
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/3/denny",
+        json!({ "amount": 100, "reason": "活动奖励" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/3/exp",
+        json!({ "amount": 20, "reason": "活动奖励" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, detail) = call(&app, MODERATOR, "GET", "/v1/admin/users/3", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["bio"], "广告位招租 加群 123");
+    assert_eq!(detail["denny"], 130);
+    assert_eq!(detail["exp"], 20);
+    assert!(detail["lastSeenAt"].is_string(), "{detail}");
+
+    let (_, denny) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/users/3/denny-logs",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(denny["total"], 1, "{denny}");
+    assert_eq!(denny["items"][0]["action"], "admin_grant");
+    assert_eq!(denny["items"][0]["amount"], 100);
+    let (_, exp) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/users/3/exp-logs",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(exp["total"], 1, "{exp}");
+    assert_eq!(exp["items"][0]["bucket"], "exempt");
+
+    // 清理违规签名：版主可以，但不能清理管理员的资料。
+    let reset = json!({ "bio": true, "avatar": true, "note": "签名是广告", "notify": true });
+    let (status, body) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/1/profile/reset",
+        reset.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "CANNOT_SANCTION_STAFF");
+    let (status, done) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/profile/reset",
+        reset.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["bioCleared"], true);
+    assert_eq!(done["avatarCleared"], false);
+    let (_, again) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/profile/reset",
+        reset,
+    )
+    .await;
+    assert_eq!(again["bioCleared"], false);
+    let notices = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM notifications WHERE recipient_id = 3 AND kind = 'system'"#
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(notices, 1);
+    let audits = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM admin_audit_log WHERE action = 'user.profile.reset'"#
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn user_moderation_history_skips_anonymous_content(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+    sqlx::query!(
+        r#"INSERT INTO reports (id, reporter_id, target_type, target_id, owner_user_id, reason, snapshot)
+           VALUES (710, 4, 'post', 500, 3, 'spam', '{"title":"公开帖"}'),
+                  (711, 4, 'post', 501, 3, 'spam', '{"title":"匿名帖","anonymous":true}')"#
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    // 举报还没结案，先直接处置两条没有举报的：实名评论与匿名评论。
+    let (status, done) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "comment", "ids": ["600", "601"], "action": "hide" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["affected"], 2);
+
+    let (status, history) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/users/3/moderation",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{history}");
+    assert_eq!(history["stats"]["total"], 1, "{history}");
+    assert_eq!(history["stats"]["open"], 1);
+    assert_eq!(history["reports"][0]["preview"]["title"], "公开帖");
+    let actions = history["actions"].as_array().unwrap();
+    assert_eq!(actions.len(), 1, "{history}");
+    assert_eq!(actions[0]["targetId"], "600");
+    assert_eq!(actions[0]["action"], "hide_content");
+    assert_eq!(actions[0]["actor"]["username"], "mod");
+
+    let (status, _) = call(
+        &app,
+        USER,
+        "GET",
+        "/v1/admin/users/3/moderation",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn force_logout_and_rename(db: PgPool) {
+    let app = setup(&db).await;
+
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/users/3/sessions",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, sessions) = call(
+        &app,
+        ADMIN,
+        "GET",
+        "/v1/admin/users/3/sessions",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sessions}");
+    assert_eq!(sessions.as_array().unwrap().len(), 1);
+
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/sessions/revoke",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(&app, USER, "GET", "/v1/me", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, revoked) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/users/3/sessions/revoke",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert_eq!(revoked["revoked"], 1);
+    let (status, _) = call(&app, USER, "GET", "/v1/me", Value::Null).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // 封禁中的账号也能强制改名；名字被占用时 409；不合规的名字 400。
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/users/3/block",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/3/username",
+        json!({ "username": "mod" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "USERNAME_TAKEN");
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/users/3/username",
+        json!({ "username": "a@b" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "PUT",
+        "/v1/admin/users/3/username",
+        json!({ "username": "清理过的名字" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // 并发提交同一个新名字：只改一次、只记一条审计、只通知一次。
+    let rename = json!({ "username": "清理过的名字", "note": "原名含广告", "notify": true });
+    let (a, b) = tokio::join!(
+        call(
+            &app,
+            ADMIN,
+            "PUT",
+            "/v1/admin/users/3/username",
+            rename.clone()
+        ),
+        call(&app, ADMIN, "PUT", "/v1/admin/users/3/username", rename),
+    );
+    for (status, body) in [&a, &b] {
+        assert_eq!(*status, StatusCode::OK, "{body}");
+        assert_eq!(body["user"]["username"], "清理过的名字");
+    }
+    let audits = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM admin_audit_log WHERE action = 'user.username.set'"#
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+    let notices = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM notifications WHERE recipient_id = 3 AND kind = 'system'"#
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(notices, 1);
+}

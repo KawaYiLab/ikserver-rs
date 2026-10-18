@@ -3308,6 +3308,65 @@
         ]
       }
     },
+    "/v1/admin/users/{id}/denny-logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "账号的丁尼流水（新的在前）",
+        "operationId": "user_denny_logs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "默认 20，最大 100。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_DennyLogView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/users/{id}/exam-pass": {
       "post": {
         "tags": [
@@ -3423,6 +3482,192 @@
         ]
       }
     },
+    "/v1/admin/users/{id}/exp-logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "账号的经验流水（新的在前）",
+        "operationId": "user_exp_logs",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "默认 20，最大 100。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_ExpLogView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/users/{id}/moderation": {
+      "get": {
+        "tags": [
+          "moderation"
+        ],
+        "summary": "账号的处罚记录与收到的举报（审核）",
+        "description": "匿名内容相关的处置与举报一律不出现，免得从一个人的记录反推出他的匿名内容。",
+        "operationId": "user_history",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "用户 id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserModeration"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/users/{id}/profile/reset": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "清理违规资料：清空签名、清除自定义头像（审核）",
+        "description": "版主不能清理版主、管理员的资料（403 `CANNOT_SANCTION_STAFF`）。",
+        "operationId": "reset_profile",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProfileReset"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileResetResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "CANNOT_SANCTION_STAFF",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/users/{id}/role": {
       "put": {
         "tags": [
@@ -3490,6 +3735,113 @@
         ]
       }
     },
+    "/v1/admin/users/{id}/sessions": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "账号的登录设备（只有管理员：含 IP）",
+        "operationId": "user_sessions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionView"
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/users/{id}/sessions/revoke": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "强制下线（只有管理员）",
+        "description": "吊销全部会话，在线的连接随即断开。",
+        "operationId": "revoke_sessions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/users/{id}/unblock": {
       "post": {
         "tags": [
@@ -3520,6 +3872,82 @@
           },
           "403": {
             "description": "FORBIDDEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/users/{id}/username": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "强制改名（只有管理员；不收费，封禁中的账号也能改）",
+        "operationId": "put_username",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsernameUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "USERNAME_TAKEN",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12586,23 +13014,65 @@
           "exp",
           "postCount",
           "totalViews",
-          "totalLikes"
+          "totalLikes",
+          "totalComments",
+          "bio",
+          "dennyGiven",
+          "checkInStreak",
+          "checkInTotal"
         ],
         "properties": {
+          "avatarUrl": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "自定义头像的地址；没有时为 null（显示默认头像或系统头像）。"
+          },
+          "bio": {
+            "type": "string",
+            "description": "签名。"
+          },
+          "checkInStreak": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "checkInTotal": {
+            "type": "integer",
+            "format": "int32"
+          },
           "denny": {
             "type": "integer",
             "format": "int32",
             "description": "丁尼余额。"
+          },
+          "dennyGiven": {
+            "type": "integer",
+            "format": "int32",
+            "description": "累计投出的丁尼。"
           },
           "exp": {
             "type": "integer",
             "format": "int64",
             "description": "累计经验。"
           },
+          "lastSeenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "最近一次活跃（全部会话里最新的）。"
+          },
           "postCount": {
             "type": "integer",
             "format": "int64",
             "description": "已发布、公开、实名的帖子数。"
+          },
+          "totalComments": {
+            "type": "integer",
+            "format": "int64",
+            "description": "这些帖子收到的评论数。"
           },
           "totalLikes": {
             "type": "integer",
@@ -14872,6 +15342,47 @@
         },
         "additionalProperties": false
       },
+      "ExpLogView": {
+        "type": "object",
+        "description": "经验流水（管理后台）。",
+        "required": [
+          "action",
+          "amount",
+          "requested",
+          "bucket",
+          "bizDay",
+          "createdAt"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "`check_in` | `create_post` | `create_comment` | `like_give` | `comment_accepted` |\n`denny_received` | `exam_passed` | `admin_grant`（以及迁移来的历史动作）"
+          },
+          "amount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "实际发放量（被每日上限截断后）。"
+          },
+          "bizDay": {
+            "type": "string",
+            "format": "date",
+            "description": "业务日（北京时间 04:00 切日）。"
+          },
+          "bucket": {
+            "type": "string",
+            "description": "每日上限桶：`active` / `passive` / `exempt`（不计上限）。"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requested": {
+            "type": "integer",
+            "format": "int32",
+            "description": "申请的量。"
+          }
+        }
+      },
       "ExpSource": {
         "type": "object",
         "description": "今日某项主动经验的完成情况。",
@@ -15844,6 +16355,55 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "ModerationEntry": {
+        "type": "object",
+        "description": "一条审核记录（处置、自动隐藏、封禁、解封）。",
+        "required": [
+          "action",
+          "targetType",
+          "targetId",
+          "reportCount",
+          "createdAt"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "`auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |\n`block_user` | `unblock_user`"
+          },
+          "actor": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UserRef",
+                "description": "操作人；自动隐藏为 null。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reportCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "一并结案的举报条数（直接处置为 0）。"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "targetType": {
+            "$ref": "#/components/schemas/TargetType"
           }
         }
       },
@@ -17940,6 +18500,142 @@
           }
         }
       },
+      "Paged_DennyLogView": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "action",
+                "amount",
+                "balance",
+                "description",
+                "createdAt"
+              ],
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "`check_in` | `gift_sent` | `gift_received` | `spend_rename` | `spend_avatar` |\n`exam_passed` | `admin_grant` | `admin_deduct`（以及迁移来的历史动作）"
+                },
+                "amount": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "有符号：入账为正，出账为负。"
+                },
+                "balance": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "变动后的余额。"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "description": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
+      "Paged_ExpLogView": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "经验流水（管理后台）。",
+              "required": [
+                "action",
+                "amount",
+                "requested",
+                "bucket",
+                "bizDay",
+                "createdAt"
+              ],
+              "properties": {
+                "action": {
+                  "type": "string",
+                  "description": "`check_in` | `create_post` | `create_comment` | `like_give` | `comment_accepted` |\n`denny_received` | `exam_passed` | `admin_grant`（以及迁移来的历史动作）"
+                },
+                "amount": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "实际发放量（被每日上限截断后）。"
+                },
+                "bizDay": {
+                  "type": "string",
+                  "format": "date",
+                  "description": "业务日（北京时间 04:00 切日）。"
+                },
+                "bucket": {
+                  "type": "string",
+                  "description": "每日上限桶：`active` / `passive` / `exempt`（不计上限）。"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "requested": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "申请的量。"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
       "PaperQuestion": {
         "type": "object",
         "description": "试卷上的一道题（不含正确答案）。",
@@ -18635,6 +19331,46 @@
           }
         }
       },
+      "ProfileReset": {
+        "type": "object",
+        "properties": {
+          "avatar": {
+            "type": "boolean",
+            "description": "清除自定义头像（系统头像不动）。"
+          },
+          "bio": {
+            "type": "boolean",
+            "description": "清空签名。"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "给用户发系统通知。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProfileResetResult": {
+        "type": "object",
+        "required": [
+          "bioCleared",
+          "avatarCleared"
+        ],
+        "properties": {
+          "avatarCleared": {
+            "type": "boolean"
+          },
+          "bioCleared": {
+            "type": "boolean",
+            "description": "确实清掉了签名（原本就是空的为 false）。"
+          }
+        }
+      },
       "ProfileStats": {
         "type": "object",
         "description": "作者主页统计。只计公开的非匿名内容，作者本人看也一样（PROFILE-015）。",
@@ -19069,6 +19805,85 @@
           "plagiarism",
           "other"
         ]
+      },
+      "ReceivedReport": {
+        "type": "object",
+        "description": "某人收到的一条举报（针对他的实名内容或账号本身）。",
+        "required": [
+          "targetType",
+          "targetId",
+          "reason",
+          "status",
+          "preview",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "detail": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "preview": {
+            "$ref": "#/components/schemas/TargetPreview",
+            "description": "举报时的快照。"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/Reason"
+          },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Resolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReportStatus"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "targetType": {
+            "$ref": "#/components/schemas/TargetType"
+          }
+        }
+      },
+      "ReceivedStats": {
+        "type": "object",
+        "description": "某人收到的举报统计（不含匿名内容）。",
+        "required": [
+          "total",
+          "open",
+          "accepted",
+          "rejected"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "open": {
+            "type": "integer",
+            "format": "int64",
+            "description": "待处理与复核中。"
+          },
+          "rejected": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "RegenerateAccepted": {
         "type": "object",
@@ -19609,6 +20424,20 @@
           "totalScore": {
             "type": "integer",
             "format": "int32"
+          }
+        }
+      },
+      "RevokeResult": {
+        "type": "object",
+        "required": [
+          "revoked"
+        ],
+        "properties": {
+          "revoked": {
+            "type": "integer",
+            "format": "int64",
+            "description": "吊销的会话数。",
+            "minimum": 0
           }
         }
       },
@@ -20855,6 +21684,34 @@
           }
         }
       },
+      "UserModeration": {
+        "type": "object",
+        "description": "账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律不出现（AGENTS.md 规则 10）。",
+        "required": [
+          "stats",
+          "reports",
+          "actions"
+        ],
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ModerationEntry"
+            },
+            "description": "最近 50 条审核记录。"
+          },
+          "reports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReceivedReport"
+            },
+            "description": "最近 20 条收到的举报。"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/ReceivedStats"
+          }
+        }
+      },
       "UserRef": {
         "type": "object",
         "description": "后台展示的账号。",
@@ -20918,6 +21775,30 @@
             "type": "string"
           }
         }
+      },
+      "UsernameUpdate": {
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "properties": {
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "原因（写进审计；通知用户时附上）。"
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "给用户发系统通知。"
+          },
+          "username": {
+            "type": "string",
+            "description": "新用户名（与用户自己改名的规则一致，不收费）。"
+          }
+        },
+        "additionalProperties": false
       },
       "VideoPage": {
         "type": "object",

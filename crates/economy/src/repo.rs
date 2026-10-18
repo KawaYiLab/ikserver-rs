@@ -387,3 +387,72 @@ pub(crate) async fn gifted_post_ids(
     .fetch_all(conn)
     .await
 }
+
+// ---------- 管理后台：按人查流水 ----------
+
+pub(crate) async fn count_denny_logs(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM denny_logs WHERE user_id = $1"#,
+        user_id
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) async fn denny_logs_offset(
+    conn: &mut PgConnection,
+    user_id: i64,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<DennyLogRow>> {
+    sqlx::query_as!(
+        DennyLogRow,
+        "SELECT id, action, amount, balance, description, created_at
+         FROM denny_logs WHERE user_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2 OFFSET $3",
+        user_id,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct ExpLogRow {
+    pub action: String,
+    pub amount: i32,
+    pub requested: i32,
+    pub bucket: String,
+    pub biz_day: NaiveDate,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn count_exp_logs(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM exp_logs WHERE user_id = $1"#,
+        user_id
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) async fn exp_logs_offset(
+    conn: &mut PgConnection,
+    user_id: i64,
+    limit: i64,
+    offset: i64,
+) -> sqlx::Result<Vec<ExpLogRow>> {
+    sqlx::query_as!(
+        ExpLogRow,
+        "SELECT action, amount, requested, bucket, biz_day, created_at
+         FROM exp_logs WHERE user_id = $1
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2 OFFSET $3",
+        user_id,
+        limit,
+        offset,
+    )
+    .fetch_all(conn)
+    .await
+}

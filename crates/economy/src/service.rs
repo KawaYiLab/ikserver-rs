@@ -10,14 +10,14 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use http::StatusCode;
 use ik_auth::Principal;
 use ik_auth::interop::{self, LockedUser};
-use ik_kernel::cursor::{self, Page};
+use ik_kernel::cursor::{self, Page, Paged, page_window};
 use ik_kernel::{Problem, Snowflake, time};
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
 use crate::dto::{
-    BenefitsView, CheckInResult, CheckInStatusView, DennyLogView, ExpSource, ExpSources, ExpView,
-    PageQuery, WalletView,
+    BenefitsView, CheckInResult, CheckInStatusView, DennyLogView, EconomySummary, ExpLogView,
+    ExpSource, ExpSources, ExpView, PageQuery, WalletView,
 };
 use crate::repo::{self, EconomyRow, NewCheckIn, NewDennyLog, NewExpLog};
 use crate::{EconomyState, benefits, level};
@@ -266,6 +266,83 @@ pub async fn balance_of(conn: &mut PgConnection, user_id: i64) -> Result<i32, Pr
     Ok(repo::get_row(conn, user_id)
         .await?
         .map_or(INITIAL_BALANCE, |row| row.denny_balance))
+}
+
+/// 经济概况（管理后台账号详情）。没有经济行时按初始值。
+pub async fn summary_of(conn: &mut PgConnection, user_id: i64) -> Result<EconomySummary, Problem> {
+    Ok(repo::get_row(conn, user_id).await?.map_or(
+        EconomySummary {
+            denny: INITIAL_BALANCE,
+            denny_given: 0,
+            exp: 0,
+            check_in_streak: 0,
+            check_in_total: 0,
+            last_check_in_day: None,
+        },
+        |row| EconomySummary {
+            denny: row.denny_balance,
+            denny_given: row.denny_given,
+            exp: row.exp,
+            check_in_streak: row.check_in_streak,
+            check_in_total: row.check_in_total,
+            last_check_in_day: row.last_check_in_day,
+        },
+    ))
+}
+
+/// 某人的丁尼流水，新的在前（管理后台，按页）。
+pub async fn denny_log_list(
+    conn: &mut PgConnection,
+    user_id: i64,
+    page: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Paged<DennyLogView>, Problem> {
+    let (page, limit, offset) = page_window(page, limit, DEFAULT_PAGE);
+    let total = repo::count_denny_logs(conn, user_id).await?;
+    let rows = repo::denny_logs_offset(conn, user_id, i64::from(limit), offset).await?;
+    Ok(Paged {
+        items: rows
+            .into_iter()
+            .map(|r| DennyLogView {
+                action: r.action,
+                amount: r.amount,
+                balance: r.balance,
+                description: r.description,
+                created_at: r.created_at,
+            })
+            .collect(),
+        total,
+        page,
+        limit,
+    })
+}
+
+/// 某人的经验流水，新的在前（管理后台，按页）。
+pub async fn exp_log_list(
+    conn: &mut PgConnection,
+    user_id: i64,
+    page: Option<u32>,
+    limit: Option<u32>,
+) -> Result<Paged<ExpLogView>, Problem> {
+    let (page, limit, offset) = page_window(page, limit, DEFAULT_PAGE);
+    let total = repo::count_exp_logs(conn, user_id).await?;
+    let rows = repo::exp_logs_offset(conn, user_id, i64::from(limit), offset).await?;
+    Ok(Paged {
+        items: rows
+            .into_iter()
+            .map(|r| ExpLogView {
+                action: r.action,
+                amount: r.amount,
+                requested: r.requested,
+                bucket: r.bucket,
+                biz_day: r.biz_day,
+                created_at: r.created_at,
+            })
+            .collect(),
+        total,
+        page,
+        limit,
+    })
 }
 
 // ---------- 丁尼 ----------

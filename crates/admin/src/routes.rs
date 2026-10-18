@@ -1,4 +1,4 @@
-//! HTTP 接口：`/v1/admin/users*`、`/v1/admin/dashboard`、`/v1/admin/search*`、`/v1/admin/audit`。
+//! HTTP 接口：`/v1/admin/users*`（含流水、登录设备、强制下线、强制改名、清理资料）、`/v1/admin/dashboard`、`/v1/admin/search*`、`/v1/admin/audit`。
 
 use axum::extract::{FromRef, State};
 use http::StatusCode;
@@ -15,8 +15,11 @@ use utoipa_axum::routes;
 use crate::AdminState;
 use crate::dashboard::{self, Dashboard, SearchStatus};
 use crate::users::{
-    self, AdminUserDetail, AiAgentUpdate, DennyAdjustment, EconomyResult, ExpGrant, RoleUpdate,
+    self, AdminUserDetail, AiAgentUpdate, DennyAdjustment, EconomyResult, ExpGrant, LedgerQuery,
+    ProfileReset, ProfileResetResult, RevokeResult, RoleUpdate, UsernameUpdate,
 };
+use ik_auth::dto::SessionView;
+use ik_economy::dto::{DennyLogView, ExpLogView};
 
 pub fn router<S>() -> OpenApiRouter<S>
 where
@@ -32,6 +35,12 @@ where
         .routes(routes!(pass_exam))
         .routes(routes!(adjust_denny))
         .routes(routes!(grant_exp))
+        .routes(routes!(user_denny_logs))
+        .routes(routes!(user_exp_logs))
+        .routes(routes!(user_sessions))
+        .routes(routes!(revoke_sessions))
+        .routes(routes!(put_username))
+        .routes(routes!(reset_profile))
         .routes(routes!(get_dashboard))
         .routes(routes!(get_search))
         .routes(routes!(reindex))
@@ -198,6 +207,139 @@ async fn grant_exp(
 ) -> Result<Json<EconomyResult>, Problem> {
     Ok(Json(
         users::grant_exp(&state, &op, id.get(), request).await?,
+    ))
+}
+
+/// 账号的丁尼流水（新的在前）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/users/{id}/denny-logs",
+    tag = "admin",
+    params(("id" = String, Path), LedgerQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses((status = 200, body = Paged<DennyLogView>))
+)]
+async fn user_denny_logs(
+    State(state): State<AdminState>,
+    StaffOperator(_): StaffOperator,
+    Path(id): Path<Id<User>>,
+    Query(query): Query<LedgerQuery>,
+) -> Result<Json<Paged<DennyLogView>>, Problem> {
+    Ok(Json(users::denny_logs(&state, id.get(), query).await?))
+}
+
+/// 账号的经验流水（新的在前）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/users/{id}/exp-logs",
+    tag = "admin",
+    params(("id" = String, Path), LedgerQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses((status = 200, body = Paged<ExpLogView>))
+)]
+async fn user_exp_logs(
+    State(state): State<AdminState>,
+    StaffOperator(_): StaffOperator,
+    Path(id): Path<Id<User>>,
+    Query(query): Query<LedgerQuery>,
+) -> Result<Json<Paged<ExpLogView>>, Problem> {
+    Ok(Json(users::exp_logs(&state, id.get(), query).await?))
+}
+
+/// 账号的登录设备（只有管理员：含 IP）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/users/{id}/sessions",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Vec<SessionView>),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn user_sessions(
+    State(state): State<AdminState>,
+    AdminOperator(_): AdminOperator,
+    Path(id): Path<Id<User>>,
+) -> Result<Json<Vec<SessionView>>, Problem> {
+    Ok(Json(users::sessions(&state, id.get()).await?))
+}
+
+/// 强制下线（只有管理员）
+///
+/// 吊销全部会话，在线的连接随即断开。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/users/{id}/sessions/revoke",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = RevokeResult),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn revoke_sessions(
+    State(state): State<AdminState>,
+    AdminOperator(op): AdminOperator,
+    Path(id): Path<Id<User>>,
+) -> Result<Json<RevokeResult>, Problem> {
+    Ok(Json(users::revoke_sessions(&state, &op, id.get()).await?))
+}
+
+/// 强制改名（只有管理员；不收费，封禁中的账号也能改）
+#[utoipa::path(
+    put,
+    path = "/v1/admin/users/{id}/username",
+    tag = "admin",
+    params(("id" = String, Path)),
+    request_body = UsernameUpdate,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AdminUserDetail),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "USERNAME_TAKEN", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn put_username(
+    State(state): State<AdminState>,
+    AdminOperator(op): AdminOperator,
+    Path(id): Path<Id<User>>,
+    Json(update): Json<UsernameUpdate>,
+) -> Result<Json<AdminUserDetail>, Problem> {
+    Ok(Json(
+        users::force_rename(&state, &op, id.get(), update).await?,
+    ))
+}
+
+/// 清理违规资料：清空签名、清除自定义头像（审核）
+///
+/// 版主不能清理版主、管理员的资料（403 `CANNOT_SANCTION_STAFF`）。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/users/{id}/profile/reset",
+    tag = "admin",
+    params(("id" = String, Path)),
+    request_body = ProfileReset,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = ProfileResetResult),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "CANNOT_SANCTION_STAFF", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn reset_profile(
+    State(state): State<AdminState>,
+    StaffOperator(op): StaffOperator,
+    Path(id): Path<Id<User>>,
+    Json(reset): Json<ProfileReset>,
+) -> Result<Json<ProfileResetResult>, Problem> {
+    Ok(Json(
+        users::reset_profile(&state, &op, id.get(), reset).await?,
     ))
 }
 

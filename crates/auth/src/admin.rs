@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use http::StatusCode;
 use http::request::Parts;
 use ik_kernel::cursor::{Paged, page_window};
-use ik_kernel::{Id, Problem, Snowflake};
+use ik_kernel::{Id, Problem, Role, Snowflake};
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 use utoipa::{IntoParams, ToSchema};
@@ -403,4 +403,141 @@ pub async fn user_counts(
         blocked: row.blocked,
         new_today: row.new_since,
     })
+}
+
+// ---------- 账号详情（登录设备、强制下线、强制改名、清除头像） ----------
+
+/// 某人当前有效的登录会话，最近活跃的在前（只给管理员看：含 IP）。
+pub async fn user_sessions(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Vec<crate::dto::SessionView>, Problem> {
+    let rows = repo::active_sessions(conn, user_id, Utc::now()).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| crate::dto::SessionView {
+            id: Id::new(row.id),
+            login_method: row.login_method,
+            user_agent: row.user_agent,
+            ip: row.ip,
+            location: row.location,
+            created_at: row.created_at,
+            last_seen_at: row.last_seen_at,
+            expires_at: row.expires_at,
+            current: false,
+        })
+        .collect())
+}
+
+/// 最近一次活跃的时间（全部会话里最新的，含已下线的）。
+pub async fn last_seen(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Option<DateTime<Utc>>, Problem> {
+    Ok(repo::last_seen(conn, user_id).await?)
+}
+
+/// 被操作的账号：存在且没有注销 / 合并。返回当前用户名与角色。
+async fn lock_target(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<repo::LockedAccountRow, Problem> {
+    match repo::lock_account(conn, user_id).await? {
+        Some(row) if matches!(row.status.as_str(), "active" | "blocked") => Ok(row),
+        _ => Err(Problem::not_found()),
+    }
+}
+
+/// 版主不能处置版主、管理员（与封禁一致）；管理员可以。
+fn ensure_can_sanction(op: &Operator, target_role: Role) -> Result<(), Problem> {
+    if target_role.is_staff() && !op.principal.role.is_admin() {
+        return Err(Problem::new(
+            StatusCode::FORBIDDEN,
+            "CANNOT_SANCTION_STAFF",
+            "不能封禁版主或管理员",
+        ));
+    }
+    Ok(())
+}
+
+/// 强制下线：吊销全部会话。返回吊销的条数；调用方在提交后发布 [`crate::service::sessions_changed_event`]。
+pub async fn revoke_sessions(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    op: &Operator,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> Result<u64, Problem> {
+    let target = lock_target(conn, user_id).await?;
+    ensure_can_sanction(op, target.role)?;
+    let revoked = repo::revoke_user_sessions(conn, user_id, None, now, "admin").await?;
+    record(
+        conn,
+        ids,
+        op,
+        Audit {
+            action: "user.sessions.revoke",
+            target_type: "user",
+            target_id: Some(user_id.to_string()),
+            details: serde_json::json!({ "revoked": revoked }),
+        },
+        now,
+    )
+    .await?;
+    Ok(revoked)
+}
+
+/// 强制改名（不收费，封禁中的账号也能改）。调用方负责校验格式；同名时不改、不记审计，返回 None。
+/// 名字被占用 → 409 `USERNAME_TAKEN`。返回原用户名。
+pub async fn force_rename(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    op: &Operator,
+    user_id: i64,
+    username: &str,
+    note: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<Option<String>, Problem> {
+    let target = lock_target(conn, user_id).await?;
+    ensure_can_sanction(op, target.role)?;
+    if target.username == username {
+        return Ok(None);
+    }
+    match repo::force_rename(conn, user_id, username, now).await {
+        Ok(true) => {}
+        Ok(false) => return Err(Problem::not_found()),
+        Err(error) if ik_kernel::db::is_unique_violation(&error, "users_username_uq") => {
+            return Err(Problem::conflict("USERNAME_TAKEN", "该用户名已被占用"));
+        }
+        Err(error) => return Err(error.into()),
+    }
+    record(
+        conn,
+        ids,
+        op,
+        Audit {
+            action: "user.username.set",
+            target_type: "user",
+            target_id: Some(user_id.to_string()),
+            details: serde_json::json!({ "from": target.username, "to": username, "note": note }),
+        },
+        now,
+    )
+    .await?;
+    Ok(Some(target.username))
+}
+
+/// 锁住要清理资料的账号并检查权限（版主不能动版主、管理员）。资料清理本身由调用方编排。
+pub async fn lock_for_profile_reset(
+    conn: &mut PgConnection,
+    op: &Operator,
+    user_id: i64,
+) -> Result<(), Problem> {
+    let target = lock_target(conn, user_id).await?;
+    ensure_can_sanction(op, target.role)
+}
+
+/// 清除自定义头像（不论账号是否封禁）。返回原本是否有自定义头像。调用方已锁住账号行。
+pub async fn clear_avatar(conn: &mut PgConnection, user_id: i64) -> Result<bool, Problem> {
+    Ok(repo::force_clear_avatar(conn, user_id).await?)
 }

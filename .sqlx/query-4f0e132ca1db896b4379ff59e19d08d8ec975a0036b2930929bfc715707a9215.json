@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET avatar_media_id = NULL\n         WHERE id = $1 AND status IN ('active', 'blocked') AND avatar_media_id IS NOT NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f0e132ca1db896b4379ff59e19d08d8ec975a0036b2930929bfc715707a9215"
+}

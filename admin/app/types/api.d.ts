@@ -820,6 +820,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/users/{id}/denny-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 账号的丁尼流水（新的在前） */
+        get: operations["user_denny_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/users/{id}/exam-pass": {
         parameters: {
             query?: never;
@@ -854,6 +871,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/users/{id}/exp-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 账号的经验流水（新的在前） */
+        get: operations["user_exp_logs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{id}/moderation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 账号的处罚记录与收到的举报（审核）
+         * @description 匿名内容相关的处置与举报一律不出现，免得从一个人的记录反推出他的匿名内容。
+         */
+        get: operations["user_history"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{id}/profile/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 清理违规资料：清空签名、清除自定义头像（审核）
+         * @description 版主不能清理版主、管理员的资料（403 `CANNOT_SANCTION_STAFF`）。
+         */
+        post: operations["reset_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/users/{id}/role": {
         parameters: {
             query?: never;
@@ -871,6 +945,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/users/{id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 账号的登录设备（只有管理员：含 IP） */
+        get: operations["user_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{id}/sessions/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 强制下线（只有管理员）
+         * @description 吊销全部会话，在线的连接随即断开。
+         */
+        post: operations["revoke_sessions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/users/{id}/unblock": {
         parameters: {
             query?: never;
@@ -882,6 +993,23 @@ export interface paths {
         put?: never;
         /** 解封用户（审核） */
         post: operations["unblock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{id}/username": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 强制改名（只有管理员；不收费，封禁中的账号也能改） */
+        put: operations["put_username"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3444,21 +3572,44 @@ export interface components {
             username: string;
         };
         AdminUserDetail: {
+            /** @description 自定义头像的地址；没有时为 null（显示默认头像或系统头像）。 */
+            avatarUrl?: string | null;
+            /** @description 签名。 */
+            bio: string;
+            /** Format: int32 */
+            checkInStreak: number;
+            /** Format: int32 */
+            checkInTotal: number;
             /**
              * Format: int32
              * @description 丁尼余额。
              */
             denny: number;
             /**
+             * Format: int32
+             * @description 累计投出的丁尼。
+             */
+            dennyGiven: number;
+            /**
              * Format: int64
              * @description 累计经验。
              */
             exp: number;
             /**
+             * Format: date-time
+             * @description 最近一次活跃（全部会话里最新的）。
+             */
+            lastSeenAt?: string | null;
+            /**
              * Format: int64
              * @description 已发布、公开、实名的帖子数。
              */
             postCount: number;
+            /**
+             * Format: int64
+             * @description 这些帖子收到的评论数。
+             */
+            totalComments: number;
             /** Format: int64 */
             totalLikes: number;
             /** Format: int64 */
@@ -4235,6 +4386,33 @@ export interface components {
             amount: number;
             reason: string;
         };
+        /** @description 经验流水（管理后台）。 */
+        ExpLogView: {
+            /**
+             * @description `check_in` | `create_post` | `create_comment` | `like_give` | `comment_accepted` |
+             *     `denny_received` | `exam_passed` | `admin_grant`（以及迁移来的历史动作）
+             */
+            action: string;
+            /**
+             * Format: int32
+             * @description 实际发放量（被每日上限截断后）。
+             */
+            amount: number;
+            /**
+             * Format: date
+             * @description 业务日（北京时间 04:00 切日）。
+             */
+            bizDay: string;
+            /** @description 每日上限桶：`active` / `passive` / `exempt`（不计上限）。 */
+            bucket: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: int32
+             * @description 申请的量。
+             */
+            requested: number;
+        };
         /** @description 今日某项主动经验的完成情况。 */
         ExpSource: {
             done: boolean;
@@ -4589,6 +4767,25 @@ export interface components {
             key: string;
             /** Format: int32 */
             sortOrder: number;
+        };
+        /** @description 一条审核记录（处置、自动隐藏、封禁、解封）。 */
+        ModerationEntry: {
+            /**
+             * @description `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |
+             *     `block_user` | `unblock_user`
+             */
+            action: string;
+            actor?: components["schemas"]["UserRef"] | null;
+            /** Format: date-time */
+            createdAt: string;
+            note?: string | null;
+            /**
+             * Format: int32
+             * @description 一并结案的举报条数（直接处置为 0）。
+             */
+            reportCount: number;
+            targetId: string;
+            targetType: components["schemas"]["TargetType"];
         };
         MovePostInput: {
             categoryId: string;
@@ -5214,6 +5411,82 @@ export interface components {
              */
             total: number;
         };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_DennyLogView: {
+            items: {
+                /**
+                 * @description `check_in` | `gift_sent` | `gift_received` | `spend_rename` | `spend_avatar` |
+                 *     `exam_passed` | `admin_grant` | `admin_deduct`（以及迁移来的历史动作）
+                 */
+                action: string;
+                /**
+                 * Format: int32
+                 * @description 有符号：入账为正，出账为负。
+                 */
+                amount: number;
+                /**
+                 * Format: int32
+                 * @description 变动后的余额。
+                 */
+                balance: number;
+                /** Format: date-time */
+                createdAt: string;
+                description: string;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_ExpLogView: {
+            items: {
+                /**
+                 * @description `check_in` | `create_post` | `create_comment` | `like_give` | `comment_accepted` |
+                 *     `denny_received` | `exam_passed` | `admin_grant`（以及迁移来的历史动作）
+                 */
+                action: string;
+                /**
+                 * Format: int32
+                 * @description 实际发放量（被每日上限截断后）。
+                 */
+                amount: number;
+                /**
+                 * Format: date
+                 * @description 业务日（北京时间 04:00 切日）。
+                 */
+                bizDay: string;
+                /** @description 每日上限桶：`active` / `passive` / `exempt`（不计上限）。 */
+                bucket: string;
+                /** Format: date-time */
+                createdAt: string;
+                /**
+                 * Format: int32
+                 * @description 申请的量。
+                 */
+                requested: number;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
         /** @description 试卷上的一道题（不含正确答案）。 */
         PaperQuestion: {
             id: string;
@@ -5427,6 +5700,20 @@ export interface components {
             /** @description 这一页是主页精选（按作者设定的顺序，最多 6 篇，没有下一页）。 */
             pinned: boolean;
         };
+        ProfileReset: {
+            /** @description 清除自定义头像（系统头像不动）。 */
+            avatar?: boolean;
+            /** @description 清空签名。 */
+            bio?: boolean;
+            note?: string | null;
+            /** @description 给用户发系统通知。 */
+            notify?: boolean;
+        };
+        ProfileResetResult: {
+            avatarCleared: boolean;
+            /** @description 确实清掉了签名（原本就是空的为 false）。 */
+            bioCleared: boolean;
+        };
         /** @description 作者主页统计。只计公开的非匿名内容，作者本人看也一样（PROFILE-015）。 */
         ProfileStats: {
             /** Format: int64 */
@@ -5577,6 +5864,33 @@ export interface components {
          * @enum {string}
          */
         Reason: "spam" | "abuse" | "porn" | "illegal" | "privacy" | "misinfo" | "plagiarism" | "other";
+        /** @description 某人收到的一条举报（针对他的实名内容或账号本身）。 */
+        ReceivedReport: {
+            /** Format: date-time */
+            createdAt: string;
+            detail?: string | null;
+            /** @description 举报时的快照。 */
+            preview: components["schemas"]["TargetPreview"];
+            reason: components["schemas"]["Reason"];
+            resolution?: components["schemas"]["Resolution"] | null;
+            status: components["schemas"]["ReportStatus"];
+            targetId: string;
+            targetType: components["schemas"]["TargetType"];
+        };
+        /** @description 某人收到的举报统计（不含匿名内容）。 */
+        ReceivedStats: {
+            /** Format: int64 */
+            accepted: number;
+            /**
+             * Format: int64
+             * @description 待处理与复核中。
+             */
+            open: number;
+            /** Format: int64 */
+            rejected: number;
+            /** Format: int64 */
+            total: number;
+        };
         /** @description 重新生成已受理：旧回复已撤回，新回复随后以 `dm.message.created`（`ai.state = streaming`）到达。 */
         RegenerateAccepted: {
             replacedMessageId: string;
@@ -5741,6 +6055,13 @@ export interface components {
             submittedAt: string;
             /** Format: int32 */
             totalScore: number;
+        };
+        RevokeResult: {
+            /**
+             * Format: int64
+             * @description 吊销的会话数。
+             */
+            revoked: number;
         };
         RewardView: {
             /** Format: int32 */
@@ -6138,6 +6459,14 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        /** @description 账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律不出现（AGENTS.md 规则 10）。 */
+        UserModeration: {
+            /** @description 最近 50 条审核记录。 */
+            actions: components["schemas"]["ModerationEntry"][];
+            /** @description 最近 20 条收到的举报。 */
+            reports: components["schemas"]["ReceivedReport"][];
+            stats: components["schemas"]["ReceivedStats"];
+        };
         /** @description 后台展示的账号。 */
         UserRef: {
             id: string;
@@ -6158,6 +6487,14 @@ export interface components {
             isFollowing: boolean;
             /** Format: int32 */
             level: number;
+            username: string;
+        };
+        UsernameUpdate: {
+            /** @description 原因（写进审计；通知用户时附上）。 */
+            note?: string | null;
+            /** @description 给用户发系统通知。 */
+            notify?: boolean;
+            /** @description 新用户名（与用户自己改名的规则一致，不收费）。 */
             username: string;
         };
         /** @description 分 P。 */
@@ -8209,6 +8546,31 @@ export interface operations {
             };
         };
     };
+    user_denny_logs: {
+        parameters: {
+            query?: {
+                page?: number;
+                /** @description 默认 20，最大 100。 */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_DennyLogView"];
+                };
+            };
+        };
+    };
     pass_exam: {
         parameters: {
             query?: never;
@@ -8281,6 +8643,112 @@ export interface operations {
             };
         };
     };
+    user_exp_logs: {
+        parameters: {
+            query?: {
+                page?: number;
+                /** @description 默认 20，最大 100。 */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_ExpLogView"];
+                };
+            };
+        };
+    };
+    user_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 用户 id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserModeration"];
+                };
+            };
+            /** @description FORBIDDEN */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    reset_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileReset"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProfileResetResult"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description CANNOT_SANCTION_STAFF */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     put_role: {
         parameters: {
             query?: never;
@@ -8323,6 +8791,72 @@ export interface operations {
             };
         };
     };
+    user_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionView"][];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    revoke_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RevokeResult"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     unblock: {
         parameters: {
             query?: never;
@@ -8345,6 +8879,56 @@ export interface operations {
             };
             /** @description FORBIDDEN */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_username: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UsernameUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminUserDetail"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description USERNAME_TAKEN */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

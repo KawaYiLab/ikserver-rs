@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE user_profiles SET bio = '', updated_at = now() WHERE user_id = $1 AND bio <> ''",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa7a791e8e1c79324ae88c18b7313c7a53557341c997b72651fb0bcc4ab09ce5"
+}

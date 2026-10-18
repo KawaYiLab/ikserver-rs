@@ -403,3 +403,90 @@ pub(crate) async fn open_target_counts(conn: &mut PgConnection) -> sqlx::Result<
     .await?;
     Ok((row.pending, row.reviewing))
 }
+
+// ---------- 管理后台：按人查处罚记录与收到的举报 ----------
+// 匿名内容的处置与举报都排除（AGENTS.md 规则 10）：否则能从一个人的记录反推出他的匿名内容。
+
+pub(crate) struct SubjectLogRow {
+    pub actor_id: Option<i64>,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: i64,
+    pub report_count: i32,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn subject_logs(
+    conn: &mut PgConnection,
+    user_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<SubjectLogRow>> {
+    sqlx::query_as!(
+        SubjectLogRow,
+        "SELECT actor_id, action, target_type, target_id, report_count, note, created_at
+         FROM moderation_log
+         WHERE subject_user_id = $1 AND NOT subject_anonymous
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2",
+        user_id,
+        limit
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct ReceivedStatsRow {
+    pub total: i64,
+    pub open: i64,
+    pub accepted: i64,
+    pub rejected: i64,
+}
+
+pub(crate) async fn received_stats(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<ReceivedStatsRow> {
+    sqlx::query_as!(
+        ReceivedStatsRow,
+        r#"SELECT count(*) AS "total!",
+                  count(*) FILTER (WHERE status IN ('pending', 'reviewing')) AS "open!",
+                  count(*) FILTER (WHERE status = 'accepted') AS "accepted!",
+                  count(*) FILTER (WHERE status = 'rejected') AS "rejected!"
+           FROM reports
+           WHERE owner_user_id = $1 AND NOT COALESCE((snapshot ->> 'anonymous')::boolean, FALSE)"#,
+        user_id
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) struct ReceivedRow {
+    pub target_type: String,
+    pub target_id: i64,
+    pub reason: String,
+    pub detail: Option<String>,
+    pub status: String,
+    pub resolution: Option<String>,
+    pub snapshot: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn received_reports(
+    conn: &mut PgConnection,
+    user_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<ReceivedRow>> {
+    sqlx::query_as!(
+        ReceivedRow,
+        "SELECT target_type, target_id, reason, detail, status, resolution, snapshot, created_at
+         FROM reports
+         WHERE owner_user_id = $1 AND NOT COALESCE((snapshot ->> 'anonymous')::boolean, FALSE)
+         ORDER BY created_at DESC, id DESC
+         LIMIT $2",
+        user_id,
+        limit
+    )
+    .fetch_all(conn)
+    .await
+}

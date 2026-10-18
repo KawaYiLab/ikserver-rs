@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_profiles (user_id, bio) VALUES (3, '广告位招租 加群 123')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "25dd847c81d8fdb51a214144d4f3239bf3e83e7ab1a7e756bd89b11b73d9b095"
+}

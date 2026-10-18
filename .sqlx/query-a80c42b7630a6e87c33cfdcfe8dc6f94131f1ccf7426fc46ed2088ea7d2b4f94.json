@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT actor_id, action, target_type, target_id, report_count, note, created_at\n         FROM moderation_log\n         WHERE subject_user_id = $1 AND NOT subject_anonymous\n         ORDER BY created_at DESC, id DESC\n         LIMIT $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "actor_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "actor_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "target_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "target_type"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "target_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "target_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "report_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "report_count"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "note"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a80c42b7630a6e87c33cfdcfe8dc6f94131f1ccf7426fc46ed2088ea7d2b4f94"
+}

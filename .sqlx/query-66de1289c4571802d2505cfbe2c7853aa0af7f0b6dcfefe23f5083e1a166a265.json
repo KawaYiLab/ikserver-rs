@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, action, amount, balance, description, created_at\n         FROM denny_logs WHERE user_id = $1\n         ORDER BY created_at DESC, id DESC\n         LIMIT $2 OFFSET $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "denny_logs",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "denny_logs",
+            "name": "action"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "amount",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "denny_logs",
+            "name": "amount"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "balance",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "denny_logs",
+            "name": "balance"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "denny_logs",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "denny_logs",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "66de1289c4571802d2505cfbe2c7853aa0af7f0b6dcfefe23f5083e1a166a265"
+}

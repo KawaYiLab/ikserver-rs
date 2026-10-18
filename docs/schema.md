@@ -295,6 +295,13 @@
   `subject_anonymous`（AGENTS.md 规则 10）。旧记录在迁移里回填：用户类取 `target_id`，内容类取同一目标最近一条举报的
   `owner_user_id` 与快照里的匿名标记，查不到的保持 NULL。索引 `moderation_log_subject_idx (subject_user_id, created_at DESC)`。
 
+## 管理后台的账号详情（`20261104000001_admin_user_detail.sql`）
+
+- `exp_logs_user_created_idx (user_id, created_at DESC, id DESC)`：账号详情的经验流水按时间翻页
+  （原有的 `(user_id, biz_day, bucket)` 只服务每日上限统计）。
+- `reports_owner_idx (owner_user_id, created_at DESC) WHERE owner_user_id IS NOT NULL`：某人收到的举报。
+  查询时按 `snapshot ->> 'anonymous'` 排除匿名内容的举报（AGENTS.md 规则 10）。
+
 ## AI 助手（`20261027000001_ai.sql`）
 
 - 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。

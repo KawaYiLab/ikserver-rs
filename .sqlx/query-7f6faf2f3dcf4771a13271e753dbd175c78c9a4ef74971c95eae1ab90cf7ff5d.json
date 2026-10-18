@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"total!\",\n                  count(*) FILTER (WHERE status IN ('pending', 'reviewing')) AS \"open!\",\n                  count(*) FILTER (WHERE status = 'accepted') AS \"accepted!\",\n                  count(*) FILTER (WHERE status = 'rejected') AS \"rejected!\"\n           FROM reports\n           WHERE owner_user_id = $1 AND NOT COALESCE((snapshot ->> 'anonymous')::boolean, FALSE)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "open!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "accepted!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "rejected!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "7f6faf2f3dcf4771a13271e753dbd175c78c9a4ef74971c95eae1ab90cf7ff5d"
+}

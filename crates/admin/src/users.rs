@@ -7,10 +7,14 @@ use chrono::{DateTime, Utc};
 use http::StatusCode;
 use ik_auth::Operator;
 use ik_auth::admin::{self, AdminUser, Audit};
+use ik_auth::dto::SessionView;
+use ik_economy::dto::{DennyLogView, ExpLogView};
 use ik_economy::service::{Dedup, DennyAction, ExpAction};
+use ik_kernel::bus::{Audience, Effects, Event, internal};
+use ik_kernel::cursor::Paged;
 use ik_kernel::{Problem, Role};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::AdminState;
 
@@ -33,6 +37,71 @@ pub struct AdminUserDetail {
     pub post_count: i64,
     pub total_views: i64,
     pub total_likes: i64,
+    /// 这些帖子收到的评论数。
+    pub total_comments: i64,
+    /// 签名。
+    pub bio: String,
+    /// 自定义头像的地址；没有时为 null（显示默认头像或系统头像）。
+    pub avatar_url: Option<String>,
+    /// 最近一次活跃（全部会话里最新的）。
+    pub last_seen_at: Option<DateTime<Utc>>,
+    /// 累计投出的丁尼。
+    pub denny_given: i32,
+    pub check_in_streak: i32,
+    pub check_in_total: i32,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct LedgerQuery {
+    pub page: Option<u32>,
+    /// 默认 20，最大 100。
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeResult {
+    /// 吊销的会话数。
+    pub revoked: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UsernameUpdate {
+    /// 新用户名（与用户自己改名的规则一致，不收费）。
+    pub username: String,
+    /// 原因（写进审计；通知用户时附上）。
+    #[serde(default)]
+    pub note: Option<String>,
+    /// 给用户发系统通知。
+    #[serde(default)]
+    pub notify: bool,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProfileReset {
+    /// 清空签名。
+    #[serde(default)]
+    pub bio: bool,
+    /// 清除自定义头像（系统头像不动）。
+    #[serde(default)]
+    pub avatar: bool,
+    #[serde(default)]
+    pub note: Option<String>,
+    /// 给用户发系统通知。
+    #[serde(default)]
+    pub notify: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileResetResult {
+    /// 确实清掉了签名（原本就是空的为 false）。
+    pub bio_cleared: bool,
+    pub avatar_cleared: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -104,17 +173,32 @@ pub async fn detail(
 ) -> Result<AdminUserDetail, Problem> {
     let mut conn = state.db.acquire().await?;
     let user = admin::user(&mut conn, &op.principal, id).await?;
-    let denny = ik_economy::service::balance_of(&mut conn, id).await?;
-    let exp = ik_economy::service::exp_of(&mut conn, id).await?;
+    let economy = ik_economy::service::summary_of(&mut conn, id).await?;
+    let bio = ik_profile::interop::bio_of(&mut conn, id).await?;
+    let last_seen_at = admin::last_seen(&mut conn, id).await?;
     drop(conn);
     let stats = ik_content::service::author_stats(&state.content, id).await?;
+    let authors = ik_auth::service::authors(&state.db, &[id]).await?;
+    let avatar_url = state
+        .content
+        .media
+        .avatar_urls(authors.values())
+        .await?
+        .remove(&id);
     Ok(AdminUserDetail {
         user,
-        denny,
-        exp,
+        denny: economy.denny,
+        exp: economy.exp,
         post_count: stats.post_count,
         total_views: stats.total_views,
         total_likes: stats.total_likes,
+        total_comments: stats.total_comments,
+        bio,
+        avatar_url,
+        last_seen_at,
+        denny_given: economy.denny_given,
+        check_in_streak: economy.check_in_streak,
+        check_in_total: economy.check_in_total,
     })
 }
 
@@ -284,4 +368,159 @@ pub async fn grant_exp(
     .await?;
     tx.commit().await?;
     economy_result(state, id).await
+}
+
+// ---------- 账号详情的其他标签页 ----------
+
+pub async fn denny_logs(
+    state: &AdminState,
+    id: i64,
+    query: LedgerQuery,
+) -> Result<Paged<DennyLogView>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    ik_economy::service::denny_log_list(&mut conn, id, query.page, query.limit).await
+}
+
+pub async fn exp_logs(
+    state: &AdminState,
+    id: i64,
+    query: LedgerQuery,
+) -> Result<Paged<ExpLogView>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    ik_economy::service::exp_log_list(&mut conn, id, query.page, query.limit).await
+}
+
+pub async fn sessions(state: &AdminState, id: i64) -> Result<Vec<SessionView>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    admin::user_sessions(&mut conn, id).await
+}
+
+fn clean_note(note: Option<String>) -> Option<String> {
+    note.map(|n| n.trim().chars().take(REASON_MAX_CHARS).collect::<String>())
+        .filter(|n| !n.is_empty())
+}
+
+fn with_note(message: &str, note: Option<&str>) -> String {
+    match note {
+        Some(note) => format!("{message}\n说明：{note}"),
+        None => message.to_owned(),
+    }
+}
+
+/// 强制下线：吊销全部会话，在线的连接随即断开。
+pub async fn revoke_sessions(
+    state: &AdminState,
+    op: &Operator,
+    id: i64,
+) -> Result<RevokeResult, Problem> {
+    let now = Utc::now();
+    let mut effects = Effects::new();
+    let mut tx = state.db.begin().await?;
+    let revoked = admin::revoke_sessions(&mut tx, &state.ids, op, id, now).await?;
+    if revoked > 0 {
+        effects.publish(ik_auth::service::sessions_changed_event(id)?);
+    }
+    tx.commit().await?;
+    effects.dispatch(state.content.bus.as_ref());
+    Ok(RevokeResult { revoked })
+}
+
+/// 强制改名（不收费，封禁中的账号也能改）。提交后通知搜索索引更新此人的作者名。
+pub async fn force_rename(
+    state: &AdminState,
+    op: &Operator,
+    id: i64,
+    update: UsernameUpdate,
+) -> Result<AdminUserDetail, Problem> {
+    let username = ik_profile::service::validate_username(&update.username)?;
+    let note = clean_note(update.note);
+    let now = Utc::now();
+    let mut effects = Effects::new();
+    let mut tx = state.db.begin().await?;
+    let renamed =
+        admin::force_rename(&mut tx, &state.ids, op, id, &username, note.as_deref(), now).await?;
+    if let Some(from) = renamed {
+        effects.publish(Event::new(
+            internal::USER_RENAMED,
+            Audience::Internal,
+            &serde_json::json!({ "userId": id }),
+        )?);
+        if update.notify {
+            let message =
+                format!("你的用户名「{from}」不符合绳网社区规范，已被管理员改为「{username}」。");
+            ik_notify::interop::system(
+                &mut tx,
+                &state.ids,
+                &[id],
+                &with_note(&message, note.as_deref()),
+                None,
+                now,
+                &mut effects,
+            )
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    effects.dispatch(state.content.bus.as_ref());
+    detail(state, op, id).await
+}
+
+/// 清理违规资料：清空签名、清除自定义头像（不收费，封禁中的账号也能清）。版主不能清理版主、管理员的资料。
+pub async fn reset_profile(
+    state: &AdminState,
+    op: &Operator,
+    id: i64,
+    reset: ProfileReset,
+) -> Result<ProfileResetResult, Problem> {
+    if !reset.bio && !reset.avatar {
+        return Err(Problem::field("bio", "REQUIRED", "请选择要清理的资料"));
+    }
+    let note = clean_note(reset.note);
+    let now = Utc::now();
+    let mut effects = Effects::new();
+    let mut tx = state.db.begin().await?;
+    admin::lock_for_profile_reset(&mut tx, op, id).await?;
+    let bio_cleared = reset.bio && ik_profile::interop::clear_bio(&mut tx, id).await?;
+    let avatar_cleared = reset.avatar && admin::clear_avatar(&mut tx, id).await?;
+    if bio_cleared || avatar_cleared {
+        admin::record(
+            &mut tx,
+            &state.ids,
+            op,
+            Audit {
+                action: "user.profile.reset",
+                target_type: "user",
+                target_id: Some(id.to_string()),
+                details: serde_json::json!({
+                    "bio": bio_cleared, "avatar": avatar_cleared, "note": note,
+                }),
+            },
+            now,
+        )
+        .await?;
+        if reset.notify {
+            let what = match (bio_cleared, avatar_cleared) {
+                (true, true) => "签名和头像",
+                (true, false) => "签名",
+                _ => "头像",
+            };
+            let message = format!("你的{what}不符合绳网社区规范，已被管理员清除。");
+            ik_notify::interop::system(
+                &mut tx,
+                &state.ids,
+                &[id],
+                &with_note(&message, note.as_deref()),
+                None,
+                now,
+                &mut effects,
+            )
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    effects.dispatch(state.content.bus.as_ref());
+    Ok(ProfileResetResult {
+        bio_cleared,
+        avatar_cleared,
+    })
 }

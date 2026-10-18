@@ -514,3 +514,59 @@ pub struct ContentActionResult {
     #[schema(value_type = Vec<String>)]
     pub unchanged: Vec<Id>,
 }
+
+/// 某人收到的举报统计（不含匿名内容）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceivedStats {
+    pub total: i64,
+    /// 待处理与复核中。
+    pub open: i64,
+    pub accepted: i64,
+    pub rejected: i64,
+}
+
+/// 某人收到的一条举报（针对他的实名内容或账号本身）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceivedReport {
+    pub target_type: TargetType,
+    #[schema(value_type = String)]
+    pub target_id: Id,
+    pub reason: Reason,
+    pub detail: Option<String>,
+    pub status: ReportStatus,
+    pub resolution: Option<Resolution>,
+    /// 举报时的快照。
+    pub preview: TargetPreview,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 一条审核记录（处置、自动隐藏、封禁、解封）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModerationEntry {
+    /// `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |
+    /// `block_user` | `unblock_user`
+    pub action: String,
+    pub target_type: TargetType,
+    #[schema(value_type = String)]
+    pub target_id: Id,
+    /// 操作人；自动隐藏为 null。
+    pub actor: Option<UserRef>,
+    /// 一并结案的举报条数（直接处置为 0）。
+    pub report_count: i32,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律不出现（AGENTS.md 规则 10）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UserModeration {
+    pub stats: ReceivedStats,
+    /// 最近 20 条收到的举报。
+    pub reports: Vec<ReceivedReport>,
+    /// 最近 50 条审核记录。
+    pub actions: Vec<ModerationEntry>,
+}

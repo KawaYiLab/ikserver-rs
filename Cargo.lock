@@ -2409,6 +2409,8 @@ dependencies = [
  "ik-exam",
  "ik-kernel",
  "ik-moderation",
+ "ik-notify",
+ "ik-profile",
  "ik-search",
  "serde",
  "serde_json",

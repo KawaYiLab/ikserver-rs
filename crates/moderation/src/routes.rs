@@ -1,5 +1,6 @@
 //! HTTP 接口：`/v1/reports*`、`/v1/me/reports`、`/v1/admin/reports*`、`/v1/admin/users/{id}/block`、
-//! `/v1/admin/users/{id}/unblock`、`/v1/admin/moderation/actions`。
+//! `/v1/admin/users/{id}/unblock`、`/v1/admin/moderation/actions`、
+//! `/v1/admin/users/{id}/moderation`。
 
 use axum::extract::{FromRef, State};
 use http::StatusCode;
@@ -17,7 +18,7 @@ use crate::dto::{
     BlockRequest, BlockResult, CheckQuery, CheckResult, ClaimResult, ContentActionRequest,
     ContentActionResult, CreateReportRequest, GroupPage, GroupQuery, MyReport, PageQuery,
     ReportCreated, ReportGroup, ResolveRequest, ResolveResult, TargetType, UnblockResult,
-    UnclaimResult,
+    UnclaimResult, UserModeration,
 };
 use crate::{admin, service};
 
@@ -39,6 +40,7 @@ where
         .routes(routes!(unblock))
         .routes(routes!(block))
         .routes(routes!(content_action))
+        .routes(routes!(user_history))
 }
 
 /// 举报
@@ -315,4 +317,26 @@ async fn content_action(
     Json(request): Json<ContentActionRequest>,
 ) -> Result<Json<ContentActionResult>, Problem> {
     Ok(Json(admin::act(&state, &op, request).await?))
+}
+
+/// 账号的处罚记录与收到的举报（审核）
+///
+/// 匿名内容相关的处置与举报一律不出现，免得从一个人的记录反推出他的匿名内容。
+#[utoipa::path(
+    get,
+    path = "/v1/admin/users/{id}/moderation",
+    tag = "moderation",
+    params(("id" = String, Path, description = "用户 id")),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = UserModeration),
+        (status = 403, description = "FORBIDDEN", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn user_history(
+    State(state): State<ModerationState>,
+    StaffOperator(_): StaffOperator,
+    Path(user_id): Path<Id<User>>,
+) -> Result<Json<UserModeration>, Problem> {
+    Ok(Json(admin::user_history(&state, user_id.get()).await?))
 }

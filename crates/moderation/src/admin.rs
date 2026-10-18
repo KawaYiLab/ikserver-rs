@@ -17,9 +17,9 @@ use sqlx::PgConnection;
 use crate::ModerationState;
 use crate::dto::{
     Action, BlockRequest, BlockResult, ClaimResult, ContentAction, ContentActionRequest,
-    ContentActionResult, GroupPage, GroupQuery, Reason, ReportGroup, ReportRow, ReportStatus,
-    Resolution, ResolveRequest, ResolveResult, Tab, TargetType, TargetView, UnblockResult,
-    UnclaimResult, UserRef,
+    ContentActionResult, GroupPage, GroupQuery, ModerationEntry, Reason, ReceivedReport,
+    ReceivedStats, ReportGroup, ReportRow, ReportStatus, Resolution, ResolveRequest, ResolveResult,
+    Tab, TargetType, TargetView, UnblockResult, UnclaimResult, UserModeration, UserRef,
 };
 use crate::repo::{self, Closing, GroupFilter, GroupRow, NewLog, OpenRow};
 use crate::service::{Snapshot, post_of};
@@ -903,6 +903,58 @@ pub async fn act(
         affected: i64::try_from(affected.len()).unwrap_or(i64::MAX),
         pending_reports: pending,
         unchanged,
+    })
+}
+
+/// 账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律排除。
+pub async fn user_history(
+    state: &ModerationState,
+    user_id: i64,
+) -> Result<UserModeration, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let stats = repo::received_stats(&mut conn, user_id).await?;
+    let reports = repo::received_reports(&mut conn, user_id, 20).await?;
+    let logs = repo::subject_logs(&mut conn, user_id, 50).await?;
+    let mut actor_ids: Vec<i64> = logs.iter().filter_map(|l| l.actor_id).collect();
+    actor_ids.sort_unstable();
+    actor_ids.dedup();
+    let actors = ik_auth::interop::user_statuses(&mut conn, &actor_ids).await?;
+    Ok(UserModeration {
+        stats: ReceivedStats {
+            total: stats.total,
+            open: stats.open,
+            accepted: stats.accepted,
+            rejected: stats.rejected,
+        },
+        reports: reports
+            .into_iter()
+            .map(|r| ReceivedReport {
+                target_type: TargetType::parse(&r.target_type),
+                target_id: Id::new(r.target_id),
+                reason: Reason::parse(&r.reason),
+                detail: r.detail,
+                status: ReportStatus::parse(&r.status),
+                resolution: r.resolution.as_deref().map(Resolution::parse),
+                preview: Snapshot::parse(r.snapshot).preview(),
+                created_at: r.created_at,
+            })
+            .collect(),
+        actions: logs
+            .into_iter()
+            .map(|l| ModerationEntry {
+                action: l.action,
+                target_type: TargetType::parse(&l.target_type),
+                target_id: Id::new(l.target_id),
+                actor: l.actor_id.and_then(|id| actors.get(&id)).map(|u| UserRef {
+                    id: Id::new(u.id),
+                    username: u.username.clone(),
+                    status: u.status.clone(),
+                }),
+                report_count: l.report_count,
+                note: l.note,
+                created_at: l.created_at,
+            })
+            .collect(),
     })
 }
 
