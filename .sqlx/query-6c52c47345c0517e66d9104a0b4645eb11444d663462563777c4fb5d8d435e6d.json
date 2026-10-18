@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM posts p\n           WHERE p.status = 'published'\n             AND ($1::text IS NULL OR p.title ILIKE $1 OR p.id = $2)\n             AND ($3::bigint IS NULL OR p.category_id = $3)\n             AND ($4::bigint IS NULL OR (p.author_id = $4 AND NOT p.is_anonymous))\n             AND ($5::bool IS NULL OR (p.hidden_at IS NOT NULL) = $5)\n             AND ($6::text IS NULL OR p.hidden_reason = $6)\n             AND ($7::bool IS NULL OR (p.pinned_at IS NOT NULL) = $7)\n             AND ($8::bool IS NULL OR p.is_anonymous = $8)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6c52c47345c0517e66d9104a0b4645eb11444d663462563777c4fb5d8d435e6d"
+}

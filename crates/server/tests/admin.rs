@@ -843,3 +843,408 @@ async fn cosmetics_dashboard_and_search_ops(db: PgPool) {
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body["code"], "SEARCH_ENGINE_NOT_CONFIGURED");
 }
+
+/// 帖子与评论管理的测试数据：用户 3 的公开帖、匿名帖，以及其上的一条普通评论、一条匿名评论。
+async fn seed_content(db: &PgPool) {
+    sqlx::query!(
+        "INSERT INTO categories (id, slug, name) VALUES (10, 'chat', '闲聊'), (11, 'guide', '攻略')"
+    )
+    .execute(db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO categories (id, slug, name, admin_only) VALUES (12, 'notice', '公告', TRUE)"
+    )
+    .execute(db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO posts (id, author_id, category_id, title, body, status, is_anonymous, anonymous_seed,
+                            published_at, first_published_at, bumped_at, comment_count)
+         VALUES (500, 3, 10, '公开帖', '正文', 'published', FALSE, NULL, now(), now(), now(), 2),
+                (501, 3, 10, '匿名帖', '正文', 'published', TRUE, 'seed-501', now(), now(), now(), 0),
+                (502, 4, 10, '别人的帖', '正文', 'published', FALSE, NULL, now(), now(), now(), 0)"
+    )
+    .execute(db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO comments (id, post_id, author_id, floor, body, is_anonymous, anonymous_seed)
+         VALUES (600, 500, 3, 1, '普通评论', FALSE, NULL),
+                (601, 500, 3, 2, '匿名评论', TRUE, 'seed-601')"
+    )
+    .execute(db)
+    .await
+    .unwrap();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn content_lists_hide_anonymous_authors(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+
+    let (status, _) = call(&app, USER, "GET", "/v1/admin/posts", Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, all) = call(&app, MODERATOR, "GET", "/v1/admin/posts", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{all}");
+    assert_eq!(all["total"], 3);
+    let anonymous = all["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "501")
+        .unwrap();
+    assert!(anonymous["author"].is_null(), "{anonymous}");
+    assert!(
+        anonymous["anonymousName"]
+            .as_str()
+            .unwrap()
+            .starts_with("绳网用户#")
+    );
+
+    // 按作者筛选不会带出匿名帖，否则就能把匿名名和真实账号对上。
+    let (_, mine) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/posts?authorId=3",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(mine["total"], 1, "{mine}");
+    assert_eq!(mine["items"][0]["id"], "500");
+    assert_eq!(mine["items"][0]["author"]["username"], "plain");
+    assert_eq!(mine["items"][0]["category"]["name"], "闲聊");
+
+    let (_, comments) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/comments?authorId=3",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(comments["total"], 1, "{comments}");
+    assert_eq!(comments["items"][0]["text"], "普通评论");
+    assert_eq!(comments["items"][0]["postTitle"], "公开帖");
+    let (_, of_post) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/comments?postId=500",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(of_post["total"], 2);
+    let anonymous = of_post["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "601")
+        .unwrap();
+    assert!(anonymous["author"].is_null(), "{anonymous}");
+
+    let (_, by_id) = call(&app, MODERATOR, "GET", "/v1/admin/posts?q=502", Value::Null).await;
+    assert_eq!(by_id["total"], 1);
+    assert_eq!(by_id["items"][0]["title"], "别人的帖");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn moderators_hide_and_restore_content_directly(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+    let hide = json!({ "targetType": "post", "ids": ["500"], "action": "hide",
+                       "note": "引战", "notifyAuthor": true });
+
+    let (status, _) = call(
+        &app,
+        USER,
+        "POST",
+        "/v1/admin/moderation/actions",
+        hide.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, done) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        hide.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["affected"], 1);
+    let post = sqlx::query!("SELECT hidden_by, hidden_reason FROM posts WHERE id = 500")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(post.hidden_by, Some(2));
+    assert_eq!(post.hidden_reason.as_deref(), Some("moderator"));
+    let notices = sqlx::query_scalar!(
+        r#"SELECT excerpt AS "excerpt!" FROM notifications WHERE recipient_id = 3 AND kind = 'system'"#
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 1);
+    assert!(
+        notices[0].contains("公开帖") && notices[0].contains("引战"),
+        "{notices:?}"
+    );
+    let log = sqlx::query!(
+        "SELECT action, subject_user_id, subject_anonymous, report_count FROM moderation_log
+         WHERE target_type = 'post' AND target_id = 500"
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(log.action, "hide_content");
+    assert_eq!(log.subject_user_id, Some(3));
+    assert!(!log.subject_anonymous);
+    assert_eq!(log.report_count, 0);
+    let audit = sqlx::query!(
+        "SELECT action, target_id FROM admin_audit_log WHERE action LIKE 'content.post.%'"
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(audit.action, "content.post.hide");
+    assert_eq!(audit.target_id.as_deref(), Some("500"));
+
+    // 已经是版主隐藏的：不再改动、不再通知。
+    let (_, again) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        hide,
+    )
+    .await;
+    assert_eq!(again["affected"], 0);
+    assert_eq!(again["unchanged"], json!(["500"]));
+
+    // 恢复可见：版主隐藏的和多人举报自动隐藏的（没有未结案举报时）都能恢复。
+    sqlx::query!(
+        "UPDATE posts SET hidden_at = now(), hidden_reason = 'auto_report', hidden_by = NULL WHERE id = 502"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (_, restored) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "post", "ids": ["500", "502"], "action": "unhide" }),
+    )
+    .await;
+    assert_eq!(restored["affected"], 2, "{restored}");
+    let hidden =
+        sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM posts WHERE hidden_at IS NOT NULL"#)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(hidden, 0);
+    let batch = sqlx::query!(
+        "SELECT target_id, details FROM admin_audit_log WHERE action = 'content.post.unhide'"
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(batch.target_id, None);
+    assert_eq!(batch.details["ids"], json!(["500", "502"]));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn direct_actions_skip_reported_content_and_delete_comments(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+    sqlx::query!(
+        r#"INSERT INTO reports (id, reporter_id, target_type, target_id, owner_user_id, reason, snapshot)
+           VALUES (700, 4, 'comment', 600, 3, 'spam', '{}')"#
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (status, done) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "comment", "ids": ["600", "601", "999"], "action": "delete",
+                "notifyAuthor": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["affected"], 1);
+    assert_eq!(done["pendingReports"], json!(["600"]));
+    assert_eq!(done["unchanged"], json!(["999"]));
+    let left = sqlx::query_scalar!("SELECT id FROM comments ORDER BY id")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert_eq!(left, vec![600]);
+    let count = sqlx::query_scalar!("SELECT comment_count FROM posts WHERE id = 500")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    // 匿名评论的处置照常作用于真实作者，但标记为匿名，按人查处罚记录时排除。
+    let log = sqlx::query!(
+        "SELECT subject_user_id, subject_anonymous FROM moderation_log WHERE target_id = 601"
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(log.subject_user_id, Some(3));
+    assert!(log.subject_anonymous);
+
+    let (status, body) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "user", "ids": ["3"], "action": "hide" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn concurrent_hides_notify_the_author_once(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+    let hide =
+        json!({ "targetType": "post", "ids": ["500"], "action": "hide", "notifyAuthor": true });
+    let (a, b, c) = tokio::join!(
+        call(
+            &app,
+            MODERATOR,
+            "POST",
+            "/v1/admin/moderation/actions",
+            hide.clone()
+        ),
+        call(
+            &app,
+            MODERATOR,
+            "POST",
+            "/v1/admin/moderation/actions",
+            hide.clone()
+        ),
+        call(&app, ADMIN, "POST", "/v1/admin/moderation/actions", hide),
+    );
+    let affected: i64 = [a, b, c]
+        .iter()
+        .map(|(status, body)| {
+            assert_eq!(*status, StatusCode::OK, "{body}");
+            body["affected"].as_i64().unwrap()
+        })
+        .sum();
+    assert_eq!(affected, 1);
+    let notices =
+        sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM notifications WHERE recipient_id = 3"#)
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(notices, 1);
+    let logs = sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM moderation_log"#)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(logs, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn pinning_and_moving_posts(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "PUT",
+        "/v1/admin/posts/500/pin",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = call(&app, ADMIN, "PUT", "/v1/admin/posts/500/pin", Value::Null).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, pinned) = call(
+        &app,
+        MODERATOR,
+        "GET",
+        "/v1/admin/posts?pinned=true",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(pinned["total"], 1);
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        "/v1/admin/posts/500/pin",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(&app, ADMIN, "PUT", "/v1/admin/posts/404/pin", Value::Null).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // 作者有一份待发布的修改：移动分区时一并改，否则下次发布会把分区改回去。
+    sqlx::query!(
+        "INSERT INTO post_drafts (post_id, title, body, category_id) VALUES (500, '公开帖', '新正文', 10)"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let (status, body) = call(
+        &app,
+        MODERATOR,
+        "PUT",
+        "/v1/admin/posts/500/category",
+        json!({ "categoryId": "11" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let row = sqlx::query!(
+        "SELECT p.category_id, d.category_id AS draft_category FROM posts p
+         JOIN post_drafts d ON d.post_id = p.id WHERE p.id = 500"
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(row.category_id, Some(11));
+    assert_eq!(row.draft_category, Some(11));
+
+    // 仅限管理员发帖的分区，版主不能把帖子移进去。
+    let (status, body) = call(
+        &app,
+        MODERATOR,
+        "PUT",
+        "/v1/admin/posts/500/category",
+        json!({ "categoryId": "12" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "CATEGORY_ADMIN_ONLY");
+
+    let actions = sqlx::query_scalar!(
+        "SELECT action FROM admin_audit_log WHERE target_type = 'post' ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        vec![
+            "content.post.pin",
+            "content.post.unpin",
+            "content.post.move"
+        ]
+    );
+}

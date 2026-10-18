@@ -144,6 +144,22 @@ pub(crate) async fn lock_open(
     .await
 }
 
+/// 有未结案举报的目标（在 `ids` 之中）。
+pub(crate) async fn open_targets(
+    conn: &mut PgConnection,
+    target_type: &str,
+    ids: &[i64],
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT DISTINCT target_id FROM reports
+         WHERE target_type = $1 AND target_id = ANY($2) AND status IN ('pending', 'reviewing')",
+        target_type,
+        ids
+    )
+    .fetch_all(conn)
+    .await
+}
+
 /// 领取：待处理的，以及复核中但没人领取的（自动隐藏转入的）。
 pub(crate) async fn claim(
     conn: &mut PgConnection,
@@ -228,14 +244,18 @@ pub(crate) struct NewLog<'a> {
     pub target_id: i64,
     pub report_count: i32,
     pub note: Option<&'a str>,
+    /// 被处置的人（内容作者或被处置的用户）；查不到时为 None。
+    pub subject_user_id: Option<i64>,
+    /// 处置的是匿名内容：按人查询处罚记录时排除（AGENTS.md 规则 10）。
+    pub subject_anonymous: bool,
     pub now: DateTime<Utc>,
 }
 
 pub(crate) async fn log(conn: &mut PgConnection, l: NewLog<'_>) -> sqlx::Result<()> {
     sqlx::query!(
         "INSERT INTO moderation_log (id, actor_id, action, target_type, target_id, report_count, note,
-                                     created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                                     subject_user_id, subject_anonymous, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         l.id,
         l.actor_id,
         l.action,
@@ -243,6 +263,8 @@ pub(crate) async fn log(conn: &mut PgConnection, l: NewLog<'_>) -> sqlx::Result<
         l.target_id,
         l.report_count,
         l.note,
+        l.subject_user_id,
+        l.subject_anonymous,
         l.now
     )
     .execute(conn)

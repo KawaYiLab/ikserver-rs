@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT subject_user_id, subject_anonymous FROM moderation_log WHERE target_id = 601",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "subject_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "subject_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "subject_anonymous",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "moderation_log",
+            "name": "subject_anonymous"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      false
+    ]
+  },
+  "hash": "1c20a8a7f79eda1396e5d232e548f00073459d16b98fad953213d258e1324726"
+}

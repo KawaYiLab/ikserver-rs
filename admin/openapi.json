@@ -765,6 +765,104 @@
         ]
       }
     },
+    "/v1/admin/comments": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "评论（后台；含隐藏的）",
+        "operationId": "list_comments",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "正文包含；是数字时也按评论 id 匹配。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorId",
+            "in": "query",
+            "description": "作者。匿名评论不会出现在按作者筛选的结果里。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "visibility",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "visible",
+                "hidden"
+              ]
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "默认 20，最大 100。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_AdminComment"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/cosmetics/avatars": {
       "get": {
         "tags": [
@@ -1869,6 +1967,348 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AdminQuestion"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/moderation/actions": {
+      "post": {
+        "tags": [
+          "moderation"
+        ],
+        "summary": "直接处置帖子或评论（审核，不经举报）",
+        "description": "隐藏、恢复可见、删除，一次 1–50 条。有未结案举报的目标跳过，在 `pendingReports` 里返回。",
+        "operationId": "content_action",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContentActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentActionResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/posts": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "帖子（后台；含隐藏的，不含草稿）",
+        "operationId": "list_posts",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "标题包含；是数字时也按帖子 id 匹配。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "categoryId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorId",
+            "in": "query",
+            "description": "作者。匿名帖不会出现在按作者筛选的结果里。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "visibility",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "visible",
+                "hidden"
+              ]
+            }
+          },
+          {
+            "name": "hiddenReason",
+            "in": "query",
+            "description": "隐藏原因：`auto_report`（多人举报自动隐藏）或 `moderator`（版主隐藏）。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "pinned",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "anonymous",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "默认 20，最大 100。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_AdminPost"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/posts/{id}/category": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "移动帖子到另一个分区（待发布的修改一并改）",
+        "operationId": "put_post_category",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MovePostInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {},
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/posts/{id}/pin": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "置顶帖子（只有管理员；只能置顶公开的帖子）",
+        "operationId": "pin_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "取消置顶（只有管理员）",
+        "operationId": "unpin_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
                 }
               }
             }
@@ -11456,6 +11896,120 @@
           }
         }
       },
+      "AdminComment": {
+        "type": "object",
+        "required": [
+          "id",
+          "postId",
+          "text",
+          "images",
+          "isAnonymous",
+          "likeCount",
+          "pinned",
+          "accepted",
+          "createdAt"
+        ],
+        "properties": {
+          "accepted": {
+            "type": "boolean"
+          },
+          "anonymousName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "匿名评论对外显示的名字。"
+          },
+          "author": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdminUserBrief",
+                "description": "作者；匿名评论为 null。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "floor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "一级评论的楼层号。"
+          },
+          "hiddenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "hiddenBy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdminUserBrief",
+                "description": "隐藏它的版主；自动隐藏为 null。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hiddenReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`auto_report` 或 `moderator`。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaView"
+            }
+          },
+          "isAnonymous": {
+            "type": "boolean"
+          },
+          "likeCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "parentId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "回复的一级评论；一级评论为 null。"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "postId": {
+            "type": "string"
+          },
+          "postTitle": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "所属帖子的标题（帖子隐藏了也给）。"
+          },
+          "text": {
+            "type": "string",
+            "description": "纯文本（提及与表情 token 已转成可读文本）。"
+          }
+        }
+      },
       "AdminEmote": {
         "type": "object",
         "required": [
@@ -11698,6 +12252,129 @@
           }
         }
       },
+      "AdminPost": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "isAnonymous",
+          "viewCount",
+          "likeCount",
+          "commentCount"
+        ],
+        "properties": {
+          "anonymousName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "匿名帖对外显示的名字。"
+          },
+          "author": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdminUserBrief",
+                "description": "作者；匿名帖为 null。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdminPostCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "commentCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "editedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "hiddenAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "hiddenBy": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AdminUserBrief",
+                "description": "隐藏它的版主；自动隐藏为 null。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "hiddenReason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`auto_report` 或 `moderator`。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "isAnonymous": {
+            "type": "boolean"
+          },
+          "likeCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "pinnedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "publishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "title": {
+            "type": "string"
+          },
+          "viewCount": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "AdminPostCategory": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "AdminQuestion": {
         "type": "object",
         "description": "后台看到的完整题目（含答案与解析）。",
@@ -11874,6 +12551,27 @@
           },
           "status": {
             "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminUserBrief": {
+        "type": "object",
+        "description": "后台列表里的账号（作者、操作人）。",
+        "required": [
+          "id",
+          "username",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "active / blocked / deleted / merged。"
           },
           "username": {
             "type": "string"
@@ -13371,6 +14069,84 @@
           }
         },
         "additionalProperties": false
+      },
+      "ContentAction": {
+        "type": "string",
+        "description": "后台直接处置的动作（不经举报）。",
+        "enum": [
+          "hide",
+          "unhide",
+          "delete"
+        ]
+      },
+      "ContentActionRequest": {
+        "type": "object",
+        "required": [
+          "targetType",
+          "ids",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ContentAction"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1–50 个。"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "处理备注（超过 500 字截断）：写入审核日志；通知作者时附在通知里。"
+          },
+          "notifyAuthor": {
+            "type": "boolean",
+            "description": "给作者发系统通知。恢复可见时不发。"
+          },
+          "targetType": {
+            "$ref": "#/components/schemas/TargetType",
+            "description": "`post` 或 `comment`。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ContentActionResult": {
+        "type": "object",
+        "required": [
+          "action",
+          "affected",
+          "pendingReports",
+          "unchanged"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ContentAction"
+          },
+          "affected": {
+            "type": "integer",
+            "format": "int64",
+            "description": "实际改变了状态的条数。"
+          },
+          "pendingReports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "有未结案的举报而跳过的：请在举报处理里结案，免得两边状态打架。"
+          },
+          "unchanged": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "已经是目标状态（或已被删除）而没有改动的。"
+          }
+        }
       },
       "ConversationView": {
         "type": "object",
@@ -15071,6 +15847,18 @@
           }
         }
       },
+      "MovePostInput": {
+        "type": "object",
+        "required": [
+          "categoryId"
+        ],
+        "properties": {
+          "categoryId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "MyBinding": {
         "type": "object",
         "properties": {
@@ -16426,6 +17214,151 @@
           }
         }
       },
+      "Paged_AdminComment": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "postId",
+                "text",
+                "images",
+                "isAnonymous",
+                "likeCount",
+                "pinned",
+                "accepted",
+                "createdAt"
+              ],
+              "properties": {
+                "accepted": {
+                  "type": "boolean"
+                },
+                "anonymousName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "匿名评论对外显示的名字。"
+                },
+                "author": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminUserBrief",
+                      "description": "作者；匿名评论为 null。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "floor": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "一级评论的楼层号。"
+                },
+                "hiddenAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "hiddenBy": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminUserBrief",
+                      "description": "隐藏它的版主；自动隐藏为 null。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hiddenReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "`auto_report` 或 `moderator`。"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MediaView"
+                  }
+                },
+                "isAnonymous": {
+                  "type": "boolean"
+                },
+                "likeCount": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "parentId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "回复的一级评论；一级评论为 null。"
+                },
+                "pinned": {
+                  "type": "boolean"
+                },
+                "postId": {
+                  "type": "string"
+                },
+                "postTitle": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "所属帖子的标题（帖子隐藏了也给）。"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "纯文本（提及与表情 token 已转成可读文本）。"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
       "Paged_AdminJob": {
         "type": "object",
         "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
@@ -16512,6 +17445,145 @@
                 },
                 "userId": {
                   "type": "string"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
+      "Paged_AdminPost": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "isAnonymous",
+                "viewCount",
+                "likeCount",
+                "commentCount"
+              ],
+              "properties": {
+                "anonymousName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "匿名帖对外显示的名字。"
+                },
+                "author": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminUserBrief",
+                      "description": "作者；匿名帖为 null。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "category": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminPostCategory"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "commentCount": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "editedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "hiddenAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "hiddenBy": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AdminUserBrief",
+                      "description": "隐藏它的版主；自动隐藏为 null。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "hiddenReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "`auto_report` 或 `moderator`。"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "isAnonymous": {
+                  "type": "boolean"
+                },
+                "likeCount": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "pinnedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "publishedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "viewCount": {
+                  "type": "integer",
+                  "format": "int64"
                 }
               }
             }

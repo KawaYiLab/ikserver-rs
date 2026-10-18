@@ -66,7 +66,7 @@ fn revision_conflict() -> Problem {
     )
 }
 
-fn category_admin_only() -> Problem {
+pub(crate) fn category_admin_only() -> Problem {
     Problem::new(
         StatusCode::FORBIDDEN,
         "CATEGORY_ADMIN_ONLY",

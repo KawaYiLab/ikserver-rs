@@ -28,6 +28,7 @@ where
         .routes(routes!(pin, unpin))
         .routes(routes!(accept, unaccept))
         .routes(routes!(like, unlike))
+        .merge(crate::admin::router())
 }
 
 /// 帖子的评论

@@ -4,6 +4,7 @@
 //! `ik_content::interop` 在同一事务里更新。发表评论时经 [`CommentHooks`] 通知 ik-ai（AI 评论触发）；
 //! AI 的回复经 [`interop::insert_ai_reply`] 写入。
 
+pub mod admin;
 pub mod dto;
 pub mod interop;
 mod repo;

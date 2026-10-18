@@ -285,6 +285,16 @@
 - 隐藏原因（`posts.hidden_reason`、`comments.hidden_reason`）：`auto_report`（多人举报自动隐藏，驳回时恢复）、
   `moderator`（版主隐藏）。
 
+## 管理后台的内容管理（`20261103000001_admin_content_management.sql`）
+
+- `posts_hidden_idx`、`comments_hidden_idx`：`(hidden_at DESC, id DESC) WHERE hidden_at IS NOT NULL`，后台「只看已隐藏」用。
+- `moderation_log.action` 增加 `unhide_content`（后台直接恢复可见）。版主不经举报直接隐藏、删除同样记 `hide_content`、
+  `delete_content`，`report_count = 0`。
+- `moderation_log.subject_user_id` / `subject_anonymous`：被处置的人（内容作者或被处置的用户）以及处置的是不是匿名内容。
+  匿名内容同样记录真实作者（与 `reports.owner_user_id` 一样只存不出），按人查询处罚记录时必须排除
+  `subject_anonymous`（AGENTS.md 规则 10）。旧记录在迁移里回填：用户类取 `target_id`，内容类取同一目标最近一条举报的
+  `owner_user_id` 与快照里的匿名标记，查不到的保持 NULL。索引 `moderation_log_subject_idx (subject_user_id, created_at DESC)`。
+
 ## AI 助手（`20261027000001_ai.sql`）
 
 - 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。

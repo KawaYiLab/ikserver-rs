@@ -1,13 +1,18 @@
-//! 分区与标签的管理后台（media-ops.md ADMINCRUD：category、tag）。
+//! 分区、标签与帖子的管理后台（media-ops.md ADMINCRUD：category、tag）。
 //!
-//! 查看：版主或管理员；修改：只有管理员。写操作与审计日志同一事务。
+//! 分区与标签：查看是版主或管理员，修改只有管理员。写操作与审计日志同一事务。
 //! 分区「删除」只允许删没有帖子（含草稿）的；有帖子的请停用（`isActive = false`）。
+//!
+//! 帖子：列表与移动分区是版主或管理员，置顶只有管理员（与前台置顶一致）。
+//! 隐藏、恢复、删除要通知作者、写审核日志，放在 ik-moderation（`/v1/admin/moderation/actions`）。
+//! 匿名帖不返回作者，按作者筛选时也排除匿名帖（AGENTS.md 规则 10）。
 
 use axum::extract::{FromRef, State};
 use chrono::{DateTime, Utc};
 use http::StatusCode;
 use ik_auth::admin::{self, Audit};
 use ik_auth::{AdminOperator, AuthState, Operator, StaffOperator};
+use ik_kernel::bus::Effects;
 use ik_kernel::cursor::{Paged, page_window};
 use ik_kernel::error::ProblemBody;
 use ik_kernel::extract::{Json, Path, Query};
@@ -112,6 +117,86 @@ pub struct TagUpdate {
     pub name: Option<String>,
     #[serde(default)]
     pub is_blocked: Option<bool>,
+}
+
+/// 后台列表里的账号（作者、操作人）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminUserBrief {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub username: String,
+    /// active / blocked / deleted / merged。
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Visibility {
+    Visible,
+    Hidden,
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
+pub struct PostQuery {
+    /// 标题包含；是数字时也按帖子 id 匹配。
+    pub q: Option<String>,
+    #[param(value_type = Option<String>)]
+    pub category_id: Option<Id>,
+    /// 作者。匿名帖不会出现在按作者筛选的结果里。
+    #[param(value_type = Option<String>)]
+    pub author_id: Option<Id>,
+    #[param(inline)]
+    pub visibility: Option<Visibility>,
+    /// 隐藏原因：`auto_report`（多人举报自动隐藏）或 `moderator`（版主隐藏）。
+    pub hidden_reason: Option<String>,
+    pub pinned: Option<bool>,
+    pub anonymous: Option<bool>,
+    pub page: Option<u32>,
+    /// 默认 20，最大 100。
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminPostCategory {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminPost {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub title: String,
+    pub category: Option<AdminPostCategory>,
+    /// 作者；匿名帖为 null。
+    pub author: Option<AdminUserBrief>,
+    pub is_anonymous: bool,
+    /// 匿名帖对外显示的名字。
+    pub anonymous_name: Option<String>,
+    pub published_at: Option<DateTime<Utc>>,
+    pub edited_at: Option<DateTime<Utc>>,
+    pub pinned_at: Option<DateTime<Utc>>,
+    pub hidden_at: Option<DateTime<Utc>>,
+    /// `auto_report` 或 `moderator`。
+    pub hidden_reason: Option<String>,
+    /// 隐藏它的版主；自动隐藏为 null。
+    pub hidden_by: Option<AdminUserBrief>,
+    pub view_count: i64,
+    pub like_count: i32,
+    pub comment_count: i32,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MovePostInput {
+    #[schema(value_type = String)]
+    pub category_id: Id,
 }
 
 fn invalid(field: &str, detail: &str) -> Problem {
@@ -416,6 +501,203 @@ pub async fn update_tag(
     })
 }
 
+/// 后台列表里的账号简况（按 id）。
+pub async fn user_briefs(
+    conn: &mut sqlx::PgConnection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, AdminUserBrief>, Problem> {
+    let mut ids = ids.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ik_auth::interop::user_statuses(conn, &ids)
+        .await?
+        .into_values()
+        .map(|u| {
+            (
+                u.id,
+                AdminUserBrief {
+                    id: Id::new(u.id),
+                    username: u.username,
+                    status: u.status,
+                },
+            )
+        })
+        .collect())
+}
+
+pub async fn post_list(
+    state: &ContentState,
+    query: PostQuery,
+) -> Result<Paged<AdminPost>, Problem> {
+    let (page, limit, offset) = page_window(query.page, query.limit, 20);
+    let q = query.q.as_deref().map(str::trim).filter(|q| !q.is_empty());
+    let pattern = q.map(contains_pattern);
+    let hidden_reason = query
+        .hidden_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|r| !r.is_empty());
+    let filter = repo::AdminPostFilter {
+        pattern: pattern.as_deref(),
+        id: q.and_then(|q| q.parse().ok()),
+        category_id: query.category_id.map(Id::get),
+        author_id: query.author_id.map(Id::get),
+        hidden: query.visibility.map(|v| v == Visibility::Hidden),
+        hidden_reason,
+        pinned: query.pinned,
+        anonymous: query.anonymous,
+    };
+    let mut conn = state.db.acquire().await?;
+    let total = repo::count_admin_posts(&mut conn, &filter).await?;
+    let rows = repo::admin_posts(&mut conn, &filter, i64::from(limit), offset).await?;
+    let user_ids: Vec<i64> = rows
+        .iter()
+        .flat_map(|r| [(!r.is_anonymous).then_some(r.author_id), r.hidden_by])
+        .flatten()
+        .collect();
+    let users = user_briefs(&mut conn, &user_ids).await?;
+    let items = rows
+        .into_iter()
+        .map(|r| AdminPost {
+            id: Id::new(r.id),
+            title: r.title,
+            category: r
+                .category_id
+                .zip(r.category_name)
+                .map(|(id, name)| AdminPostCategory {
+                    id: Id::new(id),
+                    name,
+                }),
+            author: if r.is_anonymous {
+                None
+            } else {
+                users.get(&r.author_id).cloned()
+            },
+            anonymous_name: if r.is_anonymous {
+                r.anonymous_seed
+                    .as_deref()
+                    .map(crate::anonymous::display_name)
+            } else {
+                None
+            },
+            is_anonymous: r.is_anonymous,
+            published_at: r.first_published_at,
+            edited_at: r.edited_at,
+            pinned_at: r.pinned_at,
+            hidden_at: r.hidden_at,
+            hidden_reason: r.hidden_reason,
+            hidden_by: r.hidden_by.and_then(|id| users.get(&id).cloned()),
+            view_count: r.view_count,
+            like_count: r.like_count,
+            comment_count: r.comment_count,
+        })
+        .collect();
+    Ok(Paged {
+        items,
+        total,
+        page,
+        limit,
+    })
+}
+
+/// 置顶 / 取消置顶（幂等）。只能置顶公开的帖子。
+pub async fn set_pinned(
+    state: &ContentState,
+    op: &Operator,
+    post_id: i64,
+    pinned: bool,
+) -> Result<(), Problem> {
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    let changed = if pinned {
+        repo::pin(&mut tx, post_id, op.principal.user_id.get(), now).await?
+    } else {
+        repo::unpin(&mut tx, post_id).await?
+    };
+    if !changed {
+        return Err(Problem::not_found());
+    }
+    admin::record(
+        &mut tx,
+        &state.ids,
+        op,
+        Audit {
+            action: if pinned {
+                "content.post.pin"
+            } else {
+                "content.post.unpin"
+            },
+            target_type: "post",
+            target_id: Some(post_id.to_string()),
+            details: serde_json::json!({}),
+        },
+        now,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// 移动分区。目标分区必须存在且启用；仅限管理员发帖的分区只有管理员能移进去。
+pub async fn move_post(
+    state: &ContentState,
+    op: &Operator,
+    post_id: i64,
+    input: MovePostInput,
+) -> Result<(), Problem> {
+    let category_id = input.category_id.get();
+    let now = Utc::now();
+    let mut effects = Effects::new();
+    let mut tx = state.db.begin().await?;
+    match repo::category_by_id(&mut tx, category_id).await? {
+        Some(category) if category.is_active => {
+            if category.admin_only && !op.principal.role.is_admin() {
+                return Err(crate::service::category_admin_only());
+            }
+        }
+        _ => {
+            return Err(Problem::field(
+                "categoryId",
+                "NOT_FOUND",
+                "分区不存在或已停用",
+            ));
+        }
+    }
+    let Some((from, public)) = repo::lock_published(&mut tx, post_id).await? else {
+        return Err(Problem::not_found());
+    };
+    if from == Some(category_id) {
+        return Ok(());
+    }
+    repo::move_post(&mut tx, post_id, category_id, now).await?;
+    if public {
+        effects.publish(crate::service::published_event(
+            post_id,
+            Some(category_id),
+            false,
+        )?);
+    }
+    admin::record(
+        &mut tx,
+        &state.ids,
+        op,
+        Audit {
+            action: "content.post.move",
+            target_type: "post",
+            target_id: Some(post_id.to_string()),
+            details: serde_json::json!({
+                "from": from.map(|id| id.to_string()),
+                "to": category_id.to_string(),
+            }),
+        },
+        now,
+    )
+    .await?;
+    tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
+    Ok(())
+}
+
 // ---------- HTTP ----------
 
 pub fn router<S>() -> OpenApiRouter<S>
@@ -429,6 +711,9 @@ where
         .routes(routes!(put_category, remove_category))
         .routes(routes!(list_tags))
         .routes(routes!(patch_tag))
+        .routes(routes!(list_posts))
+        .routes(routes!(pin_post, unpin_post))
+        .routes(routes!(put_post_category))
 }
 
 /// 分区（含停用的，附帖子数）
@@ -558,4 +843,93 @@ async fn patch_tag(
     Json(input): Json<TagUpdate>,
 ) -> Result<Json<AdminTag>, Problem> {
     Ok(Json(update_tag(&state, &op, id.get(), input).await?))
+}
+
+/// 帖子（后台；含隐藏的，不含草稿）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/posts",
+    tag = "admin",
+    params(PostQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Paged<AdminPost>),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn list_posts(
+    State(state): State<ContentState>,
+    StaffOperator(_): StaffOperator,
+    Query(query): Query<PostQuery>,
+) -> Result<Json<Paged<AdminPost>>, Problem> {
+    Ok(Json(post_list(&state, query).await?))
+}
+
+/// 置顶帖子（只有管理员；只能置顶公开的帖子）
+#[utoipa::path(
+    put,
+    path = "/v1/admin/posts/{id}/pin",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn pin_post(
+    State(state): State<ContentState>,
+    AdminOperator(op): AdminOperator,
+    Path(id): Path<Id>,
+) -> Result<StatusCode, Problem> {
+    set_pinned(&state, &op, id.get(), true).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 取消置顶（只有管理员）
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/posts/{id}/pin",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn unpin_post(
+    State(state): State<ContentState>,
+    AdminOperator(op): AdminOperator,
+    Path(id): Path<Id>,
+) -> Result<StatusCode, Problem> {
+    set_pinned(&state, &op, id.get(), false).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 移动帖子到另一个分区（待发布的修改一并改）
+#[utoipa::path(
+    put,
+    path = "/v1/admin/posts/{id}/category",
+    tag = "admin",
+    params(("id" = String, Path)),
+    request_body = MovePostInput,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn put_post_category(
+    State(state): State<ContentState>,
+    StaffOperator(op): StaffOperator,
+    Path(id): Path<Id>,
+    Json(input): Json<MovePostInput>,
+) -> Result<StatusCode, Problem> {
+    move_post(&state, &op, id.get(), input).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

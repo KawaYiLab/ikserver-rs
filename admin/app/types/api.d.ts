@@ -205,6 +205,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 评论（后台；含隐藏的） */
+        get: operations["list_comments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/cosmetics/avatars": {
         parameters: {
             query?: never;
@@ -456,6 +473,78 @@ export interface paths {
         /** 启用 / 停用题目（只有管理员） */
         post: operations["toggle_question"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/moderation/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 直接处置帖子或评论（审核，不经举报）
+         * @description 隐藏、恢复可见、删除，一次 1–50 条。有未结案举报的目标跳过，在 `pendingReports` 里返回。
+         */
+        post: operations["content_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 帖子（后台；含隐藏的，不含草稿） */
+        get: operations["list_posts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/posts/{id}/category": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 移动帖子到另一个分区（待发布的修改一并改） */
+        put: operations["put_post_category"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/posts/{id}/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 置顶帖子（只有管理员；只能置顶公开的帖子） */
+        put: operations["pin_post"];
+        post?: never;
+        /** 取消置顶（只有管理员） */
+        delete: operations["unpin_post"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3165,6 +3254,37 @@ export interface components {
             /** @description 绑定账号的用户名（账号已不存在时为空）。 */
             username?: string | null;
         };
+        AdminComment: {
+            accepted: boolean;
+            /** @description 匿名评论对外显示的名字。 */
+            anonymousName?: string | null;
+            author?: components["schemas"]["AdminUserBrief"] | null;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: int32
+             * @description 一级评论的楼层号。
+             */
+            floor?: number | null;
+            /** Format: date-time */
+            hiddenAt?: string | null;
+            hiddenBy?: components["schemas"]["AdminUserBrief"] | null;
+            /** @description `auto_report` 或 `moderator`。 */
+            hiddenReason?: string | null;
+            id: string;
+            images: components["schemas"]["MediaView"][];
+            isAnonymous: boolean;
+            /** Format: int32 */
+            likeCount: number;
+            /** @description 回复的一级评论；一级评论为 null。 */
+            parentId?: string | null;
+            pinned: boolean;
+            postId: string;
+            /** @description 所属帖子的标题（帖子隐藏了也给）。 */
+            postTitle?: string | null;
+            /** @description 纯文本（提及与表情 token 已转成可读文本）。 */
+            text: string;
+        };
         AdminEmote: {
             active: boolean;
             code: string;
@@ -3227,6 +3347,36 @@ export interface components {
             /** Format: int32 */
             sortOrder: number;
         };
+        AdminPost: {
+            /** @description 匿名帖对外显示的名字。 */
+            anonymousName?: string | null;
+            author?: components["schemas"]["AdminUserBrief"] | null;
+            category?: components["schemas"]["AdminPostCategory"] | null;
+            /** Format: int32 */
+            commentCount: number;
+            /** Format: date-time */
+            editedAt?: string | null;
+            /** Format: date-time */
+            hiddenAt?: string | null;
+            hiddenBy?: components["schemas"]["AdminUserBrief"] | null;
+            /** @description `auto_report` 或 `moderator`。 */
+            hiddenReason?: string | null;
+            id: string;
+            isAnonymous: boolean;
+            /** Format: int32 */
+            likeCount: number;
+            /** Format: date-time */
+            pinnedAt?: string | null;
+            /** Format: date-time */
+            publishedAt?: string | null;
+            title: string;
+            /** Format: int64 */
+            viewCount: number;
+        };
+        AdminPostCategory: {
+            id: string;
+            name: string;
+        };
         /** @description 后台看到的完整题目（含答案与解析）。 */
         AdminQuestion: {
             correctKeys: string[];
@@ -3283,6 +3433,13 @@ export interface components {
             /** Format: int32 */
             level: number;
             role: components["schemas"]["Role"];
+            status: string;
+            username: string;
+        };
+        /** @description 后台列表里的账号（作者、操作人）。 */
+        AdminUserBrief: {
+            id: string;
+            /** @description active / blocked / deleted / merged。 */
             status: string;
             username: string;
         };
@@ -3787,6 +3944,34 @@ export interface components {
              * @description 客户端测得的宽高（服务端不校验，UPL-016）。
              */
             width?: number | null;
+        };
+        /**
+         * @description 后台直接处置的动作（不经举报）。
+         * @enum {string}
+         */
+        ContentAction: "hide" | "unhide" | "delete";
+        ContentActionRequest: {
+            action: components["schemas"]["ContentAction"];
+            /** @description 1–50 个。 */
+            ids: string[];
+            /** @description 处理备注（超过 500 字截断）：写入审核日志；通知作者时附在通知里。 */
+            note?: string | null;
+            /** @description 给作者发系统通知。恢复可见时不发。 */
+            notifyAuthor?: boolean;
+            /** @description `post` 或 `comment`。 */
+            targetType: components["schemas"]["TargetType"];
+        };
+        ContentActionResult: {
+            action: components["schemas"]["ContentAction"];
+            /**
+             * Format: int64
+             * @description 实际改变了状态的条数。
+             */
+            affected: number;
+            /** @description 有未结案的举报而跳过的：请在举报处理里结案，免得两边状态打架。 */
+            pendingReports: string[];
+            /** @description 已经是目标状态（或已被删除）而没有改动的。 */
+            unchanged: string[];
         };
         ConversationView: {
             /**
@@ -4405,6 +4590,9 @@ export interface components {
             /** Format: int32 */
             sortOrder: number;
         };
+        MovePostInput: {
+            categoryId: string;
+        };
         MyBinding: {
             binding?: components["schemas"]["BindingView"] | null;
         };
@@ -4787,6 +4975,52 @@ export interface components {
             nextCursor?: string | null;
         };
         /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_AdminComment: {
+            items: {
+                accepted: boolean;
+                /** @description 匿名评论对外显示的名字。 */
+                anonymousName?: string | null;
+                author?: components["schemas"]["AdminUserBrief"] | null;
+                /** Format: date-time */
+                createdAt: string;
+                /**
+                 * Format: int32
+                 * @description 一级评论的楼层号。
+                 */
+                floor?: number | null;
+                /** Format: date-time */
+                hiddenAt?: string | null;
+                hiddenBy?: components["schemas"]["AdminUserBrief"] | null;
+                /** @description `auto_report` 或 `moderator`。 */
+                hiddenReason?: string | null;
+                id: string;
+                images: components["schemas"]["MediaView"][];
+                isAnonymous: boolean;
+                /** Format: int32 */
+                likeCount: number;
+                /** @description 回复的一级评论；一级评论为 null。 */
+                parentId?: string | null;
+                pinned: boolean;
+                postId: string;
+                /** @description 所属帖子的标题（帖子隐藏了也给）。 */
+                postTitle?: string | null;
+                /** @description 纯文本（提及与表情 token 已转成可读文本）。 */
+                text: string;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
         Paged_AdminJob: {
             items: {
                 aiUserId: string;
@@ -4809,6 +5043,47 @@ export interface components {
                 /** Format: date-time */
                 updatedAt: string;
                 userId: string;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_AdminPost: {
+            items: {
+                /** @description 匿名帖对外显示的名字。 */
+                anonymousName?: string | null;
+                author?: components["schemas"]["AdminUserBrief"] | null;
+                category?: components["schemas"]["AdminPostCategory"] | null;
+                /** Format: int32 */
+                commentCount: number;
+                /** Format: date-time */
+                editedAt?: string | null;
+                /** Format: date-time */
+                hiddenAt?: string | null;
+                hiddenBy?: components["schemas"]["AdminUserBrief"] | null;
+                /** @description `auto_report` 或 `moderator`。 */
+                hiddenReason?: string | null;
+                id: string;
+                isAnonymous: boolean;
+                /** Format: int32 */
+                likeCount: number;
+                /** Format: date-time */
+                pinnedAt?: string | null;
+                /** Format: date-time */
+                publishedAt?: string | null;
+                title: string;
+                /** Format: int64 */
+                viewCount: number;
             }[];
             /** Format: int32 */
             limit: number;
@@ -6445,6 +6720,43 @@ export interface operations {
             };
         };
     };
+    list_comments: {
+        parameters: {
+            query?: {
+                /** @description 正文包含；是数字时也按评论 id 匹配。 */
+                q?: string;
+                postId?: string;
+                /** @description 作者。匿名评论不会出现在按作者筛选的结果里。 */
+                authorId?: string;
+                visibility?: "visible" | "hidden";
+                page?: number;
+                /** @description 默认 20，最大 100。 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_AdminComment"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     list_avatars: {
         parameters: {
             query?: never;
@@ -7165,6 +7477,204 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminQuestion"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    content_action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContentActionRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContentActionResult"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description FORBIDDEN */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_posts: {
+        parameters: {
+            query?: {
+                /** @description 标题包含；是数字时也按帖子 id 匹配。 */
+                q?: string;
+                categoryId?: string;
+                /** @description 作者。匿名帖不会出现在按作者筛选的结果里。 */
+                authorId?: string;
+                visibility?: "visible" | "hidden";
+                /** @description 隐藏原因：`auto_report`（多人举报自动隐藏）或 `moderator`（版主隐藏）。 */
+                hiddenReason?: string;
+                pinned?: boolean;
+                anonymous?: boolean;
+                page?: number;
+                /** @description 默认 20，最大 100。 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_AdminPost"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_post_category: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MovePostInput"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    pin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    unpin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             404: {

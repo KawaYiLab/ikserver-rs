@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO posts (id, author_id, category_id, title, body, status, is_anonymous, anonymous_seed,\n                            published_at, first_published_at, bumped_at, comment_count)\n         VALUES (500, 3, 10, '公开帖', '正文', 'published', FALSE, NULL, now(), now(), now(), 2),\n                (501, 3, 10, '匿名帖', '正文', 'published', TRUE, 'seed-501', now(), now(), now(), 0),\n                (502, 4, 10, '别人的帖', '正文', 'published', FALSE, NULL, now(), now(), now(), 0)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "74a310d7e3d39d0dde0f8e6f435a3c36239873d521be9da898ae1355542bbd62"
+}

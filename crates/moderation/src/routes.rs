@@ -1,5 +1,5 @@
 //! HTTP 接口：`/v1/reports*`、`/v1/me/reports`、`/v1/admin/reports*`、`/v1/admin/users/{id}/block`、
-//! `/v1/admin/users/{id}/unblock`。
+//! `/v1/admin/users/{id}/unblock`、`/v1/admin/moderation/actions`。
 
 use axum::extract::{FromRef, State};
 use http::StatusCode;
@@ -14,9 +14,10 @@ use utoipa_axum::routes;
 
 use crate::ModerationState;
 use crate::dto::{
-    BlockRequest, BlockResult, CheckQuery, CheckResult, ClaimResult, CreateReportRequest,
-    GroupPage, GroupQuery, MyReport, PageQuery, ReportCreated, ReportGroup, ResolveRequest,
-    ResolveResult, TargetType, UnblockResult, UnclaimResult,
+    BlockRequest, BlockResult, CheckQuery, CheckResult, ClaimResult, ContentActionRequest,
+    ContentActionResult, CreateReportRequest, GroupPage, GroupQuery, MyReport, PageQuery,
+    ReportCreated, ReportGroup, ResolveRequest, ResolveResult, TargetType, UnblockResult,
+    UnclaimResult,
 };
 use crate::{admin, service};
 
@@ -37,6 +38,7 @@ where
         .routes(routes!(resolve))
         .routes(routes!(unblock))
         .routes(routes!(block))
+        .routes(routes!(content_action))
 }
 
 /// 举报
@@ -290,4 +292,27 @@ async fn block(
     Ok(Json(
         admin::block(&state, &op, user_id.get(), request).await?,
     ))
+}
+
+/// 直接处置帖子或评论（审核，不经举报）
+///
+/// 隐藏、恢复可见、删除，一次 1–50 条。有未结案举报的目标跳过，在 `pendingReports` 里返回。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/moderation/actions",
+    tag = "moderation",
+    request_body = ContentActionRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = ContentActionResult),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 403, description = "FORBIDDEN", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn content_action(
+    State(state): State<ModerationState>,
+    StaffOperator(op): StaffOperator,
+    Json(request): Json<ContentActionRequest>,
+) -> Result<Json<ContentActionResult>, Problem> {
+    Ok(Json(admin::act(&state, &op, request).await?))
 }

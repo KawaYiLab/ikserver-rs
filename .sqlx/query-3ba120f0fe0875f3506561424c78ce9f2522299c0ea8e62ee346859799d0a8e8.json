@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT comment_count FROM posts WHERE id = 500",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "comment_count",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "comment_count"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3ba120f0fe0875f3506561424c78ce9f2522299c0ea8e62ee346859799d0a8e8"
+}

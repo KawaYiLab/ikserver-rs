@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET hidden_at = now(), hidden_reason = 'auto_report', hidden_by = NULL WHERE id = 502",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2987202c9c54d0bebf5f7511ee4a6019fd0c91d8985bcb207d00ff1be84fbf1d"
+}

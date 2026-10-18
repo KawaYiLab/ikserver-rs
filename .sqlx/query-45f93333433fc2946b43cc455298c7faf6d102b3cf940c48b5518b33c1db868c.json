@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO categories (id, slug, name, admin_only) VALUES (12, 'notice', '公告', TRUE)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "45f93333433fc2946b43cc455298c7faf6d102b3cf940c48b5518b33c1db868c"
+}

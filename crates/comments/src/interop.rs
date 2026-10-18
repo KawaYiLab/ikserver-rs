@@ -211,6 +211,44 @@ pub async fn delete_comment(
     Ok(true)
 }
 
+/// 后台直接处置时锁住的评论（AGENTS.md 规则 6：先锁再判断状态）。
+#[derive(Debug, Clone)]
+pub struct ModerationTarget {
+    pub author_id: i64,
+    pub post_id: i64,
+    pub post_title: String,
+    pub is_anonymous: bool,
+    /// 隐藏原因；未隐藏为 None。
+    pub hidden_reason: Option<String>,
+}
+
+/// 依次锁住所属帖子与评论行（与删除评论同样的加锁顺序，避免死锁），返回处置需要的信息。
+pub async fn lock_moderation_target(
+    conn: &mut PgConnection,
+    comment_id: i64,
+) -> Result<Option<ModerationTarget>, Problem> {
+    let Some(post_id) = repo::get(conn, comment_id).await?.map(|c| c.post_id) else {
+        return Ok(None);
+    };
+    let Some(post) = ik_content::interop::lock_post(conn, post_id).await? else {
+        return Ok(None);
+    };
+    let Some(row) = repo::lock_moderation_target(conn, comment_id).await? else {
+        return Ok(None);
+    };
+    Ok(Some(ModerationTarget {
+        author_id: row.author_id,
+        post_id: row.post_id,
+        post_title: post.title,
+        is_anonymous: row.is_anonymous,
+        hidden_reason: if row.hidden {
+            Some(row.hidden_reason.unwrap_or_default())
+        } else {
+            None
+        },
+    }))
+}
+
 /// 评论是否隐藏（按 id；已删除的不出现）。审核后台展示目标状态用。
 pub async fn hidden_states(
     conn: &mut PgConnection,
