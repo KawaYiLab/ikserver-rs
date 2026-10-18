@@ -77,7 +77,7 @@ function openPage(item: NavItem) {
 }
 
 function openUser(user: Schemas['AdminUser']) {
-  go({ path: '/users', query: { q: user.id } })
+  go(`/users/${user.id}`)
 }
 
 function toggleTheme() {
@@ -118,6 +118,9 @@ const nothing = computed(() => !!keyword.value && !searching.value && pages.valu
             </CommandItem>
             <CommandItem :value="`id-comment-${keyword}`" @select="go({ path: '/comments', query: { q: keyword } })">
               <Hash />评论 {{ keyword }}
+            </CommandItem>
+            <CommandItem :value="`id-user-${keyword}`" @select="go(`/users/${keyword}`)">
+              <Hash />账号 {{ keyword }}
             </CommandItem>
           </CommandGroup>
 

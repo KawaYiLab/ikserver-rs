@@ -6,63 +6,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
 import { formatTime } from '~/lib/format'
+import { auditActionLabel as auditActions, auditTargetLabel as auditTargets } from '~/lib/audit'
 
 definePageMeta({ admin: true })
-
-/** 审计动作（与后端写入的 `action` 一致）。 */
-const auditActions: Record<string, string> = {
-  'user.role.set': '修改角色',
-  'user.ai_agent.set': '设置 AI 账号',
-  'user.exam.pass': '手动通过考试',
-  'user.denny.adjust': '调整丁尼',
-  'user.exp.grant': '发放经验',
-  'user.block': '封禁账号',
-  'user.unblock': '解封账号',
-  'exam.question.create': '新建题目',
-  'exam.question.update': '编辑题目',
-  'exam.question.toggle': '启停题目',
-  'exam.question.delete': '删除题目',
-  'content.category.create': '新建分区',
-  'content.category.update': '编辑分区',
-  'content.category.delete': '删除分区',
-  'content.tag.update': '修改标签',
-  'content.post.hide': '隐藏帖子',
-  'content.post.unhide': '恢复帖子',
-  'content.post.delete': '删除帖子',
-  'content.post.pin': '置顶帖子',
-  'content.post.unpin': '取消置顶',
-  'content.post.move': '移动帖子分区',
-  'content.comment.hide': '隐藏评论',
-  'content.comment.unhide': '恢复评论',
-  'content.comment.delete': '删除评论',
-  'cosmetics.avatar.create': '新建系统头像',
-  'cosmetics.avatar.update': '编辑系统头像',
-  'cosmetics.avatar.delete': '下架系统头像',
-  'cosmetics.card.create': '新建名片',
-  'cosmetics.card.update': '编辑名片',
-  'cosmetics.card.delete': '下架名片',
-  'ai.settings.update': '修改 AI 设置',
-  'ai.model.save': '保存模型',
-  'ai.model.delete': '删除模型',
-  'ai.character.save': '保存角色',
-  'ai.character.delete': '删除角色',
-  'search.reindex': '重建索引',
-}
-
-const auditTargets: Record<string, string> = {
-  user: '用户',
-  exam_question: '题目',
-  category: '分区',
-  tag: '标签',
-  post: '帖子',
-  comment: '评论',
-  system_avatar: '系统头像',
-  business_card: '名片',
-  ai_settings: 'AI 设置',
-  ai_model: 'AI 模型',
-  ai_character: 'AI 角色',
-  search: '搜索',
-}
 
 const list = useListQuery({
   filters: { action: 'all', targetType: 'all', targetId: '', actorId: '' },

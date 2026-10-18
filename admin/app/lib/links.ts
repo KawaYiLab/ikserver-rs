@@ -1,8 +1,8 @@
 /** 后台内部链接。 */
 
-/** 账号页（按 ID 筛出这个账号）。 */
-export function userPath(id: string) {
-  return { path: '/users', query: { q: id } }
+/** 账号详情页。 */
+export function userPath(id: string, tab?: string) {
+  return tab ? { path: `/users/${id}`, query: { tab } } : `/users/${id}`
 }
 
 /** 隐藏原因的说明。 */
