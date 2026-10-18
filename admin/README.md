@@ -86,5 +86,7 @@ pnpm build            # nuxt generate → .output/public
   版主不能处置版主、管理员（封禁、清理资料），后端同样校验。
 - 隐藏 / 恢复 / 删除帖子或评论统一用 `useModerate()`（弹框填备注、选择是否通知作者，删除要输入确认），
   调 `/v1/admin/moderation/actions`；有待处理举报的会被跳过并提示去举报处理结案。
+- 工作台的图表手写 SVG（`AdminTrendChart`、`AdminSparkline`），不引入图表库；单系列色是 `--chart-1`
+  （浅 / 深两套值都按底色校验过对比度）。图表要有悬停提示和「看数据表」，数值不能只靠悬停才看得到。
 - 时间一律按北京时间显示（`~/lib/format`），状态徽标的配色也在这里（`userStatusVariant` 等）。
 - 上传图片用 `~/lib/upload` 的 `uploadImage`：先签名，再直传到对象存储，最后调用完成接口。
