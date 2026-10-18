@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useColorMode } from '@vueuse/core'
 import { Toaster } from '@/components/ui/sonner'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import 'vue-sonner/style.css'
 
 // 跟随系统深浅色；用户在顶栏切换后记在本机。
@@ -9,9 +10,11 @@ installUnauthorizedRedirect()
 </script>
 
 <template>
-  <NuxtLayout>
-    <NuxtPage />
-  </NuxtLayout>
+  <TooltipProvider :delay-duration="300">
+    <NuxtLayout>
+      <NuxtPage />
+    </NuxtLayout>
+  </TooltipProvider>
   <Toaster rich-colors position="top-center" />
   <AdminConfirmHost />
 </template>
