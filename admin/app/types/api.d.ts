@@ -3096,6 +3096,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/story/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 剧情库 MCP 端点
+         * @description 给剧情总结 AI 用的 MCP 服务（Streamable HTTP，无状态）：`zzz_catalog` 目录、`zzz_search` 检索、
+         *     `zzz_read` 顺读原文、`zzz_character` 角色速览、`zzz_guide` 方法指引。客户端配置
+         *     `{"type": "streamable-http", "url": "https://<域名>/v1/story/mcp"}`；配置了访问密钥时另加
+         *     `Authorization: Bearer <密钥>` 头。工具参数错误以 `result.isError = true` 返回，协议错误为 JSON-RPC `error`。
+         */
+        post: operations["mcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tags/suggest": {
         parameters: {
             query?: never;
@@ -4691,6 +4714,30 @@ export interface components {
              * @description 新写入的阅读记录数（之前读过的不重复计）。
              */
             marked: number;
+        };
+        /** @description JSON-RPC 2.0 请求或通知（MCP）。也可以是这些对象组成的数组（批量）。 */
+        McpRequest: {
+            /** @description 请求 id（字符串或数字）；没有 id 的是通知，服务端回 202 且无响应体。 */
+            id: Record<string, never>;
+            /**
+             * @description 固定为 `"2.0"`。
+             * @example 2.0
+             */
+            jsonrpc: string;
+            /**
+             * @description `initialize`、`tools/list`、`tools/call`、`prompts/list`、`prompts/get`、`ping` 等。
+             * @example tools/call
+             */
+            method: string;
+            params: Record<string, never>;
+        };
+        /** @description JSON-RPC 2.0 响应：`result` 与 `error` 二选一。 */
+        McpResponse: {
+            error: Record<string, never>;
+            id: Record<string, never>;
+            /** @example 2.0 */
+            jsonrpc: string;
+            result: Record<string, never>;
         };
         /** @description 当前登录用户的自我视图（含邮箱，只返回给本人）。 */
         MeView: {
@@ -13862,6 +13909,64 @@ export interface operations {
             };
             /** @description RATE_LIMITED */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    mcp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpRequest"];
+            };
+        };
+        responses: {
+            /** @description JSON-RPC 响应（批量请求时为数组） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpResponse"];
+                };
+            };
+            /** @description 只有通知或响应，无响应体 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description MCP_PROTOCOL_UNSUPPORTED */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description STORY_ACCESS_DENIED */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description STORY_DISABLED */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

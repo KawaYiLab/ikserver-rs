@@ -23,6 +23,7 @@ use ik_profile::ProfileState;
 use ik_realtime::{RealtimeState, TypingHandler};
 use ik_search::SearchState;
 use ik_social::SocialState;
+use ik_story::StoryState;
 use sqlx::PgPool;
 
 /// 所有 handler 共享的应用状态。克隆代价很低（内部都是 Arc / 连接池句柄）。
@@ -53,6 +54,8 @@ pub struct AppState {
     pub moderation: ModerationState,
     pub ai: AiState,
     pub admin: AdminState,
+    /// 剧情库：这里只建空壳，语料由 `serve` 显式加载（CLI 子命令不需要）。
+    pub story: StoryState,
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
 }
 
@@ -140,7 +143,9 @@ impl AppState {
             moderation.clone(),
             search.clone(),
         );
+        let story = StoryState::new(&config.story)?;
         Ok(Self {
+            story,
             admin,
             ai,
             moderation,
@@ -274,5 +279,11 @@ impl FromRef<AppState> for MediaState {
 impl FromRef<AppState> for AdminState {
     fn from_ref(state: &AppState) -> Self {
         state.admin.clone()
+    }
+}
+
+impl FromRef<AppState> for StoryState {
+    fn from_ref(state: &AppState) -> Self {
+        state.story.clone()
     }
 }

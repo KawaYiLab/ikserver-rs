@@ -40,6 +40,9 @@ enum Command {
     /// AI 助手配置运维
     #[command(subcommand)]
     Ai(AiCommand),
+    /// 绝区零剧情库（MCP `/v1/story/mcp`）运维
+    #[command(subcommand)]
+    Story(StoryCommand),
     /// 从旧 Strapi 库一次性迁移数据（先把旧库恢复到本库的 legacy schema，见 crates/legacy/README.md）
     #[command(subcommand)]
     Legacy(LegacyCommand),
@@ -66,6 +69,31 @@ enum LegacyCommand {
         /// 旧库时间列所用的时区（旧服务进程的时区），例如 Asia/Shanghai 或 UTC；没有默认值
         #[arg(long)]
         legacy_timezone: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum StoryCommand {
+    /// 从 zzz-story-extractor 的输出目录构建剧情库快照（预建索引，服务启动时只需几十毫秒加载）。
+    /// 不连数据库。生成后把 `IK_STORY__SOURCE` 指向它，`systemctl reload ik-server` 热更新
+    Build {
+        /// 提取器输出目录（含 story.jsonl，可选 supplement.jsonl、lore/）
+        #[arg(long)]
+        data: std::path::PathBuf,
+        /// 快照输出路径（先写临时文件再改名，运行中的服务不会读到一半）
+        #[arg(long, short)]
+        output: std::path::PathBuf,
+    },
+    /// 本地直接调用一个剧情库工具并打印结果（调试用，不连数据库）
+    Call {
+        /// 快照文件或提取器输出目录
+        #[arg(long)]
+        source: std::path::PathBuf,
+        /// 工具名：zzz_catalog / zzz_search / zzz_read / zzz_character / zzz_guide
+        tool: String,
+        /// JSON 参数，例如 '{"keyword":"零号空洞"}'
+        #[arg(default_value = "{}")]
+        args: String,
     },
 }
 
@@ -199,6 +227,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Command::Legacy(cmd) => legacy_command(cmd).await,
+        Command::Story(cmd) => story_command(cmd),
         Command::Search(SearchCommand::Reindex) => {
             let state = connect_for_cli().await?;
             state.search.reindex().await?;
@@ -206,6 +235,37 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+fn story_command(cmd: StoryCommand) -> anyhow::Result<()> {
+    init_tracing(LogFormat::Pretty);
+    let mut out = std::io::stdout().lock();
+    match cmd {
+        StoryCommand::Build { data, output } => {
+            let started = std::time::Instant::now();
+            let corpus = ik_story::corpus::build_from_dir(&data)?;
+            let bytes = ik_story::corpus::save_snapshot(&corpus, &output)?;
+            tracing::info!(
+                output = %output.display(),
+                size_mb = bytes / 1_000_000,
+                docs = corpus.docs.len(),
+                lines = corpus.lines.len(),
+                elapsed_ms = started.elapsed().as_millis() as u64,
+                "剧情库快照已生成"
+            );
+        }
+        StoryCommand::Call { source, tool, args } => {
+            let corpus = ik_story::load_source(&source)?;
+            let args: serde_json::Value =
+                serde_json::from_str(&args).context("参数不是合法的 JSON")?;
+            match ik_story::mcp::tools::call(&corpus, &tool, Some(args)) {
+                Ok(Ok(text)) => writeln!(out, "{text}")?,
+                Ok(Err(error)) => writeln!(out, "[isError] {error}")?,
+                Err(_) => anyhow::bail!("未知工具 {tool}"),
+            }
+        }
+    }
+    Ok(())
 }
 
 /// 逐题校验并写入；遇到不合格的题立即停止并报出是第几题（前面的题已经写入）。
@@ -373,6 +433,9 @@ async fn serve() -> anyhow::Result<()> {
         .context("连接数据库失败")?;
     let addr = config.http.addr;
     let state = AppState::new(config, db)?;
+    // 配置了剧情库却加载失败时启动失败（非法配置启动即失败）；之后的 SIGHUP 重载失败只记日志、保留旧语料。
+    state.story.load().await?;
+    let reload = spawn_reload_on_sighup(state.story.clone());
     state
         .search
         .start_indexer(&state.bus, &state.config.search)?;
@@ -419,6 +482,7 @@ async fn serve() -> anyhow::Result<()> {
     })
     .await?;
     presence.abort();
+    reload.abort();
     if let Err(error) = ik_realtime::presence::withdraw(&presence_db, node_id).await {
         tracing::warn!(%error, "撤下在线快照失败（45 秒后自然过期）");
     }
@@ -431,6 +495,34 @@ async fn serve() -> anyhow::Result<()> {
     }
     tracing::info!("ik-server 已退出");
     Ok(())
+}
+
+/// SIGHUP（`systemctl reload ik-server`）：重新加载剧情库并原子替换，进行中的请求继续用旧语料。
+#[cfg(unix)]
+fn spawn_reload_on_sighup(story: ik_story::StoryState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut hangup = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+        {
+            Ok(signal) => signal,
+            Err(error) => {
+                tracing::error!(%error, "无法监听 SIGHUP，剧情库不能热更新");
+                return;
+            }
+        };
+        while hangup.recv().await.is_some() {
+            if !story.is_configured() {
+                continue;
+            }
+            if let Err(error) = story.load().await {
+                tracing::error!(error = %format!("{error:#}"), "剧情库重新加载失败，继续使用旧语料");
+            }
+        }
+    })
+}
+
+#[cfg(not(unix))]
+fn spawn_reload_on_sighup(_story: ik_story::StoryState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async {})
 }
 
 fn init_tracing(format: LogFormat) {

@@ -98,6 +98,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | UPLOAD_TOKEN_INVALID | 400 | 上传凭证无效 | 格式或签名不对，或不是自己的凭证 |
 | UPLOAD_TOKEN_EXPIRED | 400 | 上传凭证已过期，请重新上传 | 签名后 10 分钟内完成 |
 | UPLOAD_NOT_FOUND | 400 | 没有找到已上传的文件，请重新上传 | 还没 PUT，或暂存对象已被清理 |
+| MCP_PROTOCOL_UNSUPPORTED | 400 | 不支持的 MCP 协议版本 | `POST /v1/story/mcp`：`MCP-Protocol-Version` 头不在支持列表里（2024-11-05～2025-11-25） |
 | UPLOAD_SIZE_MISMATCH | 400 | 上传的文件大小与声明不符 | 也包括读取过程中对象被替换 |
 | UPLOAD_CHECKSUM_MISMATCH | 400 | 上传的文件内容与声明的哈希不符 | |
 | UPLOAD_NOT_IMAGE | 400 | 上传的文件不是支持的图片格式 | 按文件头嗅探，只认 jpeg/png/gif/webp/avif |
@@ -127,6 +128,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | USER_BLOCKED | 403 | 你与对方存在拉黑关系，无法进行此操作 | 任一方向的拉黑；不说明谁拉黑了谁。查看帖子详情时文案为「无法查看该委托」。匿名内容永不返回此码 |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
 | MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
+| STORY_ACCESS_DENIED | 401 | 剧情库访问密钥无效 | `POST /v1/story/mcp`：配置了 `IK_STORY__ACCESS_KEY` 而请求没带或带错 `Authorization: Bearer`；响应带 `WWW-Authenticate: Bearer` |
 | MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |
 | MIHOYO_DELETE_ACCOUNT_MISMATCH | 403 | 扫码的米游社账号与当前账号不一致，请使用当前账号绑定的米游社扫码 | MHY-017 |
 | CANNOT_SANCTION_STAFF | 403 | 不能封禁版主或管理员 | 审核结案 `block_user`、后台直接封禁 |
@@ -181,6 +183,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | MIHOYO_UPSTREAM_ERROR | 502 | 米游社服务暂时不可用，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | VIDEO_UPSTREAM_ERROR | 502 | B 站服务暂时不可用，请稍后再试 | 视频预览时 B 站超时或报错；5xx 统一文案，客户端按 code 区分。保存帖子不受影响 |
 | MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | `IK_MIHOYO__ENABLED=false`；5xx 统一文案 |
+| STORY_DISABLED | 503 | 剧情库暂不可用 | 没有配置 `IK_STORY__SOURCE`；5xx 统一文案 |
 
 ## 限流
 
@@ -194,6 +197,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 - 具体接口另有更严的限流（两者都生效）：登录/验证码类按 IP 每路由 20/min，评论、私信、拉黑、上传签名等见各域代码。
 - 计数在进程内（不使用 Redis），多实例时每个实例各自计。
 - 搜索（`/v1/search/*`）：登录用户每秒 10 次，游客每 IP 每秒 5 次。
+- 剧情库 MCP（`POST /v1/story/mcp`）是只读查询，在全站默认限流里按「读」计。
 - 视频预览（`/v1/videos/resolve`，会访问 B 站）：每人每分钟 30 次；结果在进程内缓存 10 分钟。
 
 ## 实时（WebSocket `/v1/realtime`）

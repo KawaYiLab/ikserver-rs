@@ -14,6 +14,8 @@ WorkingDirectory=/opt/interknot
 # 全部配置（数据库、密钥、对象存储……）都在这个文件里，只有 root 和 interknot 能读。
 EnvironmentFile=/etc/interknot/ik-server.env
 ExecStart=/opt/interknot/ik-server serve
+# `systemctl reload ik-server`：重新加载剧情库快照（IK_STORY__SOURCE），不中断服务。
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=3
 # 收到 SIGTERM 后停止接新请求、关闭实时连接、等后台任务收尾，再退出。

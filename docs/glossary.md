@@ -33,6 +33,7 @@
 | 处罚 | sanction | 禁言（mute）/封禁（ban），带到期时间 |
 | 审计日志 | audit_log | 管理操作留痕 |
 | AI 助手 / 角色卡 | ai / role_card | 人格、模型、额度 |
+| 剧情库 | story | 绝区零剧情 / 设定语料的只读 MCP 服务（`/v1/story/mcp`）；一篇文档 `doc`（场景或设定条目），分组 `group`（章节 `ch:` / 设定分类 `lore:`） |
 | 米游社 | mihoyo | 扫码登录/绑定 |
 | 权益 | benefit | 等级权益 |
 | 上传回执 | upload receipt | 直传完成凭证 |

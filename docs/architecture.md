@@ -28,7 +28,7 @@ flowchart LR
 
 | 层 | crate | 直接依赖（省略 kernel） |
 |---|---|---|
-| 0 | `kernel`、`mail` | 无业务域 |
+| 0 | `kernel`、`mail`、`story` | 无业务域 |
 | 1 | `auth` | — |
 | 2 | `economy`、`social`、`media`、`mihoyo`、`realtime` | `auth` |
 | 3 | `exam` | `auth, economy` |
@@ -81,6 +81,15 @@ flowchart LR
   系统头像的图片 id 也冗余在账号上，所以 `ik_auth::service::authors` 直接给出「装备头像优先，其次自定义头像」，
   展示作者的各域不依赖 cosmetics。目录换图时 cosmetics 在同一事务里调用 `refresh_equipped_avatar` 同步。
   表情包（`emote_groups`、`emotes`）也归 cosmetics：公开清单进程内缓存，后台修改后立即失效；评论域只按文本存 `:ik-xxx:`，不依赖它。
+- `story → kernel`：绝区零剧情库，给剧情总结 AI 用的 MCP 服务（`POST /v1/story/mcp`，Streamable HTTP 无状态模式：
+  直接回 JSON、不开 SSE、不发会话 id；GET/DELETE 405），不读写数据库。语料是 zzz-story-extractor 的产出，
+  由 `ik-server story build` 编成快照（整块文本 + CSR 存储的字符二元组倒排 + xxh3 校验），`serve` 启动时加载
+  （约 50 ms；`IK_STORY__SOURCE` 也可以直接指向提取器输出目录，现场构建约 1 秒），加载失败则启动失败；
+  SIGHUP（`systemctl reload ik-server`）重新加载并经 `ArcSwap` 原子替换，失败保留旧语料。工具：`zzz_catalog`
+  （章节 / 场景目录）、`zzz_search`（多词 AND、BM25、标题 / 路径 / 出场名单加分）、`zzz_read`（字数预算分页 +
+  续读游标，`follow` 跨场景顺读整章）、`zzz_character`、`zzz_guide`（另以 MCP prompts 提供）。
+  `IK_STORY__ACCESS_KEY` 设置后要求 `Authorization: Bearer`；生产环境启用时必须设密钥或显式 `IK_STORY__PUBLIC=true`。
+  JSON-RPC 是只读查询，在全站限流里按「读」计。典型查询 0.1 ms 级，极高频词 1～2 ms，直接在请求线程里算。
 - `mail → kernel`：发信通道（SMTP、Brevo）与双通道调度，实现 `ik_kernel::mail::Mailer`，只由 server 装配；
   业务代码只依赖 `Mailer`（验证码邮件在 auth 里事务提交后发送）。
 - `mihoyo → auth`：米游社身份（`mihoyo_bindings`）与扫码会话（`mihoyo_qr_logins`，替代旧系统的 Redis 键）。

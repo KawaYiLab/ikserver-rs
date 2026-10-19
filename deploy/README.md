@@ -71,6 +71,51 @@ journalctl -u ik-server -f                        # 日志
 
 读文件的命令（如 `ik ai import <路径>`）以 `interknot` 用户运行，文件要让它读得到。
 
+## 剧情库（MCP）
+
+`POST /v1/story/mcp` 是给剧情总结 AI 用的只读 MCP 服务，数据来自
+[zzz-story-extractor](https://github.com/KawaYiLab/zzz-story-extractor) 的输出目录（`story.jsonl`、`supplement.jsonl`、`lore/`）。
+不配置时接口返回 503 `STORY_DISABLED`，其余功能不受影响。
+
+1. 在任意机器上把提取器输出编成快照（不连数据库，约 1 秒，产物约 25 MB）：
+
+   ```bash
+   cargo run --release -p ik-server -- story build --data out/zzz_story_3.2.0_chs --output zzz_story.zsc
+   # 调试：本地直接调用工具
+   cargo run --release -p ik-server -- story call --source zzz_story.zsc zzz_search '{"keyword":"零号空洞"}'
+   ```
+
+2. 放到服务器上服务用户读得到的位置，并配置：
+
+   ```bash
+   sudo install -d -m 0750 -o interknot -g interknot /opt/interknot/story
+   sudo install -m 0640 -o interknot -g interknot zzz_story.zsc /opt/interknot/story/
+   # /etc/interknot/ik-server.env
+   IK_STORY__SOURCE=/opt/interknot/story/zzz_story.zsc
+   IK_STORY__ACCESS_KEY=<openssl rand -hex 32>
+   sudo systemctl restart ik-server        # 第一次配置：环境变量只在启动时读取
+   ```
+
+3. 数据更新：覆盖同一路径的快照后 `sudo systemctl reload ik-server`，新语料原子替换，不中断请求；
+   新快照加载失败时继续使用旧的（看 `journalctl -u ik-server`）。
+
+客户端（Claude Code / Claude Desktop / Cursor 等）配置：
+
+```json
+{
+  "mcpServers": {
+    "zzz-story": {
+      "type": "streamable-http",
+      "url": "https://ik.tiwat.cn/v1/story/mcp",
+      "headers": { "Authorization": "Bearer <IK_STORY__ACCESS_KEY>" }
+    }
+  }
+}
+```
+
+工具：`zzz_catalog`（章节与场景目录）、`zzz_search`（全文检索，空格分隔多词为同篇 AND）、`zzz_read`（按字数预算顺读，
+`follow=true` 跨场景读完整章）、`zzz_character`（角色出场与档案）、`zzz_guide`（剧情总结 / 角色弧线 / 时间线 / 查证的方法指引）。
+
 ## 回滚
 
 迁移只增不改，旧版本在新表结构上照常工作，换回旧的可执行文件即可：

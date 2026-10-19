@@ -55,6 +55,7 @@ use crate::{AppState, system};
         (name = "cosmetics", description = "装扮：系统头像与论坛名片"),
         (name = "moderation", description = "举报，以及审核（版主、管理员）"),
         (name = "ai", description = "AI 助手：角色、模型、额度"),
+        (name = "story", description = "绝区零剧情库（MCP）"),
     )
 )]
 pub struct ApiDoc;
@@ -107,6 +108,7 @@ fn api_router() -> OpenApiRouter<AppState> {
         .merge(ik_moderation::router())
         .merge(ik_ai::router())
         .merge(ik_admin::router())
+        .merge(ik_story::router())
 }
 
 /// 完整 OpenAPI 文档（`ik-server openapi` 与 `/v1/openapi.json` 共用）。
