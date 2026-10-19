@@ -39,8 +39,9 @@ crates/
   search/    搜索：帖子与评论全文搜索、联想（Meilisearch + 数据库回查与兜底）、索引同步
   media/     媒体：直传上传（签名、完成校验与发布）、媒体文件、我的图库、CDN 缩略图地址
   cosmetics/ 装扮：系统头像与论坛名片的目录、装备（装备状态存在账号上）；表情包（清单与后台维护）
-  story/     绝区零剧情库：zzz-story-extractor 产出（主线、过场/漫画、设定）的快照、字符二元组倒排检索、
-             五个只读工具（目录 / 检索 / 顺读 / 角色 / 指引），以 MCP 挂在 POST /v1/story/mcp（不读写数据库）
+  story/     绝区零剧情库：zzz-story-extractor 产出（主线、过场/漫画、设定）的语料包上传与版本管理（后台）、
+             内存里的字符二元组倒排检索、五个只读工具（目录 / 检索 / 顺读 / 角色 / 指引），以 MCP 挂在
+             POST /v1/story/mcp
   mail/      发信通道：国内邮箱走 SMTP、其余走 Brevo，失败改走另一个（server 装配，业务只依赖 kernel 的 Mailer）
   mihoyo/    米游社扫码登录（自动建号）、绑定与解绑、扫码注销核验、上游协议客户端
   account/   账号安全：安全概览、注销账号（编排 auth、mihoyo、profile）

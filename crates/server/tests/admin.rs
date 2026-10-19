@@ -50,6 +50,7 @@ async fn setup(db: &PgPool) -> Router {
     config.database.url = Secret::new("postgres://unused");
     config.http.allowed_origins = vec![ORIGIN.to_owned()];
     config.hot.enabled = false;
+    config.story.public = true;
     let state = AppState::new(config, db.clone()).unwrap();
     build_app(state).unwrap()
 }
@@ -1625,4 +1626,225 @@ async fn member_numbers_are_shown_and_searchable(db: PgPool) {
     assert_eq!(found["total"], 1, "{found}");
     assert_eq!(found["items"][0]["username"], "newbie");
     assert_eq!(found["items"][0]["memberNo"], 5);
+}
+
+/// 原始字节请求（剧情库语料包上传）。
+async fn send_raw(app: &Router, token: &str, uri: &str, body: Vec<u8>) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method("PUT")
+        .uri(uri)
+        .header("content-type", "application/gzip")
+        .header("origin", ORIGIN)
+        .header("user-agent", "admin-test/1.0")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap()
+    };
+    (status, json)
+}
+
+fn story_bundle() -> ik_story::corpus::Bundle {
+    let dir = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../story/tests/fixtures/sample"
+    );
+    ik_story::corpus::Bundle::from_dir(std::path::Path::new(dir)).unwrap()
+}
+
+/// 用 MCP 检索，返回结果文本（剧情库未启用时返回 None）。
+async fn story_search(app: &Router, keyword: &str) -> Option<String> {
+    let rpc = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"zzz_search","arguments":{"keyword": keyword}}});
+    let (status, body) = call(app, USER, "POST", "/v1/story/mcp", rpc).await;
+    if status == StatusCode::SERVICE_UNAVAILABLE {
+        return None;
+    }
+    assert_eq!(status, StatusCode::OK, "{body}");
+    Some(
+        body["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+    )
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn story_corpus_upload_switch_and_rollback(db: PgPool) {
+    let app = setup(&db).await;
+    let upload = "/v1/admin/story/corpus";
+    let first = story_bundle();
+    let first_gz = first.encode_gzip().unwrap();
+
+    // 还没有语料。
+    assert!(story_search(&app, "狡兔屋").await.is_none());
+
+    // 只有管理员能上传、能看版本。
+    assert_eq!(
+        send_raw(&app, MODERATOR, upload, first_gz.clone()).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(&app, USER, "GET", "/v1/admin/story/corpora", Value::Null)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+
+    // 不合格的包：400，不入库。
+    let (status, body) = send_raw(&app, ADMIN, upload, b"not a bundle".to_vec()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["code"], "STORY_BUNDLE_INVALID");
+
+    let (status, v1) = send_raw(&app, ADMIN, upload, first_gz.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{v1}");
+    assert_eq!(v1["active"], true);
+    assert_eq!(v1["sourceVersion"], "3.2.0");
+    assert_eq!(v1["bundleBytes"].as_i64().unwrap(), first_gz.len() as i64);
+    assert_eq!(v1["uploadedBy"], "1");
+    // 上传后本实例立即生效。
+    let text = story_search(&app, "狡兔屋").await.unwrap();
+    assert!(text.contains("命中"), "{text}");
+    assert!(
+        story_search(&app, "新增的台词")
+            .await
+            .unwrap()
+            .contains("没有命中")
+    );
+
+    // 同一个包再传一次：不重复保存。
+    let (status, again) = send_raw(&app, ADMIN, upload, first_gz).await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(again["id"], v1["id"]);
+
+    // 新版本（多一句台词，未压缩的 JSON 也接受）：切换过去。
+    let mut second = story_bundle();
+    second.story.push_str(
+        &json!({"chapter":"Chapter01","chapter_label":"第一季 第一章","chapter_order":2,
+            "scene":"1010002","scene_title":"新的场景","family":"GalGame","speaker":"妮可",
+            "text":"这是新增的台词。","line_type":"dialogue","scene_speakers":["妮可"],"order":99})
+        .to_string(),
+    );
+    let (status, v2) = send_raw(&app, ADMIN, upload, serde_json::to_vec(&second).unwrap()).await;
+    assert_eq!(status, StatusCode::CREATED, "{v2}");
+    assert_ne!(v2["id"], v1["id"]);
+    assert!(
+        story_search(&app, "新增的台词")
+            .await
+            .unwrap()
+            .contains("妮可：这是新增的台词。")
+    );
+
+    let (status, list) = call(&app, ADMIN, "GET", "/v1/admin/story/corpora", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["serving"], v2["id"]);
+    assert_eq!(list["localSource"], false);
+    let corpora = list["corpora"].as_array().unwrap();
+    assert_eq!(corpora.len(), 2);
+    assert_eq!(corpora[0]["id"], v2["id"]);
+    assert_eq!(corpora[0]["active"], true);
+    assert_eq!(corpora[1]["active"], false);
+
+    // 回滚到第一个版本。
+    let activate = format!(
+        "/v1/admin/story/corpora/{}/activate",
+        v1["id"].as_str().unwrap()
+    );
+    let (status, back) = call(&app, ADMIN, "POST", &activate, Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{back}");
+    assert_eq!(back["active"], true);
+    assert!(
+        story_search(&app, "新增的台词")
+            .await
+            .unwrap()
+            .contains("没有命中")
+    );
+    assert_eq!(
+        call(
+            &app,
+            ADMIN,
+            "POST",
+            "/v1/admin/story/corpora/123/activate",
+            Value::Null
+        )
+        .await
+        .0,
+        StatusCode::NOT_FOUND
+    );
+
+    let active: Vec<i64> = sqlx::query_scalar!("SELECT id FROM story_corpora WHERE active")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    assert_eq!(active.len(), 1);
+    let actions: Vec<String> = sqlx::query_scalar!(
+        "SELECT action FROM admin_audit_log WHERE target_type = 'story_corpus' ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        [
+            "story.corpus.upload",
+            "story.corpus.upload",
+            "story.corpus.upload",
+            "story.corpus.activate"
+        ]
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn story_corpus_keeps_recent_versions_and_loads_on_startup(db: PgPool) {
+    let app = setup(&db).await;
+    let mut ids = Vec::new();
+    for i in 0..7 {
+        let mut bundle = story_bundle();
+        bundle.story.push_str(
+            &json!({"chapter":"Chapter01","chapter_label":"第一季 第一章","chapter_order":2,
+                "scene":"1010009","family":"GalGame","text": format!("版本{i}"),"order":100})
+            .to_string(),
+        );
+        let (status, v) = send_raw(
+            &app,
+            ADMIN,
+            "/v1/admin/story/corpus",
+            bundle.encode_gzip().unwrap(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{v}");
+        ids.push(v["id"].as_str().unwrap().to_owned());
+    }
+    let kept: i64 = sqlx::query_scalar!("SELECT count(*) FROM story_corpora")
+        .fetch_one(&db)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kept, 5, "只保留最近 5 个版本");
+
+    // 新起一个实例（相当于重启或另一台机器）：启动时从数据库加载生效版本。
+    let mut config = Config::default();
+    config.database.url = Secret::new("postgres://unused");
+    config.http.allowed_origins = vec![ORIGIN.to_owned()];
+    config.story.public = true;
+    let state = AppState::new(config, db.clone()).unwrap();
+    assert!(state.story.current().is_none());
+    state.story.load().await.unwrap();
+    assert_eq!(
+        state.story.version().map(|v| v.to_string()),
+        ids.last().cloned()
+    );
+    let other = build_app(state).unwrap();
+    assert!(
+        story_search(&other, "版本6")
+            .await
+            .unwrap()
+            .contains("命中 1 篇")
+    );
 }

@@ -310,7 +310,10 @@ mod story {
             .connect_lazy(config.database.url.expose())
             .unwrap();
         let state = AppState::new(config, db).unwrap();
-        state.story.load().await.unwrap();
+        // 只在用本地语料时加载：这里的数据库连不上，数据库里的语料版本由 admin.rs 的用例覆盖。
+        if !state.config.story.source.is_empty() {
+            state.story.load().await.unwrap();
+        }
         build_app(state).unwrap()
     }
 
@@ -335,7 +338,11 @@ mod story {
 
     #[tokio::test]
     async fn mcp_client_works_through_the_full_stack() {
-        let app = build(|c| c.story.source = fixture()).await;
+        let app = build(|c| {
+            c.story.source = fixture();
+            c.story.public = true;
+        })
+        .await;
         let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}});
         let (status, headers, body) =
             send(&app, mcp().body(Body::from(init.to_string())).unwrap()).await;
@@ -380,6 +387,7 @@ mod story {
     async fn mcp_posts_count_as_reads_in_the_global_limiter() {
         let app = build(|c| {
             c.story.source = fixture();
+            c.story.public = true;
             c.rate_limit.anon_read_per_min = 3;
             c.rate_limit.anon_write_per_min = 1;
         })

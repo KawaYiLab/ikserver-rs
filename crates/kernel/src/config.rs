@@ -185,17 +185,16 @@ impl Default for Video {
 }
 
 /// 绝区零剧情库（ik-story），以 MCP 提供在 `POST /v1/story/mcp`。
+/// 语料由管理员上传到数据库（`PUT /v1/admin/story/corpus`），这里只管访问控制与本地开发。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Story {
-    /// 语料：`ik-server story build` 生成的快照文件，或 zzz-story-extractor 的输出目录（启动时现场构建）。
-    /// 空 = 不启用，接口返回 503 `STORY_DISABLED`。`serve` 启动时加载，加载失败则启动失败；
-    /// 收到 SIGHUP 时重新加载并原子替换（失败则保留旧语料）。
+    /// 本地语料（开发用）：zzz-story-extractor 的输出目录或语料包文件。设置后启动时用它，不读数据库；
+    /// 生产环境留空。
     pub source: String,
-    /// 设置后要求 `Authorization: Bearer <access_key>`。
+    /// MCP 客户端须带 `Authorization: Bearer <access_key>`。
     pub access_key: Secret,
-    /// 不设 `access_key` 时是否允许公开访问。生产环境启用剧情库却既没有密钥也没有显式公开，视为配置错误：
-    /// 游戏文本不宜在不知情的情况下对外开放。
+    /// 允许不带密钥访问。默认关闭：既没有密钥也没有公开时，接口拒绝所有请求（游戏文本默认不公开）。
     pub public: bool,
 }
 
@@ -806,17 +805,6 @@ impl Config {
                     .to_owned(),
             ));
         }
-        let story = &self.story;
-        if self.env.is_prod()
-            && !story.source.trim().is_empty()
-            && story.access_key.is_empty()
-            && !story.public
-        {
-            return Err(ConfigError::Invalid(
-                "启用剧情库（story.source）时需要设置 story.access_key，或显式设置 story.public=true"
-                    .to_owned(),
-            ));
-        }
         let search = &self.search;
         let prefix_ok = search.index_prefix.len() <= 32
             && search
@@ -1086,35 +1074,6 @@ mod tests {
         assert!(matches!(err, ConfigError::Invalid(_)));
         let config = Config::from_figment(cross_site(true)).unwrap();
         assert!(config.session.cookie_cross_site);
-    }
-
-    #[test]
-    fn prod_story_needs_access_key_or_explicit_public() {
-        let prod = || {
-            with(&[
-                ("database.url", "postgres://x"),
-                ("env", "prod"),
-                ("secrets.code_hmac_key", "a2V5"),
-                ("secrets.qr_session_key", "a2V5"),
-                ("mail.provider", "dual"),
-                ("mail.smtp.host", "smtp.example.cn"),
-                ("mail.smtp.from", "a@example.cn"),
-            ])
-        };
-        let source = Serialized::default("story.source", "/opt/interknot/zzz_story.zsc");
-        assert!(Config::from_figment(prod()).is_ok(), "未启用剧情库时不检查");
-        let err = Config::from_figment(prod().merge(source.clone())).unwrap_err();
-        assert!(err.to_string().contains("story.access_key"), "{err}");
-        let keyed = prod()
-            .merge(source.clone())
-            .merge(Serialized::default("story.access_key", "k"));
-        assert!(Config::from_figment(keyed).is_ok());
-        let public = prod()
-            .merge(source.clone())
-            .merge(Serialized::default("story.public", true));
-        assert!(Config::from_figment(public).is_ok());
-        let dev = with(&[("database.url", "postgres://x")]).merge(source);
-        assert!(Config::from_figment(dev).is_ok(), "开发环境可以不设密钥");
     }
 
     #[test]

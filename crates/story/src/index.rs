@@ -7,11 +7,9 @@
 //!
 //! 存储为 CSR：`keys` 有序，`offsets[i]..offsets[i+1]` 是 `postings` 中第 i 个键的行号区间。
 
-use serde::{Deserialize, Serialize};
-
 const END: u32 = 0;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 pub struct BigramIndex {
     line_count: u32,
     keys: Vec<u64>,

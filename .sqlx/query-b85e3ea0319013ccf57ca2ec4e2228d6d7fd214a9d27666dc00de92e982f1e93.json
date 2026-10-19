@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE story_corpora SET active = false WHERE active AND id <> $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b85e3ea0319013ccf57ca2ec4e2228d6d7fd214a9d27666dc00de92e982f1e93"
+}

@@ -1,4 +1,4 @@
-//! 从 zzz-story-extractor 的输出目录构建语料。
+//! 从 zzz-story-extractor 的产出（[`Bundle`]）构建语料。
 //!
 //! 读取：
 //! - `story.jsonl`：主线台词（一行一句，按章节 → 场景 → 行排序）
@@ -7,14 +7,15 @@
 //! - `manifest.json`：数据版本（可选）
 
 use std::borrow::Cow;
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use xxhash_rust::xxh3::xxh3_64;
 
+use super::bundle::Bundle;
 use super::{
     Corpus, DOC_HASH_MASK, Doc, DocKeys, DocKind, Group, GroupKind, Line, LineKind, Meta,
     NO_SPEAKER,
@@ -121,27 +122,29 @@ impl Builder {
 }
 
 pub fn build_from_dir(dir: &Path) -> Result<Corpus> {
-    let story_path = dir.join("story.jsonl");
-    if !story_path.is_file() {
-        bail!(
-            "{} 不是 zzz-story-extractor 的输出目录（缺少 story.jsonl）。先运行 `python -m zzz_story extract`",
-            dir.display()
-        );
-    }
-    let manifest: Manifest = match std::fs::read(dir.join("manifest.json")) {
-        Ok(bytes) => serde_json::from_slice(&bytes).context("manifest.json 解析失败")?,
-        Err(_) => Manifest::default(),
+    build_from_bundle(&Bundle::from_dir(dir)?)
+}
+
+/// 从语料包构建（上传、启动加载、本地目录都走这里）。
+pub fn build_from_bundle(bundle: &Bundle) -> Result<Corpus> {
+    let manifest: Manifest = match &bundle.manifest {
+        Some(value) => serde_json::from_value(value.clone()).context("manifest 解析失败")?,
+        None => Manifest::default(),
     };
 
     let mut builder = Builder::default();
-    let story_stats = ingest_jsonl(&mut builder, &story_path, DocKind::Story)?;
-    let supplement_path = dir.join("supplement.jsonl");
-    if supplement_path.is_file() {
-        ingest_jsonl(&mut builder, &supplement_path, DocKind::Supplement)?;
+    let story_stats = ingest_jsonl(&mut builder, "story.jsonl", &bundle.story, DocKind::Story)?;
+    if let Some(supplement) = &bundle.supplement {
+        ingest_jsonl(
+            &mut builder,
+            "supplement.jsonl",
+            supplement,
+            DocKind::Supplement,
+        )?;
     }
-    let lore_dir = dir.join("lore");
-    if lore_dir.is_dir() {
-        ingest_lore(&mut builder, &lore_dir)?;
+    ingest_lore(&mut builder, &bundle.lore);
+    if builder.docs.is_empty() {
+        bail!("语料包里没有任何可用的文本");
     }
 
     let built_at = SystemTime::now()
@@ -192,9 +195,7 @@ pub fn family_label(family: &str) -> &str {
     }
 }
 
-fn ingest_jsonl(builder: &mut Builder, path: &Path, kind: DocKind) -> Result<JsonlStats> {
-    let raw =
-        std::fs::read_to_string(path).with_context(|| format!("读取 {} 失败", path.display()))?;
+fn ingest_jsonl(builder: &mut Builder, name: &str, raw: &str, kind: DocKind) -> Result<JsonlStats> {
     let mut rows: Vec<(usize, Row<'_>)> = raw
         .lines()
         .enumerate()
@@ -202,7 +203,7 @@ fn ingest_jsonl(builder: &mut Builder, path: &Path, kind: DocKind) -> Result<Jso
         .map(|(i, l)| {
             serde_json::from_str::<Row<'_>>(l)
                 .map(|r| (i, r))
-                .with_context(|| format!("{} 第 {} 行解析失败", path.display(), i + 1))
+                .with_context(|| format!("{name} 第 {} 行解析失败", i + 1))
         })
         .collect::<Result<_>>()?;
     rows.sort_by_key(|(i, r)| (r.order, *i));
@@ -345,19 +346,6 @@ fn lore_category_order(dir: &str) -> i64 {
     }
 }
 
-fn collect_md(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(dir).with_context(|| format!("读取 {} 失败", dir.display()))?
-    {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_md(&path, out)?;
-        } else if path.extension().is_some_and(|e| e == "md") {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
 /// 去掉文件名的数字前缀：`01_狡兔屋` → `狡兔屋`。
 fn strip_order_prefix(stem: &str) -> &str {
     let trimmed = stem.trim_start_matches(|c: char| c.is_ascii_digit());
@@ -459,41 +447,30 @@ pub(crate) fn split_markdown(content: &str, fallback_title: &str) -> Vec<LoreSec
     sections
 }
 
-fn ingest_lore(builder: &mut Builder, lore_dir: &Path) -> Result<()> {
-    let mut files = Vec::new();
-    collect_md(lore_dir, &mut files)?;
-    let mut entries: Vec<(String, String, PathBuf)> = files
-        .into_iter()
-        .filter_map(|path| {
-            let rel = path.strip_prefix(lore_dir).ok()?.to_path_buf();
-            let mut comps = rel.components();
-            let first = comps.next()?.as_os_str().to_string_lossy().into_owned();
-            // lore/README.md 只是目录索引，不收录。
-            let category = if comps.next().is_some() {
-                first
-            } else {
-                return None;
-            };
-            let rel_key = rel.to_string_lossy().replace('\\', "/");
-            Some((category, rel_key, path))
+/// `files`：lore 目录下的相对路径（`/` 分隔）→ Markdown。第一层目录是分类；
+/// lore 根目录下的文件（README.md 是目录索引）不收录。
+fn ingest_lore(builder: &mut Builder, files: &BTreeMap<String, String>) {
+    let mut entries: Vec<(String, &String, &String)> = files
+        .iter()
+        .filter(|(rel, _)| rel.ends_with(".md"))
+        .filter_map(|(rel, content)| {
+            let (category, _) = rel.split_once('/')?;
+            Some((category.to_owned(), rel, content))
         })
         .collect();
-    entries
-        .sort_by(|a, b| (lore_category_order(&a.0), &a.1).cmp(&(lore_category_order(&b.0), &b.1)));
+    entries.sort_by(|a, b| (lore_category_order(&a.0), a.1).cmp(&(lore_category_order(&b.0), b.1)));
 
     let parsed: Vec<(String, String, Vec<LoreSection>)> = entries
-        .iter()
-        .map(|(category, rel_key, path)| {
-            let content = std::fs::read_to_string(path)
-                .with_context(|| format!("读取 {} 失败", path.display()))?;
-            let stem = path
+        .into_iter()
+        .map(|(category, rel_key, content)| {
+            let stem = Path::new(rel_key)
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let sections = split_markdown(&content, strip_order_prefix(&stem));
-            Ok((category.clone(), rel_key.clone(), sections))
+            let sections = split_markdown(content, strip_order_prefix(&stem));
+            (category, rel_key.clone(), sections)
         })
-        .collect::<Result<_>>()?;
+        .collect();
 
     for (category, rel_key, sections) in parsed {
         let label = lore_category_label(&category);
@@ -541,7 +518,6 @@ fn ingest_lore(builder: &mut Builder, lore_dir: &Path) -> Result<()> {
             });
         }
     }
-    Ok(())
 }
 
 /// 把草稿落成扁平结构并建索引。

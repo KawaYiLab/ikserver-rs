@@ -2,24 +2,22 @@
 //!
 //! 所有台词文本拼成一整块 `text`，行、文档、分组都是指向它的下标区间；
 //! 一个文档的行在 `lines` 里连续，一个分组按阅读顺序列出文档。
-//! 这种扁平布局让快照可以整块读写，检索时也几乎不产生指针追逐。
+//! 这种扁平布局让检索时几乎不产生指针追逐。
 
 mod build;
-mod snapshot;
+mod bundle;
 
-pub use build::{build_from_dir, family_label};
-pub use snapshot::{load_snapshot, save_snapshot};
+pub use build::{build_from_bundle, build_from_dir, family_label};
+pub use bundle::{BUNDLE_FORMAT, Bundle};
 
 use std::ops::Range;
-
-use serde::{Deserialize, Serialize};
 
 use crate::index::BigramIndex;
 
 /// 没有说话人。
 pub const NO_SPEAKER: u32 = u32::MAX;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct Meta {
     /// 数据版本（ZenlessData 版本号，如 3.2.0）。
     pub source_version: String,
@@ -34,7 +32,7 @@ pub struct Meta {
     pub speaker_coverage: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
     /// 有说话人的台词。
     Dialogue,
@@ -48,7 +46,7 @@ pub enum LineKind {
     Text,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
 pub struct Line {
     pub start: u32,
     pub len: u32,
@@ -56,7 +54,7 @@ pub struct Line {
     pub kind: LineKind,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DocKind {
     /// 主线剧情（story.jsonl）。
     Story,
@@ -76,7 +74,7 @@ impl DocKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Doc {
     /// 稳定的 64 位标识，对外显示为 `doc_` + 12 位十六进制。
     pub hash: u64,
@@ -105,13 +103,13 @@ impl Doc {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroupKind {
     Chapter,
     Lore,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Group {
     /// 对外标识：`ch:Chapter110`、`lore:agents`。
     pub id: String,
@@ -121,7 +119,7 @@ pub struct Group {
     pub docs: Vec<u32>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct Corpus {
     pub meta: Meta,
     pub text: String,
@@ -243,7 +241,7 @@ impl Corpus {
 ///
 /// 标题拼成一整块 `标题\0` × N，一个检索词在整块上做一次 SIMD 子串扫描；
 /// 路径由整组/整个文件共享，只按去重后的几百条路径各比一次，再展开成文档。
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default)]
 pub struct DocKeys {
     titles: String,
     /// 第 i 篇标题的起点；末尾多一个哨兵。

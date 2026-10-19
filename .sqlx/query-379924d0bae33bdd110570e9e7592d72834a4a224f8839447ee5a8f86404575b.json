@@ -1,0 +1,143 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, source_version, language, docs, lines, speaker_coverage,\n                  octet_length(bundle)::bigint AS \"bundle_bytes!\", bundle_sha256, active, uploaded_by,\n                  created_at\n             FROM story_corpora\n            WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "source_version",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "source_version"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "language",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "language"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "docs",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "docs"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "lines",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "lines"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "speaker_coverage",
+        "type_info": "Float4",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "speaker_coverage"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "bundle_bytes!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 7,
+        "name": "bundle_sha256",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "bundle_sha256"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "active",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "active"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "uploaded_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "uploaded_by"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "story_corpora",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "379924d0bae33bdd110570e9e7592d72834a4a224f8839447ee5a8f86404575b"
+}

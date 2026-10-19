@@ -11,9 +11,9 @@ use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
-use ik_kernel::config::Secret;
+use ik_kernel::config::{Secret, Story};
 use ik_story::StoryState;
-use ik_story::corpus::{Corpus, DocKind, build_from_dir, load_snapshot, save_snapshot};
+use ik_story::corpus::{Bundle, Corpus, DocKind, build_from_bundle, build_from_dir};
 use ik_story::mcp::{Server, tools};
 
 fn fixture() -> PathBuf {
@@ -99,26 +99,46 @@ fn builds_docs_groups_and_speakers() {
 }
 
 #[test]
-fn snapshot_round_trip_and_corruption_detection() {
+fn bundle_round_trip_and_validation() {
     let c = corpus();
-    let dir = std::env::temp_dir().join(format!("zzz-mcp-test-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("corpus.zsc");
-    save_snapshot(&c, &path).unwrap();
-    let loaded = load_snapshot(&path).unwrap();
-    assert_eq!(loaded.docs.len(), c.docs.len());
-    assert_eq!(loaded.text, c.text);
-    let a = ok(&c, "zzz_search", json!({ "keyword": "狡兔屋" }));
-    let b = ok(&loaded, "zzz_search", json!({ "keyword": "狡兔屋" }));
-    assert_eq!(a, b);
+    let bundle = Bundle::from_dir(&fixture()).unwrap();
+    // lore 根目录的 README.md 也在包里，但构建时不收录（见 builds_docs_groups_and_speakers）。
+    assert!(bundle.lore.contains_key("README.md"));
+    assert!(bundle.lore.contains_key("agents/01_狡兔屋.md"));
 
-    let mut bytes = std::fs::read(&path).unwrap();
-    let last = bytes.len() - 1;
-    bytes[last] ^= 0xFF;
-    std::fs::write(&path, &bytes).unwrap();
-    let err = load_snapshot(&path).unwrap_err().to_string();
-    assert!(err.contains("校验失败"), "{err}");
-    std::fs::remove_dir_all(&dir).unwrap();
+    let gz = bundle.encode_gzip().unwrap();
+    assert_eq!(&gz[..2], &[0x1f, 0x8b]);
+    let decoded = Bundle::decode(&gz, 10_000_000).unwrap();
+    let rebuilt = build_from_bundle(&decoded).unwrap();
+    assert_eq!(rebuilt.text, c.text);
+    assert_eq!(rebuilt.docs.len(), c.docs.len());
+    let a = ok(&c, "zzz_search", json!({ "keyword": "狡兔屋" }));
+    let b = ok(&rebuilt, "zzz_search", json!({ "keyword": "狡兔屋" }));
+    assert_eq!(a, b, "同一份数据，文档 id 与结果都应一致");
+
+    // 未压缩的 JSON 也接受。
+    let plain = serde_json::to_vec(&bundle).unwrap();
+    assert!(Bundle::decode(&plain, 10_000_000).is_ok());
+
+    // 解压后超限（防压缩炸弹）、坏的 gzip、格式版本不对、主线为空：都拒绝。
+    let err = Bundle::decode(&gz, 100).unwrap_err().to_string();
+    assert!(err.contains("上限"), "{err}");
+    let mut broken = gz.clone();
+    broken.truncate(gz.len() / 2);
+    assert!(Bundle::decode(&broken, 10_000_000).is_err());
+    let mut future = bundle.clone();
+    future.format = 99;
+    let err = Bundle::decode(&serde_json::to_vec(&future).unwrap(), 10_000_000)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("格式"), "{err}");
+    let mut empty = bundle.clone();
+    empty.story = " \n".to_owned();
+    assert!(Bundle::decode(&serde_json::to_vec(&empty).unwrap(), 10_000_000).is_err());
+    let mut bad_line = bundle;
+    bad_line.story.push_str("{not json}\n");
+    let err = build_from_bundle(&bad_line).unwrap_err().to_string();
+    assert!(err.contains("story.jsonl 第 15 行"), "{err}");
 }
 
 #[test]
@@ -501,10 +521,28 @@ fn jsonrpc_batch() {
     );
 }
 
+/// 空密钥表示公开访问。
 fn app(access_key: &str) -> axum::Router {
-    let state = StoryState::with_corpus(corpus(), Secret::new(access_key)).unwrap();
-    let (router, _doc) = ik_story::router().split_for_parts();
+    let config = Story {
+        access_key: Secret::new(access_key),
+        public: access_key.is_empty(),
+        ..Default::default()
+    };
+    let state = StoryState::with_corpus(corpus(), &config).unwrap();
+    let (router, _doc) = ik_story::mcp_router().split_for_parts();
     router.with_state(state)
+}
+
+/// 不会被连接的数据库（这些用例走本地语料或根本不加载）。
+fn unused_db() -> (sqlx::PgPool, std::sync::Arc<ik_kernel::Snowflake>) {
+    let db = sqlx::postgres::PgPoolOptions::new()
+        .acquire_timeout(std::time::Duration::from_millis(200))
+        .connect_lazy("postgres://x:x@127.0.0.1:1/x")
+        .unwrap();
+    (
+        db,
+        std::sync::Arc::new(ik_kernel::Snowflake::new(1).unwrap()),
+    )
 }
 
 async fn send(
@@ -628,11 +666,25 @@ async fn http_access_key_and_disabled() {
     .await;
     assert_eq!(status, StatusCode::OK);
 
-    // 未配置语料：503。
-    let disabled = StoryState::new(&ik_kernel::config::Story::default()).unwrap();
-    assert!(!disabled.is_configured());
-    disabled.load().await.unwrap();
-    let (router, _) = ik_story::router().split_for_parts();
+    // 既没有密钥也没有公开：谁也进不来。
+    let closed = StoryState::with_corpus(corpus(), &Story::default()).unwrap();
+    let (router, _) = ik_story::mcp_router().split_for_parts();
+    let (status, _, _) = send(
+        router.with_state(closed),
+        post().body(Body::from(ping.to_string())).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // 还没有语料（数据库里没有生效版本、也没有本地语料）：503。
+    let (db, ids) = unused_db();
+    let public = Story {
+        public: true,
+        ..Default::default()
+    };
+    let disabled = StoryState::new(&public, db, ids).unwrap();
+    assert!(disabled.current().is_none());
+    let (router, _) = ik_story::mcp_router().split_for_parts();
     let (status, _, body) = send(
         router.with_state(disabled),
         post().body(Body::from(ping.to_string())).unwrap(),
@@ -644,33 +696,51 @@ async fn http_access_key_and_disabled() {
 }
 
 #[tokio::test]
-async fn load_from_config_and_reload() {
-    let config = ik_kernel::config::Story {
+async fn load_local_source_and_reload() {
+    let (db, ids) = unused_db();
+    let config = Story {
         source: fixture().to_string_lossy().into_owned(),
         ..Default::default()
     };
-    let state = StoryState::new(&config).unwrap();
-    assert!(state.is_configured() && state.corpus().is_none());
+    // 设置了本地语料：只用它，不碰数据库（这里的数据库连不上）。
+    let state = StoryState::new(&config, db.clone(), ids.clone()).unwrap();
+    assert!(state.current().is_none());
     state.load().await.unwrap();
-    let first = state.corpus().unwrap();
+    let first = state.current().unwrap();
+    assert_eq!(first.version, None);
     assert_eq!(
         first
+            .corpus
             .docs
             .iter()
             .filter(|d| d.kind == DocKind::Story)
             .count(),
         4
     );
+    assert!(state.spawn_watcher().is_none(), "本地语料不检查数据库版本");
     // 重新加载：原子替换成新的一份，旧的引用仍然可用。
     state.load().await.unwrap();
-    let second = state.corpus().unwrap();
+    let second = state.current().unwrap();
     assert!(!std::sync::Arc::ptr_eq(&first, &second));
 
-    let broken = ik_kernel::config::Story {
-        source: "/nonexistent/zzz_story.zsc".to_owned(),
+    // 语料包文件同样可以作为本地语料。
+    let dir = std::env::temp_dir().join(format!("ik-story-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("zzz_story.json.gz");
+    std::fs::write(
+        &file,
+        Bundle::from_dir(&fixture()).unwrap().encode_gzip().unwrap(),
+    )
+    .unwrap();
+    let from_file = ik_story::load_source(&file).unwrap();
+    assert_eq!(from_file.text, first.corpus.text);
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    let broken = Story {
+        source: "/nonexistent/zzz_story.json.gz".to_owned(),
         ..Default::default()
     };
-    let state = StoryState::new(&broken).unwrap();
+    let state = StoryState::new(&broken, db, ids).unwrap();
     assert!(state.load().await.is_err());
-    assert!(state.corpus().is_none());
+    assert!(state.current().is_none());
 }

@@ -1,6 +1,6 @@
 [package]
 name = "ik-story"
-description = "绝区零剧情库：剧情/设定语料的检索与顺读，以 MCP（/v1/story/mcp）提供给剧情总结 AI"
+description = "绝区零剧情库：剧情/设定语料（存于数据库）的检索与顺读，以 MCP（/v1/story/mcp）提供给剧情总结 AI"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 ik-kernel.workspace = true
+ik-auth.workspace = true
 axum.workspace = true
 http.workspace = true
 serde.workspace = true
@@ -19,7 +20,10 @@ tracing.workspace = true
 anyhow.workspace = true
 arc-swap.workspace = true
 memchr.workspace = true
-postcard.workspace = true
+sqlx.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+flate2.workspace = true
 xxhash-rust.workspace = true
 subtle.workspace = true
 

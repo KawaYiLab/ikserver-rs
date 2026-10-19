@@ -7,6 +7,7 @@ use axum::body::Bytes;
 use axum::extract::{FromRef, State};
 use axum::response::{IntoResponse, Response};
 use http::{HeaderMap, HeaderValue, StatusCode, header};
+use ik_auth::AuthState;
 use ik_kernel::Problem;
 use ik_kernel::error::ProblemBody;
 use subtle::ConstantTimeEq;
@@ -17,7 +18,8 @@ use crate::StoryState;
 use crate::dto::{McpRequest, McpResponse};
 use crate::mcp::PROTOCOL_VERSIONS;
 
-pub fn router<S>() -> OpenApiRouter<S>
+/// 只含 MCP 端点（不需要登录体系）。
+pub fn mcp_router<S>() -> OpenApiRouter<S>
 where
     S: Clone + Send + Sync + 'static,
     StoryState: FromRef<S>,
@@ -25,12 +27,23 @@ where
     OpenApiRouter::new().routes(routes!(mcp))
 }
 
+/// MCP 端点 + 管理后台的语料上传与版本管理。
+pub fn router<S>() -> OpenApiRouter<S>
+where
+    S: Clone + Send + Sync + 'static,
+    StoryState: FromRef<S>,
+    AuthState: FromRef<S>,
+{
+    mcp_router().merge(crate::admin::router())
+}
+
 /// 剧情库 MCP 端点
 ///
 /// 给剧情总结 AI 用的 MCP 服务（Streamable HTTP，无状态）：`zzz_catalog` 目录、`zzz_search` 检索、
 /// `zzz_read` 顺读原文、`zzz_character` 角色速览、`zzz_guide` 方法指引。客户端配置
-/// `{"type": "streamable-http", "url": "https://<域名>/v1/story/mcp"}`；配置了访问密钥时另加
-/// `Authorization: Bearer <密钥>` 头。工具参数错误以 `result.isError = true` 返回，协议错误为 JSON-RPC `error`。
+/// `{"type": "streamable-http", "url": "https://<域名>/v1/story/mcp"}`，另加
+/// `Authorization: Bearer <IK_STORY__ACCESS_KEY>` 头（`IK_STORY__PUBLIC=true` 时不需要）。
+/// 语料由管理员用 `PUT /v1/admin/story/corpus` 上传。工具参数错误以 `result.isError = true` 返回，协议错误为 JSON-RPC `error`。
 #[utoipa::path(
     post,
     path = "/v1/story/mcp",
@@ -41,7 +54,7 @@ where
         (status = 202, description = "只有通知或响应，无响应体"),
         (status = 400, description = "MCP_PROTOCOL_UNSUPPORTED", body = ProblemBody, content_type = "application/problem+json"),
         (status = 401, description = "STORY_ACCESS_DENIED", body = ProblemBody, content_type = "application/problem+json"),
-        (status = 503, description = "STORY_DISABLED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 503, description = "STORY_DISABLED：还没有上传语料", body = ProblemBody, content_type = "application/problem+json"),
     )
 )]
 async fn mcp(
@@ -49,7 +62,7 @@ async fn mcp(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, Problem> {
-    let corpus = state.corpus().ok_or_else(|| {
+    let loaded = state.current().ok_or_else(|| {
         Problem::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "STORY_DISABLED",
@@ -79,7 +92,7 @@ async fn mcp(
             "不支持的 MCP 协议版本",
         ));
     }
-    Ok(match state.server().handle(&corpus, &body) {
+    Ok(match state.server().handle(&loaded.corpus, &body) {
         Some(json) => (
             StatusCode::OK,
             [(
@@ -93,11 +106,15 @@ async fn mcp(
     })
 }
 
-/// 没配置密钥时放行；配置了则要求 `Authorization: Bearer <密钥>`，常数时间比较。
+/// `IK_STORY__PUBLIC=true` 时放行；否则要求 `Authorization: Bearer <IK_STORY__ACCESS_KEY>`，
+/// 常数时间比较。两者都没配置时谁也进不来（默认不公开游戏文本）。
 fn authorized(state: &StoryState, headers: &HeaderMap) -> bool {
+    if state.is_public() {
+        return true;
+    }
     let expected = state.access_key();
     if expected.is_empty() {
-        return true;
+        return false;
     }
     let Some(given) = headers
         .get(header::AUTHORIZATION)

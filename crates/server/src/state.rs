@@ -143,7 +143,7 @@ impl AppState {
             moderation.clone(),
             search.clone(),
         );
-        let story = StoryState::new(&config.story)?;
+        let story = StoryState::new(&config.story, db.clone(), ids.clone())?;
         Ok(Self {
             story,
             admin,

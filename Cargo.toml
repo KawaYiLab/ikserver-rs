@@ -112,8 +112,8 @@ reqwest13 = { package = "reqwest", version = "0.13", default-features = false, f
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 
-# 剧情库（ik-story）：快照编码、校验与子串扫描
-postcard = { version = "1.1", default-features = false, features = ["use-std"] }
+# 剧情库（ik-story）：语料包解压、文档 id 哈希与子串扫描
+flate2 = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 memchr = "2.7"
 arc-swap = "1.7"
