@@ -1,4 +1,4 @@
-//! zzz_catalog：浏览目录。根目录列出全部章节与设定分类；指定分组时按阅读顺序列出文档。
+//! ik_catalog：浏览目录。根目录列出全部章节与设定分类；指定分组时按阅读顺序列出文档。
 
 use std::fmt::Write as _;
 
@@ -56,7 +56,7 @@ fn root(corpus: &Corpus) -> String {
     let meta = &corpus.meta;
     let _ = writeln!(
         out,
-        "[zzz_catalog] 绝区零剧情库 | 数据版本 {} {} | 主线 {} 场景 · {} 句 · {} | 说话人覆盖 {}",
+        "[ik_catalog] 绝区零剧情库 | 数据版本 {} {} | 主线 {} 场景 · {} 句 · {} | 说话人覆盖 {}",
         if meta.source_version.is_empty() {
             "?"
         } else {
@@ -147,8 +147,8 @@ fn root(corpus: &Corpus) -> String {
         }
     }
     out.push_str(
-        "\n下一步：zzz_catalog(path=\"ch:…\") 列出一章的场景；zzz_read(docId=\"ch:…\") 从章首顺读；\
-         zzz_search(keyword=…) 全文检索。",
+        "\n下一步：ik_catalog(path=\"ch:…\") 列出一章的场景；ik_read(docId=\"ch:…\") 从章首顺读；\
+         ik_search(keyword=…) 全文检索。",
     );
     out
 }
@@ -163,7 +163,7 @@ fn titles_everywhere(corpus: &Corpus, keyword: &str, offset: usize, max: usize) 
     let mut out = String::new();
     let _ = writeln!(
         out,
-        "[zzz_catalog] 标题/路径包含「{keyword}」的文档 {} 篇（显示 {}-{}）",
+        "[ik_catalog] 标题/路径包含「{keyword}」的文档 {} 篇（显示 {}-{}）",
         thousands(hits.len()),
         (offset + 1).min(hits.len()),
         (offset + max).min(hits.len())
@@ -176,11 +176,11 @@ fn titles_everywhere(corpus: &Corpus, keyword: &str, offset: usize, max: usize) 
     if offset + max < hits.len() {
         let _ = write!(
             out,
-            "还有更多：zzz_catalog(keyword=\"{keyword}\", offset={})",
+            "还有更多：ik_catalog(keyword=\"{keyword}\", offset={})",
             offset + max
         );
     } else if hits.is_empty() {
-        out.push_str("没有标题匹配。标题之外的正文请用 zzz_search 检索。");
+        out.push_str("没有标题匹配。标题之外的正文请用 ik_search 检索。");
     }
     out
 }
@@ -215,7 +215,7 @@ fn group_listing(
     let mut out = String::with_capacity(8192);
     let _ = write!(
         out,
-        "[zzz_catalog] {} {} | {} 篇 · {} 行 · {}",
+        "[ik_catalog] {} {} | {} 篇 · {} 行 · {}",
         g.id,
         g.label,
         thousands(members.len()),
@@ -285,7 +285,7 @@ fn group_listing(
     if offset + max < members.len() {
         let _ = write!(
             out,
-            "\n还有 {} 篇：zzz_catalog(path=\"{}\", offset={})",
+            "\n还有 {} 篇：ik_catalog(path=\"{}\", offset={})",
             members.len() - offset - max,
             g.id,
             offset + max
@@ -307,7 +307,7 @@ fn doc_card(corpus: &Corpus, doc: usize) -> String {
     let d = &corpus.docs[doc];
     let g = &corpus.groups[d.group as usize];
     let mut out = String::new();
-    out.push_str("[zzz_catalog] ");
+    out.push_str("[ik_catalog] ");
     push_doc_summary(&mut out, corpus, doc);
     let _ = write!(
         out,

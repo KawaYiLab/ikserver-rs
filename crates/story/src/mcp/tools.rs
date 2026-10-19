@@ -13,7 +13,7 @@ fn read_only() -> Value {
 pub fn definitions() -> Value {
     json!({ "tools": [
         {
-            "name": "zzz_catalog",
+            "name": "ik_catalog",
             "title": "绝区零剧情目录",
             "description": "浏览绝区零剧情库目录。不带参数：列出全部主线章节（游戏顺序，含场景数/台词数/字数）与设定资料分类。\
     path=章节或分类 id（如 ch:Chapter110、lore:agents，也可写章节名「云霞同归处」）：按阅读顺序列出该组全部文档，\
@@ -32,10 +32,10 @@ pub fn definitions() -> Value {
             "annotations": read_only()
         },
         {
-            "name": "zzz_search",
+            "name": "ik_search",
             "title": "绝区零剧情检索",
             "description": "绝区零（Zenless Zone Zero）游戏文本全文检索：主线剧情台词、过场字幕/漫画、世界观设定（代理人档案、音擎/驱动盘/邦布、\
-    绳网委托与私信、录像店影片、街区闲聊）。涉及剧情、人物、阵营、地点、事件、台词出处时先用它找候选，再用 zzz_read 读原文。\
+    绳网委托与私信、录像店影片、街区闲聊）。涉及剧情、人物、阵营、地点、事件、台词出处时先用它找候选，再用 ik_read 读原文。\
     多个关键词用空格分隔，表示同一篇内同时出现（AND）；建议用角色名、地名、组织名、台词短语等实体词。\
     结果按相关度排序，每篇给出 docId、路径与命中行（L行号）。提供 docId 时改为篇内检索，列出该篇全部命中行。",
             "inputSchema": {
@@ -54,9 +54,9 @@ pub fn definitions() -> Value {
             "annotations": read_only()
         },
         {
-            "name": "zzz_read",
+            "name": "ik_read",
             "title": "读取剧情原文",
-            "description": "读取绝区零剧情/设定原文。docId 必须原样使用 zzz_search / zzz_catalog 返回的 doc_…；\
+            "description": "读取绝区零剧情/设定原文。docId 必须原样使用 ik_search / ik_catalog 返回的 doc_…；\
     也可以传章节/分类 id（如 ch:Chapter110）从该组第一篇开始顺读。每行格式「L行号 说话人：台词」，【选项】为玩家选项。\
     按 offset/limit 分页并受 maxChars 字数预算约束；follow=true 时读完一篇自动接着读同章下一篇，适合整章总结。\
     结尾总会给出精确的续读调用，照抄即可继续。",
@@ -76,10 +76,10 @@ pub fn definitions() -> Value {
             "annotations": read_only()
         },
         {
-            "name": "zzz_character",
+            "name": "ik_character",
             "title": "角色速览",
             "description": "绝区零角色速览：设定档案 docId、按章节统计的出场场景数/台词数/被提及次数、每章首次出现的场景、常同场角色。\
-    写角色小传、角色弧线或判断某角色在哪些章节有戏份时先用它，再按给出的 docId 用 zzz_read 读原文。",
+    写角色小传、角色弧线或判断某角色在哪些章节有戏份时先用它，再按给出的 docId 用 ik_read 读原文。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -92,7 +92,7 @@ pub fn definitions() -> Value {
             "annotations": read_only()
         },
         {
-            "name": "zzz_guide",
+            "name": "ik_guide",
             "title": "任务方法指引",
             "description": "读取剧情类任务的方法指引：summary（章节/任务剧情总结）、character（角色弧线）、timeline（事件时间线）、verify（原文查证）。\
     开始一项较大的总结或考据任务前读一次对应指引；同一任务不要反复读取。闲聊不需要。",
@@ -121,11 +121,11 @@ fn parse<T: DeserializeOwned + Default>(args: Option<Value>) -> Result<T, ToolEr
 
 pub fn call(corpus: &Corpus, name: &str, args: Option<Value>) -> Result<ToolResult, UnknownTool> {
     let result = match name {
-        "zzz_catalog" => parse(args).and_then(|a| engine::catalog::run(corpus, &a)),
-        "zzz_search" => parse(args).and_then(|a| engine::search::run(corpus, &a)),
-        "zzz_read" => parse(args).and_then(|a| engine::read::run(corpus, &a)),
-        "zzz_character" => parse(args).and_then(|a| engine::character::run(corpus, &a)),
-        "zzz_guide" => parse(args).and_then(|a| engine::guide::run(&a)),
+        "ik_catalog" => parse(args).and_then(|a| engine::catalog::run(corpus, &a)),
+        "ik_search" => parse(args).and_then(|a| engine::search::run(corpus, &a)),
+        "ik_read" => parse(args).and_then(|a| engine::read::run(corpus, &a)),
+        "ik_character" => parse(args).and_then(|a| engine::character::run(corpus, &a)),
+        "ik_guide" => parse(args).and_then(|a| engine::guide::run(&a)),
         _ => return Err(UnknownTool),
     };
     Ok(result)

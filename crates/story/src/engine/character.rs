@@ -1,4 +1,4 @@
-//! zzz_character：角色速览。设定档案、按章节的出场与台词统计、首次登场、常同场角色、被提及次数，
+//! ik_character：角色速览。设定档案、按章节的出场与台词统计、首次登场、常同场角色、被提及次数，
 //! 给「角色弧线」类总结一个可直接按图索骥的读书清单。
 
 use std::collections::HashMap;
@@ -156,7 +156,7 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
     }
 
     let mut out = String::with_capacity(4096);
-    let _ = write!(out, "[zzz_character] {name}");
+    let _ = write!(out, "[ik_character] {name}");
     if !ids.is_empty() {
         let names: Vec<&str> = ids.iter().filter_map(|&i| corpus.speaker_name(i)).collect();
         let _ = write!(out, " | 匹配说话人：{}", names.join("、"));
@@ -189,7 +189,7 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
     if other_titled > 0 {
         let _ = writeln!(
             out,
-            "另有 {other_titled} 篇设定标题含「{name}」（多为委托/物品）：zzz_catalog(keyword=\"{name}\")"
+            "另有 {other_titled} 篇设定标题含「{name}」（多为委托/物品）：ik_catalog(keyword=\"{name}\")"
         );
     }
 
@@ -250,14 +250,11 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
 
     out.push_str("\n下一步：");
     if !ids.is_empty() {
-        let _ = write!(
-            out,
-            "zzz_search(keyword=…, speaker=\"{name}\") 查本人台词；"
-        );
+        let _ = write!(out, "ik_search(keyword=…, speaker=\"{name}\") 查本人台词；");
     }
     let _ = write!(
         out,
-        "zzz_search(keyword=\"{name}\") 查被提及处；zzz_read(docId=首次出场场景) 读登场经过。"
+        "ik_search(keyword=\"{name}\") 查被提及处；ik_read(docId=首次出场场景) 读登场经过。"
     );
     Ok(out)
 }

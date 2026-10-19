@@ -80,7 +80,7 @@ enum StoryCommand {
         /// zzz-story-extractor 的输出目录，或语料包文件（`upload --save` 存下的 .json.gz）
         #[arg(long)]
         source: std::path::PathBuf,
-        /// 工具名：zzz_catalog / zzz_search / zzz_read / zzz_character / zzz_guide
+        /// 工具名：ik_catalog / ik_search / ik_read / ik_character / ik_guide
         tool: String,
         /// JSON 参数，例如 '{"keyword":"零号空洞"}'
         #[arg(default_value = "{}")]

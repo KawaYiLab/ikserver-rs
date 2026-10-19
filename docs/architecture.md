@@ -90,9 +90,9 @@ flowchart LR
   启动时加载生效版本（失败则启动失败）；上传 / 回滚的实例提交后立即切换，其他实例每分钟查一次生效版本 id
   跟上，SIGHUP 立即重查；切换经 `ArcSwap` 原子替换，失败保留当前语料。上传在事务外校验与构建，
   事务内用 advisory 锁串行化「换生效版本」，同一事务写审计。`IK_STORY__SOURCE` 指向本地输出目录或语料包时
-  用本地语料、不读库（开发用）。工具：`zzz_catalog`（章节 / 场景目录）、`zzz_search`（多词 AND、BM25、
-  标题 / 路径 / 出场名单加分）、`zzz_read`（字数预算分页 + 续读游标，`follow` 跨场景顺读整章）、`zzz_character`、
-  `zzz_guide`（另以 MCP prompts 提供）。访问：`IK_STORY__ACCESS_KEY`（Bearer）或 `IK_STORY__PUBLIC=true`，
+  用本地语料、不读库（开发用）。工具：`ik_catalog`（章节 / 场景目录）、`ik_search`（多词 AND、BM25、
+  标题 / 路径 / 出场名单加分）、`ik_read`（字数预算分页 + 续读游标，`follow` 跨场景顺读整章）、`ik_character`、
+  `ik_guide`（另以 MCP prompts 提供）。访问：`IK_STORY__ACCESS_KEY`（Bearer）或 `IK_STORY__PUBLIC=true`，
   都没有时拒绝所有请求。JSON-RPC 是只读查询，在全站限流里按「读」计。典型查询 0.1 ms 级，极高频词 1～2 ms，
   直接在请求线程里算。
 - `mail → kernel`：发信通道（SMTP、Brevo）与双通道调度，实现 `ik_kernel::mail::Mailer`，只由 server 装配；

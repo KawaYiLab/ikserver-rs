@@ -1661,7 +1661,7 @@ fn story_bundle() -> ik_story::corpus::Bundle {
 /// 用 MCP 检索，返回结果文本（剧情库未启用时返回 None）。
 async fn story_search(app: &Router, keyword: &str) -> Option<String> {
     let rpc = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
-        "params":{"name":"zzz_search","arguments":{"keyword": keyword}}});
+        "params":{"name":"ik_search","arguments":{"keyword": keyword}}});
     let (status, body) = call(app, USER, "POST", "/v1/story/mcp", rpc).await;
     if status == StatusCode::SERVICE_UNAVAILABLE {
         return None;

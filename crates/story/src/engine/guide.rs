@@ -1,4 +1,4 @@
-//! zzz_guide：任务方法指引（同时以 MCP prompts 形式提供）。
+//! ik_guide：任务方法指引（同时以 MCP prompts 形式提供）。
 
 use serde::Deserialize;
 
@@ -58,10 +58,7 @@ pub struct GuideArgs {
 
 pub fn run(args: &GuideArgs) -> ToolResult {
     match find(&args.mode) {
-        Some(g) => Ok(format!(
-            "[zzz_guide] {} | {}\n\n{}",
-            g.mode, g.title, g.body
-        )),
+        Some(g) => Ok(format!("[ik_guide] {} | {}\n\n{}", g.mode, g.title, g.body)),
         None => {
             let modes: Vec<String> = GUIDES
                 .iter()

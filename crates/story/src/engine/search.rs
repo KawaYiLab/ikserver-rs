@@ -1,4 +1,4 @@
-//! zzz_search：全文检索。
+//! ik_search：全文检索。
 //!
 //! 多个关键词用空格分隔，按「同一文档内全部出现」求交（AND）；没有文档同时包含全部关键词时
 //! 退化为按覆盖词数排序的部分匹配并明确告知。文档打分用行级 BM25，标题/路径命中额外加分。
@@ -509,7 +509,7 @@ fn render_ranked(
     hits.sort_by(rank);
 
     let mut out = String::with_capacity(4096);
-    let _ = write!(out, "[zzz_search] 「{keyword}」");
+    let _ = write!(out, "[ik_search] 「{keyword}」");
     if let Some(s) = speaker {
         let _ = write!(out, " | 说话人: {s}");
     }
@@ -536,7 +536,7 @@ fn render_ranked(
     if hits.is_empty() {
         out.push_str(
             "没有命中。建议：换用角色名/地名/组织名等实体词；减少关键词；去掉 scope/path/speaker 限制；\
-             或用 zzz_catalog(keyword=…) 按标题查找。",
+             或用 ik_catalog(keyword=…) 按标题查找。",
         );
         return out;
     }
@@ -577,7 +577,7 @@ fn render_ranked(
             total_docs - hits.len()
         );
     }
-    out.push_str("下一步：zzz_read(docId=…, offset=行号-5) 读命中处上下文；zzz_search(docId=…, keyword=…) 列出该篇全部命中行。");
+    out.push_str("下一步：ik_read(docId=…, offset=行号-5) 读命中处上下文；ik_search(docId=…, keyword=…) 列出该篇全部命中行。");
     out
 }
 
@@ -592,7 +592,7 @@ fn render_in_doc(
 ) -> String {
     let max = clamp(max_results, 50, 500);
     let mut out = String::with_capacity(4096);
-    out.push_str("[zzz_search] 篇内检索 ");
+    out.push_str("[ik_search] 篇内检索 ");
     push_doc_summary(&mut out, corpus, doc);
     let _ = write!(out, "\n关键词「{keyword}」");
     if let Some(s) = speaker {

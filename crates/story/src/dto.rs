@@ -15,7 +15,7 @@ pub struct McpRequest {
     /// `initialize`、`tools/list`、`tools/call`、`prompts/list`、`prompts/get`、`ping` 等。
     #[schema(example = "tools/call")]
     pub method: String,
-    #[schema(value_type = Object, example = json!({"name": "zzz_search", "arguments": {"keyword": "零号空洞"}}))]
+    #[schema(value_type = Object, example = json!({"name": "ik_search", "arguments": {"keyword": "零号空洞"}}))]
     pub params: Option<serde_json::Value>,
 }
 

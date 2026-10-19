@@ -112,8 +112,8 @@ fn bundle_round_trip_and_validation() {
     let rebuilt = build_from_bundle(&decoded).unwrap();
     assert_eq!(rebuilt.text, c.text);
     assert_eq!(rebuilt.docs.len(), c.docs.len());
-    let a = ok(&c, "zzz_search", json!({ "keyword": "狡兔屋" }));
-    let b = ok(&rebuilt, "zzz_search", json!({ "keyword": "狡兔屋" }));
+    let a = ok(&c, "ik_search", json!({ "keyword": "狡兔屋" }));
+    let b = ok(&rebuilt, "ik_search", json!({ "keyword": "狡兔屋" }));
     assert_eq!(a, b, "同一份数据，文档 id 与结果都应一致");
 
     // 未压缩的 JSON 也接受。
@@ -144,7 +144,7 @@ fn bundle_round_trip_and_validation() {
 #[test]
 fn search_and_semantics_with_speaker_and_scope() {
     let c = corpus();
-    let out = ok(&c, "zzz_search", json!({ "keyword": "狡兔屋 妮可" }));
+    let out = ok(&c, "ik_search", json!({ "keyword": "狡兔屋 妮可" }));
     assert!(out.contains("命中"), "{out}");
     assert!(!out.contains("部分匹配"));
     assert!(
@@ -155,7 +155,7 @@ fn search_and_semantics_with_speaker_and_scope() {
     // 说话人过滤：只保留妮可本人的台词。
     let out = ok(
         &c,
-        "zzz_search",
+        "ik_search",
         json!({ "keyword": "狡兔屋", "speaker": "妮可" }),
     );
     assert!(out.contains("妮可：安比"), "{out}");
@@ -164,64 +164,59 @@ fn search_and_semantics_with_speaker_and_scope() {
     // 范围：设定。
     let out = ok(
         &c,
-        "zzz_search",
+        "ik_search",
         json!({ "keyword": "赤字", "scope": "lore" }),
     );
     assert!(out.contains("妮可（妮可·德玛拉）"), "{out}");
     assert!(!out.contains("主线 ›"), "{out}");
 
     // 没有共同出现时退化为部分匹配。
-    let out = ok(&c, "zzz_search", json!({ "keyword": "猫又 赫利俄斯" }));
+    let out = ok(&c, "ik_search", json!({ "keyword": "猫又 赫利俄斯" }));
     assert!(out.contains("部分匹配"), "{out}");
 
     // 全角、大小写折叠。
-    let out = ok(&c, "zzz_search", json!({ "keyword": "ＦＡＩＲＹ" }));
+    let out = ok(&c, "ik_search", json!({ "keyword": "ＦＡＩＲＹ" }));
     assert!(out.contains("Fairy：检测到以太活性异常升高。"), "{out}");
 
     // 只按说话人列出台词。
-    let out = ok(&c, "zzz_search", json!({ "speaker": "零号·安比" }));
+    let out = ok(&c, "ik_search", json!({ "speaker": "零号·安比" }));
     assert!(out.contains("零号·安比：这里交给我。"), "{out}");
 
     let err = call(
         &c,
-        "zzz_search",
+        "ik_search",
         json!({ "keyword": "x", "speaker": "不存在的人" }),
     )
     .unwrap_err();
     assert!(err.contains("没有名为"), "{err}");
-    let err = call(
-        &c,
-        "zzz_search",
-        json!({ "keyword": "x", "scope": "bogus" }),
-    )
-    .unwrap_err();
+    let err = call(&c, "ik_search", json!({ "keyword": "x", "scope": "bogus" })).unwrap_err();
     assert!(err.contains("scope"), "{err}");
-    let out = ok(&c, "zzz_search", json!({ "keyword": "完全不存在的词组" }));
+    let out = ok(&c, "ik_search", json!({ "keyword": "完全不存在的词组" }));
     assert!(out.contains("没有命中"), "{out}");
 }
 
 #[test]
 fn search_within_doc_and_path() {
     let c = corpus();
-    let found = ok(&c, "zzz_search", json!({ "keyword": "赤字" }));
+    let found = ok(&c, "ik_search", json!({ "keyword": "赤字" }));
     let doc = first_doc_id(&found);
     let out = ok(
         &c,
-        "zzz_search",
+        "ik_search",
         json!({ "docId": doc, "keyword": "狡兔屋" }),
     );
-    assert!(out.starts_with("[zzz_search] 篇内检索"), "{out}");
+    assert!(out.starts_with("[ik_search] 篇内检索"), "{out}");
     assert!(out.contains("命中 2 行"), "{out}");
 
     let out = ok(
         &c,
-        "zzz_search",
+        "ik_search",
         json!({ "keyword": "零号", "path": "第一季 第一章" }),
     );
     assert!(out.contains("零号空洞"), "{out}");
     let out = ok(
         &c,
-        "zzz_search",
+        "ik_search",
         json!({ "keyword": "妮可", "path": "Chapter01" }),
     );
     assert!(out.contains("没有命中"), "{out}");
@@ -233,7 +228,7 @@ fn read_pages_and_follows_across_docs() {
     // 分组 id 从章首开始并默认 follow，跨场景读到章末。
     let out = ok(
         &c,
-        "zzz_read",
+        "ik_read",
         json!({ "docId": "ch:Chapter00", "maxChars": 20000 }),
     );
     assert!(out.contains("L2 铃：哥哥，今天也有委托吗？"), "{out}");
@@ -253,7 +248,7 @@ fn read_pages_and_follows_across_docs() {
     // 行数上限 → 给出精确续读游标。
     let out = ok(
         &c,
-        "zzz_read",
+        "ik_read",
         json!({ "docId": "ch:Chapter00", "limit": 2 }),
     );
     assert!(out.contains("第 1-2 行"), "{out}");
@@ -261,34 +256,34 @@ fn read_pages_and_follows_across_docs() {
 
     // 单篇读完给出下一篇。
     let first = first_doc_id(&out);
-    let out = ok(&c, "zzz_read", json!({ "docId": first, "offset": 6 }));
+    let out = ok(&c, "ik_read", json!({ "docId": first, "offset": 6 }));
     assert!(out.contains("本篇完。下一篇"), "{out}");
     assert!(out.contains("L6 妮可：法厄同"), "{out}");
 
     let out = ok(
         &c,
-        "zzz_read",
+        "ik_read",
         json!({ "docId": first, "lineNumbers": "false", "limit": "1" }),
     );
     assert!(out.contains("\n六分街"), "{out}");
 
-    let err = call(&c, "zzz_read", json!({ "docId": first, "offset": 99 })).unwrap_err();
+    let err = call(&c, "ik_read", json!({ "docId": first, "offset": 99 })).unwrap_err();
     assert!(err.contains("超出范围"), "{err}");
-    let err = call(&c, "zzz_read", json!({ "docId": "doc_000000000000" })).unwrap_err();
+    let err = call(&c, "ik_read", json!({ "docId": "doc_000000000000" })).unwrap_err();
     assert!(err.contains("找不到文档"), "{err}");
-    let err = call(&c, "zzz_read", json!({})).unwrap_err();
+    let err = call(&c, "ik_read", json!({})).unwrap_err();
     assert!(err.contains("docId"), "{err}");
 }
 
 #[test]
 fn catalog_root_group_and_doc() {
     let c = corpus();
-    let root = ok(&c, "zzz_catalog", json!({}));
+    let root = ok(&c, "ik_catalog", json!({}));
     assert!(root.contains("ch:Chapter00 序章 | 3 场景"), "{root}");
     assert!(root.contains("lore:agents 代理人档案 | 2 篇"), "{root}");
     assert!(root.contains("说话人覆盖 79%"), "{root}");
 
-    let group = ok(&c, "zzz_catalog", json!({ "path": "序章" }));
+    let group = ok(&c, "ik_catalog", json!({ "path": "序章" }));
     assert!(group.contains("#### 任务：开张大吉"), "{group}");
     assert!(
         group.contains("录像店的早晨 · 6句 · 铃、哲、妮可"),
@@ -296,12 +291,12 @@ fn catalog_root_group_and_doc() {
     );
     assert!(group.contains("### 补充 · 过场字幕"), "{group}");
 
-    let filtered = ok(&c, "zzz_catalog", json!({ "keyword": "妮可" }));
+    let filtered = ok(&c, "ik_catalog", json!({ "keyword": "妮可" }));
     assert!(filtered.contains("妮可（妮可·德玛拉）"), "{filtered}");
     assert!(filtered.contains("主线聊天·妮可"), "{filtered}");
 
     let doc = first_doc_id(&group);
-    let card = ok(&c, "zzz_catalog", json!({ "path": doc }));
+    let card = ok(&c, "ik_catalog", json!({ "path": doc }));
     assert!(
         card.contains("所属：ch:Chapter00 序章（第 1/4 篇）"),
         "{card}"
@@ -310,22 +305,22 @@ fn catalog_root_group_and_doc() {
 
     let paged = ok(
         &c,
-        "zzz_catalog",
+        "ik_catalog",
         json!({ "path": "ch:Chapter00", "maxResults": 1 }),
     );
     assert!(
-        paged.contains("还有 3 篇：zzz_catalog(path=\"ch:Chapter00\", offset=1)"),
+        paged.contains("还有 3 篇：ik_catalog(path=\"ch:Chapter00\", offset=1)"),
         "{paged}"
     );
 
-    let err = call(&c, "zzz_catalog", json!({ "path": "不存在的章节" })).unwrap_err();
+    let err = call(&c, "ik_catalog", json!({ "path": "不存在的章节" })).unwrap_err();
     assert!(err.contains("找不到分组"), "{err}");
 }
 
 #[test]
 fn character_profile() {
     let c = corpus();
-    let out = ok(&c, "zzz_character", json!({ "name": "安比" }));
+    let out = ok(&c, "ik_character", json!({ "name": "安比" }));
     assert!(out.contains("匹配说话人：安比"), "{out}");
     assert!(
         out.contains("相关名称（未合并统计）：零号·安比（1 句）"),
@@ -338,19 +333,19 @@ fn character_profile() {
         "{out}"
     );
 
-    let out = ok(&c, "zzz_character", json!({ "name": "赫利俄斯" }));
+    let out = ok(&c, "ik_character", json!({ "name": "赫利俄斯" }));
     assert!(out.contains("不是已知说话人"), "{out}");
-    let err = call(&c, "zzz_character", json!({ "name": "查无此人" })).unwrap_err();
+    let err = call(&c, "ik_character", json!({ "name": "查无此人" })).unwrap_err();
     assert!(err.contains("没有找到"), "{err}");
 }
 
 #[test]
 fn guide_modes() {
     let c = corpus();
-    assert!(ok(&c, "zzz_guide", json!({ "mode": "summary" })).contains("分层压缩"));
-    assert!(ok(&c, "zzz_guide", json!({ "mode": "查证" })).contains("原文查证"));
+    assert!(ok(&c, "ik_guide", json!({ "mode": "summary" })).contains("分层压缩"));
+    assert!(ok(&c, "ik_guide", json!({ "mode": "查证" })).contains("原文查证"));
     assert!(
-        call(&c, "zzz_guide", json!({ "mode": "x" }))
+        call(&c, "ik_guide", json!({ "mode": "x" }))
             .unwrap_err()
             .contains("可选")
     );
@@ -396,7 +391,7 @@ fn jsonrpc_lifecycle() {
         init["result"]["instructions"]
             .as_str()
             .unwrap()
-            .contains("zzz_search")
+            .contains("ik_search")
     );
 
     // 未知版本 → 回应最新版本。
@@ -429,11 +424,11 @@ fn jsonrpc_lifecycle() {
     assert_eq!(
         names,
         vec![
-            "zzz_catalog",
-            "zzz_search",
-            "zzz_read",
-            "zzz_character",
-            "zzz_guide"
+            "ik_catalog",
+            "ik_search",
+            "ik_read",
+            "ik_character",
+            "ik_guide"
         ]
     );
     for t in list["result"]["tools"].as_array().unwrap() {
@@ -443,25 +438,25 @@ fn jsonrpc_lifecycle() {
 
     let res = rpc(
         &s,
-        json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"zzz_search","arguments":{"keyword":"狡兔屋"}}}),
+        json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"ik_search","arguments":{"keyword":"狡兔屋"}}}),
     );
     assert_eq!(res["result"]["isError"], false);
     assert!(
         res["result"]["content"][0]["text"]
             .as_str()
             .unwrap()
-            .starts_with("[zzz_search]")
+            .starts_with("[ik_search]")
     );
 
     // 工具执行错误 → isError，而不是协议错误。
     let res = rpc(
         &s,
-        json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"zzz_read","arguments":{"docId":"doc_bad"}}}),
+        json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"ik_read","arguments":{"docId":"doc_bad"}}}),
     );
     assert_eq!(res["result"]["isError"], true);
     let res = rpc(
         &s,
-        json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"zzz_read","arguments":{"offset":"abc","docId":"x"}}}),
+        json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"ik_read","arguments":{"offset":"abc","docId":"x"}}}),
     );
     assert_eq!(res["result"]["isError"], true);
     assert!(
@@ -620,7 +615,7 @@ async fn http_endpoint() {
     let v: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(v["code"], "MCP_PROTOCOL_UNSUPPORTED");
 
-    let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"zzz_search","arguments":{"keyword":"狡兔屋"}}});
+    let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ik_search","arguments":{"keyword":"狡兔屋"}}});
     let (status, _, body) = send(
         app,
         post()

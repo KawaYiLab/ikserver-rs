@@ -103,7 +103,7 @@ nginx 的 `ik-api.inc` 给上传接口单独放宽了正文上限（64 MB），�
 
 ```bash
 cargo run --release -p ik-server -- story call --source ../zzz-story-extractor/out/zzz_story_3.2.0_chs \
-    zzz_search '{"keyword":"零号空洞"}'
+    ik_search '{"keyword":"零号空洞"}'
 ```
 
 客户端（Claude Code / Claude Desktop / Cursor 等）配置：
@@ -120,8 +120,8 @@ cargo run --release -p ik-server -- story call --source ../zzz-story-extractor/o
 }
 ```
 
-工具：`zzz_catalog`（章节与场景目录）、`zzz_search`（全文检索，空格分隔多词为同篇 AND）、`zzz_read`（按字数预算顺读，
-`follow=true` 跨场景读完整章）、`zzz_character`（角色出场与档案）、`zzz_guide`（剧情总结 / 角色弧线 / 时间线 / 查证的方法指引）。
+工具：`ik_catalog`（章节与场景目录）、`ik_search`（全文检索，空格分隔多词为同篇 AND）、`ik_read`（按字数预算顺读，
+`follow=true` 跨场景读完整章）、`ik_character`（角色出场与档案）、`ik_guide`（剧情总结 / 角色弧线 / 时间线 / 查证的方法指引）。
 
 ## 回滚
 

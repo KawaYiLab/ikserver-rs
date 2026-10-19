@@ -253,9 +253,9 @@ pub fn instructions(c: &Corpus) -> String {
     };
     format!(
         "绳网档案（绝区零 Zenless Zone Zero 剧情与世界观知识库），数据版本 {version}（{}），主线 {} 场景、设定 {} 篇。\
-             涉及绝区零的剧情、人物、阵营、地点、事件、台词出处时，先用 zzz_search 检索、再用 zzz_read 读原文确认，不要凭记忆作答。\
-             总结整章时先 zzz_catalog(path=\"ch:…\") 规划，再 zzz_read(docId=\"ch:…\", follow=true) 顺读并分层压缩；\
-             角色相关先用 zzz_character。较大的总结/考据任务开始前可读一次 zzz_guide(mode=summary|character|timeline|verify)。\
+             涉及绝区零的剧情、人物、阵营、地点、事件、台词出处时，先用 ik_search 检索、再用 ik_read 读原文确认，不要凭记忆作答。\
+             总结整章时先 ik_catalog(path=\"ch:…\") 规划，再 ik_read(docId=\"ch:…\", follow=true) 顺读并分层压缩；\
+             角色相关先用 ik_character。较大的总结/考据任务开始前可读一次 ik_guide(mode=summary|character|timeline|verify)。\
              docId 必须原样使用工具返回的值。主线为男主「哲」视角，「铃」以妹妹身份出现；没有说话人的行不要臆测说话人。",
         c.meta.language,
         thousands(story_docs),

@@ -352,7 +352,7 @@ mod story {
         assert_eq!(body["result"]["serverInfo"]["name"], "绳网档案");
 
         let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
-            "params":{"name":"zzz_search","arguments":{"keyword":"狡兔屋 妮可"}}});
+            "params":{"name":"ik_search","arguments":{"keyword":"狡兔屋 妮可"}}});
         let (status, _, body) = send(&app, mcp().body(Body::from(call.to_string())).unwrap()).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body["result"]["isError"], false);

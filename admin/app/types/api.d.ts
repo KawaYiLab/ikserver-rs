@@ -3163,8 +3163,8 @@ export interface paths {
         put?: never;
         /**
          * 剧情库 MCP 端点
-         * @description 给剧情总结 AI 用的 MCP 服务（Streamable HTTP，无状态）：`zzz_catalog` 目录、`zzz_search` 检索、
-         *     `zzz_read` 顺读原文、`zzz_character` 角色速览、`zzz_guide` 方法指引。客户端配置
+         * @description 给剧情总结 AI 用的 MCP 服务（Streamable HTTP，无状态）：`ik_catalog` 目录、`ik_search` 检索、
+         *     `ik_read` 顺读原文、`ik_character` 角色速览、`ik_guide` 方法指引。客户端配置
          *     `{"type": "streamable-http", "url": "https://<域名>/v1/story/mcp"}`，另加
          *     `Authorization: Bearer <IK_STORY__ACCESS_KEY>` 头（`IK_STORY__PUBLIC=true` 时不需要）。
          *     语料由管理员用 `PUT /v1/admin/story/corpus` 上传。工具参数错误以 `result.isError = true` 返回，协议错误为 JSON-RPC `error`。

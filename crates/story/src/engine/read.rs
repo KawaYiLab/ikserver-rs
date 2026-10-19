@@ -1,7 +1,7 @@
-//! zzz_read：读原文。
+//! ik_read：读原文。
 //!
 //! 按行分页，并受字数预算约束；`follow=true` 时读完一篇自动接着读同组下一篇，
-//! 总结型 AI 可以用一串 zzz_read 调用把整章按阅读顺序读完，每次结尾都给出精确的续读游标。
+//! 总结型 AI 可以用一串 ik_read 调用把整章按阅读顺序读完，每次结尾都给出精确的续读游标。
 //! docId 也可以直接写分组 id（如 `ch:Chapter110`），等价于从该组第一篇开始 follow。
 
 use std::fmt::Write as _;
@@ -41,7 +41,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
     let id = args.doc_id.trim();
     if id.is_empty() {
         return err(
-            "docId 不能为空：传 zzz_search / zzz_catalog 返回的 doc_…，或分组 id（如 ch:Chapter110）",
+            "docId 不能为空：传 ik_search / ik_catalog 返回的 doc_…，或分组 id（如 ch:Chapter110）",
         );
     }
     let (mut doc, follow) = if id.starts_with("doc_") {
@@ -77,7 +77,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
         if first_doc {
             let _ = write!(
                 out,
-                "[zzz_read] {} 「{}」\n{}",
+                "[ik_read] {} 「{}」\n{}",
                 corpus.doc_id(doc),
                 d.title,
                 d.path
@@ -123,7 +123,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
         if end < total {
             let _ = write!(
                 out,
-                "\n\n— 已达本次{}上限。继续：zzz_read(docId=\"{}\", offset={}{})",
+                "\n\n— 已达本次{}上限。继续：ik_read(docId=\"{}\", offset={}{})",
                 if lines_used >= line_budget {
                     "行数"
                 } else {
@@ -148,9 +148,9 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             }
             Some(n) => {
                 let call = if follow {
-                    format!("zzz_read(docId=\"{}\", follow=true)", corpus.doc_id(n))
+                    format!("ik_read(docId=\"{}\", follow=true)", corpus.doc_id(n))
                 } else {
-                    format!("zzz_read(docId=\"{}\")", corpus.doc_id(n))
+                    format!("ik_read(docId=\"{}\")", corpus.doc_id(n))
                 };
                 let _ = write!(
                     out,
@@ -170,7 +170,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
                 {
                     let _ = write!(
                         out,
-                        "下一组：{} {} → zzz_read(docId=\"{}\")",
+                        "下一组：{} {} → ik_read(docId=\"{}\")",
                         ng.id, ng.label, ng.id
                     );
                 }

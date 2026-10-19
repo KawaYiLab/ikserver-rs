@@ -97,7 +97,7 @@ pub(crate) fn parse_scope(scope: Option<&str>) -> Result<Option<DocKind>, ToolEr
 pub(crate) fn resolve_group(corpus: &Corpus, path: &str) -> Result<usize, ToolError> {
     corpus.find_group(path).ok_or_else(|| {
         ToolError(format!(
-            "找不到分组「{path}」。用 zzz_catalog() 查看全部章节（如 ch:Chapter110）与设定分类（如 lore:agents）"
+            "找不到分组「{path}」。用 ik_catalog() 查看全部章节（如 ch:Chapter110）与设定分类（如 lore:agents）"
         ))
     })
 }
@@ -105,7 +105,7 @@ pub(crate) fn resolve_group(corpus: &Corpus, path: &str) -> Result<usize, ToolEr
 pub(crate) fn resolve_doc(corpus: &Corpus, id: &str) -> Result<usize, ToolError> {
     corpus.find_doc(id).ok_or_else(|| {
         ToolError(format!(
-            "找不到文档「{id}」。docId 形如 doc_1a2b3c4d5e6f，必须原样使用 zzz_search / zzz_catalog 返回的值"
+            "找不到文档「{id}」。docId 形如 doc_1a2b3c4d5e6f，必须原样使用 ik_search / ik_catalog 返回的值"
         ))
     })
 }
