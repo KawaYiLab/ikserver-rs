@@ -2877,6 +2877,167 @@
         ]
       }
     },
+    "/v1/admin/story/corpora": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "剧情库版本列表",
+        "operationId": "list_corpora",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpusList"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/story/corpora/{id}/activate": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "回滚到某个剧情库版本",
+        "operationId": "activate_corpus",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpusView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/story/corpus": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "上传剧情库语料",
+        "description": "正文是 zzz-story-extractor 的语料包（gzip 压缩的 JSON，见 `python -m zzz_story upload`）。\n校验并建好索引后设为生效版本，本实例立即切换，其他实例一分钟内跟上；与已有版本内容相同时\n不重复保存。只保留最近 5 个版本。",
+        "operationId": "upload_corpus",
+        "requestBody": {
+          "description": "gzip 压缩的语料包",
+          "content": {
+            "application/gzip": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorpusView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "STORY_BUNDLE_INVALID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "FORBIDDEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/tags": {
       "get": {
         "tags": [
@@ -11221,6 +11382,71 @@
         }
       }
     },
+    "/v1/story/mcp": {
+      "post": {
+        "tags": [
+          "story"
+        ],
+        "summary": "剧情库 MCP 端点",
+        "description": "给剧情总结 AI 用的 MCP 服务（Streamable HTTP，无状态）：`zzz_catalog` 目录、`zzz_search` 检索、\n`zzz_read` 顺读原文、`zzz_character` 角色速览、`zzz_guide` 方法指引。客户端配置\n`{\"type\": \"streamable-http\", \"url\": \"https://<域名>/v1/story/mcp\"}`，另加\n`Authorization: Bearer <IK_STORY__ACCESS_KEY>` 头（`IK_STORY__PUBLIC=true` 时不需要）。\n语料由管理员用 `PUT /v1/admin/story/corpus` 上传。工具参数错误以 `result.isError = true` 返回，协议错误为 JSON-RPC `error`。",
+        "operationId": "mcp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC 响应（批量请求时为数组）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "只有通知或响应，无响应体"
+          },
+          "400": {
+            "description": "MCP_PROTOCOL_UNSUPPORTED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "STORY_ACCESS_DENIED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "STORY_DISABLED：还没有上传语料",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tags/suggest": {
       "get": {
         "tags": [
@@ -14738,6 +14964,94 @@
           }
         }
       },
+      "CorpusList": {
+        "type": "object",
+        "required": [
+          "localSource",
+          "corpora"
+        ],
+        "properties": {
+          "corpora": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CorpusView"
+            },
+            "description": "新的在前。"
+          },
+          "localSource": {
+            "type": "boolean",
+            "description": "本实例是否在用本地语料（开发环境）。此时上传仍会入库并生效，但重启后又回到本地语料。"
+          },
+          "serving": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "本实例正在使用的版本；用本地语料（`IK_STORY__SOURCE`）或未启用时为空。"
+          }
+        }
+      },
+      "CorpusView": {
+        "type": "object",
+        "description": "一个语料版本（不含语料包本身）。",
+        "required": [
+          "id",
+          "sourceVersion",
+          "language",
+          "docs",
+          "lines",
+          "speakerCoverage",
+          "bundleBytes",
+          "bundleSha256",
+          "active",
+          "uploadedBy",
+          "createdAt"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "是否是生效版本。"
+          },
+          "bundleBytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "语料包大小（gzip 后，字节）。"
+          },
+          "bundleSha256": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "docs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "id": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "sourceVersion": {
+            "type": "string",
+            "description": "数据版本（manifest.json 的 source_version，如 3.2.0）。"
+          },
+          "speakerCoverage": {
+            "type": "number",
+            "format": "float",
+            "description": "主线台词里带说话人的比例（0–1）。"
+          },
+          "uploadedBy": {
+            "type": "string"
+          }
+        }
+      },
       "CosmeticKind": {
         "type": "string",
         "description": "装扮的分类（COSMETIC-001）。列表按分类、再按上架先后排序。",
@@ -16097,6 +16411,60 @@
             "format": "int64",
             "description": "新写入的阅读记录数（之前读过的不重复计）。",
             "minimum": 0
+          }
+        }
+      },
+      "McpRequest": {
+        "type": "object",
+        "description": "JSON-RPC 2.0 请求或通知（MCP）。也可以是这些对象组成的数组（批量）。",
+        "required": [
+          "jsonrpc",
+          "id",
+          "method",
+          "params"
+        ],
+        "properties": {
+          "id": {
+            "type": "object",
+            "description": "请求 id（字符串或数字）；没有 id 的是通知，服务端回 202 且无响应体。"
+          },
+          "jsonrpc": {
+            "type": "string",
+            "description": "固定为 `\"2.0\"`。",
+            "example": "2.0"
+          },
+          "method": {
+            "type": "string",
+            "description": "`initialize`、`tools/list`、`tools/call`、`prompts/list`、`prompts/get`、`ping` 等。",
+            "example": "tools/call"
+          },
+          "params": {
+            "type": "object"
+          }
+        }
+      },
+      "McpResponse": {
+        "type": "object",
+        "description": "JSON-RPC 2.0 响应：`result` 与 `error` 二选一。",
+        "required": [
+          "jsonrpc",
+          "id",
+          "result",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "object"
+          },
+          "id": {
+            "type": "object"
+          },
+          "jsonrpc": {
+            "type": "string",
+            "example": "2.0"
+          },
+          "result": {
+            "type": "object"
           }
         }
       },
@@ -22217,6 +22585,10 @@
     {
       "name": "ai",
       "description": "AI 助手：角色、模型、额度"
+    },
+    {
+      "name": "story",
+      "description": "绝区零剧情库（MCP）"
     }
   ]
 }

@@ -708,6 +708,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/story/corpora": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 剧情库版本列表 */
+        get: operations["list_corpora"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/story/corpora/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 回滚到某个剧情库版本 */
+        post: operations["activate_corpus"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/story/corpus": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 上传剧情库语料
+         * @description 正文是 zzz-story-extractor 的语料包（gzip 压缩的 JSON，见 `python -m zzz_story upload`）。
+         *     校验并建好索引后设为生效版本，本实例立即切换，其他实例一分钟内跟上；与已有版本内容相同时
+         *     不重复保存。只保留最近 5 个版本。
+         */
+        put: operations["upload_corpus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/tags": {
         parameters: {
             query?: never;
@@ -3096,6 +3152,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/story/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 剧情库 MCP 端点
+         * @description 给剧情总结 AI 用的 MCP 服务（Streamable HTTP，无状态）：`zzz_catalog` 目录、`zzz_search` 检索、
+         *     `zzz_read` 顺读原文、`zzz_character` 角色速览、`zzz_guide` 方法指引。客户端配置
+         *     `{"type": "streamable-http", "url": "https://<域名>/v1/story/mcp"}`，另加
+         *     `Authorization: Bearer <IK_STORY__ACCESS_KEY>` 头（`IK_STORY__PUBLIC=true` 时不需要）。
+         *     语料由管理员用 `PUT /v1/admin/story/corpus` 上传。工具参数错误以 `result.isError = true` 返回，协议错误为 JSON-RPC `error`。
+         */
+        post: operations["mcp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tags/suggest": {
         parameters: {
             query?: never;
@@ -4169,6 +4249,41 @@ export interface components {
              */
             unreadCount: number;
         };
+        CorpusList: {
+            /** @description 新的在前。 */
+            corpora: components["schemas"]["CorpusView"][];
+            /** @description 本实例是否在用本地语料（开发环境）。此时上传仍会入库并生效，但重启后又回到本地语料。 */
+            localSource: boolean;
+            /** @description 本实例正在使用的版本；用本地语料（`IK_STORY__SOURCE`）或未启用时为空。 */
+            serving?: string | null;
+        };
+        /** @description 一个语料版本（不含语料包本身）。 */
+        CorpusView: {
+            /** @description 是否是生效版本。 */
+            active: boolean;
+            /**
+             * Format: int64
+             * @description 语料包大小（gzip 后，字节）。
+             */
+            bundleBytes: number;
+            bundleSha256: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: int32 */
+            docs: number;
+            id: string;
+            language: string;
+            /** Format: int32 */
+            lines: number;
+            /** @description 数据版本（manifest.json 的 source_version，如 3.2.0）。 */
+            sourceVersion: string;
+            /**
+             * Format: float
+             * @description 主线台词里带说话人的比例（0–1）。
+             */
+            speakerCoverage: number;
+            uploadedBy: string;
+        };
         /**
          * @description 装扮的分类（COSMETIC-001）。列表按分类、再按上架先后排序。
          * @enum {string}
@@ -4691,6 +4806,30 @@ export interface components {
              * @description 新写入的阅读记录数（之前读过的不重复计）。
              */
             marked: number;
+        };
+        /** @description JSON-RPC 2.0 请求或通知（MCP）。也可以是这些对象组成的数组（批量）。 */
+        McpRequest: {
+            /** @description 请求 id（字符串或数字）；没有 id 的是通知，服务端回 202 且无响应体。 */
+            id: Record<string, never>;
+            /**
+             * @description 固定为 `"2.0"`。
+             * @example 2.0
+             */
+            jsonrpc: string;
+            /**
+             * @description `initialize`、`tools/list`、`tools/call`、`prompts/list`、`prompts/get`、`ping` 等。
+             * @example tools/call
+             */
+            method: string;
+            params: Record<string, never>;
+        };
+        /** @description JSON-RPC 2.0 响应：`result` 与 `error` 二选一。 */
+        McpResponse: {
+            error: Record<string, never>;
+            id: Record<string, never>;
+            /** @example 2.0 */
+            jsonrpc: string;
+            result: Record<string, never>;
         };
         /** @description 当前登录用户的自我视图（含邮箱，只返回给本人）。 */
         MeView: {
@@ -8359,6 +8498,115 @@ export interface operations {
             };
             /** @description REINDEX_RUNNING / SEARCH_ENGINE_NOT_CONFIGURED */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_corpora: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorpusList"];
+                };
+            };
+            /** @description FORBIDDEN */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    activate_corpus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorpusView"];
+                };
+            };
+            /** @description FORBIDDEN */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    upload_corpus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description gzip 压缩的语料包 */
+        requestBody: {
+            content: {
+                "application/gzip": number[];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CorpusView"];
+                };
+            };
+            /** @description STORY_BUNDLE_INVALID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description FORBIDDEN */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13862,6 +14110,64 @@ export interface operations {
             };
             /** @description RATE_LIMITED */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    mcp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpRequest"];
+            };
+        };
+        responses: {
+            /** @description JSON-RPC 响应（批量请求时为数组） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpResponse"];
+                };
+            };
+            /** @description 只有通知或响应，无响应体 */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description MCP_PROTOCOL_UNSUPPORTED */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description STORY_ACCESS_DENIED */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description STORY_DISABLED：还没有上传语料 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

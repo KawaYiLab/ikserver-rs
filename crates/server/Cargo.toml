@@ -36,6 +36,7 @@ ik-ai.workspace = true
 ik-admin.workspace = true
 ik-legacy.workspace = true
 ik-mail.workspace = true
+ik-story.workspace = true
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

@@ -61,6 +61,13 @@ jobs:
       IK_TEST_MEILI_KEY: ci-master-key-0123456789
       IK_TEST_S3_URL: http://localhost:9000
     steps:
+      # 全部测试二进制（每个 server 集成测试都链接一个完整的 ik-server）加起来接近 runner 的磁盘上限，
+      # 写满时链接器报 Bus error。先删掉用不到的预装工具链（.NET、Android、GHC、CodeQL），腾出约 20 GB。
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:

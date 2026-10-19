@@ -32,6 +32,7 @@ ik-ai = { path = "crates/ai" }
 ik-admin = { path = "crates/admin" }
 ik-legacy = { path = "crates/legacy" }
 ik-mail = { path = "crates/mail" }
+ik-story = { path = "crates/story" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
@@ -110,6 +111,12 @@ async-openai = { version = "0.42", default-features = false, features = ["chat-c
 reqwest13 = { package = "reqwest", version = "0.13", default-features = false, features = ["json", "stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
+
+# 剧情库（ik-story）：语料包解压、文档 id 哈希与子串扫描
+flate2 = "1"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+memchr = "2.7"
+arc-swap = "1.7"
 
 # 其他
 moka = { version = "0.12", features = ["future"] }

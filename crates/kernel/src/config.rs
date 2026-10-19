@@ -74,6 +74,7 @@ pub struct Config {
     pub video: Video,
     pub moderation: Moderation,
     pub ai: Ai,
+    pub story: Story,
 }
 
 /// AI 助手（ai-assistant.md）。模型、角色卡、额度上限在数据库里（后台维护）；这里是部署相关的参数与
@@ -181,6 +182,20 @@ impl Default for Video {
             timeout_secs: 5,
         }
     }
+}
+
+/// 绝区零剧情库（ik-story），以 MCP 提供在 `POST /v1/story/mcp`。
+/// 语料由管理员上传到数据库（`PUT /v1/admin/story/corpus`），这里只管访问控制与本地开发。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Story {
+    /// 本地语料（开发用）：zzz-story-extractor 的输出目录或语料包文件。设置后启动时用它，不读数据库；
+    /// 生产环境留空。
+    pub source: String,
+    /// MCP 客户端须带 `Authorization: Bearer <access_key>`。
+    pub access_key: Secret,
+    /// 允许不带密钥访问。默认关闭：既没有密钥也没有公开时，接口拒绝所有请求（游戏文本默认不公开）。
+    pub public: bool,
 }
 
 /// 事件总线。
@@ -403,6 +418,7 @@ impl Default for Config {
             video: Video::default(),
             moderation: Moderation::default(),
             ai: Ai::default(),
+            story: Story::default(),
         }
     }
 }

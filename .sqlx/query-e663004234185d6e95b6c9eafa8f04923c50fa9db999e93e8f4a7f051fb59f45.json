@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM story_corpora\n          WHERE NOT active\n            AND id NOT IN (SELECT id FROM story_corpora ORDER BY created_at DESC, id DESC LIMIT $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e663004234185d6e95b6c9eafa8f04923c50fa9db999e93e8f4a7f051fb59f45"
+}

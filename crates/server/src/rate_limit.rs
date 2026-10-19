@@ -7,6 +7,7 @@
 //! - 身份要查会话：令牌摘要 → 用户 id 缓存 30 秒，所以大多数请求不多查一次库。令牌无效、账号封禁、
 //!   查库失败都按游客处理（RL-004）；随便编的令牌落在 IP 桶里，拿不到新配额。
 //! - 进程内计数（不使用 Redis）：多实例时每个实例各自计。
+//! - 读 = GET / HEAD，外加剧情库 MCP 的 POST（JSON-RPC 只读查询）。
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU32;
@@ -32,6 +33,8 @@ use crate::AppState;
 
 const SESSION_CACHE_TTL: Duration = Duration::from_secs(30);
 const SESSION_CACHE_CAPACITY: u64 = 100_000;
+/// 按读计的 POST 接口。
+const STORY_MCP_PATH: &str = "/v1/story/mcp";
 /// 多久清理一次长时间没有请求的桶。
 const SWEEP_EVERY: Duration = Duration::from_secs(60);
 
@@ -130,7 +133,9 @@ pub async fn layer(State(state): State<AppState>, request: Request, next: Next) 
     if !limiter.enabled || !request.uri().path().starts_with("/v1/") {
         return next.run(request).await;
     }
-    let read = matches!(*request.method(), Method::GET | Method::HEAD);
+    // 剧情库 MCP 是只读查询，只是 JSON-RPC 规定用 POST：按读计，否则总结一章要读几十次就会撞上写的限额。
+    let read = matches!(*request.method(), Method::GET | Method::HEAD)
+        || request.uri().path() == STORY_MCP_PATH;
     let (bucket, key) = match limiter.user_id(&state.auth, request.headers()).await {
         Some(user_id) => (
             if read {

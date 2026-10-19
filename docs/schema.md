@@ -383,3 +383,13 @@
   匹配正则一致（CMT-008），唯一且建好后不能改（旧评论靠它渲染）。
 - `active = false`：下架，不出现在表情面板，但仍在公开清单里（`selectable = false`），旧评论照常显示成图片。
 - 删除分组时组里的表情变成未分组（`ON DELETE SET NULL`）；表情与分组图标引用 `media_files`（不级联，图片不会被单独删除）。
+
+## 剧情库（`20261107000001_story_corpora.sql`）
+
+- `story_corpora` 归 ik-story：每行是一次上传的语料包（zzz-story-extractor 的产出打成的 gzip JSON），原样保存在
+  `bundle`；索引不入库，各实例启动或切换版本时从包构建，所以索引结构改了也不用迁移数据。
+- `active`：至多一行（部分唯一索引 `story_corpora_active_uq`，也是启动时查生效版本用的索引）。「换生效版本」在事务里先拿
+  `pg_advisory_xact_lock(hashtextextended('ik:story_corpora', 0))` 再改。
+- `bundle_sha256`：同一个包重复上传时复用已有行，只把它设为生效。只保留最近 5 个版本（生效版本总是保留）。
+- `uploaded_by → users`（不级联；注销账号是脱敏不是删除）。
+

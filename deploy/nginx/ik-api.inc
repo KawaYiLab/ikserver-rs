@@ -15,6 +15,18 @@ location /v1/ {
     proxy_read_timeout 60s;
 }
 
+# 剧情库语料包上传（管理员，gzip 后约 6 MB）：只对这个接口放宽正文上限，后端同样限制 64 MB。
+location = /v1/admin/story/corpus {
+    proxy_pass http://ik_server;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 64m;
+    proxy_read_timeout 120s;
+}
+
 location = /v1/realtime {
     proxy_pass http://ik_server;
     proxy_http_version 1.1;

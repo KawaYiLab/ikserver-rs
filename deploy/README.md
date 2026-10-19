@@ -71,6 +71,58 @@ journalctl -u ik-server -f                        # 日志
 
 读文件的命令（如 `ik ai import <路径>`）以 `interknot` 用户运行，文件要让它读得到。
 
+## 剧情库（MCP）
+
+`POST /v1/story/mcp` 是给剧情总结 AI 用的只读 MCP 服务，语料来自
+[zzz-story-extractor](https://github.com/KawaYiLab/zzz-story-extractor) 的产出，存在数据库里（`story_corpora`），
+服务器上不需要放任何文件。还没有上传语料时接口返回 503 `STORY_DISABLED`，其余功能不受影响。
+
+1. 服务器配置访问密钥（只需一次，改完 `sudo systemctl restart ik-server`）：
+
+   ```bash
+   # /etc/interknot/ik-server.env
+   IK_STORY__ACCESS_KEY=<openssl rand -hex 32>
+   ```
+
+2. 在本地提取并一键上传（管理员账号；密码从环境变量 `IK_PASSWORD` 读，不设则交互输入）：
+
+   ```powershell
+   .\.venv\Scripts\python.exe -m zzz_story extract --out out
+   .\.venv\Scripts\python.exe -m zzz_story upload --server https://ik.tiwat.cn --account 管理员邮箱
+   ```
+
+   上传的是 gzip 压缩的语料包（约 6 MB）。服务端校验并建好索引后设为生效版本，本实例立即切换，
+   多实例时其他实例一分钟内跟上；同一份数据重复上传不会多存一份。数据更新时重复这一步即可，不用重启。
+
+3. 版本与回滚（管理员）：`GET /v1/admin/story/corpora` 查看最近 5 个版本，
+   `POST /v1/admin/story/corpora/{id}/activate` 回滚到其中一个。上传与回滚都记在审计日志里。
+
+nginx 的 `ik-api.inc` 给上传接口单独放宽了正文上限（64 MB），更新 nginx 配置后 `nginx -t && systemctl reload nginx`。
+
+本地调试工具（不连数据库）：
+
+```bash
+cargo run --release -p ik-server -- story call --source ../zzz-story-extractor/out/zzz_story_3.2.0_chs \
+    zzz_search '{"keyword":"零号空洞"}'
+```
+
+客户端（Claude Code / Claude Desktop / Cursor 等）配置：
+
+```json
+{
+  "mcpServers": {
+    "zzz-story": {
+      "type": "streamable-http",
+      "url": "https://ik.tiwat.cn/v1/story/mcp",
+      "headers": { "Authorization": "Bearer <IK_STORY__ACCESS_KEY>" }
+    }
+  }
+}
+```
+
+工具：`zzz_catalog`（章节与场景目录）、`zzz_search`（全文检索，空格分隔多词为同篇 AND）、`zzz_read`（按字数预算顺读，
+`follow=true` 跨场景读完整章）、`zzz_character`（角色出场与档案）、`zzz_guide`（剧情总结 / 角色弧线 / 时间线 / 查证的方法指引）。
+
 ## 回滚
 
 迁移只增不改，旧版本在新表结构上照常工作，换回旧的可执行文件即可：
