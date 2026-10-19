@@ -349,7 +349,7 @@ mod story {
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(headers[header::CONTENT_TYPE], "application/json");
         assert!(headers.contains_key("x-request-id"));
-        assert_eq!(body["result"]["serverInfo"]["name"], "zzz-story-mcp");
+        assert_eq!(body["result"]["serverInfo"]["name"], "绳网档案");
 
         let call = json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
             "params":{"name":"zzz_search","arguments":{"keyword":"狡兔屋 妮可"}}});

@@ -111,7 +111,7 @@ cargo run --release -p ik-server -- story call --source ../zzz-story-extractor/o
 ```json
 {
   "mcpServers": {
-    "zzz-story": {
+    "绳网档案": {
       "type": "streamable-http",
       "url": "https://ik.tiwat.cn/v1/story/mcp",
       "headers": { "Authorization": "Bearer <IK_STORY__ACCESS_KEY>" }

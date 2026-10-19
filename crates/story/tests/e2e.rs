@@ -390,7 +390,8 @@ fn jsonrpc_lifecycle() {
     );
     assert_eq!(init["id"], 1);
     assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
-    assert_eq!(init["result"]["serverInfo"]["name"], "zzz-story-mcp");
+    assert_eq!(init["result"]["serverInfo"]["name"], "绳网档案");
+    assert_eq!(init["result"]["serverInfo"]["title"], "绳网档案");
     assert!(
         init["result"]["instructions"]
             .as_str()

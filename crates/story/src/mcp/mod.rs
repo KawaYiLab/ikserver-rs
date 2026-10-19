@@ -18,7 +18,7 @@ use crate::text::thousands;
 /// 支持的协议版本，新的在前。客户端请求的版本在列表内就照单回应，否则回应最新版本。
 pub const PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-pub const SERVER_NAME: &str = "zzz-story-mcp";
+pub const SERVER_NAME: &str = "绳网档案";
 
 const PARSE_ERROR: i32 = -32700;
 const INVALID_REQUEST: i32 = -32600;
@@ -236,7 +236,7 @@ fn initialize(corpus: &Corpus, params: Option<&RawValue>) -> Result<Box<RawValue
         },
         "serverInfo": {
             "name": SERVER_NAME,
-            "title": "绝区零剧情库",
+            "title": "绳网档案",
             "version": env!("CARGO_PKG_VERSION")
         },
         "instructions": instructions(corpus)
@@ -252,7 +252,7 @@ pub fn instructions(c: &Corpus) -> String {
         &c.meta.source_version
     };
     format!(
-        "绝区零（Zenless Zone Zero）剧情与世界观只读知识库，数据版本 {version}（{}），主线 {} 场景、设定 {} 篇。\
+        "绳网档案（绝区零 Zenless Zone Zero 剧情与世界观知识库），数据版本 {version}（{}），主线 {} 场景、设定 {} 篇。\
              涉及绝区零的剧情、人物、阵营、地点、事件、台词出处时，先用 zzz_search 检索、再用 zzz_read 读原文确认，不要凭记忆作答。\
              总结整章时先 zzz_catalog(path=\"ch:…\") 规划，再 zzz_read(docId=\"ch:…\", follow=true) 顺读并分层压缩；\
              角色相关先用 zzz_character。较大的总结/考据任务开始前可读一次 zzz_guide(mode=summary|character|timeline|verify)。\
