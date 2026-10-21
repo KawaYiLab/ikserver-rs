@@ -6,7 +6,7 @@ pub mod catalog;
 pub mod character;
 pub mod guide;
 pub mod read;
-mod releases;
+pub(crate) mod releases;
 pub mod search;
 
 use std::fmt::Write as _;
@@ -37,7 +37,20 @@ pub(crate) fn push_line(out: &mut String, corpus: &Corpus, line: usize, text: &s
         LineKind::Option => {
             out.push_str("【选项】");
         }
+        LineKind::Placeholder => out.push_str("【占位说明】"),
+        LineKind::Unknown => out.push_str("【署名未知】"),
         _ => {
+            if corpus.is_inferred(line) {
+                out.push_str("【推断署名】");
+            } else if corpus.speaker_name(l.speaker).is_some()
+                && corpus
+                    .line_evidence(line)
+                    .speaker_status
+                    .as_deref()
+                    .is_some_and(|s| s != "resolved")
+            {
+                out.push_str("【署名未核验】");
+            }
             if let Some(name) = corpus.speaker_name(l.speaker) {
                 out.push_str(name);
                 out.push('：');
@@ -79,6 +92,8 @@ pub(crate) fn push_version(out: &mut String, corpus: &Corpus) {
         None => "旧语料未声明",
     };
     let _ = writeln!(out, "提取模式：{mode}");
+    let _ = writeln!(out, "corpusRevision：{}", corpus.revision);
+    out.push_str("证据边界：姓名解析不确认播放；未找到配音不代表旁白。局部行序与跨场景顺序分别核验，目录相邻不证明执行关系。\n");
 }
 
 pub(crate) fn push_order_note(out: &mut String, corpus: &Corpus, doc: usize) {
@@ -95,6 +110,63 @@ pub(crate) fn push_order_note(out: &mut String, corpus: &Corpus, doc: usize) {
     if d.section == "Comic" && d.context_status.as_deref() != Some("linked") {
         out.push_str("漫画片段尚未关联完整场景；没有说话人和时间信息时不要补写，目录前后片段也不构成上下文。\n");
     }
+    push_evidence_note(out, corpus, doc);
+}
+
+pub(crate) fn push_evidence_note(out: &mut String, corpus: &Corpus, doc: usize) {
+    let d = &corpus.docs[doc];
+    if d.kind == DocKind::Lore {
+        return;
+    }
+    let counts = &d.evidence_counts;
+    let mut notes = Vec::new();
+    for (label, count) in [
+        ("占位说明", counts.placeholders),
+        ("署名未知", counts.unknown),
+        ("未关联候选", counts.unlinked),
+        ("推断署名", counts.inferred),
+        ("未提供署名核验证据", counts.missing),
+        ("未找到配音关联", counts.no_voice),
+    ] {
+        if count > 0 {
+            notes.push(format!("{label} {count}"));
+        }
+    }
+    if !notes.is_empty() {
+        let _ = writeln!(out, "证据状态：{}（统计可交叉）。", notes.join(" · "));
+    }
+    let names = names_preview(corpus, &d.name_table, 12);
+    if !names.is_empty() {
+        let _ = writeln!(
+            out,
+            "TextMap 姓名表：{names}（只表示姓名关联，不是逐句署名或首次登场证据）。"
+        );
+    }
+}
+
+pub(crate) fn push_evidence(out: &mut String, corpus: &Corpus, line: usize) {
+    let evidence = corpus.line_evidence(line);
+    if !evidence.provided() {
+        out.push_str(" [提取证据：未提供证据]");
+    } else if let Ok(json) = serde_json::to_string(evidence) {
+        let _ = write!(out, " [提取证据：{json}]");
+    }
+}
+
+pub(crate) fn push_doc_evidence(out: &mut String, corpus: &Corpus, doc: usize) {
+    for line in corpus.docs[doc].lines().take(20) {
+        let _ = write!(out, "L{}", line - corpus.docs[doc].first_line as usize + 1);
+        push_source(out, corpus, line);
+        push_evidence(out, corpus, line);
+        out.push('\n');
+    }
+    if corpus.docs[doc].line_count > 20 {
+        let _ = writeln!(
+            out,
+            "证据仅展开前 20 行；其余用 ik_read(docId=\"{}\", offset=21, includeEvidence=true)。",
+            corpus.doc_id(doc)
+        );
+    }
 }
 
 pub(crate) fn push_source(out: &mut String, corpus: &Corpus, line: usize) {
@@ -109,7 +181,10 @@ pub(crate) fn push_source(out: &mut String, corpus: &Corpus, line: usize) {
 
 /// 出场名单（最多 `max` 个）。
 pub(crate) fn speakers_preview(corpus: &Corpus, doc: usize, max: usize) -> String {
-    let ids = corpus.doc_speakers(&corpus.docs[doc]);
+    names_preview(corpus, corpus.doc_speakers(&corpus.docs[doc]), max)
+}
+
+fn names_preview(corpus: &Corpus, ids: &[u32], max: usize) -> String {
     let mut names: Vec<&str> = ids
         .iter()
         .take(max)

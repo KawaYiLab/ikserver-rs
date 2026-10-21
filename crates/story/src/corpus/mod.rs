@@ -6,10 +6,14 @@
 
 mod build;
 mod bundle;
+mod evidence;
+mod revision;
 
 pub use build::{build_from_bundle, build_from_dir, family_label};
 pub use bundle::{BUNDLE_FORMAT, Bundle};
+pub use evidence::{EvidenceCounts, LineEvidence, ResourceEvidence};
 
+use serde::Serialize;
 use std::ops::Range;
 
 use crate::index::BigramIndex;
@@ -34,7 +38,7 @@ pub struct Meta {
     pub accuracy_first: Option<bool>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum LineKind {
     /// 有说话人的台词。
     Dialogue,
@@ -46,6 +50,8 @@ pub enum LineKind {
     Unknown,
     /// 设定资料里的一行 Markdown。
     Text,
+    /// 经来源核查的场景提纲/占位说明，不是角色对白。
+    Placeholder,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -57,13 +63,13 @@ pub struct Line {
 }
 
 /// 可选的原始行出处；与 lines 一一对应，兼容旧语料包。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct LineSource {
     pub source_key: Option<String>,
     pub line_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum DocKind {
     /// 主线剧情（story.jsonl）。
     Story,
@@ -83,7 +89,7 @@ impl DocKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Doc {
     /// 稳定的 64 位标识，对外显示为 `doc_` + 12 位十六进制。
     pub hash: u64,
@@ -104,9 +110,13 @@ pub struct Doc {
     pub first_line: u32,
     pub line_count: u32,
     pub char_count: u32,
-    /// `doc_speakers` 中的区间：场景名单 ∪ 实际说话人，按出场先后。
+    /// `doc_speakers` 中的区间：逐句已解析署名（含旧包署名），按文档行序。
     pub speakers_start: u32,
     pub speakers_len: u32,
+    /// TextMap 姓名表；与实际署名独立，不能据此确认出场。
+    pub name_table: Vec<u32>,
+    pub inferred_speakers: Vec<u32>,
+    pub evidence_counts: EvidenceCounts,
 }
 
 impl Doc {
@@ -133,10 +143,15 @@ pub struct Group {
 
 #[derive(Debug)]
 pub struct Corpus {
+    /// 规范化内容、影响结果的配置及查询契约的摘要；不含构建/提取时间。
+    pub revision: String,
     pub meta: Meta,
     pub text: String,
     pub lines: Vec<Line>,
     pub line_sources: Vec<LineSource>,
+    /// 与行对应的证据表下标，相同证据只保存一份。
+    pub line_evidence_ids: Vec<u32>,
+    pub evidence: Vec<LineEvidence>,
     pub docs: Vec<Doc>,
     pub groups: Vec<Group>,
     pub speakers: Vec<String>,
@@ -164,6 +179,26 @@ impl Corpus {
     pub fn line_text(&self, line: usize) -> &str {
         let l = &self.lines[line];
         &self.text[l.start as usize..(l.start + l.len) as usize]
+    }
+
+    pub fn line_evidence(&self, line: usize) -> &LineEvidence {
+        &self.evidence[self.line_evidence_ids[line] as usize]
+    }
+
+    pub fn is_inferred(&self, line: usize) -> bool {
+        self.line_evidence(line).speaker_status.as_deref() == Some("inferred")
+    }
+
+    /// 旧包有署名但未提供证据时仍保留署名；新包的推断/未解析状态不当作已解析。
+    pub fn is_attributed(&self, line: usize) -> bool {
+        let l = &self.lines[line];
+        l.speaker != NO_SPEAKER
+            && l.kind == LineKind::Dialogue
+            && self
+                .line_evidence(line)
+                .speaker_status
+                .as_deref()
+                .is_none_or(|s| s == "resolved")
     }
 
     #[inline]
@@ -328,6 +363,23 @@ impl DocKeys {
                 let members = &self.path_docs
                     [self.path_offsets[p] as usize..self.path_offsets[p + 1] as usize];
                 out = crate::index::union_sorted(&out, members);
+            }
+        }
+        out
+    }
+
+    pub fn matching_path(&self, needle: &str) -> Vec<u32> {
+        let mut out = Vec::new();
+        if needle.is_empty() || needle.contains('\0') {
+            return out;
+        }
+        for (p, path) in self.paths.iter().enumerate() {
+            if path.contains(needle) {
+                out = crate::index::union_sorted(
+                    &out,
+                    &self.path_docs
+                        [self.path_offsets[p] as usize..self.path_offsets[p + 1] as usize],
+                );
             }
         }
         out

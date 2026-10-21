@@ -19,6 +19,8 @@ pub struct CatalogArgs {
     pub offset: Option<usize>,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
     pub max_results: Option<usize>,
+    #[serde(default, deserialize_with = "crate::de::opt_bool")]
+    pub include_evidence: Option<bool>,
 }
 
 pub fn run(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
@@ -34,21 +36,46 @@ pub fn run(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
             let group = super::releases::resolve(corpus, release)?;
             let mut out = String::new();
             super::releases::push_note(&mut out, corpus, release);
-            out.push_str(&group_listing(corpus, group, "", offset, max));
+            out.push_str(&group_listing(
+                corpus,
+                group,
+                "",
+                offset,
+                max,
+                args.include_evidence.unwrap_or(false),
+            ));
             return Ok(out);
         }
-        return Ok(titles_everywhere(corpus, keyword, offset, max));
+        return Ok(titles_everywhere(
+            corpus,
+            keyword,
+            offset,
+            max,
+            args.include_evidence.unwrap_or(false),
+        ));
     }
     if path.starts_with("doc_") {
         let doc = resolve_doc(corpus, path)?;
-        return Ok(doc_card(corpus, doc));
+        let mut out = doc_card(corpus, doc);
+        if args.include_evidence == Some(true) {
+            out.push('\n');
+            super::push_doc_evidence(&mut out, corpus, doc);
+        }
+        return Ok(out);
     }
     let group = resolve_group(corpus, path)?;
     let mut out = String::new();
     if let Some(release) = super::releases::lookup(path)? {
         super::releases::push_note(&mut out, corpus, release);
     }
-    out.push_str(&group_listing(corpus, group, keyword, offset, max));
+    out.push_str(&group_listing(
+        corpus,
+        group,
+        keyword,
+        offset,
+        max,
+        args.include_evidence.unwrap_or(false),
+    ));
     Ok(out)
 }
 
@@ -170,7 +197,13 @@ fn root(corpus: &Corpus) -> String {
     out
 }
 
-fn titles_everywhere(corpus: &Corpus, keyword: &str, offset: usize, max: usize) -> String {
+fn titles_everywhere(
+    corpus: &Corpus,
+    keyword: &str,
+    offset: usize,
+    max: usize,
+    include_evidence: bool,
+) -> String {
     let hits: Vec<usize> = corpus
         .doc_keys
         .matching(&fold(keyword), false)
@@ -190,6 +223,10 @@ fn titles_everywhere(corpus: &Corpus, keyword: &str, offset: usize, max: usize) 
         out.push_str("- ");
         push_doc_summary(&mut out, corpus, d);
         out.push('\n');
+        super::push_evidence_note(&mut out, corpus, d);
+        if include_evidence {
+            super::push_doc_evidence(&mut out, corpus, d);
+        }
     }
     if offset.saturating_add(max) < hits.len() {
         let _ = write!(
@@ -209,6 +246,7 @@ fn group_listing(
     keyword: &str,
     offset: usize,
     max: usize,
+    include_evidence: bool,
 ) -> String {
     let g = &corpus.groups[group];
     let members: Vec<usize> = if keyword.is_empty() {
@@ -314,9 +352,13 @@ fn group_listing(
         );
         let speakers = speakers_preview(corpus, d, 6);
         if !speakers.is_empty() {
-            let _ = write!(out, " · {speakers}");
+            let _ = write!(out, " · 逐句署名：{speakers}");
         }
         out.push('\n');
+        super::push_evidence_note(&mut out, corpus, d);
+        if include_evidence {
+            super::push_doc_evidence(&mut out, corpus, d);
+        }
     }
     if offset.saturating_add(max) < members.len() {
         let _ = write!(
@@ -358,7 +400,7 @@ fn doc_card(corpus: &Corpus, doc: usize) -> String {
     );
     let speakers = speakers_preview(corpus, doc, 30);
     if !speakers.is_empty() {
-        let _ = write!(out, "\n出场：{speakers}");
+        let _ = write!(out, "\n逐句署名：{speakers}");
     }
     if d.group_pos > 0 {
         let prev = g.docs[d.group_pos as usize - 1] as usize;

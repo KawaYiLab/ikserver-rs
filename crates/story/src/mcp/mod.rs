@@ -258,6 +258,8 @@ pub fn instructions(c: &Corpus) -> String {
              角色相关先用 ik_character。较大的总结/考据任务开始前可读一次 ik_guide(mode=summary|character|timeline|verify)。\
              docId 必须原样使用工具返回的值。提取模式：{}；没有说话人的行不要臆测说话人。\
              多词检索先同篇 AND，无完整匹配时默认明确标注部分匹配及缺失词；allowPartial=false 要求严格匹配。\
+             逐词匹配字段区分正文和元数据；仅元数据命中为独立目录建议，正文共现须用 matchIn=body。\
+             占位说明不是正式对白，TextMap姓名表不证明出场，推断署名单独统计；includeEvidence=true 展开来源证据，姓名解析和资源引用均不确认播放。\
              3.2/3.3 等已确认版本别名定位该版新增主线，可作目录 path、顺读 docId 或检索中的独立版本词；语料快照仍包含历史章节，未知版本不推演。\
              目录排列未证实为剧情先后，follow 只保证目录覆盖；未关联的 Comic 不可按相邻位置拼接。",
         c.meta.language,

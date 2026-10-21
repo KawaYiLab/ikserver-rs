@@ -37,6 +37,8 @@ pub struct ReadArgs {
     pub line_numbers: Option<bool>,
     #[serde(default, deserialize_with = "crate::de::opt_bool")]
     pub include_sources: Option<bool>,
+    #[serde(default, deserialize_with = "crate::de::opt_bool")]
+    pub include_evidence: Option<bool>,
 }
 
 fn continuation(doc: &str, offset: usize, args: &ReadArgs, follow: bool) -> String {
@@ -56,6 +58,9 @@ fn continuation(doc: &str, offset: usize, args: &ReadArgs, follow: bool) -> Stri
     }
     if args.include_sources == Some(true) {
         call.push_str(", includeSources=true");
+    }
+    if args.include_evidence == Some(true) {
+        call.push_str(", includeEvidence=true");
     }
     call.push(')');
     call
@@ -121,7 +126,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
         }
         let speakers = speakers_preview(corpus, doc, 12);
         if !speakers.is_empty() {
-            let _ = write!(out, " | 出场：{speakers}");
+            let _ = write!(out, " | 逐句署名：{speakers}");
         }
         out.push('\n');
         if first_doc {
@@ -140,8 +145,11 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
                 let _ = write!(line_buf, "L{} ", end + 1);
             }
             push_line(&mut line_buf, corpus, line, corpus.line_text(line));
-            if args.include_sources.unwrap_or(false) {
+            if args.include_sources.unwrap_or(false) || args.include_evidence.unwrap_or(false) {
                 super::push_source(&mut line_buf, corpus, line);
+            }
+            if args.include_evidence.unwrap_or(false) {
+                super::push_evidence(&mut line_buf, corpus, line);
             }
             let cost = line_buf.chars().count() + 1;
             // 预算用尽就停，但每次调用至少给出一行，避免死循环。

@@ -27,6 +27,10 @@ const RELEASES: &[Release] = &[
     },
 ];
 
+pub(crate) fn revision_data() -> Vec<(&'static str, &'static str)> {
+    RELEASES.iter().map(|r| (r.version, r.group)).collect()
+}
+
 /// Recognize only a whole version expression. Percentages, decimal values in
 /// phrases and arbitrary substrings remain literal search terms.
 fn version_expression(query: &str) -> Option<String> {

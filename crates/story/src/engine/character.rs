@@ -19,6 +19,8 @@ pub struct CharacterArgs {
     pub name: String,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
     pub max_results: Option<usize>,
+    #[serde(default, deserialize_with = "crate::de::opt_bool")]
+    pub include_evidence: Option<bool>,
 }
 
 /// 场景名单里的非角色项。
@@ -34,6 +36,8 @@ struct ChapterStat {
     mentions: usize,
     first_appear: Option<usize>,
     first_mention: Option<usize>,
+    name_table: usize,
+    inferred: usize,
 }
 
 pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
@@ -77,6 +81,9 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
     let mut per_group: HashMap<u32, ChapterStat> = HashMap::new();
     let mut co: HashMap<&str, usize> = HashMap::new();
     let (mut scenes, mut spoken) = (0usize, 0usize);
+    let (mut table_scenes, mut inferred_lines) = (0usize, 0usize);
+    let mut association_docs = Vec::new();
+    let mut attributed_docs = Vec::new();
     let mut related_lines: HashMap<u32, usize> = HashMap::new();
     for (d, doc) in corpus.docs.iter().enumerate() {
         if doc.kind == DocKind::Lore {
@@ -84,11 +91,24 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         }
         let names = corpus.doc_speakers(doc);
         let appears = names.iter().any(|s| ids.contains(s));
+        let table = doc.name_table.iter().any(|s| ids.contains(s));
+        let inferred_here = doc
+            .lines()
+            .filter(|&l| ids.contains(&corpus.lines[l].speaker) && corpus.is_inferred(l))
+            .count();
+        if table || inferred_here > 0 {
+            association_docs.push(d);
+            let stat = per_group.entry(doc.group).or_default();
+            stat.name_table += usize::from(table);
+            stat.inferred += inferred_here;
+            table_scenes += usize::from(table);
+            inferred_lines += inferred_here;
+        }
         let mut lines_here = 0usize;
         if appears || !related.is_empty() {
             for l in doc.lines() {
                 let sp = corpus.lines[l].speaker;
-                if ids.contains(&sp) {
+                if ids.contains(&sp) && corpus.is_attributed(l) {
                     lines_here += 1;
                 } else if related.contains(&sp) {
                     *related_lines.entry(sp).or_default() += 1;
@@ -98,6 +118,7 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         if !appears {
             continue;
         }
+        attributed_docs.push(d);
         scenes += 1;
         spoken += lines_here;
         let stat = per_group.entry(doc.group).or_default();
@@ -209,6 +230,44 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         thousands(mention_docs),
         thousands(lore_mentions)
     );
+    let _ = writeln!(
+        out,
+        "姓名表关联 {table_scenes} 场景 · 推断署名 {inferred_lines} 句（独立统计，不计入实际署名台词或目录首见出场）。"
+    );
+    if args.include_evidence == Some(true) {
+        out.push_str("逐句署名证据入口（按目录序）：\n");
+        for &d in attributed_docs.iter().take(max) {
+            push_doc_summary(&mut out, corpus, d);
+            out.push('\n');
+            super::push_evidence_note(&mut out, corpus, d);
+            super::push_doc_evidence(&mut out, corpus, d);
+        }
+        if attributed_docs.len() > max {
+            let _ = writeln!(
+                out,
+                "另有 {} 篇逐句署名证据未展开；用 ik_search(speaker=\"{name}\", includeEvidence=true) 缩小范围。",
+                attributed_docs.len() - max
+            );
+        }
+    }
+    if !association_docs.is_empty() {
+        out.push_str("姓名表/推断关联入口：\n");
+        for &d in association_docs.iter().take(max) {
+            push_doc_summary(&mut out, corpus, d);
+            out.push('\n');
+            super::push_evidence_note(&mut out, corpus, d);
+            if args.include_evidence == Some(true) {
+                super::push_doc_evidence(&mut out, corpus, d);
+            }
+        }
+        if association_docs.len() > max {
+            let _ = writeln!(
+                out,
+                "另有 {} 篇关联未显示；用 ik_search(keyword=\"{name}\") 查看。",
+                association_docs.len() - max
+            );
+        }
+    }
     let mut groups: Vec<(&u32, &ChapterStat)> = per_group.iter().collect();
     groups.sort_by_key(|(g, _)| **g);
     let chapter_rows = groups
@@ -218,8 +277,14 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         let group = &corpus.groups[**g as usize];
         let _ = write!(
             out,
-            "- {} {} | 场景 {} · 台词 {} · 提及 {}",
-            group.id, group.label, stat.scenes, stat.lines, stat.mentions
+            "- {} {} | 场景 {} · 台词 {} · 提及 {} · 姓名表 {} · 推断 {}",
+            group.id,
+            group.label,
+            stat.scenes,
+            stat.lines,
+            stat.mentions,
+            stat.name_table,
+            stat.inferred
         );
         let first = match (stat.first_appear, stat.first_mention) {
             (Some(d), _) => Some(("目录首见出场", d)),

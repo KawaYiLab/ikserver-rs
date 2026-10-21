@@ -829,7 +829,7 @@ fn catalog_root_group_and_doc() {
     let group = ok(&c, "ik_catalog", json!({ "path": "序章" }));
     assert!(group.contains("#### 任务：开张大吉"), "{group}");
     assert!(
-        group.contains("录像店的早晨 · 6句 · 铃、哲、妮可"),
+        group.contains("录像店的早晨 · 6句 · 逐句署名：铃、哲、妮可"),
         "{group}"
     );
     assert!(group.contains("### 补充 · 过场字幕"), "{group}");

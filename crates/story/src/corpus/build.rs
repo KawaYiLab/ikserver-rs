@@ -13,18 +13,31 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
-use xxhash_rust::xxh3::xxh3_64;
+use std::sync::Arc;
+use xxhash_rust::xxh3::{xxh3_64, xxh3_128};
 
 use super::bundle::Bundle;
 use super::{
-    Corpus, DOC_HASH_MASK, Doc, DocKeys, DocKind, Group, GroupKind, Line, LineKind, LineSource,
-    Meta, NO_SPEAKER,
+    Corpus, DOC_HASH_MASK, Doc, DocKeys, DocKind, Group, GroupKind, Line, LineEvidence, LineKind,
+    LineSource, Meta, NO_SPEAKER,
 };
 use crate::index::BigramIndex;
 use crate::text::fold;
 
 #[derive(Deserialize)]
 struct Row<'a> {
+    content_status: Option<Arc<str>>,
+    content_evidence: Option<Box<serde_json::Value>>,
+    source_attribution: Option<Box<serde_json::Value>>,
+    speaker_status: Option<Arc<str>>,
+    speaker_gap_reason: Option<Arc<str>>,
+    speaker_source: Option<Arc<str>>,
+    speaker_slot: Option<Box<serde_json::Value>>,
+    has_voice: Option<bool>,
+    line_order_source: Option<Arc<str>>,
+    line_order_status: Option<Arc<str>>,
+    perform: Option<Box<super::ResourceEvidence>>,
+    timeline: Option<Box<super::ResourceEvidence>>,
     #[serde(borrow)]
     chapter: Cow<'a, str>,
     #[serde(borrow, default)]
@@ -63,6 +76,25 @@ struct Row<'a> {
     order: i64,
 }
 
+impl Row<'_> {
+    fn take_evidence(&mut self) -> LineEvidence {
+        LineEvidence {
+            content_status: self.content_status.take(),
+            content_evidence: self.content_evidence.take(),
+            source_attribution: self.source_attribution.take(),
+            speaker_status: self.speaker_status.take(),
+            speaker_gap_reason: self.speaker_gap_reason.take(),
+            speaker_source: self.speaker_source.take(),
+            speaker_slot: self.speaker_slot.take(),
+            has_voice: self.has_voice,
+            line_order_source: self.line_order_source.take(),
+            line_order_status: self.line_order_status.take(),
+            perform: self.perform.take(),
+            timeline: self.timeline.take(),
+        }
+    }
+}
+
 fn zero_order() -> serde_json::Number {
     0.into()
 }
@@ -95,6 +127,8 @@ struct DraftDoc {
     context_status: Option<String>,
     lines: Vec<DraftLine>,
     speakers: Vec<String>,
+    name_table: Vec<String>,
+    inferred_speakers: Vec<String>,
 }
 
 struct DraftLine {
@@ -102,6 +136,7 @@ struct DraftLine {
     speaker: Option<String>,
     kind: LineKind,
     source: LineSource,
+    evidence: LineEvidence,
 }
 
 struct DraftGroup {
@@ -307,21 +342,26 @@ fn ingest_jsonl(
     kind: DocKind,
     legacy: bool,
 ) -> Result<JsonlStats> {
-    let mut rows: Vec<(usize, Row<'_>)> = raw
+    let mut evidence_strings = HashMap::new();
+    let mut rows: Vec<(usize, Row<'_>, LineEvidence)> = raw
         .lines()
         .enumerate()
         .filter(|(_, l)| !l.trim().is_empty())
         .map(|(i, l)| {
             serde_json::from_str::<Row<'_>>(l)
-                .map(|r| (i, r))
+                .map(|mut r| {
+                    let mut evidence = r.take_evidence();
+                    evidence.intern(&mut evidence_strings);
+                    (i, r, evidence)
+                })
                 .with_context(|| format!("{name} 第 {} 行解析失败", i + 1))
         })
         .collect::<Result<_>>()?;
-    rows.sort_by_key(|(i, r)| (r.order, *i));
+    rows.sort_by_key(|(i, r, _)| (r.order, *i));
 
     let mut stats = JsonlStats::default();
     let mut doc_by_key: HashMap<String, usize> = HashMap::new();
-    for (_, row) in rows {
+    for (_, row, mut evidence) in rows {
         let text = row.text.trim();
         if text.is_empty() {
             continue;
@@ -400,19 +440,30 @@ fn ingest_jsonl(
                     chronology_status: row.chronology_status.as_deref().map(str::to_owned),
                     context_status: row.context_status.as_deref().map(str::to_owned),
                     lines: Vec::new(),
-                    speakers: scene_speakers,
+                    speakers: Vec::new(),
+                    name_table: scene_speakers,
+                    inferred_speakers: Vec::new(),
                 });
                 doc_by_key.insert(key, d);
                 d
             }
         };
-        let speaker = row
+        let placeholder = row.line_type.as_deref() == Some("placeholder")
+            || evidence.content_status.as_deref() == Some("reviewed_placeholder");
+        let raw_speaker = row
             .speaker
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_owned);
+        if placeholder && evidence.source_attribution.is_none() && raw_speaker.is_some() {
+            evidence.source_attribution = Some(Box::new(
+                serde_json::json!({"speaker":raw_speaker,"speaker_id":row.speaker_id,"line_type":row.line_type}),
+            ));
+        }
+        let speaker = if placeholder { None } else { raw_speaker };
         let line_kind = match (row.line_type.as_deref(), &speaker) {
+            _ if placeholder => LineKind::Placeholder,
             (Some("option"), _) => LineKind::Option,
             (_, Some(_)) => LineKind::Dialogue,
             (Some("narration"), None) => LineKind::Narration,
@@ -435,10 +486,28 @@ fn ingest_jsonl(
             stats.with_speaker += usize::from(speaker.is_some());
         }
         let draft = &mut builder.docs[doc];
+        if let Some(names) = row.scene_speakers {
+            for name in names {
+                let name = name.trim();
+                if !name.is_empty() && !draft.name_table.iter().any(|s| s == name) {
+                    draft.name_table.push(name.to_owned());
+                }
+            }
+        }
+        let names = if evidence.speaker_status.as_deref() == Some("inferred") {
+            &mut draft.inferred_speakers
+        } else {
+            &mut draft.speakers
+        };
         if let Some(s) = &speaker
-            && !draft.speakers.contains(s)
+            && (evidence
+                .speaker_status
+                .as_deref()
+                .is_none_or(|s| matches!(s, "resolved" | "inferred")))
+            && line_kind == LineKind::Dialogue
+            && !names.contains(s)
         {
-            draft.speakers.push(s.clone());
+            names.push(s.clone());
         }
         draft.lines.push(DraftLine {
             text: text.to_owned(),
@@ -448,6 +517,7 @@ fn ingest_jsonl(
                 source_key: row.source_key.as_deref().map(str::to_owned),
                 line_id: row.line_id.as_deref().map(str::to_owned),
             },
+            evidence,
         });
     }
     Ok(stats)
@@ -647,9 +717,12 @@ fn ingest_lore(builder: &mut Builder, files: &BTreeMap<String, String>) {
                         speaker: None,
                         kind: LineKind::Text,
                         source: LineSource::default(),
+                        evidence: LineEvidence::default(),
                     })
                     .collect(),
                 speakers: Vec::new(),
+                name_table: Vec::new(),
+                inferred_speakers: Vec::new(),
             });
         }
     }
@@ -705,6 +778,10 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
     let mut text = String::with_capacity(total_bytes);
     let mut lines = Vec::with_capacity(total_lines);
     let mut line_sources = Vec::with_capacity(total_lines);
+    let mut line_evidence_ids = Vec::with_capacity(total_lines);
+    let mut evidence = Vec::new();
+    let mut evidence_lookup = HashMap::new();
+    let mut evidence_strings: HashMap<Arc<str>, Arc<str>> = HashMap::new();
     let mut docs = Vec::with_capacity(drafts.len());
     let mut doc_speakers = Vec::new();
     let mut new_doc_index = vec![0u32; drafts.len()];
@@ -734,6 +811,20 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
                 kind: l.kind,
             });
             line_sources.push(l.source.clone());
+            let mut entry = l.evidence.clone();
+            entry.intern(&mut evidence_strings);
+            let key = xxh3_128(&serde_json::to_vec(&entry)?);
+            if let Some(&id) = evidence_lookup.get(&key)
+                && evidence[id as usize] != entry
+            {
+                bail!("提取证据摘要碰撞，请重新生成语料包");
+            }
+            let id = *evidence_lookup.entry(key).or_insert_with(|| {
+                let id = evidence.len() as u32;
+                evidence.push(entry);
+                id
+            });
+            line_evidence_ids.push(id);
         }
         let speakers_start = doc_speakers.len() as u32;
         for s in &d.speakers {
@@ -756,11 +847,46 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
             char_count: char_count as u32,
             speakers_start,
             speakers_len: d.speakers.len() as u32,
+            name_table: d
+                .name_table
+                .iter()
+                .map(|s| intern(s, &mut speakers))
+                .collect(),
+            inferred_speakers: d
+                .inferred_speakers
+                .iter()
+                .map(|s| intern(s, &mut speakers))
+                .collect(),
+            evidence_counts: {
+                let mut counts = super::EvidenceCounts::default();
+                for line in &d.lines {
+                    counts.placeholders += usize::from(line.kind == LineKind::Placeholder);
+                    counts.unknown += usize::from(
+                        line.kind == LineKind::Unknown
+                            || (line.kind == LineKind::Dialogue
+                                && line
+                                    .evidence
+                                    .speaker_status
+                                    .as_deref()
+                                    .is_some_and(|s| !matches!(s, "resolved" | "inferred"))),
+                    );
+                    counts.inferred +=
+                        usize::from(line.evidence.speaker_status.as_deref() == Some("inferred"));
+                    counts.missing += usize::from(line.evidence.speaker_status.is_none());
+                    counts.unlinked += usize::from(line.evidence.unlinked_candidate());
+                    counts.no_voice += usize::from(line.evidence.has_voice == Some(false));
+                }
+                counts
+            },
         });
     }
     if text.len() > u32::MAX as usize {
         bail!("语料超过 4 GiB，超出索引寻址范围");
     }
+    // 原文、来源与去重证据均已落成；构建倒排索引前释放草稿和临时字典，降低峰值驻留内存。
+    drop(drafts);
+    drop(evidence_lookup);
+    drop(evidence_strings);
 
     let mut groups: Vec<Group> = Vec::with_capacity(group_order.len());
     for &old in &group_order {
@@ -796,6 +922,12 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         for &s in &doc_speakers[start..start + d.speakers_len as usize] {
             by_speaker[s as usize].push(i as u32);
         }
+        for &s in d.name_table.iter().chain(&d.inferred_speakers) {
+            let list = &mut by_speaker[s as usize];
+            if list.last() != Some(&(i as u32)) {
+                list.push(i as u32);
+            }
+        }
     }
     let mut speaker_doc_offsets = Vec::with_capacity(speakers.len() + 1);
     let mut speaker_docs = Vec::new();
@@ -816,11 +948,14 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         line_doc.extend(std::iter::repeat_n(i as u32, d.line_count as usize));
     }
 
-    Ok(Corpus {
+    let mut corpus = Corpus {
+        revision: String::new(),
         meta,
         text,
         lines,
         line_sources,
+        line_evidence_ids,
+        evidence,
         docs,
         groups,
         speakers,
@@ -834,7 +969,9 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         doc_lookup,
         line_doc,
         index,
-    })
+    };
+    corpus.revision = super::revision::revision(&corpus)?;
+    Ok(corpus)
 }
 
 #[cfg(test)]
