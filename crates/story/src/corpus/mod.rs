@@ -30,6 +30,8 @@ pub struct Meta {
     pub built_at: u64,
     /// 主线台词里带说话人的比例（0..=1）。
     pub speaker_coverage: f32,
+    /// None 表示旧包未声明筛选模式。
+    pub accuracy_first: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +54,13 @@ pub struct Line {
     pub len: u32,
     pub speaker: u32,
     pub kind: LineKind,
+}
+
+/// 可选的原始行出处；与 lines 一一对应，兼容旧语料包。
+#[derive(Debug, Clone, Default)]
+pub struct LineSource {
+    pub source_key: Option<String>,
+    pub line_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,6 +98,9 @@ pub struct Doc {
     pub path: String,
     /// 官方任务名（仅剧情演出）。
     pub quest: Option<String>,
+    pub order_source: Option<String>,
+    pub chronology_status: Option<String>,
+    pub context_status: Option<String>,
     pub first_line: u32,
     pub line_count: u32,
     pub char_count: u32,
@@ -124,11 +136,16 @@ pub struct Corpus {
     pub meta: Meta,
     pub text: String,
     pub lines: Vec<Line>,
+    pub line_sources: Vec<LineSource>,
     pub docs: Vec<Doc>,
     pub groups: Vec<Group>,
     pub speakers: Vec<String>,
     /// 折叠后的说话人名，与 `speakers` 一一对应。
     pub speakers_folded: Vec<String>,
+    /// 角色身份的折叠名；不同形态仍保留各自的显示名。
+    pub speaker_identities: Vec<String>,
+    /// 归一角色名的原始写法，用于聚合后的显示。
+    pub speaker_identity_names: Vec<String>,
     pub doc_speakers: Vec<u32>,
     /// CSR：说话人 → 出场文档（升序），`speaker_docs[speaker_doc_offsets[s]..speaker_doc_offsets[s+1]]`。
     pub speaker_doc_offsets: Vec<u32>,
@@ -207,16 +224,24 @@ impl Corpus {
         if by_token.is_some() {
             return by_token;
         }
-        if let Some(i) = self
+        let exact: Vec<usize> = self
             .groups
             .iter()
-            .position(|g| crate::text::fold(&g.label) == folded)
-        {
-            return Some(i);
+            .enumerate()
+            .filter(|(_, g)| crate::text::fold(&g.label) == folded)
+            .map(|(i, _)| i)
+            .collect();
+        if !exact.is_empty() {
+            return (exact.len() == 1).then(|| exact[0]);
         }
-        self.groups
+        let partial: Vec<usize> = self
+            .groups
             .iter()
-            .position(|g| crate::text::fold(&g.label).contains(&folded))
+            .enumerate()
+            .filter(|(_, g)| crate::text::fold(&g.label).contains(&folded))
+            .map(|(i, _)| i)
+            .collect();
+        (partial.len() == 1).then(|| partial[0])
     }
 
     /// 阅读顺序中的下一篇（同一分组内）。

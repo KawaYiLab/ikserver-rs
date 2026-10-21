@@ -1,7 +1,7 @@
 //! ik_search：全文检索。
 //!
 //! 多个关键词用空格分隔，按「同一文档内全部出现」求交（AND）；没有文档同时包含全部关键词时
-//! 退化为按覆盖词数排序的部分匹配并明确告知。文档打分用行级 BM25，标题/路径命中额外加分。
+//! 仅 allowPartial=true 时返回部分匹配。文档打分用行级 BM25，标题/路径命中额外加分。
 //! 指定 docId 时变为文档内检索，逐行列出命中与行号。
 
 use std::fmt::Write as _;
@@ -38,6 +38,10 @@ pub struct SearchArgs {
     pub max_results: Option<usize>,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
     pub hits_per_doc: Option<usize>,
+    #[serde(default, deserialize_with = "crate::de::opt_bool")]
+    pub allow_partial: Option<bool>,
+    #[serde(default, deserialize_with = "crate::de::opt_usize")]
+    pub context_lines: Option<usize>,
 }
 
 /// 检索范围：文档种类 / 分组 / 单篇 / 说话人。
@@ -74,7 +78,7 @@ pub(crate) fn match_speakers(corpus: &Corpus, name: &str) -> Vec<u32> {
         .speakers_folded
         .iter()
         .enumerate()
-        .filter(|(_, s)| **s == folded)
+        .filter(|(i, s)| **s == folded || corpus.speaker_identities[*i] == folded)
         .map(|(i, _)| i as u32)
         .collect();
     if !exact.is_empty() {
@@ -164,7 +168,7 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
 
     let term_hits = collect_term_hits(corpus, &terms, &filter);
     let df: Vec<usize> = term_hits.iter().map(|t| t.docs.len()).collect();
-    let hits = assemble(corpus, &term_hits, filter.doc.is_some());
+    let hits = assemble(corpus, &term_hits, args.allow_partial.unwrap_or(false));
 
     match doc {
         Some(d) => Ok(render_in_doc(
@@ -174,6 +178,7 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
             speaker_name,
             &terms,
             &hits,
+            truncated,
             args.max_results,
         )),
         None => Ok(render_ranked(
@@ -255,7 +260,9 @@ fn collect_term_hits(corpus: &Corpus, terms: &[String], filter: &Filter) -> Vec<
             .speakers_folded
             .iter()
             .enumerate()
-            .filter(|(_, n)| n.contains(term.as_str()))
+            .filter(|(i, n)| {
+                n.contains(term.as_str()) || corpus.speaker_identities[*i].contains(term.as_str())
+            })
             .map(|(i, _)| i as u32)
             .collect();
         let mut cast_docs: Vec<u32> = Vec::new();
@@ -281,9 +288,10 @@ fn collect_term_hits(corpus: &Corpus, terms: &[String], filter: &Filter) -> Vec<
             }
         }
         let line_docs = docs_of_lines(corpus, &lines);
-        // 元数据命中只在全局检索时计入；按说话人筛选时，元数据命中但没有该说话人台词的文档不算。
+        // 全库和篇内使用同一元数据条件；按说话人筛选时，
+        // 元数据命中但没有该说话人台词的文档不算。
         // 出场名单也算元数据：「狡兔屋 妮可」应能找到妮可出场、台词里提到狡兔屋的场景。
-        let title_docs: Vec<u32> = if filter.doc.is_none() {
+        let title_docs: Vec<u32> = {
             union_sorted(&corpus.doc_keys.matching(term, false), &cast_docs)
                 .into_iter()
                 .filter(|&d| {
@@ -291,8 +299,6 @@ fn collect_term_hits(corpus: &Corpus, terms: &[String], filter: &Filter) -> Vec<
                         && (filter.speakers.is_none() || line_docs.binary_search(&d).is_ok())
                 })
                 .collect()
-        } else {
-            Vec::new()
         };
         let docs = union_sorted(&line_docs, &title_docs);
         out.push(TermHits {
@@ -319,21 +325,16 @@ fn docs_of_lines(corpus: &Corpus, lines: &[u32]) -> Vec<u32> {
     out
 }
 
-/// 先在文档集合上求交（AND），只为入选文档构建命中表；全空时退化为并集（部分匹配）。
-/// 篇内检索不求交：同一篇里任一命中都要列出。
-fn assemble(corpus: &Corpus, terms: &[TermHits], in_doc: bool) -> Hits {
+/// 先在文档集合上求交（AND），仅显式允许时退化为并集（部分匹配）。
+fn assemble(corpus: &Corpus, terms: &[TermHits], allow_partial: bool) -> Hits {
     let mut sets: Vec<&[u32]> = terms.iter().map(|t| t.docs.as_slice()).collect();
     sets.sort_by_key(|s| s.len());
     let mut selected: Vec<u32> = sets.first().map(|s| s.to_vec()).unwrap_or_default();
     for s in sets.iter().skip(1) {
-        selected = if in_doc {
-            union_sorted(&selected, s)
-        } else {
-            intersect(&selected, s)
-        };
+        selected = intersect(&selected, s);
     }
     let mut partial = false;
-    if selected.is_empty() && terms.len() > 1 {
+    if selected.is_empty() && terms.len() > 1 && allow_partial {
         partial = true;
         for s in &sets {
             selected = union_sorted(&selected, s);
@@ -527,6 +528,7 @@ fn render_ranked(
         thousands(total_lines),
         hits.len()
     );
+    super::push_version(&mut out, corpus);
     if truncated {
         let _ = writeln!(out, "注意：最多使用前 {MAX_TERMS} 个关键词。");
     }
@@ -534,6 +536,9 @@ fn render_ranked(
         out.push_str("没有文档同时包含全部关键词，以下按覆盖的关键词数排序（部分匹配）。\n");
     }
     if hits.is_empty() {
+        if terms.len() > 1 {
+            out.push_str("AND 查询没有共同命中；可显式设置 allowPartial=true 查看部分匹配。\n");
+        }
         out.push_str(
             "没有命中。建议：换用角色名/地名/组织名等实体词；减少关键词；去掉 scope/path/speaker 限制；\
              或用 ik_catalog(keyword=…) 按标题查找。",
@@ -550,24 +555,81 @@ fn render_ranked(
             out.push_str("（标题/出场命中）");
         }
         out.push('\n');
+        super::push_order_note(&mut out, corpus, h.doc);
+        if partial {
+            let missing: Vec<&str> = terms
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| ((h.line_mask | h.title_mask) >> i) & 1 == 0)
+                .map(|(_, term)| term.as_str())
+                .collect();
+            let _ = writeln!(out, "   未命中关键词：{}", missing.join("、"));
+        }
         // 先挑覆盖词最多的行，再按行号展示。
         let mut picked: Vec<(u32, u32)> = hit_lines[h.start as usize..h.end as usize].to_vec();
         picked.sort_by(|a, b| b.1.count_ones().cmp(&a.1.count_ones()).then(a.0.cmp(&b.0)));
         picked.truncate(per_doc);
         picked.sort_unstable_by_key(|&(l, _)| l);
         let first = corpus.docs[h.doc].first_line;
-        for (line, mask) in picked {
+        let anchor = picked
+            .first()
+            .map(|&(line, _)| (line - first + 1).saturating_sub(5).max(1))
+            .or_else(|| (corpus.docs[h.doc].line_count > 0).then_some(1));
+        let context = args
+            .context_lines
+            .unwrap_or(usize::from(speaker.is_none()))
+            .min(3);
+        let doc = &corpus.docs[h.doc];
+        let mut shown: Vec<u32> = picked
+            .iter()
+            .flat_map(|&(line, _)| {
+                line.saturating_sub(context as u32).max(first)
+                    ..(line + context as u32 + 1).min(first + doc.line_count)
+            })
+            .collect();
+        shown.sort_unstable();
+        shown.dedup();
+        for line in shown {
+            let mask = picked
+                .binary_search_by_key(&line, |&(l, _)| l)
+                .ok()
+                .map(|i| picked[i].1);
             let text = corpus.line_text(line as usize);
-            let term = terms.get(mask.trailing_zeros() as usize);
+            let term = mask.and_then(|m| terms.get(m.trailing_zeros() as usize));
             let at = term.and_then(|t| find_folded(text, t, &mut scratch));
-            let _ = write!(out, "   L{} ", line - first + 1);
+            let _ = write!(
+                out,
+                "   {}L{} ",
+                if mask.is_some() { "" } else { "上下文 " },
+                line - first + 1
+            );
             push_line(
                 &mut out,
                 corpus,
                 line as usize,
                 &snippet(text, at, SNIPPET_WIDTH),
             );
+            if let Some(mask) = mask {
+                let names: Vec<&str> = terms
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, t)| {
+                        mask & (1 << i) != 0 && find_folded(text, t, &mut scratch).is_none()
+                    })
+                    .map(|(_, t)| t.as_str())
+                    .collect();
+                if !names.is_empty() {
+                    let _ = write!(out, " [说话人名/身份匹配：{}]", names.join("、"));
+                }
+            }
             out.push('\n');
+        }
+        if let Some(offset) = anchor {
+            let _ = writeln!(
+                out,
+                "   读上下文：ik_read(docId=\"{}\", offset={offset}, limit=20)",
+                corpus.doc_id(h.doc)
+            );
         }
     }
     if total_docs > hits.len() {
@@ -577,7 +639,7 @@ fn render_ranked(
             total_docs - hits.len()
         );
     }
-    out.push_str("下一步：ik_read(docId=…, offset=行号-5) 读命中处上下文；ik_search(docId=…, keyword=…) 列出该篇全部命中行。");
+    out.push_str("下一步：使用各篇的精确 ik_read 调用读上下文；ik_search(docId=…, keyword=…) 列出该篇全部命中行。");
     out
 }
 
@@ -588,6 +650,7 @@ fn render_in_doc(
     speaker: Option<&str>,
     terms: &[String],
     hits: &Hits,
+    truncated: bool,
     max_results: Option<usize>,
 ) -> String {
     let max = clamp(max_results, 50, 500);
@@ -598,24 +661,35 @@ fn render_in_doc(
     if let Some(s) = speaker {
         let _ = write!(out, " | 说话人: {s}");
     }
-    let lines: Vec<(u32, u32)> = hits.lines.clone();
-    let all_mask: u32 = if terms.is_empty() {
-        0
-    } else {
-        (1u32 << terms.len()) - 1
-    };
-    // 篇内检索按「同一行」求交更有用；没有同时命中的行时退回任一命中。
-    let strict: Vec<(u32, u32)> = lines
-        .iter()
-        .copied()
-        .filter(|&(_, m)| m & all_mask == all_mask)
-        .collect();
-    let (shown, note) = if strict.is_empty() && !lines.is_empty() {
-        (lines, "（没有一行同时包含全部关键词，列出任一命中）")
-    } else {
-        (strict, "")
-    };
-    let _ = writeln!(out, " | 命中 {} 行{note}", shown.len());
+    let shown = &hits.lines;
+    let _ = writeln!(
+        out,
+        " | 命中 {} 行（同篇 AND，列出各关键词的命中行）",
+        shown.len()
+    );
+    super::push_version(&mut out, corpus);
+    if truncated {
+        out.push_str("关键词过多，仅检索前 8 个。\n");
+    }
+    super::push_order_note(&mut out, corpus, doc);
+    if hits.docs.iter().any(|h| h.title_mask != 0) {
+        out.push_str("标题/出场命中计入同篇 AND；正文命中行单独列出。\n");
+    }
+    if hits.partial {
+        let mask = hits
+            .docs
+            .iter()
+            .fold(0u32, |acc, h| acc | h.line_mask | h.title_mask);
+        let missing: Vec<&str> = terms
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) == 0)
+            .map(|(_, t)| t.as_str())
+            .collect();
+        let _ = writeln!(out, "部分匹配；未命中关键词：{}", missing.join("、"));
+    } else if hits.docs.is_empty() && terms.len() > 1 {
+        out.push_str("AND 查询没有共同命中；可显式设置 allowPartial=true 查看部分匹配。\n");
+    }
     let first = corpus.docs[doc].first_line;
     let mut scratch = String::new();
     for &(line, mask) in shown.iter().take(max) {
@@ -630,6 +704,15 @@ fn render_in_doc(
             line as usize,
             &snippet(text, at, SNIPPET_WIDTH * 2),
         );
+        let names: Vec<&str> = terms
+            .iter()
+            .enumerate()
+            .filter(|(i, t)| mask & (1 << i) != 0 && find_folded(text, t, &mut scratch).is_none())
+            .map(|(_, t)| t.as_str())
+            .collect();
+        if !names.is_empty() {
+            let _ = write!(out, " [说话人名/身份匹配：{}]", names.join("、"));
+        }
         out.push('\n');
     }
     if shown.len() > max {

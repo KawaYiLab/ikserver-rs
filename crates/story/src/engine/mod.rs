@@ -66,6 +66,46 @@ pub(crate) fn push_doc_summary(out: &mut String, corpus: &Corpus, doc: usize) {
     );
 }
 
+pub(crate) fn push_version(out: &mut String, corpus: &Corpus) {
+    let _ = writeln!(
+        out,
+        "语料版本：{} {} | 提取时间：{}",
+        corpus.meta.source_version, corpus.meta.language, corpus.meta.generated_at
+    );
+    let mode = match corpus.meta.accuracy_first {
+        Some(true) => "完整性校对（双方分支候选保留）",
+        Some(false) => "默认哲视角；不确定分支保留，非严格单一路线",
+        None => "旧语料未声明",
+    };
+    let _ = writeln!(out, "提取模式：{mode}");
+}
+
+pub(crate) fn push_order_note(out: &mut String, corpus: &Corpus, doc: usize) {
+    let d = &corpus.docs[doc];
+    if d.kind == DocKind::Lore {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "顺序来源：{} | 剧情先后：{}。目录位置不代表剧情后继或故事内时间。",
+        d.order_source.as_deref().unwrap_or("旧语料未记录"),
+        d.chronology_status.as_deref().unwrap_or("unknown")
+    );
+    if d.section == "Comic" && d.context_status.as_deref() != Some("linked") {
+        out.push_str("漫画片段尚未关联完整场景；没有说话人和时间信息时不要补写，目录前后片段也不构成上下文。\n");
+    }
+}
+
+pub(crate) fn push_source(out: &mut String, corpus: &Corpus, line: usize) {
+    let source = &corpus.line_sources[line];
+    if let Some(key) = &source.source_key {
+        let _ = write!(out, " [sourceKey={key}]");
+    }
+    if let Some(id) = &source.line_id {
+        let _ = write!(out, " [lineId={id}]");
+    }
+}
+
 /// 出场名单（最多 `max` 个）。
 pub(crate) fn speakers_preview(corpus: &Corpus, doc: usize, max: usize) -> String {
     let ids = corpus.doc_speakers(&corpus.docs[doc]);
@@ -97,7 +137,7 @@ pub(crate) fn parse_scope(scope: Option<&str>) -> Result<Option<DocKind>, ToolEr
 pub(crate) fn resolve_group(corpus: &Corpus, path: &str) -> Result<usize, ToolError> {
     corpus.find_group(path).ok_or_else(|| {
         ToolError(format!(
-            "找不到分组「{path}」。用 ik_catalog() 查看全部章节（如 ch:Chapter110）与设定分类（如 lore:agents）"
+            "找不到分组「{path}」或名称有歧义。用 ik_catalog() 查看全部章节，并使用精确 id（如 ch:Chapter110 / lore:agents）"
         ))
     })
 }

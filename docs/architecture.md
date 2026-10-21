@@ -91,10 +91,15 @@ flowchart LR
   跟上，SIGHUP 立即重查；切换经 `ArcSwap` 原子替换，失败保留当前语料。上传在事务外校验与构建，
   事务内用 advisory 锁串行化「换生效版本」，同一事务写审计。`IK_STORY__SOURCE` 指向本地输出目录或语料包时
   用本地语料、不读库（开发用）。工具：`ik_catalog`（章节 / 场景目录）、`ik_search`（多词 AND、BM25、
-  标题 / 路径 / 出场名单加分）、`ik_read`（字数预算分页 + 续读游标，`follow` 跨场景顺读整章）、`ik_character`、
+  标题 / 路径 / 出场名单加分，`allowPartial=true` 才放宽为部分匹配；`contextLines` 控制同篇上下文）、
+  `ik_read`（字数预算分页 + 续读游标，`follow` 按目录跨场景覆盖整章，`includeSources` 返回原始键与稳定行 id）、`ik_character`、
   `ik_guide`（另以 MCP prompts 提供）。访问：`IK_STORY__ACCESS_KEY`（Bearer）或 `IK_STORY__PUBLIC=true`，
   都没有时拒绝所有请求。JSON-RPC 是只读查询，在全站限流里按「读」计。典型查询 0.1 ms 级，极高频词 1～2 ms，
   直接在请求线程里算。
+  新语料保留 `speaker_id`（已知角色形态的归一身份）、原始 `source_key` / `line_id` 和顺序来源；旧包字段可省略。
+  目录顺序不代表剧情先后，未关联场景的 Comic 保持独立片段；角色速览中的首见是目录首见。MCP 查询输出携带语料版本和提取模式。
+  开发时可直接运行 `cargo run -p ik-story --example query -- <语料目录或包> ik_search '{"keyword":"零号空洞"}'`，
+  使用与 MCP 相同的工具分发和参数，无需编译整个 server 或连接数据库。
 - `mail → kernel`：发信通道（SMTP、Brevo）与双通道调度，实现 `ik_kernel::mail::Mailer`，只由 server 装配；
   业务代码只依赖 `Mailer`（验证码邮件在 auth 里事务提交后发送）。
 - `mihoyo → auth`：米游社身份（`mihoyo_bindings`）与扫码会话（`mihoyo_qr_logins`，替代旧系统的 Redis 键）。
@@ -210,3 +215,9 @@ graphile_worker（schema `graphile_worker`，由它自己迁移：执行器启�
 - tracing JSON 日志（dev 用 pretty），所有 span 带 request_id。
 - `/metrics` Prometheus（请求、任务、WS 连接数、DB 池）。
 - `/healthz`（存活）与 `/readyz`（DB ping + 迁移版本检查）。
+
+### 剧情工具边界
+
+剧情检索的同篇 AND 同时核对正文、说话人身份与标题/出场元数据，全库与篇内范围保持一致；说话人身份命中会明确标注。超过 8 个词会提示截断，模糊章节名有歧义时要求精确分组 id。
+
+`ik_read` 续读保留显式行数、字数、行号、来源和 follow 参数。字数预算计入标题与正文，首行可超预算以保证游标推进，末尾续读提示不计入。默认提取保留不确定分支，不代表严格单一路线或已恢复播放顺序。新清单用 `chapter_order_scale=10` 声明整数比例；旧小数按全包统一迁移，显式新比例拒绝小数。

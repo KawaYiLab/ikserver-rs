@@ -17,8 +17,8 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use super::bundle::Bundle;
 use super::{
-    Corpus, DOC_HASH_MASK, Doc, DocKeys, DocKind, Group, GroupKind, Line, LineKind, Meta,
-    NO_SPEAKER,
+    Corpus, DOC_HASH_MASK, Doc, DocKeys, DocKind, Group, GroupKind, Line, LineKind, LineSource,
+    Meta, NO_SPEAKER,
 };
 use crate::index::BigramIndex;
 use crate::text::fold;
@@ -29,8 +29,8 @@ struct Row<'a> {
     chapter: Cow<'a, str>,
     #[serde(borrow, default)]
     chapter_label: Option<Cow<'a, str>>,
-    #[serde(default)]
-    chapter_order: i64,
+    #[serde(default = "zero_order")]
+    chapter_order: serde_json::Number,
     #[serde(borrow)]
     scene: Cow<'a, str>,
     #[serde(borrow, default)]
@@ -41,6 +41,18 @@ struct Row<'a> {
     family: Cow<'a, str>,
     #[serde(borrow, default)]
     speaker: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    speaker_id: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    source_key: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    line_id: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    order_source: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    chronology_status: Option<Cow<'a, str>>,
+    #[serde(borrow, default)]
+    context_status: Option<Cow<'a, str>>,
     #[serde(borrow)]
     text: Cow<'a, str>,
     #[serde(borrow, default)]
@@ -49,6 +61,10 @@ struct Row<'a> {
     scene_speakers: Option<Vec<Cow<'a, str>>>,
     #[serde(default)]
     order: i64,
+}
+
+fn zero_order() -> serde_json::Number {
+    0.into()
 }
 
 #[derive(Deserialize, Default)]
@@ -61,6 +77,8 @@ struct Manifest {
     generated_at: String,
     #[serde(default)]
     local_game_version: String,
+    #[serde(default)]
+    accuracy_first: Option<bool>,
 }
 
 /// 构建过程中的文档（行先挂在文档上，最后统一落进扁平数组）。
@@ -72,6 +90,9 @@ struct DraftDoc {
     title: String,
     path: String,
     quest: Option<String>,
+    order_source: Option<String>,
+    chronology_status: Option<String>,
+    context_status: Option<String>,
     lines: Vec<DraftLine>,
     speakers: Vec<String>,
 }
@@ -80,6 +101,7 @@ struct DraftLine {
     text: String,
     speaker: Option<String>,
     kind: LineKind,
+    source: LineSource,
 }
 
 struct DraftGroup {
@@ -95,6 +117,7 @@ struct Builder {
     docs: Vec<DraftDoc>,
     groups: Vec<DraftGroup>,
     group_by_id: HashMap<String, usize>,
+    speaker_identities: HashMap<String, String>,
 }
 
 impl Builder {
@@ -132,14 +155,22 @@ pub fn build_from_bundle(bundle: &Bundle) -> Result<Corpus> {
         None => Manifest::default(),
     };
 
+    let legacy_orders = legacy_chapter_orders(bundle)?;
     let mut builder = Builder::default();
-    let story_stats = ingest_jsonl(&mut builder, "story.jsonl", &bundle.story, DocKind::Story)?;
+    let story_stats = ingest_jsonl(
+        &mut builder,
+        "story.jsonl",
+        &bundle.story,
+        DocKind::Story,
+        legacy_orders,
+    )?;
     if let Some(supplement) = &bundle.supplement {
         ingest_jsonl(
             &mut builder,
             "supplement.jsonl",
             supplement,
             DocKind::Supplement,
+            legacy_orders,
         )?;
     }
     ingest_lore(&mut builder, &bundle.lore);
@@ -160,6 +191,7 @@ pub fn build_from_bundle(bundle: &Bundle) -> Result<Corpus> {
         },
         generated_at: manifest.generated_at,
         local_game_version: manifest.local_game_version,
+        accuracy_first: manifest.accuracy_first,
         built_at,
         speaker_coverage: if story_stats.lines == 0 {
             0.0
@@ -195,7 +227,86 @@ pub fn family_label(family: &str) -> &str {
     }
 }
 
-fn ingest_jsonl(builder: &mut Builder, name: &str, raw: &str, kind: DocKind) -> Result<JsonlStats> {
+fn legacy_chapter_orders(bundle: &Bundle) -> Result<bool> {
+    let scale = bundle
+        .manifest
+        .as_ref()
+        .and_then(|m| m.get("chapter_order_scale"));
+    if let Some(scale) = scale {
+        return match scale.as_u64() {
+            Some(1) => Ok(true),
+            Some(10) => Ok(false),
+            _ => bail!("chapter_order_scale 必须为 1 或 10"),
+        };
+    }
+    // Legacy outputs had integral story orders and fractional supplements.
+    // Detect once across both files so every group uses the same scale.
+    #[derive(Deserialize)]
+    struct OrderProbe {
+        #[serde(default)]
+        chapter_order: Option<serde_json::Number>,
+    }
+    for (name, raw) in std::iter::once(("story.jsonl", bundle.story.as_str())).chain(
+        bundle
+            .supplement
+            .as_deref()
+            .map(|s| ("supplement.jsonl", s)),
+    ) {
+        for (i, line) in raw
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| !l.trim().is_empty())
+        {
+            let row: OrderProbe = serde_json::from_str(line)
+                .with_context(|| format!("{name} 第 {} 行解析失败", i + 1))?;
+            if row.chapter_order.is_some_and(|n| n.is_f64()) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn chapter_order(number: &serde_json::Number, legacy: bool) -> Result<i64> {
+    if let Some(n) = number.as_i64() {
+        return n
+            .checked_mul(if legacy { 10 } else { 1 })
+            .context("chapter_order 超出 64 位整数范围");
+    }
+    if !legacy {
+        bail!("chapter_order 必须为 64 位整数");
+    }
+    // Old JSON decimal orders have at most one non-zero fractional digit.
+    // Parse their decimal spelling without a lossy float-to-int cast.
+    let spelling = number.to_string();
+    let (whole, fraction) = spelling
+        .split_once('.')
+        .context("chapter_order 无法无损转换")?;
+    let fraction = fraction.trim_end_matches('0');
+    if fraction.len() > 1 || !fraction.bytes().all(|b| b.is_ascii_digit()) {
+        bail!("chapter_order 无法无损转换");
+    }
+    let whole: i64 = whole.parse().context("chapter_order 超出范围")?;
+    let digit = fraction.parse::<i64>().unwrap_or(0);
+    whole
+        .checked_mul(10)
+        .and_then(|n| {
+            if spelling.starts_with('-') {
+                n.checked_sub(digit)
+            } else {
+                n.checked_add(digit)
+            }
+        })
+        .context("chapter_order 超出 64 位整数范围")
+}
+
+fn ingest_jsonl(
+    builder: &mut Builder,
+    name: &str,
+    raw: &str,
+    kind: DocKind,
+    legacy: bool,
+) -> Result<JsonlStats> {
     let mut rows: Vec<(usize, Row<'_>)> = raw
         .lines()
         .enumerate()
@@ -224,7 +335,8 @@ fn ingest_jsonl(builder: &mut Builder, name: &str, raw: &str, kind: DocKind) -> 
             format!("ch:{}", row.chapter),
             GroupKind::Chapter,
             &chapter_label,
-            row.chapter_order,
+            chapter_order(&row.chapter_order, legacy)
+                .with_context(|| format!("{name} chapter_order 无效"))?,
         );
         let prefix = if kind == DocKind::Story {
             "story"
@@ -284,6 +396,9 @@ fn ingest_jsonl(builder: &mut Builder, name: &str, raw: &str, kind: DocKind) -> 
                     title,
                     path,
                     quest,
+                    order_source: row.order_source.as_deref().map(str::to_owned),
+                    chronology_status: row.chronology_status.as_deref().map(str::to_owned),
+                    context_status: row.context_status.as_deref().map(str::to_owned),
                     lines: Vec::new(),
                     speakers: scene_speakers,
                 });
@@ -303,6 +418,18 @@ fn ingest_jsonl(builder: &mut Builder, name: &str, raw: &str, kind: DocKind) -> 
             (Some("narration"), None) => LineKind::Narration,
             _ => LineKind::Unknown,
         };
+        if let (Some(display), Some(identity)) = (&speaker, row.speaker_id.as_deref())
+            && !identity.trim().is_empty()
+        {
+            let identity = identity.trim().to_owned();
+            if let Some(previous) = builder
+                .speaker_identities
+                .insert(display.clone(), identity.clone())
+                && previous != identity
+            {
+                bail!("说话人 {display} 对应多个角色身份：{previous} / {identity}");
+            }
+        }
         if kind == DocKind::Story {
             stats.lines += 1;
             stats.with_speaker += usize::from(speaker.is_some());
@@ -317,6 +444,10 @@ fn ingest_jsonl(builder: &mut Builder, name: &str, raw: &str, kind: DocKind) -> 
             text: text.to_owned(),
             speaker,
             kind: line_kind,
+            source: LineSource {
+                source_key: row.source_key.as_deref().map(str::to_owned),
+                line_id: row.line_id.as_deref().map(str::to_owned),
+            },
         });
     }
     Ok(stats)
@@ -505,6 +636,9 @@ fn ingest_lore(builder: &mut Builder, files: &BTreeMap<String, String>) {
                 title: section.title,
                 path: format!("设定 › {label} › {file_label}"),
                 quest: None,
+                order_source: None,
+                chronology_status: None,
+                context_status: None,
                 lines: section
                     .lines
                     .into_iter()
@@ -512,6 +646,7 @@ fn ingest_lore(builder: &mut Builder, files: &BTreeMap<String, String>) {
                         text,
                         speaker: None,
                         kind: LineKind::Text,
+                        source: LineSource::default(),
                     })
                     .collect(),
                 speakers: Vec::new(),
@@ -525,6 +660,7 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
     let Builder {
         docs: drafts,
         groups: mut draft_groups,
+        speaker_identities: identities,
         ..
     } = builder;
 
@@ -568,6 +704,7 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         .sum();
     let mut text = String::with_capacity(total_bytes);
     let mut lines = Vec::with_capacity(total_lines);
+    let mut line_sources = Vec::with_capacity(total_lines);
     let mut docs = Vec::with_capacity(drafts.len());
     let mut doc_speakers = Vec::new();
     let mut new_doc_index = vec![0u32; drafts.len()];
@@ -596,6 +733,7 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
                 speaker,
                 kind: l.kind,
             });
+            line_sources.push(l.source.clone());
         }
         let speakers_start = doc_speakers.len() as u32;
         for s in &d.speakers {
@@ -610,6 +748,9 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
             title: d.title.clone(),
             path: d.path.clone(),
             quest: d.quest.clone(),
+            order_source: d.order_source.clone(),
+            chronology_status: d.chronology_status.clone(),
+            context_status: d.context_status.clone(),
             first_line,
             line_count: d.lines.len() as u32,
             char_count: char_count as u32,
@@ -644,6 +785,11 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
     drop(folded_lines);
 
     let speakers_folded = speakers.iter().map(|s| fold(s)).collect();
+    let speaker_identity_names: Vec<String> = speakers
+        .iter()
+        .map(|s| identities.get(s).unwrap_or(s).clone())
+        .collect();
+    let speaker_identities = speaker_identity_names.iter().map(|s| fold(s)).collect();
     let mut by_speaker: Vec<Vec<u32>> = vec![Vec::new(); speakers.len()];
     for (i, d) in docs.iter().enumerate() {
         let start = d.speakers_start as usize;
@@ -674,10 +820,13 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         meta,
         text,
         lines,
+        line_sources,
         docs,
         groups,
         speakers,
         speakers_folded,
+        speaker_identities,
+        speaker_identity_names,
         doc_speakers,
         speaker_doc_offsets,
         speaker_docs,

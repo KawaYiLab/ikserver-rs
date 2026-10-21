@@ -49,7 +49,8 @@ impl Bundle {
         };
         let manifest = match std::fs::read(dir.join("manifest.json")) {
             Ok(bytes) => Some(serde_json::from_slice(&bytes).context("manifest.json 解析失败")?),
-            Err(_) => None,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e).context("manifest.json 读取失败"),
         };
         let supplement_path = dir.join("supplement.jsonl");
         let supplement = if supplement_path.is_file() {
@@ -76,7 +77,7 @@ impl Bundle {
         let json: Vec<u8> = if bytes.starts_with(&[0x1f, 0x8b]) {
             let mut out = Vec::new();
             flate2::read::GzDecoder::new(bytes)
-                .take(max_bytes as u64 + 1)
+                .take((max_bytes as u64).saturating_add(1))
                 .read_to_end(&mut out)
                 .context("gzip 解压失败")?;
             if out.len() > max_bytes {
@@ -84,6 +85,9 @@ impl Bundle {
             }
             out
         } else {
+            if bytes.len() > max_bytes {
+                bail!("JSON 超过 {} 字节上限", max_bytes);
+            }
             bytes.to_vec()
         };
         let bundle: Self = serde_json::from_slice(&json).context("语料包不是合法的 JSON")?;

@@ -256,10 +256,17 @@ pub fn instructions(c: &Corpus) -> String {
              涉及绝区零的剧情、人物、阵营、地点、事件、台词出处时，先用 ik_search 检索、再用 ik_read 读原文确认，不要凭记忆作答。\
              总结整章时先 ik_catalog(path=\"ch:…\") 规划，再 ik_read(docId=\"ch:…\", follow=true) 顺读并分层压缩；\
              角色相关先用 ik_character。较大的总结/考据任务开始前可读一次 ik_guide(mode=summary|character|timeline|verify)。\
-             docId 必须原样使用工具返回的值。主线为男主「哲」视角，「铃」以妹妹身份出现；没有说话人的行不要臆测说话人。",
+             docId 必须原样使用工具返回的值。提取模式：{}；没有说话人的行不要臆测说话人。\
+             多词检索为同篇 AND，不会静默降级；allowPartial=true 才允许部分匹配。\
+             目录排列未证实为剧情先后，follow 只保证目录覆盖；未关联的 Comic 不可按相邻位置拼接。",
         c.meta.language,
         thousands(story_docs),
-        thousands(lore_docs)
+        thousands(lore_docs),
+        match c.meta.accuracy_first {
+            Some(true) => "完整性校对（双方分支候选保留）",
+            Some(false) => "男主分支筛选（默认哲视角）",
+            None => "旧语料未声明",
+        }
     )
 }
 

@@ -1,7 +1,7 @@
 //! ik_character：角色速览。设定档案、按章节的出场与台词统计、首次登场、常同场角色、被提及次数，
 //! 给「角色弧线」类总结一个可直接按图索骥的读书清单。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
 use serde::Deserialize;
@@ -44,9 +44,10 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
     let max = clamp(args.max_results, 40, 200);
     let folded = fold(name);
     let ids = match_speakers(corpus, name);
-    let exact = ids
-        .iter()
-        .any(|&i| corpus.speakers_folded[i as usize] == folded);
+    let exact = ids.iter().any(|&i| {
+        corpus.speakers_folded[i as usize] == folded
+            || corpus.speaker_identities[i as usize] == folded
+    });
     // 精确命中时，把「包含该名字」的其他说话人（如「零号·安比」之于「安比」）单独列为相关名称。
     let related: Vec<u32> = if exact {
         corpus
@@ -74,7 +75,7 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
     };
 
     let mut per_group: HashMap<u32, ChapterStat> = HashMap::new();
-    let mut co: HashMap<u32, usize> = HashMap::new();
+    let mut co: HashMap<&str, usize> = HashMap::new();
     let (mut scenes, mut spoken) = (0usize, 0usize);
     let mut related_lines: HashMap<u32, usize> = HashMap::new();
     for (d, doc) in corpus.docs.iter().enumerate() {
@@ -105,9 +106,13 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         if stat.first_appear.is_none() {
             stat.first_appear = Some(d);
         }
+        let mut seen = HashSet::new();
         for &s in names {
             if !ids.contains(&s) && !related.contains(&s) {
-                *co.entry(s).or_default() += 1;
+                let identity = corpus.speaker_identity_names[s as usize].as_str();
+                if seen.insert(identity) {
+                    *co.entry(identity).or_default() += 1;
+                }
             }
         }
     }
@@ -164,6 +169,8 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         out.push_str(" | 不是已知说话人（以下仅统计被提及与设定资料）");
     }
     out.push('\n');
+    super::push_version(&mut out, corpus);
+    out.push_str("目录首见仅指当前语料排列中的最早位置，实际首次登场需读原文确认。\n");
     if !related.is_empty() {
         let mut rel: Vec<(u32, usize)> = related
             .iter()
@@ -215,8 +222,8 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
             group.id, group.label, stat.scenes, stat.lines, stat.mentions
         );
         let first = match (stat.first_appear, stat.first_mention) {
-            (Some(d), _) => Some(("首次出场", d)),
-            (None, Some(d)) => Some(("首次提及", d)),
+            (Some(d), _) => Some(("目录首见出场", d)),
+            (None, Some(d)) => Some(("目录首见提及", d)),
             _ => None,
         };
         if let Some((label, d)) = first {
@@ -234,16 +241,16 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         let _ = writeln!(out, "…另有 {} 章未显示", rows - max);
     }
 
-    let mut co: Vec<(u32, usize)> = co
+    let mut co: Vec<(&str, usize)> = co
         .into_iter()
-        .filter(|(s, _)| corpus.speaker_name(*s).is_some_and(|n| !is_placeholder(n)))
+        .filter(|(name, _)| !is_placeholder(name))
         .collect();
     co.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     if !co.is_empty() {
         let list: Vec<String> = co
             .iter()
             .take(15)
-            .filter_map(|&(s, n)| corpus.speaker_name(s).map(|x| format!("{x}({n})")))
+            .map(|&(name, n)| format!("{name}({n})"))
             .collect();
         let _ = writeln!(out, "\n常同场角色（共同出场场景数）：{}", list.join("、"));
     }
@@ -254,7 +261,7 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
     }
     let _ = write!(
         out,
-        "ik_search(keyword=\"{name}\") 查被提及处；ik_read(docId=首次出场场景) 读登场经过。"
+        "ik_search(keyword=\"{name}\") 查被提及处；ik_read(docId=目录首见场景) 读原文确认登场经过。"
     );
     Ok(out)
 }

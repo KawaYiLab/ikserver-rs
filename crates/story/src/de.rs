@@ -5,7 +5,7 @@ use serde::{Deserialize, Deserializer};
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum NumOrStr {
-    Num(f64),
+    Num(serde_json::Number),
     Str(String),
 }
 
@@ -13,8 +13,11 @@ pub fn opt_usize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<usize>, D::Er
     let v: Option<NumOrStr> = Option::deserialize(d)?;
     match v {
         None => Ok(None),
-        Some(NumOrStr::Num(n)) if n.is_finite() && n >= 0.0 => Ok(Some(n as usize)),
-        Some(NumOrStr::Num(_)) => Err(serde::de::Error::custom("需要非负整数")),
+        Some(NumOrStr::Num(n)) => n
+            .as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("需要范围内的非负整数")),
         Some(NumOrStr::Str(s)) if s.trim().is_empty() => Ok(None),
         Some(NumOrStr::Str(s)) => s
             .trim()

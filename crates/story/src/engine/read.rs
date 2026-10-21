@@ -35,6 +35,30 @@ pub struct ReadArgs {
     pub follow: Option<bool>,
     #[serde(default, deserialize_with = "crate::de::opt_bool")]
     pub line_numbers: Option<bool>,
+    #[serde(default, deserialize_with = "crate::de::opt_bool")]
+    pub include_sources: Option<bool>,
+}
+
+fn continuation(doc: &str, offset: usize, args: &ReadArgs, follow: bool) -> String {
+    let mut call = format!("ik_read(docId=\"{doc}\"");
+    if offset > 1 {
+        let _ = write!(call, ", offset={offset}");
+    }
+    let _ = write!(call, ", follow={follow}");
+    if let Some(limit) = args.limit {
+        let _ = write!(call, ", limit={}", limit.clamp(1, MAX_LIMIT));
+    }
+    if let Some(chars) = args.max_chars {
+        let _ = write!(call, ", maxChars={}", chars.clamp(500, MAX_CHARS));
+    }
+    if args.line_numbers == Some(false) {
+        call.push_str(", lineNumbers=false");
+    }
+    if args.include_sources == Some(true) {
+        call.push_str(", includeSources=true");
+    }
+    call.push(')');
+    call
 }
 
 pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
@@ -72,6 +96,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
     let mut first_doc = true;
     let mut line_buf = String::new();
     loop {
+        let header_start = out.len();
         let d = &corpus.docs[doc];
         let total = d.line_count as usize;
         if first_doc {
@@ -95,6 +120,12 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
         if !speakers.is_empty() {
             let _ = write!(out, " | 出场：{speakers}");
         }
+        out.push('\n');
+        if first_doc {
+            super::push_version(&mut out, corpus);
+        }
+        super::push_order_note(&mut out, corpus, doc);
+        chars_used += out[header_start..].chars().count();
 
         let start = offset;
         let mut end = start - 1; // 已输出的最后一行（1 基）
@@ -106,6 +137,9 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
                 let _ = write!(line_buf, "L{} ", end + 1);
             }
             push_line(&mut line_buf, corpus, line, corpus.line_text(line));
+            if args.include_sources.unwrap_or(false) {
+                super::push_source(&mut line_buf, corpus, line);
+            }
             let cost = line_buf.chars().count() + 1;
             // 预算用尽就停，但每次调用至少给出一行，避免死循环。
             if chars_used + cost > char_budget && lines_used > 0 {
@@ -117,21 +151,32 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             lines_used += 1;
             end += 1;
         }
+        if end < start && !first_doc {
+            // Don't expose an empty "1-0" range when the next header/line
+            // cannot fit. Resume that document on the next invocation.
+            out.truncate(header_start);
+            let _ = write!(
+                out,
+                "\n\n— 已达本次字数上限。继续：{}",
+                continuation(&corpus.doc_id(doc), start, args, follow)
+            );
+            break;
+        }
+        let range_start = out.len();
         let _ = writeln!(out, " | 第 {start}-{end} 行 / 共 {} 行", thousands(total));
+        chars_used += out[range_start..].chars().count();
         out.push_str(body.trim_end_matches('\n'));
 
         if end < total {
             let _ = write!(
                 out,
-                "\n\n— 已达本次{}上限。继续：ik_read(docId=\"{}\", offset={}{})",
+                "\n\n— 已达本次{}上限。继续：{}",
                 if lines_used >= line_budget {
                     "行数"
                 } else {
                     "字数"
                 },
-                corpus.doc_id(doc),
-                end + 1,
-                if follow { ", follow=true" } else { "" }
+                continuation(&corpus.doc_id(doc), end + 1, args, follow)
             );
             break;
         }
@@ -147,14 +192,10 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
                 first_doc = false;
             }
             Some(n) => {
-                let call = if follow {
-                    format!("ik_read(docId=\"{}\", follow=true)", corpus.doc_id(n))
-                } else {
-                    format!("ik_read(docId=\"{}\")", corpus.doc_id(n))
-                };
+                let call = continuation(&corpus.doc_id(n), 1, args, follow);
                 let _ = write!(
                     out,
-                    "\n\n— 本篇完。下一篇：{} 「{}」 → {call}",
+                    "\n\n— 本篇完。下一篇（目录相邻，非剧情后继）：{} 「{}」 → {call}",
                     corpus.doc_id(n),
                     corpus.docs[n].title
                 );
@@ -170,8 +211,10 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
                 {
                     let _ = write!(
                         out,
-                        "下一组：{} {} → ik_read(docId=\"{}\")",
-                        ng.id, ng.label, ng.id
+                        "下一组：{} {} → {}",
+                        ng.id,
+                        ng.label,
+                        continuation(&ng.id, 1, args, follow)
                     );
                 }
                 break;

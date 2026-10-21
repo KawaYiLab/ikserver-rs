@@ -72,7 +72,9 @@ fn root(corpus: &Corpus) -> String {
             "无（提取时未接入游戏资源，台词不带说话人）".to_owned()
         }
     );
-    out.push_str("\n## 主线章节（游戏顺序）\n");
+    super::push_version(&mut out, corpus);
+    out.push_str("目录顺序不代表故事内时间或实际播放顺序。\n");
+    out.push_str("\n## 主线章节（章节目录顺序）\n");
     let mut supplement_only = Vec::new();
     for g in corpus
         .groups
@@ -165,19 +167,20 @@ fn titles_everywhere(corpus: &Corpus, keyword: &str, offset: usize, max: usize) 
         out,
         "[ik_catalog] 标题/路径包含「{keyword}」的文档 {} 篇（显示 {}-{}）",
         thousands(hits.len()),
-        (offset + 1).min(hits.len()),
-        (offset + max).min(hits.len())
+        (offset.saturating_add(1)).min(hits.len()),
+        (offset.saturating_add(max)).min(hits.len())
     );
+    super::push_version(&mut out, corpus);
     for &d in hits.iter().skip(offset).take(max) {
         out.push_str("- ");
         push_doc_summary(&mut out, corpus, d);
         out.push('\n');
     }
-    if offset + max < hits.len() {
+    if offset.saturating_add(max) < hits.len() {
         let _ = write!(
             out,
             "还有更多：ik_catalog(keyword=\"{keyword}\", offset={})",
-            offset + max
+            offset.saturating_add(max)
         );
     } else if hits.is_empty() {
         out.push_str("没有标题匹配。标题之外的正文请用 ik_search 检索。");
@@ -228,9 +231,27 @@ fn group_listing(
     let _ = writeln!(
         out,
         " | 显示 {}-{}",
-        (offset + 1).min(members.len()),
-        (offset + max).min(members.len())
+        (offset.saturating_add(1)).min(members.len()),
+        (offset.saturating_add(max)).min(members.len())
     );
+
+    super::push_version(&mut out, corpus);
+    if g.kind == GroupKind::Chapter {
+        out.push_str("以下为目录顺序，未确认的场景先后不能据此作为剧情时间线。\n");
+        let scenes: Vec<_> = members
+            .iter()
+            .map(|&d| &corpus.docs[d])
+            .filter(|d| d.kind == DocKind::Story && d.section == "GalGame")
+            .collect();
+        if !scenes.is_empty() {
+            let linked = scenes.iter().filter(|d| d.quest.is_some()).count();
+            let _ = writeln!(
+                out,
+                "剧情演出任务关联：{linked}/{} 场景；未关联场景按标题或 docId 定位。",
+                scenes.len()
+            );
+        }
+    }
 
     let mut last_section: Option<(&str, DocKind)> = None;
     let mut last_quest: Option<&str> = None;
@@ -282,13 +303,13 @@ fn group_listing(
         }
         out.push('\n');
     }
-    if offset + max < members.len() {
+    if offset.saturating_add(max) < members.len() {
         let _ = write!(
             out,
             "\n还有 {} 篇：ik_catalog(path=\"{}\", offset={})",
             members.len() - offset - max,
             g.id,
-            offset + max
+            offset.saturating_add(max)
         );
         if !keyword.is_empty() {
             out.pop();
@@ -309,6 +330,9 @@ fn doc_card(corpus: &Corpus, doc: usize) -> String {
     let mut out = String::new();
     out.push_str("[ik_catalog] ");
     push_doc_summary(&mut out, corpus, doc);
+    out.push('\n');
+    super::push_version(&mut out, corpus);
+    super::push_order_note(&mut out, corpus, doc);
     let _ = write!(
         out,
         "\n所属：{} {}（第 {}/{} 篇）",
@@ -325,7 +349,7 @@ fn doc_card(corpus: &Corpus, doc: usize) -> String {
         let prev = g.docs[d.group_pos as usize - 1] as usize;
         let _ = write!(
             out,
-            "\n上一篇：{} 「{}」",
+            "\n上一篇（目录相邻）：{} 「{}」",
             corpus.doc_id(prev),
             corpus.docs[prev].title
         );
@@ -333,7 +357,7 @@ fn doc_card(corpus: &Corpus, doc: usize) -> String {
     if let Some(next) = corpus.next_in_group(doc) {
         let _ = write!(
             out,
-            "\n下一篇：{} 「{}」",
+            "\n下一篇（目录相邻）：{} 「{}」",
             corpus.doc_id(next),
             corpus.docs[next].title
         );

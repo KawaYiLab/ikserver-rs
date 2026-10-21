@@ -16,8 +16,8 @@ pub fn definitions() -> Value {
             "name": "ik_catalog",
             "title": "绝区零剧情目录",
             "description": "浏览绝区零剧情库目录。不带参数：列出全部主线章节（游戏顺序，含场景数/台词数/字数）与设定资料分类。\
-    path=章节或分类 id（如 ch:Chapter110、lore:agents，也可写章节名「云霞同归处」）：按阅读顺序列出该组全部文档，\
-    主线按内容类型与官方任务分节，并给出每篇的 docId、句数与出场角色——总结一章前先用它规划阅读范围。\
+    path=章节或分类 id（如 ch:Chapter110、lore:agents，也可写章节名「云霞同归处」）：按目录顺序列出该组全部文档，\
+    主线按内容类型与可解析的任务分节，并给出每篇的 docId、句数与出场角色——总结一章前先用它规划阅读范围。目录相邻不代表剧情先后。\
     path=docId：查看该篇所在位置与前后篇。keyword：按标题/路径筛选。",
             "inputSchema": {
                 "type": "object",
@@ -36,7 +36,7 @@ pub fn definitions() -> Value {
             "title": "绝区零剧情检索",
             "description": "绝区零（Zenless Zone Zero）游戏文本全文检索：主线剧情台词、过场字幕/漫画、世界观设定（代理人档案、音擎/驱动盘/邦布、\
     绳网委托与私信、录像店影片、街区闲聊）。涉及剧情、人物、阵营、地点、事件、台词出处时先用它找候选，再用 ik_read 读原文。\
-    多个关键词用空格分隔，表示同一篇内同时出现（AND）；建议用角色名、地名、组织名、台词短语等实体词。\
+    多个关键词用空格分隔，表示同一篇内同时出现（AND）；不会自动放宽，allowPartial=true 才返回部分匹配并列出缺失关键词。建议用角色名、地名、组织名、台词短语等实体词。\
     结果按相关度排序，每篇给出 docId、路径与命中行（L行号）。提供 docId 时改为篇内检索，列出该篇全部命中行。",
             "inputSchema": {
                 "type": "object",
@@ -45,9 +45,11 @@ pub fn definitions() -> Value {
                     "scope": { "type": "string", "enum": ["all", "story", "supplement", "lore"], "default": "all", "description": "范围：all 全部 / story 主线 / supplement 过场与漫画 / lore 设定资料。" },
                     "path": { "type": "string", "description": "可选，限定在某章或某设定分类内（ch:Chapter110 / lore:agents / 章节名）。" },
                     "docId": { "type": "string", "description": "可选，篇内检索：只在这一篇里找，返回全部命中行。" },
-                    "speaker": { "type": "string", "description": "可选，只看这个说话人的台词（如「妮可」「哲」）。" },
+                    "speaker": { "type": "string", "description": "可选，只看这个说话人的台词（如「妮可」「哲」）；已记录角色身份的服装/形态会合并匹配，原文显示名保留。" },
                     "maxResults": { "type": "integer", "minimum": 1, "maximum": 500, "description": "最多返回多少篇（默认 10，上限 50）；篇内检索时为最多多少行（默认 50）。" },
-                    "hitsPerDoc": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3, "description": "每篇展示的命中行数。" }
+                    "hitsPerDoc": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3, "description": "每篇展示的命中行数。" },
+                    "allowPartial": { "type": "boolean", "default": false, "description": "AND 无共同命中时，是否显式允许返回任一关键词的部分匹配；全库和篇内检索都适用。" },
+                    "contextLines": { "type": "integer", "minimum": 0, "maximum": 3, "description": "全库检索每个命中前后展示几行同篇上下文，合并去重并按行号排列。默认 1；有 speaker 筛选时默认 0。上下文可以含其他说话人。" }
                 },
                 "additionalProperties": false
             },
@@ -58,7 +60,7 @@ pub fn definitions() -> Value {
             "title": "读取剧情原文",
             "description": "读取绝区零剧情/设定原文。docId 必须原样使用 ik_search / ik_catalog 返回的 doc_…；\
     也可以传章节/分类 id（如 ch:Chapter110）从该组第一篇开始顺读。每行格式「L行号 说话人：台词」，【选项】为玩家选项。\
-    按 offset/limit 分页并受 maxChars 字数预算约束；follow=true 时读完一篇自动接着读同章下一篇，适合整章总结。\
+    按 offset/limit 分页并受 maxChars 字数预算约束；follow=true 时读完一篇自动接着读同章目录下一篇，适合整章覆盖阅读，不能据此推定剧情时间线。\
     结尾总会给出精确的续读调用，照抄即可继续。",
             "inputSchema": {
                 "type": "object",
@@ -66,9 +68,10 @@ pub fn definitions() -> Value {
                     "docId": { "type": "string", "description": "doc_… 或分组 id（ch:Chapter110 / lore:agents）。" },
                     "offset": { "type": "integer", "minimum": 1, "default": 1, "description": "起始行号（1 起）。" },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 2000, "description": "本次最多读多少行（通常由 maxChars 先生效）。" },
-                    "maxChars": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 16000, "description": "本次输出的字数预算。" },
+                    "maxChars": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 16000, "description": "标题、来源与正文的字数预算；首行过长时仍输出一行以推进游标，末尾续读提示不计入。" },
                     "follow": { "type": "boolean", "description": "读完本篇后是否接着读同组下一篇；docId 为分组 id 时默认 true，否则默认 false。" },
-                    "lineNumbers": { "type": "boolean", "default": true, "description": "是否带行号（引用出处需要行号）。" }
+                    "lineNumbers": { "type": "boolean", "default": true, "description": "是否带行号（引用出处需要行号）。" },
+                    "includeSources": { "type": "boolean", "default": false, "description": "附上原始 sourceKey 与稳定 lineId，便于回查提取器；旧包缺少字段时省略。" }
                 },
                 "required": ["docId"],
                 "additionalProperties": false
@@ -78,7 +81,7 @@ pub fn definitions() -> Value {
         {
             "name": "ik_character",
             "title": "角色速览",
-            "description": "绝区零角色速览：设定档案 docId、按章节统计的出场场景数/台词数/被提及次数、每章首次出现的场景、常同场角色。\
+            "description": "绝区零角色速览：设定档案 docId、按章节统计的出场场景数/台词数/被提及次数、每章目录首见的场景、常同场角色。已知服装/形态按语料中的角色身份合并，目录首见不证明实际首次登场。\
     写角色小传、角色弧线或判断某角色在哪些章节有戏份时先用它，再按给出的 docId 用 ik_read 读原文。",
             "inputSchema": {
                 "type": "object",

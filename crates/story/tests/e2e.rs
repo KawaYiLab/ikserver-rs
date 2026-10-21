@@ -43,6 +43,164 @@ fn first_doc_id(text: &str) -> String {
 }
 
 #[test]
+fn review_numeric_arguments() {
+    let c = corpus();
+    assert!(
+        call(
+            &c,
+            "ik_catalog",
+            json!({"path":"ch:Chapter00", "offset":1.5})
+        )
+        .is_err()
+    );
+    assert!(call(&c, "ik_catalog", json!({"offset":1e100})).is_err());
+    let out = ok(
+        &c,
+        "ik_catalog",
+        json!({"path":"ch:Chapter00", "offset":usize::MAX}),
+    );
+    assert!(out.contains("显示"));
+    let out = ok(
+        &c,
+        "ik_catalog",
+        json!({"keyword":"序章", "offset":usize::MAX}),
+    );
+    assert!(out.contains("显示"));
+}
+
+#[test]
+fn review_read_continuation_preferences() {
+    let c = corpus();
+    let out = ok(
+        &c,
+        "ik_read",
+        json!({"docId":"ch:Chapter00", "limit":1, "maxChars":800, "lineNumbers":false, "includeSources":true}),
+    );
+    let continuation = out.split("继续：").nth(1).unwrap();
+    assert!(continuation.contains("limit=1"));
+    assert!(continuation.contains("maxChars=800"));
+    assert!(continuation.contains("lineNumbers=false"));
+    assert!(continuation.contains("follow=true"));
+    assert!(continuation.contains("includeSources=true"));
+}
+
+#[test]
+fn review_plain_bundle_limit() {
+    let bundle = Bundle::from_dir(&fixture()).unwrap();
+    let bytes = serde_json::to_vec(&bundle).unwrap();
+    assert!(Bundle::decode(&bytes, bytes.len() - 1).is_err());
+    assert!(Bundle::decode(&bytes, bytes.len()).is_ok());
+}
+
+#[test]
+fn review_read_long_next_header() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    bundle.story = [
+        json!({"chapter":"Chapter00", "scene":"1", "family":"GalGame", "text":"第一行", "order":1}),
+        json!({"chapter":"Chapter00", "scene":"2", "scene_title":"很长的标题".repeat(250), "family":"GalGame", "text":"第二行", "order":2}),
+    ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+    bundle.supplement = None;
+    bundle.lore.clear();
+    let c = build_from_bundle(&bundle).unwrap();
+    let out = ok(
+        &c,
+        "ik_read",
+        json!({"docId":"ch:Chapter00", "maxChars":1000}),
+    );
+    assert!(!out.contains("第 1-0 行"));
+    assert!(!out.contains("第二行"));
+    let next = first_doc_id(out.split("继续：").nth(1).unwrap());
+    let out = ok(&c, "ik_read", json!({"docId":next, "maxChars":1000}));
+    assert!(out.contains("第二行"));
+}
+
+#[test]
+fn review_in_doc_query_overflow_is_explicit() {
+    let c = corpus();
+    let id = c.doc_id(0);
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({"docId":id,"keyword":"一 二 三 四 五 六 七 八 九"}),
+    );
+    assert!(out.contains("前 8"));
+}
+
+#[test]
+fn review_legacy_fractional_chapter_order() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    bundle.story = [
+        json!({"chapter":"Chapter01", "chapter_order":2, "scene":"1", "family":"GalGame", "text":"甲"}),
+        json!({"chapter":"Chapter015", "chapter_order":2.5, "scene":"1", "family":"GalGame", "text":"乙"}),
+        json!({"chapter":"Chapter02", "chapter_order":3, "scene":"1", "family":"GalGame", "text":"丙"}),
+    ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+    bundle.supplement = None;
+    bundle.lore.clear();
+    let c = build_from_bundle(&bundle).unwrap();
+    assert_eq!(
+        c.groups.iter().map(|g| g.id.as_str()).collect::<Vec<_>>(),
+        ["ch:Chapter01", "ch:Chapter015", "ch:Chapter02"]
+    );
+    bundle.manifest.as_mut().unwrap()["chapter_order_scale"] = json!(10);
+    assert!(build_from_bundle(&bundle).is_err());
+}
+
+#[test]
+fn review_metadata_search_consistency() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    bundle.story = json!({"chapter":"Chapter00", "scene":"1", "scene_title":"标题词", "family":"GalGame", "text":"正文词"}).to_string();
+    bundle.supplement = None;
+    bundle.lore.clear();
+    let c = build_from_bundle(&bundle).unwrap();
+    let global = ok(&c, "ik_search", json!({"keyword":"标题词"}));
+    assert!(global.contains("读上下文：ik_read"));
+    let local = ok(
+        &c,
+        "ik_search",
+        json!({"docId":c.doc_id(0), "keyword":"标题词 正文词"}),
+    );
+    assert!(local.contains("命中 1 行"));
+    assert!(local.contains("标题/出场命中"));
+}
+
+#[test]
+fn review_ambiguous_group_is_rejected() {
+    let mut c = corpus();
+    c.groups[0].label = "重复标签".into();
+    c.groups[1].label = "重复标签".into();
+    assert!(call(&c, "ik_catalog", json!({"path":"重复标签"})).is_err());
+    assert!(call(&c, "ik_catalog", json!({"path":"标签"})).is_err());
+    assert!(call(&c, "ik_catalog", json!({"path":"ch:Chapter00"})).is_ok());
+}
+
+#[test]
+fn review_unreadable_manifest_is_not_silently_ignored() {
+    let dir = std::env::temp_dir().join(format!("ik-story-manifest-review-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("manifest.json")).unwrap();
+    std::fs::write(dir.join("story.jsonl"), "{}\n").unwrap();
+    let result = Bundle::from_dir(&dir);
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(result.is_err());
+}
+
+#[test]
+fn review_identity_match_is_labeled() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    bundle.story = json!({"chapter":"Chapter00", "scene":"1", "family":"GalGame", "text":"测试台词", "speaker":"服装甲", "speaker_id":"本人"}).to_string();
+    bundle.supplement = None;
+    bundle.lore.clear();
+    let c = build_from_bundle(&bundle).unwrap();
+    let global = ok(&c, "ik_search", json!({"keyword":"本人"}));
+    let local = ok(
+        &c,
+        "ik_search",
+        json!({"docId":c.doc_id(0), "keyword":"本人"}),
+    );
+    assert!(global.contains("说话人名/身份匹配：本人"));
+    assert!(local.contains("说话人名/身份匹配：本人"));
+}
+
+#[test]
 fn builds_docs_groups_and_speakers() {
     let c = corpus();
     let story: Vec<_> = c.docs.iter().filter(|d| d.kind == DocKind::Story).collect();
@@ -170,9 +328,17 @@ fn search_and_semantics_with_speaker_and_scope() {
     assert!(out.contains("妮可（妮可·德玛拉）"), "{out}");
     assert!(!out.contains("主线 ›"), "{out}");
 
-    // 没有共同出现时退化为部分匹配。
+    // AND 查询不应静默退化；只有显式请求时才返回部分匹配。
     let out = ok(&c, "ik_search", json!({ "keyword": "猫又 赫利俄斯" }));
+    assert!(out.contains("命中 0 篇"), "{out}");
+    assert!(!out.contains("以下按覆盖"), "{out}");
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({ "keyword": "猫又 赫利俄斯", "allowPartial": true }),
+    );
     assert!(out.contains("部分匹配"), "{out}");
+    assert!(out.contains("未命中关键词"), "{out}");
 
     // 全角、大小写折叠。
     let out = ok(&c, "ik_search", json!({ "keyword": "ＦＡＩＲＹ" }));
@@ -220,6 +386,190 @@ fn search_within_doc_and_path() {
         json!({ "keyword": "妮可", "path": "Chapter01" }),
     );
     assert!(out.contains("没有命中"), "{out}");
+}
+
+#[test]
+fn search_context_is_ordered_unique_and_bounded() {
+    let c = corpus();
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({
+            "keyword": "妮可", "path": "Chapter00", "contextLines": 3,
+        }),
+    );
+    let mut numbers = Vec::new();
+    for line in out.lines() {
+        if line.chars().next().is_some_and(|c| c.is_ascii_digit()) {
+            assert!(
+                numbers.windows(2).all(|pair: &[usize]| pair[0] < pair[1]),
+                "{out}"
+            );
+            numbers.clear();
+        }
+        let line = line.trim().trim_start_matches("上下文 ");
+        if let Some(number) = line
+            .strip_prefix('L')
+            .and_then(|s| s.split_whitespace().next())
+            .and_then(|s| s.parse::<usize>().ok())
+        {
+            numbers.push(number);
+        }
+    }
+    assert!(numbers.len() > 1, "{out}");
+    assert!(numbers.windows(2).all(|pair| pair[0] < pair[1]), "{out}");
+    assert!(!out.contains("offset=行号-5"), "{out}");
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({ "keyword": "狡兔屋", "speaker": "妮可" }),
+    );
+    assert!(
+        !out.contains("上下文 L"),
+        "speaker filter defaults to hits only: {out}"
+    );
+}
+
+#[test]
+fn search_within_doc_requires_all_terms_without_opt_in() {
+    let c = corpus();
+    let doc = c.doc_id(0);
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({ "docId": doc, "keyword": "录像店 赫利俄斯" }),
+    );
+    assert!(out.contains("命中 0 行"), "{out}");
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({ "docId": doc, "keyword": "录像店 赫利俄斯", "allowPartial": true }),
+    );
+    assert!(out.contains("部分匹配"), "{out}");
+    assert!(out.contains("未命中关键词：赫利俄斯"), "{out}");
+    // Document AND includes hits on separate lines; it never requires a single-line AND.
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({ "docId": doc, "keyword": "录像店 丰厚" }),
+    );
+    assert!(out.contains("命中 2 行"), "{out}");
+    assert!(out.contains("L1 ") && out.contains("L6 "), "{out}");
+}
+
+#[test]
+fn sources_and_identity_survive_ingestion_and_continuation() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    let mut rows: Vec<Value> = bundle
+        .story
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for row in &mut rows {
+        row["order_source"] = json!("archive_table");
+        row["chronology_status"] = json!("unknown");
+        if row["speaker"] == "哲" {
+            row["speaker"] = json!("道士哲");
+            row["speaker_id"] = json!("哲");
+        }
+    }
+    bundle.story = rows
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let c = build_from_bundle(&bundle).unwrap();
+    let original = corpus();
+    assert_eq!(
+        c.doc_id(0),
+        original.doc_id(0),
+        "metadata must not renumber docs"
+    );
+    assert_eq!(c.lines.len(), c.line_sources.len());
+    let out = ok(
+        &c,
+        "ik_read",
+        json!({ "docId": "ch:Chapter00", "includeSources": "true", "limit": 6 }),
+    );
+    assert!(
+        out.contains("sourceKey=Main_GalGame_Chapter00_1000001_001"),
+        "{out}"
+    );
+    assert!(out.contains("lineId=Chapter00_1000001_1"), "{out}");
+    assert!(out.contains("顺序来源：archive_table"), "{out}");
+    assert!(
+        out.contains("follow=true, limit=6, includeSources=true)"),
+        "next-doc continuation: {out}"
+    );
+    let out = ok(&c, "ik_search", json!({ "speaker": "哲" }));
+    assert!(out.contains("道士哲："), "{out}");
+    let out = ok(&c, "ik_character", json!({ "name": "哲" }));
+    assert!(out.contains("台词 3 句"), "{out}");
+    assert!(out.contains("目录首见"), "{out}");
+    // Optional fields are absent in legacy bundles; reading remains supported.
+    let out = ok(&original, "ik_read", json!({ "docId": original.doc_id(0) }));
+    assert!(!out.contains("sourceKey="), "{out}");
+}
+
+#[test]
+fn read_budget_counts_fragment_headers() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    let rows: Vec<String> = (0..100)
+        .map(|i| {
+            json!({
+                "chapter": "Comic", "chapter_label": "动态漫画", "chapter_order": 9990,
+                "scene": format!("fragment_{i}"), "family": "Comic", "text": "片段。",
+                "context_status": "unlinked", "order": i,
+            })
+            .to_string()
+        })
+        .collect();
+    bundle.supplement = Some(rows.join("\n"));
+    let c = build_from_bundle(&bundle).unwrap();
+    let out = ok(
+        &c,
+        "ik_read",
+        json!({ "docId": "ch:Comic", "maxChars": 5000 }),
+    );
+    assert!(
+        out.chars().count() < 5500,
+        "headers exceeded budget: {}",
+        out.chars().count()
+    );
+    assert!(
+        out.contains("下一篇（目录相邻"),
+        "must offer continuation: {out}"
+    );
+}
+
+#[test]
+fn character_coappearance_merges_forms_once_per_scene() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    let rows: Vec<String> = [
+        ("妮可", "妮可"),
+        ("哲", "哲"),
+        ("学生哲", "哲"),
+        ("道士哲", "哲"),
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, (speaker, identity))| {
+        json!({
+            "chapter": "Chapter00", "scene": "test", "family": "GalGame",
+            "speaker": speaker, "speaker_id": identity, "text": "同场台词", "order": i,
+        })
+        .to_string()
+    })
+    .collect();
+    bundle.story = rows.join("\n");
+    bundle.supplement = None;
+    let c = build_from_bundle(&bundle).unwrap();
+    let out = ok(&c, "ik_character", json!({ "name": "妮可" }));
+    assert!(out.contains("常同场角色（共同出场场景数）：哲(1)"), "{out}");
+    assert!(
+        !out.contains("学生哲(1)") && !out.contains("道士哲(1)"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -301,7 +651,7 @@ fn catalog_root_group_and_doc() {
         card.contains("所属：ch:Chapter00 序章（第 1/4 篇）"),
         "{card}"
     );
-    assert!(card.contains("下一篇："), "{card}");
+    assert!(card.contains("下一篇（目录相邻）："), "{card}");
 
     let paged = ok(
         &c,
