@@ -1,12 +1,15 @@
-# 剧情库检索与版本别名
+# 剧情库检索与 MCP 工具
 
-后续六项改进的阶段、依赖和验收标准见 [剧情 MCP 改进实施计划](story-mcp-improvement-plan.md)。
-M3～M5之后的默认输出补齐与章节纠错（U0～U3）已实现，契约及验证边界见 [调用体验优化实施报告](story-mcp-usability-optimization-report.md)；后续客户端与模型验收见 [调用体验优化方案](story-mcp-usability-optimization-plan.md)。
+本文说明当前六个只读工具的检索、证据、分页与资料覆盖契约。服务部署与访问配置见
+[部署说明](../deploy/README.md#剧情库mcp)。
+
+## 检索与版本别名
 
 多词检索先在同一篇文档中找全词匹配（AND）；词可分布在不同行、标题、路径或姓名元数据中。
 无完整匹配时默认返回部分匹配，优先按正文词覆盖、有效署名覆盖排序，再比较总覆盖与相关度，逐篇列出缺失词。
 `allowPartial=false` 保持严格 AND。部分匹配不能证明全部词在同篇共现，也不提供概念同义词推理。
 回退始终保留 `path`、`scope`、`speaker`、`docId` 和版本限定，不会通过移除范围来扩大命中。
+检索词超过 8 个时提示截断；版本选择器先解析为范围，不占检索词配额。
 
 ```text
 ik_search(keyword="天空 核心 秘密", path="3.3版本")
@@ -33,27 +36,15 @@ ik_read(docId="3.3版本", limit=20)
 映射维护在 `crates/story/src/engine/releases.rs`。补充新版本须先核查来源、再加入映射，
 不能直接把语料 `source_version` 赋给所有章节。此表目前覆盖两个已核对版本，未声称覆盖历代发布。
 
-验证使用本地语料、MCP 工具分发和小型隔离语料测试，覆盖默认/严格匹配、分散于多行的全词匹配、
-覆盖率排序、姓名与范围筛选、篇内查询、别名规范化、旧章隔离、冲突/缺失/未知映射及词数截断。
+## 证据与命中分类
 
-2026-10-22：31 项剧情库端到端测试通过，`ik-story --all-targets` 编译及格式检查通过。
-本机未安装 nextest，使用 `cargo test -p ik-story --test e2e`；未运行工作区全量或数据库测试。
-本地读取提取器当前 `out/zzz_story_3.3.0_chs` 的 3.3.0 语料，确认：
-“天空 核心 秘密”在 3.3 章节严格匹配为 0，默认返回标注部分匹配的候选；
-“3.3版本 核心”命中 4 篇、5 行；版本目录和顺读均解析为 Chapter240。
-只搜索“3.3”列出该章 257 个候选场景，明确说明没有正文词匹配。
-查询输出保存在提取器 `out/search_usability_3.3.0.json`，没有上传语料或部署服务。
-
-## 首批改进（M0～M2）
-
-2026-10-22 已实现证据传递与搜索分类，契约及实测见 [阶段报告](story-mcp-m0-m2-report.md)。
 默认 `matchIn=all` 兼容原来的同篇 AND：正文、逐句说话人、身份、标题、路径、姓名表可参与匹配；
 结果逐词说明字段，正文缺失词单列。`matchIn=body` 只让正文参与 AND 与部分回退，仍保留原筛选条件。
 完整匹配优先；无完整匹配时优先比较正文覆盖，再比较有效署名覆盖、总覆盖及 BM25，稳定 docId 兜底。
 
 正文或逐句署名命中使用 `maxResults`；仅元数据命中放入独立目录建议，用 `directoryOffset`（0 起）
 和 `maxDirectoryResults`（默认10，上限50）分页，不占正文配额。目录建议返回精确读取入口及未显示数量，
-续查保留全部参数。M3 已加入快照绑定 cursor 与 structuredContent，见下方。
+续查保留全部参数。快照绑定 cursor 与 structuredContent 见下方。
 
 `catalog/search/read/character` 默认报告影响理解的证据缺口；`includeEvidence=true` 展开内容状态、
 原始资源署名、署名状态/来源/缺口/槽位、配音关联、局部行序、Perform 节/节点/资源路径与 Timeline 引用摘要。
@@ -64,11 +55,12 @@ ik_read(docId="3.3版本", limit=20)
 工具输出提供 `corpusRevision`：摘要包含规范化有效语料、稳定身份/行序、证据、影响结果的 manifest 字段、
 查询排序契约及发布映射；构建/提取时间、JSON 空白变化不影响它。证据或筛选模式变化会改变摘要。
 旧包缺失字段仍加载并明确提示未提供核验证据；未知状态字面值保留，详细证据可查看。
+提取清单用 `chapter_order_scale=10` 声明章节顺序的整数比例；旧小数按全包统一迁移，显式新比例拒绝小数。
 
+## 结构化响应与分页
 
-## 模型调用体验改进（M3～M5）
-
-2026-10-22 已加入类型化结构化响应、快照游标、篇内窗口、批量读取及覆盖核对，见 [实施与实测报告](story-mcp-m3-m5-report.md)。六个工具保留 MCP text content，并提供生成自 Rust 类型的 outputSchema。共同字段为 `schemaVersion`、`corpusRevision`、`snapshotVersion`、`extractionMode` 和工具数据 `data`。
+六个工具保留 MCP text content，并提供生成自 Rust 类型的 outputSchema 和类型化 structuredContent。
+共同字段为 `schemaVersion`、`corpusRevision`、`snapshotVersion`、`extractionMode` 和工具数据 `data`。
 
 MCP 默认 `detail="compact"`，需要展开解释时用 `full`，逐行证据由 `includeEvidence=true` 控制。CLI 的旧 `tools::call` 默认保留详细文本。客户端给模型提供一种主要结果表示，避免把 text 与 structuredContent 中同一批原文重复塞入上下文；具体 token 成本取决于客户端。游标是校验过的只读续接参数，不是访问凭证，鉴权仍由 HTTP 层处理。
 
@@ -88,9 +80,9 @@ ik_read(docIds=["返回的docId1", "返回的docId2"], maxChars=16000)
 - 角色 `chapterCount/chaptersTruncated`、文档 `evidencePreviewTruncated`明确展示上限；更多实际署名结果使用角色返回的搜索入口。
 - 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`，返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
 
-本轮未增加数据库表或修改 HTTP 路由/DTO；OpenAPI 的既有动态 JSON-RPC 请求契约不变。版本目录扩充、带执行依据的跨文档关系和真实模型效果评测仍需后续资料与验证。
+查询与阅读覆盖核对不使用数据库会话；HTTP 接口使用动态 JSON-RPC 请求契约。
 
-## 默认输出补齐与章节纠错（U0～U3）
+## 默认输出与章节导航
 
 六个工具的成功compact文本现在统一带一次快照头：`语料=3.3.0 | 模式=default | corpusRevision=<完整值>`。
 版本缺失显示“未声明”；full已有完整快照头的工具保留旧格式。结构化快照字段仍保留，公共新增字段均为附加字段，`schemaVersion=1`不变。
@@ -115,6 +107,7 @@ full手动续读使用返回的具体docId；快照cursor保存原别名及读�
 `complete=true`仍表示当前指定续读目标已到末尾，可能同时存在下一篇；整章是否读全仍由`ik_coverage`核对。
 未读完、follow和batch使用各自`nextCall`，读取预算统一计入实际快照头、整篇摘要及正文；首行过长仍完整返回以保证推进。
 每块文本提供docId和`coverageDelta`区间，目录与coverage提供清单标识及缺口入口。
+续读保留显式行数、字数、行号、来源、证据、detail 和 follow 参数，末尾续读提示不计入正文预算。
 
 无效或歧义的章节选择器保持`isError=true`，给至多5个确定排序的候选及可执行重试；重试只替换错误范围，保留其他筛选。
 裸`ch:`/`lore:`说明缺少名称并给目录入口；未知版本只列已核验映射；损坏或过期cursor沿用重查错误。
@@ -123,4 +116,33 @@ full手动续读使用返回的具体docId；快照cursor保存原别名及读�
 未限定内容类型的根目录增加`chapterRelations`：当前标签相同的组标记`sharedLabel/labelOnly`，
 已核查的补充与间章归属标记`reviewedExtractorMapping`并保留提取器来源。
 这些是导航线索；原始groupId/docId、精确选择器和目录成员不合并，同名或归属关系不证明剧情先后。
-关系只展示当前可见成员，范围筛选和整篇排除不额外暴露其他分组。版本目录扩充、可选聚合选择器和真实模型效果验收仍属后续工作。
+关系只展示当前可见成员，范围筛选和整篇排除不额外暴露其他分组。
+已核查归属的上游提交及资源位置保存在 [章节关联映射](../crates/story/src/engine/chapter_relations.rs) 中。
+
+## 验证与边界
+
+发布映射目前只核验 3.2/3.3。扩充发布目录、跨文档播放顺序、章节等价与可选聚合入口仍需来源证据。
+客户端负责保存 cursor、manifestId 与 coverageDelta，并累计 ledger；真实客户端的上下文注入、模型输入
+token、回答质量与 A/B 效果尚未验证。
+
+服务端同时返回 text 与 structuredContent，默认文档摘要会增加完整 RPC 的传输和 JSON 解析成本。
+已有本地测量未统一达到“所有查询 p95 增幅不超过 20%”与“相同预算下整章调用次数不增加”的原定目标，
+不能据 compact 文本长度推断整体提速或模型 token 节省。重新测量时应固定语料、构建模式、机器、参数与
+测量入口，分别记录文本、完整 RPC、工具定义、任务调用次数及模型实际用量。
+
+相关回归位于 [剧情库测试](../crates/story/tests/)，覆盖新旧语料、证据与未知状态、检索范围、快照游标、
+窗口、读取预算、资料覆盖、章节纠错与生成 schema。本地按 [开发说明](dev-setup.md) 只运行受影响用例；
+完整测试与 clippy 由 CI 执行。
+
+[工作流示例](../crates/story/examples/usability.rs) 可测量实际语料的查询响应与整章读取，
+[schema 校验脚本](../crates/story/tests/validate_schemas.py) 使用 Python 的 `jsonschema` 包核对生成 schema 与响应。
+该示例固定查询 3.3 新增主线与 Fairy，需要包含 `ch:Chapter240` 的语料，并调用 Windows PowerShell
+采样内存。在仓库根目录运行下列命令，将占位路径替换为实际绝对路径；报告包含原文，应保存在仓库外：
+
+```powershell
+$env:CARGO_INCREMENTAL = '0'
+$env:STORY_SCHEMA_REPORT = '<仓库外的schema报告.json>'
+cargo nextest run -p ik-story -E 'test(generated_schemas_are_self_contained_and_match_results)'
+cargo run -p ik-story --example usability -- '<包含3.3新增主线的语料目录或包>' '<仓库外的工作流报告.json>'
+python crates/story/tests/validate_schemas.py '<仓库外的schema报告.json>' '<仓库外的工作流报告.json>'
+```

@@ -40,18 +40,20 @@
 
 复制 `.env.example` 为 `.env`：
 
-- `DATABASE_URL`：sqlx 宏编译期用（`cargo check` 时需要数据库在线）。
+- `DATABASE_URL`：运行、数据库集成测试与 `cargo sqlx prepare` 使用；日常编译按 `.sqlx/` 缓存离线检查。
 - `IK_*`：运行时配置，见 `crates/kernel/src/config.rs` 的层级注释。
 
 ## 日常
 
 ```powershell
+$env:CARGO_INCREMENTAL = "0"
 cargo check --workspace
-cargo nextest run --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all
+cargo nextest run -p <crate> -E 'test(<测试名>)'
+cargo fmt --all -- --check
 cargo run -p ik-server -- serve
 ```
+
+本地只跑本次改动相关的测试；全量测试与 clippy 由 CI 执行。改 bug 时先确认新测试在修之前失败、修之后通过。
 
 打开 API 文档：<http://127.0.0.1:8080/docs>（Scalar）。
 
@@ -126,10 +128,10 @@ psql $env:DATABASE_URL -v ON_ERROR_STOP=1 -f crates/legacy/sql/strapi-schema.sql
 ```powershell
 meilisearch --master-key dev-master-key-0123456789 --no-analytics
 $env:IK_TEST_MEILI_URL = "http://127.0.0.1:7700"; $env:IK_TEST_MEILI_KEY = "dev-master-key-0123456789"
-cargo nextest run -p ik-search
+cargo nextest run -p ik-search -E 'test(<测试名>)'
 ```
 
-媒体上传的用例同理需要一个 S3 兼容服务（CI 用的是 `pip install "moto[server]"` 后运行 `moto_server -p 9000`），
+媒体上传的用例同理需要一个 S3 兼容服务（CI 用的是 `pipx install 'moto[server]==5.2.4'` 后运行 `moto_server -p 9000`），
 设置 `IK_TEST_S3_URL`（需要鉴权的服务另设 `IK_TEST_S3_ACCESS_KEY` / `IK_TEST_S3_SECRET_KEY`），每个用例用独立的桶。
 
 没有设置 `IK_TEST_MEILI_URL` 时这些用例直接通过（数据库兜底的用例照常运行）。每个用例用独立的索引前缀，结束时删除索引。
@@ -148,8 +150,9 @@ cargo nextest run -p ik-search
 
 ## 常见问题
 
-- **`cargo check` 报 `error: DATABASE_URL` 或连接失败**：`.env` 缺失，或连不上远程开发库
-  （检查网络与白名单）。连不上时可用 `SQLX_OFFLINE=true` 走 `.sqlx/` 缓存编译。
-- **首次 `cargo build` 很慢**：正常（约 5–15 分钟）；之后增量编译秒级。
-  可在 `cargo check` 时加 `-p <crate>` 只看单个 crate。
-- **想完全离线编译**：`cargo sqlx prepare --workspace` 后设 `SQLX_OFFLINE=true`。
+- **`cargo check` 尝试连接数据库**：检查是否在当前环境中设了 `SQLX_OFFLINE=false`，它会覆盖
+  `.cargo/config.toml` 的默认值；日常编译应使用 `SQLX_OFFLINE=true`。
+- **SQL 宏提示缺少离线查询缓存**：查询有变化时，先迁移开发库并加载旧表结构，再运行
+  `cargo sqlx prepare --workspace -- --all-targets`，提交更新后的 `.sqlx/`。
+- **首次编译很慢或磁盘占用大**：编译前设 `CARGO_INCREMENTAL=0`；日常优先用
+  `cargo check -p <crate>` 检查受影响的 crate。`target/` 太大时可用 `cargo clean` 清理构建产物。

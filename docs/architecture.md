@@ -43,7 +43,7 @@ flowchart LR
 |   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo, realtime` |
 | 8 | `account` | `auth, mihoyo, profile` |
 |   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy` |
-| 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai` |
+| 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai, notify, profile` |
 | — | `legacy` | `media`（一次性数据导入，模块边界的例外，见 ADR 0003） |
 | — | `server` | 全部（唯一组装所有域的地方） |
 
@@ -61,8 +61,8 @@ flowchart LR
   相关推荐（`GET /v1/posts/{id}/related`）只看帖子、标签、阅读记录，所以整个在 content 里。
   B 站视频信息（`ik_content::bilibili`，trait 抽象，测试用假实现）在保存帖子的事务之前查询，进程内缓存 10 分钟。
 - `profile`：作者主页要汇总账号、关系、经验、帖子与评论、装扮与米游社绑定，所以在各内容域之上，
-  只调用各域的 service / interop；依赖它的只有 `account`（注销）与 `ai`（工具读主页）。
-- `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）是事件总线的唯一订阅者，按受众转发；
+  只调用各域的 service / interop；`account` 用于注销，`ai` 的工具和 `admin` 的账号管理调用它。
+- `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）订阅事件总线，按受众转发；
   会话吊销由 auth 发内部事件 `auth.sessions_changed`，网关收到后复查该用户的连接。
   在线人数：每个实例每 15 秒把连接快照（登录用户、游客连接数）写进 `realtime_presence`，读时合并 45 秒内的行
   （`ik_realtime::presence`），多实例下同一用户只算一次；对外的 `GET /v1/presence` 在 profile 里（要按隐藏主页筛头像，
@@ -86,16 +86,14 @@ flowchart LR
   （gzip 压缩的 JSON：story.jsonl、supplement.jsonl、lore/*.md、manifest.json 原文）由管理员上传
   （`PUT /v1/admin/story/corpus`，提取器的 `python -m zzz_story upload` 一键完成），原样存在 `story_corpora`，
   至多一个生效版本，保留最近 5 个供回滚（`POST /v1/admin/story/corpora/{id}/activate`）。索引不入库：
-  各实例在内存里从语料包构建（整块文本 + CSR 存储的字符二元组倒排，约 1 秒，在阻塞线程池里），`serve`
+  各实例在阻塞线程池里从语料包构建内存索引（整块文本 + CSR 存储的字符二元组倒排），`serve`
   启动时加载生效版本（失败则启动失败）；上传 / 回滚的实例提交后立即切换，其他实例每分钟查一次生效版本 id
   跟上，SIGHUP 立即重查；切换经 `ArcSwap` 原子替换，失败保留当前语料。上传在事务外校验与构建，
   事务内用 advisory 锁串行化「换生效版本」，同一事务写审计。`IK_STORY__SOURCE` 指向本地输出目录或语料包时
-  用本地语料、不读库（开发用）。工具：`ik_catalog`（章节 / 场景目录）、`ik_search`（多词 AND、BM25、
-  标题 / 路径 / 出场名单加分，`allowPartial=true` 才放宽为部分匹配；`contextLines` 控制同篇上下文）、
-  `ik_read`（字数预算分页 + 续读游标，`follow` 按目录跨场景覆盖整章，`includeSources` 返回原始键与稳定行 id）、`ik_character`、
-  `ik_guide`（另以 MCP prompts 提供）。访问：`IK_STORY__ACCESS_KEY`（Bearer）或 `IK_STORY__PUBLIC=true`，
-  都没有时拒绝所有请求。JSON-RPC 是只读查询，在全站限流里按「读」计。典型查询 0.1 ms 级，极高频词 1～2 ms，
-  直接在请求线程里算。
+  用本地语料、不读库（开发用）。六个只读工具提供目录、检索、顺读、角色速览、指引及资料覆盖核对，
+  指引另以 MCP prompts 提供；具体契约见 [剧情库检索与 MCP 工具](story-search.md)。
+  访问：`IK_STORY__ACCESS_KEY`（Bearer）或 `IK_STORY__PUBLIC=true`，都没有时拒绝所有请求。
+  JSON-RPC 查询在请求线程里执行，在全站限流里按「读」计。
   新语料保留 `speaker_id`（已知角色形态的归一身份）、原始 `source_key` / `line_id` 和顺序来源；旧包字段可省略。
   目录顺序不代表剧情先后，未关联场景的 Comic 保持独立片段；角色速览中的首见是目录首见。MCP 查询输出携带语料版本和提取模式。
   开发时可直接运行 `cargo run -p ik-story --example query -- <语料目录或包> ik_search '{"keyword":"零号空洞"}'`，
@@ -115,12 +113,12 @@ flowchart LR
   管理后台接口放在各自的业务域里（`ik_exam::admin`、`ik_ai::admin`、`ik_content::admin`、`ik_cosmetics::admin`、
   moderation 的举报处理与封禁解封），操作者提取器与审计日志在 ik-auth（`ik_auth::admin`）；要编排多个域的
   （账号管理、仪表盘、搜索索引运维、审计日志查看）在最上层的 ik-admin
-  （`admin → auth, economy, content, comments, exam, moderation, search, ai`）。审核接口 `/v1/admin/reports*` 需要版主或管理员角色（论坛账号的 `role`，D-062 的「后台账号」不再单独存在）。
+  （`admin → auth, economy, content, comments, exam, moderation, search, ai, notify, profile`）。审核接口 `/v1/admin/reports*` 需要版主或管理员角色（论坛账号的 `role`，D-062 的「后台账号」不再单独存在）。
   对象存储的读写都在数据库事务之外；校验并发由进程内闸门（`ik_media::gate`）限制。
 - `ai → auth, media`：直连 OpenAI 兼容的上游（`ik_ai::llm`，async-openai 的 byot 流式，rustls + ring），
   提供方地址与密钥在部署配置（`IK_AI__PROVIDERS__<名字>__BASE_URL` / `__API_KEY`），模型、角色卡、上限在数据库，
   进程内缓存 60 秒。额度账本在 PostgreSQL：预占在调用模型之前（花钱的闸门 fail-closed），结算与回复定稿同一事务。
-  加锁顺序固定为「先全站计数行、再个人计数行」。后台上线前用 `ik-server ai import <json>` 维护配置。
+  加锁顺序固定为「先全站计数行、再个人计数行」。配置由管理后台维护，也支持 `ik-server ai import <json>` 导入。
   AI 私聊建在 messaging 之上：会话是 `kind = 'ai'` 的私聊，AI 回复是普通消息（带 `ai_state`）。messaging 不依赖 ai，
   用户发消息、撤回消息时经 `ik_messaging::MessageHooks`（组装时由 `AiState::install_hooks` 注册）在同一事务里通知 ai
   建任务或置停止信号；回复由后台任务 `ai.dm_reply` 生成：准备（锁会话行、复核、预占、建占位）→ 事务外流式调用
@@ -145,16 +143,15 @@ HTTP → SetRequestId → Trace → CORS → CsrfLayer → 限流 → BodyLimit 
      ← CatchPanic ← 压缩（br/gzip）← 响应
 ```
 
-- 每个请求有 `X-Request-Id`（客户端传了就沿用并校验格式，否则生成 UUIDv7）。
+- 每个请求有 `X-Request-Id`（客户端传了就沿用并校验格式，否则生成随机请求 ID）。
 - 5xx 一律脱敏为 Problem + requestId；4xx 返回业务错误码与中文 detail。
-- `#[axum::debug_handler]` 全开。
 
 ## 事务与副作用纪律
 
 1. 一次业务写 = 一个 DB 事务：主表写入、计数原子增减、流水、任务入队同事务。
 2. 任务入队用 graphile_worker 的 scoped executor（与业务同一连接同一事务）。
-3. 实时事件、搜索同步、通知推送都在 **提交后** 发送（`after_commit` 收集器，
-   由 service 返回 `Vec<Effect>`，server 层统一派发）。
+3. service 用 `ik_kernel::bus::Effects` 收集实时事件，事务提交后调用 `dispatch`；
+   网关推送与搜索索引同步订阅事件总线执行，通知记录仍在业务事务内写入。
 4. 事务内禁止任何外部 IO（LLM、SMTP、S3、米游社）。
 
 ## 事件总线
@@ -189,9 +186,11 @@ graphile_worker（schema `graphile_worker`，由它自己迁移：执行器启�
   - `media.sweep_staging`：定时任务，每小时第 17 分钟，清理过期的上传暂存对象。只尝试一次，失败等下个小时。
   - `server.prune_idempotency_keys`：定时任务，每天一次，删除超过 24 小时的幂等键。只尝试一次。
   - `mihoyo.prune_qr_logins`：定时任务，每小时第 41 分钟，删除过期的扫码会话。只尝试一次。
+  - `ai.reclaim_quota_holds`：每分钟回收过期的额度预占。只尝试一次，失败等下次定时执行。
+  - `ai.dm_reply` / `ai.comment_reply`：私聊与评论的 AI 回复，流程见上文 AI 依赖说明。
 - 仍在进程内（每个实例各自做，不适合放进队列）：热榜刷新（结果是本实例的内存缓存）、搜索索引同步
   （订阅事件总线，失败的文档进重试表，另有定期对账）。
-- 计划：会话清理、计数/余额对账、过期验证码/登录尝试清理（D-022）、AI 回复、举报处置、账号清理。
+- 待实现：会话清理、计数/余额对账、过期验证码/登录尝试清理（D-022）。
 - 全部任务幂等（payload 带幂等键或天然可重入）。重试用 graphile_worker 的指数退避，`max_attempts` 写在任务定义旁；
   用完次数的任务留在队列表里（`attempts = max_attempts`，`last_error` 有原因），即死信，以后由管理后台处理。
 - `IK_JOBS__RUN_WORKER=false` 时本实例只入队不执行；多实例时 graphile_worker 保证每个任务只被一个实例领取，
@@ -205,19 +204,12 @@ graphile_worker（schema `graphile_worker`，由它自己迁移：执行器启�
 
 ## 配置
 
-- 编译期：`.env` 里的 `DATABASE_URL` 仅供 sqlx 宏。
-- 运行时：环境变量 `IK_` 前缀（figment，`__` 分层），密钥类（HMAC key、SMTP 密码、
-  LLM Key）支持从文件读取（`IK_SECRETS__*_FILE`）以便容器 secret 挂载。
+- 日常编译：`.cargo/config.toml` 默认 `SQLX_OFFLINE=true`，sqlx 宏使用已提交的 `.sqlx/` 缓存。
+  更新 SQL 缓存与数据库集成测试时使用 `DATABASE_URL` 连接开发库。
+- 运行时：环境变量 `IK_` 前缀（figment，`__` 分层）；`IK_DATABASE__URL` 为空时回退到 `DATABASE_URL`。
 - 非法配置启动即失败，禁止静默默认值兜底密钥。
 
 ## 观测
 
-- tracing JSON 日志（dev 用 pretty），所有 span 带 request_id。
-- `/metrics` Prometheus（请求、任务、WS 连接数、DB 池）。
-- `/healthz`（存活）与 `/readyz`（DB ping + 迁移版本检查）。
-
-### 剧情工具边界
-
-剧情检索的同篇 AND 同时核对正文、说话人身份与标题/出场元数据，全库与篇内范围保持一致；说话人身份命中会明确标注。超过 8 个词会提示截断，模糊章节名有歧义时要求精确分组 id。
-
-`ik_read` 续读保留显式行数、字数、行号、来源和 follow 参数。字数预算计入标题与正文，首行可超预算以保证游标推进，末尾续读提示不计入。默认提取保留不确定分支，不代表严格单一路线或已恢复播放顺序。新清单用 `chapter_order_scale=10` 声明整数比例；旧小数按全包统一迁移，显式新比例拒绝小数。
+- tracing JSON 日志（dev 用 pretty），HTTP 请求 span 带 request_id。
+- `/healthz`（存活）与 `/readyz`（数据库连通性检查）。

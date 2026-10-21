@@ -49,7 +49,7 @@
 | `AuthCtx` | 已认证请求上下文（用户、会话、角色、权限位） |
 | `Cursor` | 不透明分页游标 |
 | `EventBus` | 进程内事件总线 trait（realtime 推送源） |
-| `Effect` | 事务提交后要执行的副作用（推送/索引/通知） |
+| `Effects` | 事务内收集事件、提交后派发的容器（推送/索引/通知） |
 | 业务日 | 北京时间 04:00 为界的"一天"（`kernel::time::biz_day`） |
 
 ## 旧系统对照（阅读 business-rules 时用）

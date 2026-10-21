@@ -298,7 +298,7 @@
   - 所有展示作者头像的地方统一「装备的系统头像优先，其次自定义头像」，关注列表也一样（D-056 方案 A）。
   - 名片列表改为游标分页（默认 20、最多 50），分类参数叫 `kind`，不合法时 400 `VALIDATION_FAILED`（旧系统 page/pageSize 默认 30、最多 60）。
   - 名片的背景故事是 Markdown（旧系统是富文本 blocks）。名片图用原尺寸 WebP（`imageUrl`），头像用 360 缩略图（COSMETIC-009）。
-  - 目录在管理后台上线前用 CLI 维护：`ik-server cosmetics import <file.json>`，按名字新增或更新，图片引用已上传的媒体 id。
+  - 目录可通过管理后台维护，也支持 CLI：`ik-server cosmetics import <file.json>`，按名字新增或更新，图片引用已上传的媒体 id。
 - **帖子封面、评论图片只能用自己图库里的图**（D-012 方案 A），引用形态只有媒体 id 数组（旧系统的 documentId、`{set}`/`{connect}`
   等写法取消，FILE-003、POST-018、CMT-022）；先按原始条数拦截再去重。正文是 Markdown，插图数（`![...](...)`）按同一等级上限
   校验（对应旧系统按 blocks 计数，POST-014）。

@@ -155,4 +155,6 @@ pg_dump -s --section=pre-data --no-owner --no-privileges --no-comments -n legacy
 ```
 
 把输出（去掉 `SET` / `SELECT pg_catalog` / 注释 / `\restrict` 行）替换 `sql/strapi-schema.sql`，
-重新加载到开发库，跑 `cargo nextest run -p ik-legacy` 与 `cargo sqlx prepare --workspace -- --all-targets`。
+重新加载到开发库，设 `CARGO_INCREMENTAL=0` 后只跑受影响的测试：
+`cargo nextest run -p ik-legacy -E 'test(<测试名>)'`，再用 `cargo sqlx prepare --workspace -- --all-targets` 更新缓存。
+全量测试由 CI 执行。
