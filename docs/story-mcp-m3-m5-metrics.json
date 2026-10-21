@@ -1,0 +1,203 @@
+{
+  "evaluation": "deterministic MCP workflows; no model-backed quality evaluation",
+  "source": "C:/Users/Administrator/Documents/GitHub/zzz-story-extractor/out/zzz_story_3.3.0_chs",
+  "corpus_revision": "corpus_v1_7f9b051811aacbdf865de27b04a17267f850191f9f1273e1489db06bc5fdc56d",
+  "documents": 8649,
+  "lines": 155708,
+  "text_bytes": 12553056,
+  "build_ms": 10151.438600000001,
+  "working_set_bytes": 115150848,
+  "tools_list_bytes": 25853,
+  "directory_workflow": {
+    "calls": 5,
+    "distinct_documents": 244,
+    "duplicate_documents": 0
+  },
+  "bundle_sha256": "8a48142a277c31d9a889ce412618e009f0aa19b47f2bd501fe32d105ebdec9ba",
+  "queries": [
+    {
+      "args": {
+        "keyword": "天空 核心 秘密",
+        "path": "3.3版本"
+      },
+      "full_text_bytes": 16028,
+      "p50_ms": 5.321700000000001,
+      "p95_ms": 7.2654,
+      "rpc_bytes": 37478,
+      "structured_bytes": 27219,
+      "text_bytes": 9998,
+      "tool": "ik_search"
+    },
+    {
+      "args": {
+        "keyword": "3.3版本 核心",
+        "purpose": "locate"
+      },
+      "full_text_bytes": 3876,
+      "p50_ms": 1.4479,
+      "p95_ms": 1.6561,
+      "rpc_bytes": 8591,
+      "structured_bytes": 6198,
+      "text_bytes": 2255,
+      "tool": "ik_search"
+    },
+    {
+      "args": {
+        "keyword": "天空 核心",
+        "matchUnit": "window",
+        "path": "3.3版本",
+        "purpose": "verify",
+        "windowLines": 12
+      },
+      "full_text_bytes": 1136,
+      "p50_ms": 0.1988,
+      "p95_ms": 0.27240000000000003,
+      "rpc_bytes": 1796,
+      "structured_bytes": 948,
+      "text_bytes": 713,
+      "tool": "ik_search"
+    },
+    {
+      "args": {
+        "keyword": "核",
+        "path": "3.3版本"
+      },
+      "full_text_bytes": 13748,
+      "p50_ms": 3.6982,
+      "p95_ms": 3.9347000000000003,
+      "rpc_bytes": 30830,
+      "structured_bytes": 22217,
+      "text_bytes": 8384,
+      "tool": "ik_search"
+    },
+    {
+      "args": {
+        "path": "3.3版本"
+      },
+      "full_text_bytes": 26488,
+      "p50_ms": 2.2071,
+      "p95_ms": 2.4678999999999998,
+      "rpc_bytes": 48736,
+      "structured_bytes": 31747,
+      "text_bytes": 16573,
+      "tool": "ik_catalog"
+    },
+    {
+      "args": {
+        "name": "Fairy"
+      },
+      "full_text_bytes": 17185,
+      "p50_ms": 6.0987,
+      "p95_ms": 6.7139,
+      "rpc_bytes": 20381,
+      "structured_bytes": 18287,
+      "text_bytes": 1949,
+      "tool": "ik_character"
+    },
+    {
+      "args": {
+        "docId": "3.3版本",
+        "limit": 20
+      },
+      "full_text_bytes": 3160,
+      "p50_ms": 0.4425,
+      "p95_ms": 0.5482,
+      "rpc_bytes": 9766,
+      "structured_bytes": 7244,
+      "text_bytes": 2389,
+      "tool": "ik_read"
+    }
+  ],
+  "same_harness_text_comparison": [
+    {
+      "tool": "ik_search",
+      "args": {
+        "keyword": "天空 核心 秘密",
+        "path": "3.3版本"
+      },
+      "before_text_bytes": 21849,
+      "after_text_bytes": 15864,
+      "before_p95_ms": 3.8335,
+      "after_p95_ms": 3.8918
+    },
+    {
+      "tool": "ik_search",
+      "args": {
+        "keyword": "3.3版本 核心"
+      },
+      "before_text_bytes": 5704,
+      "after_text_bytes": 3876,
+      "before_p95_ms": 1.1422999999999999,
+      "after_p95_ms": 1.0115
+    },
+    {
+      "tool": "ik_search",
+      "args": {
+        "allowPartial": false,
+        "keyword": "天空",
+        "path": "3.3版本"
+      },
+      "before_text_bytes": 11493,
+      "after_text_bytes": 7960,
+      "before_p95_ms": 1.262,
+      "after_p95_ms": 1.827
+    },
+    {
+      "tool": "ik_search",
+      "args": {
+        "keyword": "Fairy",
+        "path": "3.3版本"
+      },
+      "before_text_bytes": 16895,
+      "after_text_bytes": 13019,
+      "before_p95_ms": 1.7315,
+      "after_p95_ms": 1.5026
+    },
+    {
+      "tool": "ik_search",
+      "args": {
+        "keyword": "核",
+        "path": "3.3版本"
+      },
+      "before_text_bytes": 16958,
+      "after_text_bytes": 13307,
+      "before_p95_ms": 2.73,
+      "after_p95_ms": 2.9886
+    },
+    {
+      "tool": "ik_catalog",
+      "args": {
+        "path": "3.3版本"
+      },
+      "before_text_bytes": 26190,
+      "after_text_bytes": 26488,
+      "before_p95_ms": 0.2491,
+      "after_p95_ms": 0.6927
+    },
+    {
+      "tool": "ik_read",
+      "args": {
+        "docId": "3.3版本",
+        "limit": 20
+      },
+      "before_text_bytes": 3160,
+      "after_text_bytes": 3160,
+      "before_p95_ms": 0.0257,
+      "after_p95_ms": 0.0757
+    }
+  ],
+  "chapter_workflow": {
+    "catalog_calls": 1,
+    "coverage_calls": 1,
+    "read_calls": 3,
+    "read_rpc_bytes": 975247,
+    "coveredLines": 2149,
+    "completeDocuments": 257,
+    "partialDocuments": 0,
+    "unreadDocuments": 0
+  },
+  "same_harness_snapshot": {
+    "build_ms": 9745.9938,
+    "working_set_bytes": 193609728
+  }
+}

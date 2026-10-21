@@ -2,15 +2,29 @@
 
 use std::fmt::Write as _;
 
-use serde::Deserialize;
+use super::{coverage, cursor, response::*};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::{ToolResult, clamp, push_doc_summary, resolve_doc, resolve_group, speakers_preview};
 use crate::corpus::{Corpus, DocKind, GroupKind, family_label};
 use crate::text::{char_amount, fold, thousands};
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogArgs {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub manifest: Option<bool>,
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub exclude_placeholders: Option<bool>,
+    #[serde(default)]
+    pub exclude_unlinked: Option<bool>,
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
@@ -23,7 +37,7 @@ pub struct CatalogArgs {
     pub include_evidence: Option<bool>,
 }
 
-pub fn run(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
+fn legacy(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
     let path = args.path.as_deref().map(str::trim).unwrap_or("");
     let keyword = args.keyword.as_deref().map(str::trim).unwrap_or("");
     let max = clamp(args.max_results, 100, 500);
@@ -420,4 +434,134 @@ fn doc_card(corpus: &Corpus, doc: usize) -> String {
         );
     }
     out
+}
+
+pub fn run(c: &Corpus, args: &CatalogArgs) -> ToolResult {
+    execute(c, args).map(|r| r.text)
+}
+pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
+    let full = detail(args.detail.as_deref())?;
+    let path = args.path.as_deref().unwrap_or("").trim();
+    let keyword = args.keyword.as_deref().unwrap_or("").trim();
+    let release = if path.is_empty() {
+        super::releases::lookup(keyword)?
+    } else {
+        None
+    };
+    let resolved_path = if let Some(r) = release {
+        Some(c.groups[super::releases::resolve(c, r)?].id.clone())
+    } else {
+        args.path.clone()
+    };
+    let range = coverage::RangeScope {
+        path: resolved_path,
+        scope: args.scope.clone(),
+        exclude_placeholders: args.exclude_placeholders.unwrap_or(false),
+        exclude_unlinked: args.exclude_unlinked.unwrap_or(false),
+    };
+    if args.manifest == Some(true) && !keyword.is_empty() && release.is_none() {
+        return super::err("生成清单时请用 path/scope 限定范围；keyword 仅用于目录标题检索");
+    }
+    let (mut docs, _) = coverage::members(c, &range)?;
+    if !keyword.is_empty() && release.is_none() && !path.starts_with("doc_") {
+        let matches = c.doc_keys.matching(&fold(keyword), false);
+        docs.retain(|d| matches.binary_search(&(*d as u32)).is_ok());
+    }
+    let root = (path.is_empty() || path == "/") && keyword.is_empty();
+    let total_documents = docs.len();
+    let total_lines = docs.iter().map(|&d| c.docs[d].line_count as usize).sum();
+    let offset = args.offset.unwrap_or(0);
+    let max = clamp(args.max_results, 100, 500);
+    let mut counts = std::collections::BTreeMap::new();
+    for &d in &docs {
+        let n = counts.entry(c.docs[d].group).or_insert((0, 0));
+        n.0 += 1;
+        n.1 += c.docs[d].line_count as usize;
+    }
+    let groups = if root {
+        counts.into_iter().map(|(index,(document_count,line_count))|{let g=&c.groups[index as usize];GroupCard {group_id:g.id.clone(),title:g.label.clone(),document_count,line_count,next_catalog:NextCall::new("ik_catalog",json!({"path":g.id,"scope":args.scope,"excludePlaceholders":args.exclude_placeholders,"excludeUnlinked":args.exclude_unlinked}))}}).collect()
+    } else {
+        Vec::new()
+    };
+    let documents = if root {
+        Vec::new()
+    } else {
+        docs.iter()
+            .skip(offset)
+            .take(max)
+            .map(|&d| Document::new(c, d).with_evidence(c, d, args.include_evidence == Some(true)))
+            .collect()
+    };
+    let next_call = if !root && offset.saturating_add(max) < docs.len() {
+        let mut value = serde_json::to_value(args)
+            .map_err(|_| super::ToolError("无法生成目录续接参数".into()))?;
+        value["cursor"] = json!(null);
+        value["offset"] = json!(offset.saturating_add(max));
+        Some(cursor::next(c, "ik_catalog", value)?)
+    } else {
+        None
+    };
+    let manifest = if args.manifest == Some(true) {
+        Some(coverage::manifest(c, range.clone())?)
+    } else {
+        None
+    };
+    let result = CatalogResult {
+        groups,
+        documents,
+        total_documents,
+        total_lines,
+        next_call,
+        manifest,
+        resolved_range: range,
+    };
+    let mut text = if full
+        && args.scope.is_none()
+        && args.exclude_placeholders != Some(true)
+        && args.exclude_unlinked != Some(true)
+    {
+        legacy(c, args)?
+    } else {
+        let mut out = format!(
+            "[ik_catalog] {total_documents} 篇 · {total_lines} 行\n目录相邻不证明剧情先后。\n"
+        );
+        for g in &result.groups {
+            let _ = writeln!(
+                out,
+                "{} {} | {} 篇 · {} 行 → {}",
+                g.group_id,
+                g.title,
+                g.document_count,
+                g.line_count,
+                g.next_catalog.text()
+            );
+        }
+        for d in &result.documents {
+            let _ = writeln!(
+                out,
+                "{} 「{}」 {} | {} 行 → {}",
+                d.doc_id,
+                d.title,
+                d.path,
+                d.line_count,
+                d.next_read.text()
+            );
+            for l in &d.evidence_preview {
+                let _ = write!(out, "L{}", l.number);
+                l.push_sources(&mut out);
+                if let Some(e) = &l.evidence {
+                    let _ = write!(out, " [提取证据：{e}]");
+                }
+                out.push('\n');
+            }
+        }
+        out
+    };
+    if let Some(call) = &result.next_call {
+        let _ = writeln!(text, "\n续页：{}", call.text());
+    }
+    if result.manifest.is_some() {
+        text.push_str("\n范围清单已生成；累计 ik_read.coverageDelta 后用 ik_coverage 核对。过滤以整篇为单位，仅排除全部为占位/未关联行的文档，混合文档保留。\n");
+    }
+    Ok(ToolOutput::new(c, text, ToolData::Catalog(result)))
 }

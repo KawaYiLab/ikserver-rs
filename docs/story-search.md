@@ -52,7 +52,7 @@ ik_read(docId="3.3版本", limit=20)
 
 正文或逐句署名命中使用 `maxResults`；仅元数据命中放入独立目录建议，用 `directoryOffset`（0 起）
 和 `maxDirectoryResults`（默认10，上限50）分页，不占正文配额。目录建议返回精确读取入口及未显示数量，
-续查保留全部参数。快照绑定 cursor / structuredContent 属于 M3，当前仍使用文本工具响应。
+续查保留全部参数。M3 已加入快照绑定 cursor 与 structuredContent，见下方。
 
 `catalog/search/read/character` 默认报告影响理解的证据缺口；`includeEvidence=true` 展开内容状态、
 原始资源署名、署名状态/来源/缺口/槽位、配音关联、局部行序、Perform 节/节点/资源路径与 Timeline 引用摘要。
@@ -63,3 +63,28 @@ ik_read(docId="3.3版本", limit=20)
 工具输出提供 `corpusRevision`：摘要包含规范化有效语料、稳定身份/行序、证据、影响结果的 manifest 字段、
 查询排序契约及发布映射；构建/提取时间、JSON 空白变化不影响它。证据或筛选模式变化会改变摘要。
 旧包缺失字段仍加载并明确提示未提供核验证据；未知状态字面值保留，详细证据可查看。
+
+
+## 模型调用体验改进（M3～M5）
+
+2026-10-22 已加入类型化结构化响应、快照游标、篇内窗口、批量读取及覆盖核对，见 [实施与实测报告](story-mcp-m3-m5-report.md)。六个工具保留 MCP text content，并提供生成自 Rust 类型的 outputSchema。共同字段为 `schemaVersion`、`corpusRevision`、`snapshotVersion`、`extractionMode` 和工具数据 `data`。
+
+MCP 默认 `detail="compact"`，需要展开解释时用 `full`，逐行证据由 `includeEvidence=true` 控制。CLI 的旧 `tools::call` 默认保留详细文本。客户端给模型提供一种主要结果表示，避免把 text 与 structuredContent 中同一批原文重复塞入上下文；具体 token 成本取决于客户端。游标是校验过的只读续接参数，不是访问凭证，鉴权仍由 HTTP 层处理。
+
+```text
+ik_search(keyword="核心", path="3.3版本", purpose="locate")
+ik_search(keyword="天空 核心", path="3.3版本", purpose="verify", matchUnit="window", windowLines=12)
+ik_catalog(path="3.3版本", manifest=true)
+ik_read(docIds=["返回的docId1", "返回的docId2"], maxChars=16000)
+```
+
+- `purpose=browse` 保持原检索行为；`locate` 默认每篇2个命中及1行邻行；`verify` 默认 `matchIn=body`、严格AND及2行邻行。显式参数优先。
+- 正文 `nextCall` 与目录 `nextDirectoryCall` 独立。只传返回的 `arguments={cursor:…}`；游标保留查询、范围、分页大小与偏好。损坏、超长、参数冲突、错工具或换快照均提示重查。
+- `matchUnit=window` 在1～100行的文档行距内求最小全词覆盖区间；无完整窗口时按原范围返回明确的部分窗口。展示邻行不会补足窗口条件，`orderSource/localOrderStatus`保留来源依据，`orderStatus=playback_unverified`；跨文档关系仍为未知。
+- 篇内搜索页按命中行/窗口分页；`isContext` 区分本页邻行。搜索原文超过180字时截为片段并设 `complete=false`，`matches.linesTruncated` 报告行号列表截断，`windowsTruncated/nextMatches`标出未展示窗口并给出篇内分页入口；搜索片段不产出coverageDelta。
+- `docIds` 每次最多16个实际文档ID，与 `docId/follow=true` 互斥，共用读取预算；分块保留文档身份。读取 `complete` 表示本次指定续读目标已到末尾，不证明章首或过去的请求已覆盖。
+- catalog 的 `manifest` 固定范围与整篇排除选项；只有全部行均为占位/未关联候选的文档才会被对应选项排除，混合文档保留。总行数、排除数、占位和候选计数分别报告，状态计数可能交叉。
+- 角色 `chapterCount/chaptersTruncated`、文档 `evidencePreviewTruncated`明确展示上限；更多实际署名结果使用角色返回的搜索入口。
+- 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`，返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
+
+本轮未增加数据库表或修改 HTTP 路由/DTO；OpenAPI 的既有动态 JSON-RPC 请求契约不变。版本目录扩充、带执行依据的跨文档关系和真实模型效果评测仍需后续资料与验证。

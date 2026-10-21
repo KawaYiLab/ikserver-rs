@@ -6,7 +6,9 @@
 
 use std::fmt::Write as _;
 
-use serde::Deserialize;
+use super::{cursor, response::*};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::{ToolResult, err, push_line, resolve_doc, resolve_group, speakers_preview};
 use crate::corpus::Corpus;
@@ -20,9 +22,17 @@ const MAX_CHARS: usize = 60_000;
 /// 剩余预算不足这么多字时不再接续下一篇，留给下一次调用。
 const FOLLOW_MIN_CHARS: usize = 400;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadArgs {
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub doc_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "crate::de::opt_usize")]
+    pub batch_index: Option<usize>,
     #[serde(default)]
     pub doc_id: String,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
@@ -67,7 +77,30 @@ fn continuation(doc: &str, offset: usize, args: &ReadArgs, follow: bool) -> Stri
 }
 
 pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
-    let id = args.doc_id.trim();
+    execute(corpus, args).map(|r| r.text)
+}
+
+pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
+    let full = detail(args.detail.as_deref())?;
+    let mut batch = args.batch_index.unwrap_or(0);
+    let batch_docs = if let Some(ids) = &args.doc_ids {
+        if !args.doc_id.is_empty() || args.follow == Some(true) || ids.is_empty() || ids.len() > 16
+        {
+            return err("docIds 需为1～16个文档ID，不能与 docId/follow=true 同用");
+        }
+        let resolved = ids
+            .iter()
+            .map(|id| resolve_doc(corpus, id))
+            .collect::<Result<Vec<_>, _>>()?;
+        if batch >= resolved.len() {
+            return err("batchIndex 超出批量范围；请重新读取");
+        }
+        Some(resolved)
+    } else {
+        None
+    };
+    let batch_id = batch_docs.as_ref().map(|ds| corpus.doc_id(ds[batch]));
+    let id = batch_id.as_deref().unwrap_or(&args.doc_id).trim();
     if id.is_empty() {
         return err(
             "docId 不能为空：传 ik_search / ik_catalog 返回的 doc_…，或分组 id（如 ch:Chapter110）",
@@ -95,9 +128,13 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
         return err(format!("offset={offset} 超出范围：该篇共 {total} 行"));
     }
 
+    let mut blocks = Vec::new();
+    let mut continuation_at = None;
     let mut out = String::with_capacity(char_budget * 3 + 1024);
-    if let Some(release) = super::releases::lookup(id)? {
-        super::releases::push_note(&mut out, corpus, release);
+    if full {
+        if let Some(release) = super::releases::lookup(id)? {
+            super::releases::push_note(&mut out, corpus, release);
+        }
     }
     let mut lines_used = 0usize;
     let mut chars_used = out.chars().count();
@@ -124,19 +161,22 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
                 d.path
             );
         }
-        let speakers = speakers_preview(corpus, doc, 12);
-        if !speakers.is_empty() {
-            let _ = write!(out, " | 逐句署名：{speakers}");
+        if full {
+            let speakers = speakers_preview(corpus, doc, 12);
+            if !speakers.is_empty() {
+                let _ = write!(out, " | 逐句署名：{speakers}");
+            }
+            out.push('\n');
+            if first_doc {
+                super::push_version(&mut out, corpus);
+            }
+            super::push_order_note(&mut out, corpus, doc);
         }
-        out.push('\n');
-        if first_doc {
-            super::push_version(&mut out, corpus);
-        }
-        super::push_order_note(&mut out, corpus, doc);
         chars_used += out[header_start..].chars().count();
 
         let start = offset;
         let mut end = start - 1; // 已输出的最后一行（1 基）
+        let mut source_lines = Vec::new();
         let mut body = String::new();
         while end < total && lines_used < line_budget {
             let line = d.first_line as usize + end;
@@ -156,6 +196,11 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             if chars_used + cost > char_budget && lines_used > 0 {
                 break;
             }
+            source_lines.push(SourceLine::new(
+                corpus,
+                line,
+                args.include_evidence == Some(true),
+            ));
             body.push_str(&line_buf);
             body.push('\n');
             chars_used += cost;
@@ -165,6 +210,7 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
         if end < start && !first_doc {
             // Don't expose an empty "1-0" range when the next header/line
             // cannot fit. Resume that document on the next invocation.
+            continuation_at = Some((doc, start, batch));
             out.truncate(header_start);
             let _ = write!(
                 out,
@@ -173,12 +219,19 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             );
             break;
         }
+        blocks.push(ReadBlock {
+            document: Document::new(corpus, doc),
+            start,
+            end,
+            lines: source_lines,
+        });
         let range_start = out.len();
         let _ = writeln!(out, " | 第 {start}-{end} 行 / 共 {} 行", thousands(total));
         chars_used += out[range_start..].chars().count();
         out.push_str(body.trim_end_matches('\n'));
 
         if end < total {
+            continuation_at = Some((doc, end + 1, batch));
             let _ = write!(
                 out,
                 "\n\n— 已达本次{}上限。继续：{}",
@@ -191,18 +244,29 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             );
             break;
         }
-        let next = corpus.next_in_group(doc);
+        let next = if let Some(ds) = &batch_docs {
+            ds.get(batch + 1).copied()
+        } else {
+            corpus.next_in_group(doc)
+        };
+        let continuing = follow || batch_docs.is_some();
         match next {
             Some(n)
-                if follow
+                if continuing
                     && lines_used < line_budget
                     && chars_used + FOLLOW_MIN_CHARS < char_budget =>
             {
+                if batch_docs.is_some() {
+                    batch += 1;
+                }
                 doc = n;
                 offset = 1;
                 first_doc = false;
             }
             Some(n) => {
+                if continuing {
+                    continuation_at = Some((n, 1, batch + usize::from(batch_docs.is_some())));
+                }
                 let call = continuation(&corpus.doc_id(n), 1, args, follow);
                 let _ = write!(
                     out,
@@ -214,7 +278,11 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             }
             None => {
                 let g = d.group as usize;
-                let _ = write!(out, "\n\n— 「{}」已全部读完。", corpus.groups[g].label);
+                let _ = write!(
+                    out,
+                    "\n\n— 已到「{}」目录末尾；全章覆盖请用 ik_coverage 核对。",
+                    corpus.groups[g].label
+                );
                 if let Some(ng) = corpus
                     .groups
                     .get(g + 1)
@@ -232,5 +300,72 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
             }
         }
     }
-    Ok(out)
+    let next_call = if let Some((d, start, index)) = continuation_at {
+        let mut value =
+            serde_json::to_value(args).map_err(|_| super::ToolError("无法生成续读参数".into()))?;
+        value["cursor"] = json!(null);
+        value["offset"] = json!(start);
+        if batch_docs.is_some() {
+            value["batchIndex"] = json!(index);
+        } else {
+            value["docId"] = json!(corpus.doc_id(d));
+            value["follow"] = json!(follow);
+        }
+        Some(cursor::next(corpus, "ik_read", value)?)
+    } else {
+        None
+    };
+    let coverage_delta = blocks
+        .iter()
+        .map(|b| LineRange {
+            corpus_revision: corpus.revision.clone(),
+            doc_id: b.document.doc_id.clone(),
+            start: b.start,
+            end: b.end,
+            complete: true,
+        })
+        .collect();
+    let result = ReadResult {
+        blocks,
+        coverage_delta,
+        complete: next_call.is_none(),
+        next_call,
+    };
+    if full && batch_docs.is_some() {
+        if let Some(end) = out.rfind("\n\n—") {
+            out.truncate(end);
+        }
+        if let Some(call) = &result.next_call {
+            let _ = write!(out, "\n\n继续本次批量：{}", call.text());
+        } else {
+            out.push_str("\n\n本次批量目标已到末尾；资料覆盖请用 ik_coverage 核对。");
+        }
+    }
+    if !full {
+        out.clear();
+        for b in &result.blocks {
+            let _ = writeln!(
+                out,
+                "[ik_read] {} 「{}」 | 第 {}-{} 行 / 共 {} 行",
+                b.document.doc_id, b.document.title, b.start, b.end, b.document.line_count
+            );
+            for l in &b.lines {
+                if numbers {
+                    let _ = write!(out, "L{} ", l.number);
+                }
+                out.push_str(&l.display());
+                if args.include_sources == Some(true) || args.include_evidence == Some(true) {
+                    l.push_sources(&mut out);
+                }
+                if let Some(e) = &l.evidence {
+                    let _ = write!(out, " [提取证据：{e}]");
+                }
+                out.push('\n');
+            }
+        }
+        if let Some(call) = &result.next_call {
+            let _ = write!(out, "继续：{}", call.text());
+        }
+    }
+    Ok(ToolOutput::new(corpus, out, ToolData::Read(result)))
 }

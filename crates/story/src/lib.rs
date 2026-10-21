@@ -7,8 +7,8 @@
 //! 各实例在内存里构建索引：启动时加载生效版本（[`StoryState::load`]），上传后立即切换，
 //! 其他实例一分钟内跟上（[`StoryState::spawn_watcher`]）。
 //!
-//! 分层：`corpus`（数据模型、语料包、构建）→ `index`（字符二元组倒排）→ `engine`（五个工具的逻辑，
-//! 产出给模型读的紧凑文本）→ `mcp`（JSON-RPC 分发）→ `routes` / `admin`（HTTP）；`repo` 读写表。
+//! 分层：`corpus`（数据模型、语料包、构建）→ `index`（字符二元组倒排）→ `engine`（六个工具的逻辑，
+//! 产出类型化结果与兼容文本）→ `mcp`（JSON-RPC 分发）→ `routes` / `admin`（HTTP）；`repo` 读写表。
 
 pub mod admin;
 pub mod corpus;

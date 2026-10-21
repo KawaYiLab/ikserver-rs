@@ -785,7 +785,10 @@ fn read_pages_and_follows_across_docs() {
         out.contains("赫利俄斯机关的遗产"),
         "supplement comes last: {out}"
     );
-    assert!(out.contains("已全部读完"), "{out}");
+    assert!(
+        out.contains("目录末尾") && out.contains("ik_coverage"),
+        "{out}"
+    );
     assert!(out.contains("下一组：ch:Chapter01"), "{out}");
 
     // 行数上限 → 给出精确续读游标。
@@ -971,7 +974,8 @@ fn jsonrpc_lifecycle() {
             "ik_search",
             "ik_read",
             "ik_character",
-            "ik_guide"
+            "ik_guide",
+            "ik_coverage"
         ]
     );
     for t in list["result"]["tools"].as_array().unwrap() {

@@ -228,35 +228,32 @@ fn match_fields_body_only_and_filters_are_consistent_globally_and_within_doc() {
 #[test]
 fn directory_pages_preserve_scope_and_do_not_repeat_entries() {
     let c = build_from_bundle(&sample()).unwrap();
-    let mut ids = std::collections::HashSet::new();
-    for offset in 0..3 {
-        let out = call(
-            &c,
-            "ik_search",
-            json!({"keyword":"天空 核心 秘密","path":"3.3版本","scope":"story","maxDirectoryResults":1,"directoryOffset":offset}),
-        );
-        let directory = out
-            .split("目录建议（仅元数据；不计为正文命中）：")
-            .nth(1)
+    let mut seen = std::collections::HashSet::new();
+    let mut args = json!({"keyword":"天空 核心 秘密","path":"3.3版本","scope":"story","maxDirectoryResults":1});
+    loop {
+        let output = tools::call_output(&c, "ik_search", Some(args))
+            .ok()
+            .unwrap()
             .unwrap();
-        let id = directory.lines().find(|l| l.starts_with("doc_")).unwrap()[..16].to_owned();
-        assert!(ids.insert(id), "{out}");
-        if offset < 2 {
-            assert!(
-                directory.contains("directoryOffset")
-                    && directory.contains("3.3版本")
-                    && directory.contains("story"),
-                "{out}"
-            );
+        let value = serde_json::to_value(output.response).unwrap();
+        let data = &value["data"];
+        for item in data["directorySuggestions"].as_array().unwrap() {
+            assert!(seen.insert(item["document"]["docId"].as_str().unwrap().to_owned()));
         }
+        assert_eq!(data["resolvedRange"]["groupId"], "ch:Chapter240");
+        assert_eq!(data["resolvedRange"]["scope"], "story");
+        if data["nextDirectoryCall"].is_null() {
+            break;
+        }
+        args = data["nextDirectoryCall"]["arguments"].clone();
     }
-    assert_eq!(ids.len(), 3);
+    assert_eq!(seen.len(), 3);
 }
 
 #[test]
 fn evidence_tool_definitions_and_jsonrpc_keep_text_compatibility() {
     let c = build_from_bundle(&sample()).unwrap();
-    let defs = tools::definitions();
+    let defs = tools::definitions().unwrap();
     for tool in ["ik_catalog", "ik_search", "ik_read", "ik_character"] {
         let definition = defs["tools"]
             .as_array()

@@ -5,7 +5,7 @@
 ## 工作流
 1. 用实体词检索：`ik_search(keyword="零号空洞")`、`ik_search(keyword="赫利俄斯 机关")`（空格分隔表示同篇同时出现）。
 2. 搜索结果按相关度排列。路径和 `ik_catalog(path=docId)` 的第 N/M 篇只能定位目录，不能证明事件先后。
-3. 照抄命中结果的精确 `ik_read` 调用读上下文；手动计算起点时用 `max(1, 行号-5)`。需要追溯 TextMap 时加 `includeSources=true`。
+3. 按结果的 `document.nextRead` 读上下文，按 `nextCall.arguments` 的 cursor 续查/续读。需要追溯 TextMap 时加 `includeSources=true`。`matchUnit="window"` 可找跨行概念窗口，邻行及共同资源不能证明剧情先后。
 4. 时间线条目格式：`[章节 · 场景] 事件一句话（doc_… L行号）`。
 5. 区分「故事内时间」「玩家体验顺序」和「目录排列」：当前数据只提供最后一种。用原文明示的时间、前后提及和因果建立先后；回忆、闪回、档案中的往事单独标注。无法证明先后的条目并列，写明未知。
 

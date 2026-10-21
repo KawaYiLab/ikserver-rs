@@ -4,7 +4,9 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 
-use serde::Deserialize;
+use super::response::*;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use super::search::match_speakers;
 use super::{ToolResult, clamp, err, push_doc_summary};
@@ -12,9 +14,11 @@ use crate::corpus::{Corpus, DocKind, GroupKind};
 use crate::index::Candidates;
 use crate::text::{find_folded, fold, thousands};
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterArgs {
+    #[serde(default)]
+    pub detail: Option<String>,
     #[serde(default)]
     pub name: String,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
@@ -41,6 +45,11 @@ struct ChapterStat {
 }
 
 pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
+    execute(corpus, args).map(|r| r.text)
+}
+
+pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
+    let full = detail(args.detail.as_deref())?;
     let name = args.name.trim();
     if name.is_empty() {
         return err("name 不能为空");
@@ -328,5 +337,104 @@ pub fn run(corpus: &Corpus, args: &CharacterArgs) -> ToolResult {
         out,
         "ik_search(keyword=\"{name}\") 查被提及处；ik_read(docId=目录首见场景) 读原文确认登场经过。"
     );
-    Ok(out)
+    let chapters = groups
+        .iter()
+        .filter(|(g, _)| corpus.groups[**g as usize].kind == GroupKind::Chapter)
+        .take(max)
+        .map(|(g, s)| CharacterChapter {
+            group_id: corpus.groups[**g as usize].id.clone(),
+            title: corpus.groups[**g as usize].label.clone(),
+            scenes: s.scenes,
+            spoken_lines: s.lines,
+            mentioned_lines: s.mentions,
+            name_table_scenes: s.name_table,
+            inferred_lines: s.inferred,
+            first_directory_appearance: s.first_appear.map(|d| Document::new(corpus, d)),
+            first_directory_mention: s.first_mention.map(|d| Document::new(corpus, d)),
+        })
+        .collect();
+    let result = CharacterResult {
+        evidence_documents: if args.include_evidence == Some(true) {
+            attributed_docs
+                .iter()
+                .take(max)
+                .chain(association_docs.iter().take(max))
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .map(|d| Document::new(corpus, d).with_evidence(corpus, d, true))
+                .collect()
+        } else {
+            Vec::new()
+        },
+        name: name.into(),
+        resolved_names: ids
+            .iter()
+            .filter_map(|&s| corpus.speaker_name(s).map(str::to_owned))
+            .collect(),
+        scenes,
+        spoken_lines: spoken,
+        name_table_scenes: table_scenes,
+        inferred_lines,
+        mentioned_lines: mention_lines.len(),
+        chapters,
+        chapter_count: rows,
+        chapters_truncated: rows > max,
+        profiles: profiles
+            .iter()
+            .take(8)
+            .map(|&d| Document::new(corpus, d))
+            .collect(),
+        next_calls: {
+            let mut calls = Vec::new();
+            if !ids.is_empty() {
+                calls.push(NextCall::new(
+                    "ik_search",
+                    json!({"speaker":name,"includeEvidence":args.include_evidence}),
+                ));
+            }
+            calls.push(NextCall::new(
+                "ik_search",
+                json!({"keyword":name,"matchIn":"body"}),
+            ));
+            calls
+        },
+    };
+    if !full {
+        out = format!(
+            "[ik_character] {name} | 逐句署名 {scenes} 场景 · {spoken} 句 · 被提及 {} 行\n姓名表关联 {table_scenes} 场景 · 推断署名 {inferred_lines} 句（独立统计）。\n",
+            result.mentioned_lines
+        );
+        for p in &result.profiles {
+            let _ = writeln!(
+                out,
+                "档案：{} 「{}」 → {}",
+                p.doc_id,
+                p.title,
+                p.next_read.text()
+            );
+        }
+        for chapter in &result.chapters {
+            let _ = writeln!(
+                out,
+                "{} {} | 台词 {} · 提及 {}",
+                chapter.group_id, chapter.title, chapter.spoken_lines, chapter.mentioned_lines
+            );
+        }
+        for d in &result.evidence_documents {
+            let _ = writeln!(out, "{} 「{}」", d.doc_id, d.title);
+            for l in &d.evidence_preview {
+                let _ = write!(out, "L{}", l.number);
+                l.push_sources(&mut out);
+                if let Some(e) = &l.evidence {
+                    let _ = write!(out, " [提取证据：{e}]");
+                }
+                out.push('\n');
+            }
+        }
+        for call in &result.next_calls {
+            let _ = writeln!(out, "下一步：{}", call.text());
+        }
+    }
+    Ok(ToolOutput::new(corpus, out, ToolData::Character(result)))
 }

@@ -5,7 +5,7 @@ use super::Corpus;
 
 /// Bump when matching, ranking, evidence interpretation or alias parsing changes.
 /// Release mapping data is hashed separately so edits cannot silently reuse cursors.
-const QUERY_CONTRACT: &str = "story-mcp-m0-m2-v1-body-coverage-rank";
+const QUERY_CONTRACT: &str = "story-mcp-m3-m5-v1-window-cursor-coverage";
 
 pub(super) fn revision(corpus: &Corpus) -> Result<String> {
     let mut hash = Sha256::new();
