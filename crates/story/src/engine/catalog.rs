@@ -472,14 +472,29 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     let total_lines = docs.iter().map(|&d| c.docs[d].line_count as usize).sum();
     let offset = args.offset.unwrap_or(0);
     let max = clamp(args.max_results, 100, 500);
-    let mut counts = std::collections::BTreeMap::new();
-    for &d in &docs {
-        let n = counts.entry(c.docs[d].group).or_insert((0, 0));
-        n.0 += 1;
-        n.1 += c.docs[d].line_count as usize;
-    }
     let groups = if root {
-        counts.into_iter().map(|(index,(document_count,line_count))|{let g=&c.groups[index as usize];GroupCard {group_id:g.id.clone(),title:g.label.clone(),document_count,line_count,next_catalog:NextCall::new("ik_catalog",json!({"path":g.id,"scope":args.scope,"excludePlaceholders":args.exclude_placeholders,"excludeUnlinked":args.exclude_unlinked}))}}).collect()
+        let mut counts = std::collections::BTreeMap::new();
+        for &d in &docs {
+            let n = counts.entry(c.docs[d].group).or_insert((0, 0));
+            n.0 += 1;
+            n.1 += c.docs[d].line_count as usize;
+        }
+        counts
+            .into_iter()
+            .map(|(index, (document_count, line_count))| {
+                let g = &c.groups[index as usize];
+                GroupCard {
+                    group_id: g.id.clone(),
+                    title: g.label.clone(),
+                    document_count,
+                    line_count,
+                    next_catalog: NextCall::new(
+                        "ik_catalog",
+                        json!({"path":g.id,"scope":args.scope,"excludePlaceholders":args.exclude_placeholders,"excludeUnlinked":args.exclude_unlinked}),
+                    ),
+                }
+            })
+            .collect()
     } else {
         Vec::new()
     };
@@ -489,7 +504,11 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
         docs.iter()
             .skip(offset)
             .take(max)
-            .map(|&d| Document::new(c, d).with_evidence(c, d, args.include_evidence == Some(true)))
+            .map(|&d| {
+                Document::new(c, d)
+                    .with_summary_detail(c, d, full)
+                    .with_evidence(c, d, args.include_evidence == Some(true))
+            })
             .collect()
     };
     let next_call = if !root && offset.saturating_add(max) < docs.len() {
@@ -506,7 +525,83 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     } else {
         None
     };
+    let root_main = root && super::parse_scope(args.scope.as_deref())?.is_none();
+    let coverage_docs = docs
+        .iter()
+        .copied()
+        .filter(|&d| !root_main || c.docs[d].kind == DocKind::Story)
+        .collect::<Vec<_>>();
+    let release = release.or(super::releases::lookup(path)?);
+    let group_ids = if root {
+        Vec::new()
+    } else if let Some(release) = release {
+        vec![release.group.into()]
+    } else if !path.is_empty() && !path.starts_with("doc_") {
+        vec![c.groups[resolve_group(c, path)?].id.clone()]
+    } else {
+        docs.iter()
+            .map(|&d| c.groups[c.docs[d].group as usize].id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    };
+    let range_info = Some(RangeInfo::new(
+        if path.is_empty() {
+            Some(keyword)
+        } else {
+            Some(path)
+        },
+        group_ids,
+        release,
+        if path.starts_with("doc_") {
+            "document"
+        } else {
+            "catalog"
+        },
+    ));
+    let release_aliases = if root {
+        super::releases::revision_data()
+            .into_iter()
+            .map(|(version, group)| ReleaseAlias {
+                release_version: version.into(),
+                group_id: group.into(),
+                available: c.find_group(group).is_some(),
+                next_catalog: NextCall::new("ik_catalog", json!({"path":group})),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let chapter_relations = if root && super::parse_scope(args.scope.as_deref())?.is_none() {
+        let visible = docs
+            .iter()
+            .map(|&d| c.groups[c.docs[d].group as usize].id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        super::chapter_relations::relations(c)
+            .into_iter()
+            .filter_map(|mut relation| {
+                relation
+                    .member_group_ids
+                    .retain(|id| visible.contains(id.as_str()));
+                relation
+                    .related_group_ids
+                    .retain(|id| visible.contains(id.as_str()));
+                (if relation.relation == "sharedLabel" {
+                    relation.member_group_ids.len() > 1
+                } else {
+                    !relation.member_group_ids.is_empty() && !relation.related_group_ids.is_empty()
+                })
+                .then_some(relation)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let result = CatalogResult {
+        chapter_relations,
+        range_info,
+        release_aliases,
+        speaker_coverage: Some(c.speaker_coverage_for_docs(&coverage_docs)),
         groups,
         documents,
         total_documents,
@@ -515,11 +610,11 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
         manifest,
         resolved_range: range,
     };
-    let mut text = if full
+    let legacy_text = full
         && args.scope.is_none()
         && args.exclude_placeholders != Some(true)
-        && args.exclude_unlinked != Some(true)
-    {
+        && args.exclude_unlinked != Some(true);
+    let mut text = if legacy_text {
         legacy(c, args)?
     } else {
         let mut out = format!(
@@ -546,6 +641,7 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
                 d.line_count,
                 d.next_read.text()
             );
+            d.push_summary(&mut out, full);
             for l in &d.evidence_preview {
                 let _ = write!(out, "L{}", l.number);
                 l.push_sources(&mut out);
@@ -557,11 +653,78 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
         }
         out
     };
+    if legacy_text {
+        for d in &result.documents {
+            let _ = writeln!(text, "文档摘要：{}", d.doc_id);
+            d.push_summary(&mut text, true);
+        }
+    }
+    if let Some(info) = &result.range_info {
+        info.push_text(&mut text);
+    }
+    if let Some(counts) = &result.speaker_coverage {
+        let _ = writeln!(
+            text,
+            "{}{}（姓名解析不确认播放，设定排除{}行）",
+            if root_main { "主线" } else { "范围" },
+            counts.text(),
+            counts.excluded_not_applicable_lines
+        );
+    }
+    for alias in &result.release_aliases {
+        let _ = writeln!(
+            text,
+            "版本别名={} → {}（{}） → {}",
+            alias.release_version,
+            alias.group_id,
+            if alias.available {
+                "已收录"
+            } else {
+                "当前未收录"
+            },
+            alias.next_catalog.text()
+        );
+    }
+    for relation in &result.chapter_relations {
+        let label = match relation.relation.as_str() {
+            "sharedLabel" => "同名分组，等价待核验",
+            "supplementOf" => "补充归属",
+            "interludeOf" => "正章与间章",
+            _ => &relation.relation,
+        };
+        let _ = write!(
+            text,
+            "章节关联（{label}）：{}",
+            relation.member_group_ids.join(",")
+        );
+        if !relation.related_group_ids.is_empty() {
+            let _ = write!(text, " → {}", relation.related_group_ids.join(","));
+        }
+        let _ = writeln!(text, "（{}；只作目录导航）", relation.status);
+    }
+    if result
+        .chapter_relations
+        .iter()
+        .any(|r| r.source.kind == "extractorMapping")
+    {
+        text.push_str(
+            "关联依据：提取器 f1b85ab zzz_story/extract.py:L127–137；归属不确认播放顺序。\n",
+        );
+    }
     if let Some(call) = &result.next_call {
         let _ = writeln!(text, "\n续页：{}", call.text());
     }
-    if result.manifest.is_some() {
+    if let Some(manifest) = &result.manifest {
+        let _ = writeln!(
+            text,
+            "manifestId={} | 清单={}篇/{}行",
+            manifest.manifest_id, manifest.total_documents, manifest.total_lines
+        );
         text.push_str("\n范围清单已生成；累计 ik_read.coverageDelta 后用 ik_coverage 核对。过滤以整篇为单位，仅排除全部为占位/未关联行的文档，混合文档保留。\n");
     }
-    Ok(ToolOutput::new(c, text, ToolData::Catalog(result)))
+    Ok(if legacy_text {
+        ToolOutput::with_rendered_snapshot(c, text, ToolData::Catalog(result))
+    } else {
+        ToolOutput::new(c, text, ToolData::Catalog(result))
+    })
 }

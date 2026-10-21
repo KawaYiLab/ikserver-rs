@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 use super::coverage::{CoverageResult, Manifest, MissingRange, PendingDocument, RangeScope};
 use super::{ToolError, err};
 use crate::corpus::{Corpus, DocKind, LineKind};
+pub use crate::corpus::{DocumentOrder, EvidenceSummary, OrderCount, SpeakerCoverage};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct NextCall {
@@ -67,6 +68,18 @@ pub struct Snapshot {
     pub extraction_mode: String,
 }
 impl Snapshot {
+    pub fn text(&self) -> String {
+        format!(
+            "语料={} | 模式={} | corpusRevision={}\n",
+            if self.snapshot_version.is_empty() {
+                "未声明"
+            } else {
+                &self.snapshot_version
+            },
+            self.extraction_mode,
+            self.corpus_revision
+        )
+    }
     pub fn new(c: &Corpus) -> Self {
         Self {
             schema_version: 1,
@@ -97,6 +110,28 @@ pub struct Document {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub evidence_preview: Vec<SourceLine>,
     pub evidence_preview_truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<DocumentOrder>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_summary: Option<EvidenceSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_summary: Option<SpeakerSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_coverage: Option<SpeakerCoverage>,
+    #[serde(skip)]
+    compact_summary: std::sync::Arc<str>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeakerSummary {
+    pub names: Vec<String>,
+    pub total_speakers: usize,
+    pub names_truncated: bool,
+    pub inferred_names: Vec<String>,
+    pub total_inferred_speakers: usize,
+    pub inferred_names_truncated: bool,
+    pub legacy_evidence_missing: bool,
 }
 impl Document {
     pub fn new(c: &Corpus, d: usize) -> Self {
@@ -130,6 +165,103 @@ impl Document {
             next_read: NextCall::new("ik_read", json!({"docId":c.doc_id(d)})),
             evidence_preview: Vec::new(),
             evidence_preview_truncated: false,
+            order: Some(c.doc_summaries[d].order.clone()),
+            evidence_summary: Some(c.doc_summaries[d].evidence.clone()),
+            speaker_summary: Some(Self::speakers(c, d, 6)),
+            speaker_coverage: Some(c.doc_summaries[d].coverage.clone()),
+            compact_summary: c.doc_summaries[d].compact_text.clone(),
+        }
+    }
+    fn speakers(c: &Corpus, d: usize, max: usize) -> SpeakerSummary {
+        let doc = &c.docs[d];
+        let speakers = c.doc_speakers(doc);
+        let names = |ids: &[u32]| {
+            ids.iter()
+                .take(max)
+                .filter_map(|&s| c.speaker_name(s).map(str::to_owned))
+                .collect()
+        };
+        SpeakerSummary {
+            names: names(speakers),
+            total_speakers: speakers.len(),
+            names_truncated: speakers.len() > max,
+            inferred_names: names(&doc.inferred_speakers),
+            total_inferred_speakers: doc.inferred_speakers.len(),
+            inferred_names_truncated: doc.inferred_speakers.len() > max,
+            legacy_evidence_missing: c.doc_summaries[d].coverage.legacy_named_lines > 0,
+        }
+    }
+    pub fn with_summary_detail(mut self, c: &Corpus, d: usize, full: bool) -> Self {
+        if full {
+            self.speaker_summary = Some(Self::speakers(c, d, usize::MAX));
+        }
+        self
+    }
+    /// Summary describes the entire document; it must not imply playback or definite appearances.
+    pub fn push_summary(&self, out: &mut String, full: bool) {
+        if !full {
+            out.push_str(&self.compact_summary);
+            return;
+        }
+        if let Some(order) = &self.order {
+            if !order.applicable {
+                out.push_str("顺序与署名覆盖：不适用（设定）。\n");
+                return;
+            }
+            let counts = |values: &[OrderCount]| {
+                values
+                    .iter()
+                    .map(|v| {
+                        format!(
+                            "{}:{}",
+                            if v.value == "notProvided" {
+                                "未提供"
+                            } else {
+                                &v.value
+                            },
+                            v.line_count
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("/")
+            };
+            let _ = writeln!(
+                out,
+                "整篇：篇序={} 行序={} 局部={} 剧情先后={} 上下文={}",
+                order.doc_order_source,
+                counts(&order.line_order_sources),
+                counts(&order.line_order_statuses),
+                order.chronology_status,
+                order.context_status
+            );
+        }
+        if let Some(e) = &self.evidence_summary {
+            let hints = [
+                ("占位", e.placeholders),
+                ("未知署名", e.unknown),
+                ("推断", e.inferred),
+                ("缺署名证据", e.missing),
+                ("未关联", e.unlinked),
+                ("无配音关联", e.no_voice),
+            ]
+            .into_iter()
+            .filter(|(_, n)| *n > 0)
+            .map(|(label, n)| format!("{label}{n}"))
+            .collect::<Vec<_>>();
+            if !hints.is_empty() {
+                let _ = writeln!(out, "缺口可交叉：{}", hints.join("/"));
+            }
+        }
+        if let Some(c) = &self.speaker_coverage {
+            let _ = writeln!(out, "整篇{}", c.text());
+        }
+        if let Some(s) = &self.speaker_summary {
+            if !s.names.is_empty() {
+                let _ = writeln!(out, "逐句署名：{}", s.names.join("、"));
+            }
+            if !s.inferred_names.is_empty() {
+                let _ = writeln!(out, "推断署名：{}", s.inferred_names.join("、"));
+            }
         }
     }
     pub fn with_evidence(mut self, c: &Corpus, d: usize, include: bool) -> Self {
@@ -269,6 +401,60 @@ pub struct SearchRange {
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct RangeInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selector: Option<String>,
+    pub group_ids: Vec<String>,
+    pub selection_mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_version: Option<String>,
+}
+impl RangeInfo {
+    pub(crate) fn new(
+        selector: Option<&str>,
+        group_ids: Vec<String>,
+        release: Option<&super::releases::Release>,
+        mode: &str,
+    ) -> Self {
+        Self {
+            selector: selector.filter(|s| !s.is_empty()).map(str::to_owned),
+            group_ids,
+            selection_mode: if release.is_some() {
+                "addedMainStory"
+            } else {
+                mode
+            }
+            .into(),
+            release_version: release.map(|r| r.version.into()),
+        }
+    }
+    pub fn push_text(&self, out: &mut String) {
+        if let Some(release) = &self.release_version {
+            let _ = writeln!(
+                out,
+                "范围={release}新增主线 → {}",
+                self.group_ids.join(", ")
+            );
+        } else if !self.group_ids.is_empty() {
+            let _ = writeln!(
+                out,
+                "范围={}（{}）",
+                self.group_ids.join(", "),
+                self.selection_mode
+            );
+        }
+    }
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseAlias {
+    pub release_version: String,
+    pub group_id: String,
+    pub available: bool,
+    pub next_catalog: NextCall,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchItem {
     pub document: Document,
     pub result_type: String,
@@ -285,6 +471,8 @@ pub struct SearchItem {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range_info: Option<RangeInfo>,
     pub query: String,
     pub resolved_range: SearchRange,
     pub partial: bool,
@@ -309,11 +497,24 @@ pub struct ReadBlock {
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct NextDocument {
+    pub doc_id: String,
+    pub title: String,
+    pub group_id: String,
+    pub relation: String,
+    pub next_read: NextCall,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct ReadResult {
     pub blocks: Vec<ReadBlock>,
     pub coverage_delta: Vec<LineRange>,
     pub next_call: Option<NextCall>,
     pub complete: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_document: Option<NextDocument>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range_info: Option<RangeInfo>,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -327,6 +528,14 @@ pub struct GroupCard {
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogResult {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub chapter_relations: Vec<super::chapter_relations::ChapterRelation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range_info: Option<RangeInfo>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub release_aliases: Vec<ReleaseAlias>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speaker_coverage: Option<SpeakerCoverage>,
     pub groups: Vec<GroupCard>,
     pub documents: Vec<Document>,
     pub total_documents: usize,
@@ -392,7 +601,22 @@ pub struct ToolOutput {
     pub response: ToolResponse,
 }
 impl ToolOutput {
-    pub fn new(c: &Corpus, text: String, data: ToolData) -> Self {
+    pub fn new(c: &Corpus, mut text: String, data: ToolData) -> Self {
+        let snapshot = Snapshot::new(c);
+        if !text.contains('\n') {
+            text.push('\n');
+        }
+        let at = text.find('\n').map_or(0, |i| i + 1);
+        text.insert_str(at, &snapshot.text());
+        Self {
+            text,
+            response: ToolResponse { snapshot, data },
+        }
+    }
+
+    /// Internal renderers use this only when they already emitted the actual snapshot header.
+    /// Query and corpus text cannot decide whether provenance is present.
+    pub(crate) fn with_rendered_snapshot(c: &Corpus, text: String, data: ToolData) -> Self {
         Self {
             text,
             response: ToolResponse {
@@ -424,11 +648,21 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
         TermMatch,
         Window,
         SearchRange,
+        RangeInfo,
+        ReleaseAlias,
+        super::chapter_relations::ChapterRelation,
+        super::chapter_relations::RelationSource,
         SourceLine,
         Document,
+        DocumentOrder,
+        OrderCount,
+        EvidenceSummary,
+        SpeakerSummary,
+        SpeakerCoverage,
         NextCall,
         ReadResult,
         ReadBlock,
+        NextDocument,
         LineRange,
         CatalogResult,
         GroupCard,

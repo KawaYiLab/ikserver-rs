@@ -68,10 +68,10 @@ pub fn definitions() -> Result<Value, serde_json::Error> {
 /// 未知工具（协议错误，而非工具执行错误）。
 pub struct UnknownTool;
 
-fn parse<T: DeserializeOwned + Default>(args: Option<Value>) -> Result<T, ToolError> {
+fn parse<T: DeserializeOwned + Default>(args: Option<&Value>) -> Result<T, ToolError> {
     match args {
         None | Some(Value::Null) => Ok(T::default()),
-        Some(v) => serde_json::from_value(v).map_err(|e| ToolError(format!("参数错误：{e}"))),
+        Some(v) => T::deserialize(v).map_err(|e| ToolError(format!("参数错误：{e}"))),
     }
 }
 
@@ -114,26 +114,31 @@ pub fn call_output(
         name,
         args.filter(|v| !v.is_null()).unwrap_or_else(|| json!({})),
     );
-    Ok(arguments.and_then(|args| match name {
-        "ik_catalog" => parse(Some(args)).and_then(|a| engine::catalog::execute(corpus, &a)),
-        "ik_search" => parse(Some(args)).and_then(|a| engine::search::execute(corpus, &a)),
-        "ik_read" => parse(Some(args)).and_then(|a| engine::read::execute(corpus, &a)),
-        "ik_character" => parse(Some(args)).and_then(|a| engine::character::execute(corpus, &a)),
-        "ik_coverage" => parse(Some(args)).and_then(|a| engine::coverage::execute(corpus, &a)),
-        _ => parse(Some(args)).and_then(|a: engine::guide::GuideArgs| {
-            engine::guide::run(&a).map(|text| {
-                engine::response::ToolOutput::new(
-                    corpus,
-                    text.clone(),
-                    engine::response::ToolData::Guide(engine::response::GuideResult {
-                        mode: engine::guide::find(&a.mode)
-                            .map(|g| g.mode)
-                            .unwrap_or_default()
-                            .into(),
-                        text,
-                    }),
-                )
-            })
-        }),
+    Ok(arguments.and_then(|args| {
+        let result = match name {
+            "ik_catalog" => parse(Some(&args)).and_then(|a| engine::catalog::execute(corpus, &a)),
+            "ik_search" => parse(Some(&args)).and_then(|a| engine::search::execute(corpus, &a)),
+            "ik_read" => parse(Some(&args)).and_then(|a| engine::read::execute(corpus, &a)),
+            "ik_character" => {
+                parse(Some(&args)).and_then(|a| engine::character::execute(corpus, &a))
+            }
+            "ik_coverage" => parse(Some(&args)).and_then(|a| engine::coverage::execute(corpus, &a)),
+            _ => parse(Some(&args)).and_then(|a: engine::guide::GuideArgs| {
+                engine::guide::run(&a).map(|text| {
+                    engine::response::ToolOutput::new(
+                        corpus,
+                        text.clone(),
+                        engine::response::ToolData::Guide(engine::response::GuideResult {
+                            mode: engine::guide::find(&a.mode)
+                                .map(|g| g.mode)
+                                .unwrap_or_default()
+                                .into(),
+                            text,
+                        }),
+                    )
+                })
+            }),
+        };
+        result.map_err(|error| engine::suggestions::append(corpus, name, &args, error))
     }))
 }

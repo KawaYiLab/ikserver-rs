@@ -8,10 +8,12 @@ mod build;
 mod bundle;
 mod evidence;
 mod revision;
+mod summaries;
 
 pub use build::{build_from_bundle, build_from_dir, family_label};
 pub use bundle::{BUNDLE_FORMAT, Bundle};
 pub use evidence::{EvidenceCounts, LineEvidence, ResourceEvidence};
+pub use summaries::{DocumentOrder, DocumentSummary, EvidenceSummary, OrderCount, SpeakerCoverage};
 
 use serde::Serialize;
 use std::ops::Range;
@@ -153,6 +155,8 @@ pub struct Corpus {
     pub line_evidence_ids: Vec<u32>,
     pub evidence: Vec<LineEvidence>,
     pub docs: Vec<Doc>,
+    /// Derived presentation data; not part of corpusRevision, document identity, or ordering.
+    pub doc_summaries: Vec<DocumentSummary>,
     pub groups: Vec<Group>,
     pub speakers: Vec<String>,
     /// 折叠后的说话人名，与 `speakers` 一一对应。
@@ -175,6 +179,14 @@ pub struct Corpus {
 }
 
 impl Corpus {
+    pub fn speaker_coverage_for_docs(&self, docs: &[usize]) -> SpeakerCoverage {
+        let mut coverage = SpeakerCoverage::default();
+        for &doc in docs {
+            coverage.merge(&self.doc_summaries[doc].coverage);
+        }
+        coverage
+    }
+
     #[inline]
     pub fn line_text(&self, line: usize) -> &str {
         let l = &self.lines[line];

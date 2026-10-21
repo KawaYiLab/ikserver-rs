@@ -957,6 +957,7 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         line_evidence_ids,
         evidence,
         docs,
+        doc_summaries: Vec::new(),
         groups,
         speakers,
         speakers_folded,
@@ -971,6 +972,7 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
         index,
     };
     corpus.revision = super::revision::revision(&corpus)?;
+    corpus.doc_summaries = super::summaries::build(&corpus);
     Ok(corpus)
 }
 

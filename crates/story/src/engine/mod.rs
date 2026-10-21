@@ -3,6 +3,7 @@
 //! 与协议层完全解耦，命令行 `call` 子命令与测试直接调用这里。
 
 pub mod catalog;
+pub mod chapter_relations;
 pub mod character;
 pub mod coverage;
 pub(crate) mod cursor;
@@ -11,6 +12,7 @@ pub mod read;
 pub(crate) mod releases;
 pub mod response;
 pub mod search;
+pub(crate) mod suggestions;
 
 use std::fmt::Write as _;
 

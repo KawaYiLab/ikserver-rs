@@ -318,6 +318,7 @@ fn generated_schemas_are_self_contained_and_match_results() {
     );
     if let Ok(path) = std::env::var("STORY_SCHEMA_REPORT") {
         let catalog = rpc(&c, "ik_catalog", json!({"path":"3.3版本","manifest":true}));
+        let root_catalog = rpc(&c, "ik_catalog", json!({}));
         let read = rpc(&c, "ik_read", json!({"docId":c.doc_id(0),"limit":2}));
         let coverage = rpc(
             &c,
@@ -325,10 +326,67 @@ fn generated_schemas_are_self_contained_and_match_results() {
             json!({"manifestId":catalog["result"]["structuredContent"]["data"]["manifest"]["manifestId"],"ranges":read["result"]["structuredContent"]["data"]["coverageDelta"]}),
         );
         let guide = rpc(&c, "ik_guide", json!({"mode":"summary"}));
+        // A separate source exercises nonempty relations, attribution previews and full responses
+        // without changing the shared unknown-speaker fixture used by the semantic assertions above.
+        let detail_story = [
+            ("Chapter04", "第一季 第四章"),
+            ("Chapter040", "第一季 第四章"),
+            ("Chapter02", "第一季 第二章"),
+            ("Chapter025", "第一季 第二章间章"),
+        ].iter().flat_map(|(chapter,label)| (0..9).map(move |line| {
+            json!({"chapter":chapter,"chapter_label":label,"family":"GalGame","scene":"0","order":line,"text":format!("测试原文{line}"),"speaker":format!("测试角色{line}"),"speaker_status":"resolved","line_order_source":"source_key","line_order_status":"unknown"}).to_string()
+        })).collect::<Vec<_>>().join("\n");
+        let details = build_from_bundle(&Bundle {
+            format: 1,
+            manifest: Some(json!({"source_version":"3.3.0"})),
+            story: detail_story,
+            supplement: None,
+            lore: Default::default(),
+        })
+        .unwrap();
+        let relations_catalog = rpc(&details, "ik_catalog", json!({}));
+        assert!(
+            !relations_catalog["result"]["structuredContent"]["data"]["chapterRelations"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        let character = rpc(&details, "ik_character", json!({"name":"测试角色0"}));
+        let full_character = rpc(
+            &details,
+            "ik_character",
+            json!({"name":"测试角色0","detail":"full"}),
+        );
+        let full_read = rpc(
+            &details,
+            "ik_read",
+            json!({"docId":details.doc_id(0),"detail":"full"}),
+        );
+        let full_catalog = rpc(
+            &details,
+            "ik_catalog",
+            json!({"path":"ch:Chapter04","detail":"full"}),
+        );
+        let responses = [
+            ("ik_search", compact),
+            ("ik_search", full),
+            ("ik_catalog", catalog),
+            ("ik_catalog", root_catalog),
+            ("ik_catalog", relations_catalog),
+            ("ik_catalog", full_catalog),
+            ("ik_read", read),
+            ("ik_read", full_read),
+            ("ik_character", character),
+            ("ik_character", full_character),
+            ("ik_coverage", coverage),
+            ("ik_guide", guide),
+        ]
+        .into_iter()
+        .map(|(tool, response)| json!({"tool":tool,"response":response}))
+        .collect::<Vec<_>>();
         std::fs::write(
             path,
-            serde_json::to_vec_pretty(&json!({"definitions":defs,"responses":[{"tool":"ik_search","response":compact},{"tool":"ik_search","response":full},{"tool":"ik_catalog","response":catalog},{"tool":"ik_read","response":read},{"tool":"ik_coverage","response":coverage},{"tool":"ik_guide","response":guide}]}))
-                .unwrap(),
+            serde_json::to_vec_pretty(&json!({"definitions":defs,"responses":responses})).unwrap(),
         )
         .unwrap();
     }

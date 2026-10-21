@@ -275,11 +275,15 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
         );
     }
     out.push_str(&rendered);
-    Ok(super::response::ToolOutput::new(
-        corpus,
-        out,
-        super::response::ToolData::Search(result),
-    ))
+    Ok(if full {
+        super::response::ToolOutput::with_rendered_snapshot(
+            corpus,
+            out,
+            super::response::ToolData::Search(result),
+        )
+    } else {
+        super::response::ToolOutput::new(corpus, out, super::response::ToolData::Search(result))
+    })
 }
 
 /// 一个检索词（或「只按说话人」时的一个虚拟词）的命中。

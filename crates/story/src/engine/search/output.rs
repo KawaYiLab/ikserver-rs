@@ -336,6 +336,7 @@ pub(super) fn typed_result(
             h.doc,
             h.line_count() == 0 && args.include_evidence == Some(true),
         );
+        document = document.with_summary_detail(c, h.doc, args.detail.as_deref() == Some("full"));
         let anchor = windows
             .first()
             .map(|w| w.0)
@@ -483,6 +484,26 @@ pub(super) fn typed_result(
         }
     }
     Ok(SearchResult {
+        range_info: Some(RangeInfo::new(
+            args.path.as_deref().or(args.keyword.as_deref()),
+            f.group
+                .map(|g| vec![c.groups[g as usize].id.clone()])
+                .or_else(|| {
+                    f.doc
+                        .map(|d| vec![c.groups[c.docs[d].group as usize].id.clone()])
+                })
+                .unwrap_or_default(),
+            super::super::releases::query(keyword)?
+                .1
+                .or(super::super::releases::lookup(
+                    args.path.as_deref().unwrap_or(""),
+                )?),
+            if f.doc.is_some() {
+                "document"
+            } else {
+                "search"
+            },
+        )),
         query: keyword.into(),
         resolved_range: SearchRange {
             scope: match f.kind {
@@ -525,6 +546,9 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
     }
     if full {
         super::super::push_version(&mut out, c);
+    }
+    if let Some(info) = &r.range_info {
+        info.push_text(&mut out);
     }
     if r.partial {
         out.push_str("部分匹配，不证明全部关键词共现。\n");
@@ -574,6 +598,7 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
                 ""
             }
         );
+        d.push_summary(&mut out, full);
         if full {
             let words = |body: bool| {
                 item.matches

@@ -10,7 +10,7 @@ use super::{cursor, response::*};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{ToolResult, err, push_line, resolve_doc, resolve_group, speakers_preview};
+use super::{ToolResult, err, push_line, resolve_doc, resolve_group};
 use crate::corpus::Corpus;
 use crate::text::thousands;
 
@@ -19,8 +19,6 @@ const DEFAULT_LIMIT: usize = 2000;
 const MAX_LIMIT: usize = 5000;
 const DEFAULT_CHARS: usize = 16_000;
 const MAX_CHARS: usize = 60_000;
-/// 剩余预算不足这么多字时不再接续下一篇，留给下一次调用。
-const FOLLOW_MIN_CHARS: usize = 400;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +27,9 @@ pub struct ReadArgs {
     pub cursor: Option<String>,
     #[serde(default)]
     pub detail: Option<String>,
+    /// Cursor-only presentation context; resolved and checked against the actual document's group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin_selector: Option<String>,
     #[serde(default)]
     pub doc_ids: Option<Vec<String>>,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
@@ -52,7 +53,11 @@ pub struct ReadArgs {
 }
 
 fn continuation(doc: &str, offset: usize, args: &ReadArgs, follow: bool) -> String {
-    let mut call = format!("ik_read(docId=\"{doc}\"");
+    let mut call = String::from("ik_read(");
+    if let Some(detail) = &args.detail {
+        let _ = write!(call, "detail={detail:?}, ");
+    }
+    let _ = write!(call, "docId={doc:?}");
     if offset > 1 {
         let _ = write!(call, ", offset={offset}");
     }
@@ -128,56 +133,88 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
         return err(format!("offset={offset} 超出范围：该篇共 {total} 行"));
     }
 
+    let selector = if let Some(origin) = args.origin_selector.as_deref() {
+        if batch_docs.is_some() {
+            return err("originSelector 不适用于批量读取；请重新读取");
+        }
+        let origin = origin.trim();
+        let origin_doc = if origin.starts_with("doc_") {
+            resolve_doc(corpus, origin)?
+        } else {
+            let g = resolve_group(corpus, origin)?;
+            match corpus.groups[g].docs.first() {
+                Some(&d) => d as usize,
+                None => return err(format!("分组「{origin}」是空的")),
+            }
+        };
+        if corpus.docs[origin_doc].group != corpus.docs[doc].group
+            || (!follow && origin_doc != doc)
+            || corpus.docs[origin_doc].group_pos > corpus.docs[doc].group_pos
+        {
+            return err("续读原始选择器与当前文档范围不一致；请重新读取");
+        }
+        origin
+    } else {
+        id
+    };
+    let release = super::releases::lookup(selector)?;
+    let mut group_ids = if let Some(ds) = &batch_docs {
+        ds.iter()
+            .map(|&d| corpus.groups[corpus.docs[d].group as usize].id.clone())
+            .collect::<Vec<_>>()
+    } else {
+        vec![corpus.groups[corpus.docs[doc].group as usize].id.clone()]
+    };
+    group_ids.sort();
+    group_ids.dedup();
+    let range_info = RangeInfo::new(
+        if batch_docs.is_some() {
+            None
+        } else {
+            Some(selector)
+        },
+        group_ids,
+        release,
+        if batch_docs.is_some() {
+            "batch"
+        } else if selector.starts_with("doc_") {
+            "document"
+        } else {
+            "catalog"
+        },
+    );
+    let snapshot = Snapshot::new(corpus).text();
     let mut blocks = Vec::new();
     let mut continuation_at = None;
+    let mut next_document = None;
+    let mut exhausted_before_doc = false;
     let mut out = String::with_capacity(char_budget * 3 + 1024);
-    if full {
-        if let Some(release) = super::releases::lookup(id)? {
-            super::releases::push_note(&mut out, corpus, release);
-        }
-    }
+    let mut chars_used = 0usize;
     let mut lines_used = 0usize;
-    let mut chars_used = out.chars().count();
     let mut first_doc = true;
     let mut line_buf = String::new();
     loop {
-        let header_start = out.len();
         let d = &corpus.docs[doc];
         let total = d.line_count as usize;
-        if first_doc {
-            let _ = write!(
-                out,
-                "[ik_read] {} 「{}」\n{}",
-                corpus.doc_id(doc),
-                d.title,
-                d.path
-            );
-        } else {
-            let _ = write!(
-                out,
-                "\n\n## {} 「{}」\n{}",
-                corpus.doc_id(doc),
-                d.title,
-                d.path
-            );
-        }
-        if full {
-            let speakers = speakers_preview(corpus, doc, 12);
-            if !speakers.is_empty() {
-                let _ = write!(out, " | 逐句署名：{speakers}");
-            }
-            out.push('\n');
-            if first_doc {
-                super::push_version(&mut out, corpus);
-            }
-            super::push_order_note(&mut out, corpus, doc);
-        }
-        chars_used += out[header_start..].chars().count();
-
+        let document = Document::new(corpus, doc).with_summary_detail(corpus, doc, full);
         let start = offset;
-        let mut end = start - 1; // 已输出的最后一行（1 基）
+        let mut end = start - 1;
         let mut source_lines = Vec::new();
         let mut body = String::new();
+        let mut body_chars = 0usize;
+        let base_header = block_header(
+            &document,
+            start,
+            start,
+            first_doc,
+            full,
+            &snapshot,
+            &range_info,
+            corpus,
+            doc,
+            release,
+        );
+        let header_chars = base_header.chars().count();
         while end < total && lines_used < line_budget {
             let line = d.first_line as usize + end;
             line_buf.clear();
@@ -191,9 +228,16 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
             if args.include_evidence.unwrap_or(false) {
                 super::push_evidence(&mut line_buf, corpus, line);
             }
-            let cost = line_buf.chars().count() + 1;
-            // 预算用尽就停，但每次调用至少给出一行，避免死循环。
-            if chars_used + cost > char_budget && lines_used > 0 {
+            line_buf.push('\n');
+            let cost = line_buf.chars().count();
+            // The end line appears in the heading and complete-returned-range note.
+            // Reuse the static header rather than rebuilding its summaries for every line.
+            let end_digits = (end + 1).ilog10() as usize + 1;
+            let start_digits = start.ilog10() as usize + 1;
+            let candidate_chars =
+                chars_used + header_chars + (end_digits - start_digits) * 2 + body_chars + cost;
+            // Return at least one complete line per invocation, even if its header/line exceeds the budget.
+            if candidate_chars > char_budget && lines_used > 0 {
                 break;
             }
             source_lines.push(SourceLine::new(
@@ -202,46 +246,43 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
                 args.include_evidence == Some(true),
             ));
             body.push_str(&line_buf);
-            body.push('\n');
-            chars_used += cost;
+            body_chars += cost;
             lines_used += 1;
             end += 1;
         }
-        if end < start && !first_doc {
-            // Don't expose an empty "1-0" range when the next header/line
-            // cannot fit. Resume that document on the next invocation.
+        if end < start {
+            // The next header and first line did not fit; expose neither an empty block nor a "1-0" range.
             continuation_at = Some((doc, start, batch));
-            out.truncate(header_start);
-            let _ = write!(
-                out,
-                "\n\n— 已达本次字数上限。继续：{}",
-                continuation(&corpus.doc_id(doc), start, args, follow)
-            );
+            exhausted_before_doc = true;
             break;
         }
+        let header = if end == start {
+            base_header
+        } else {
+            block_header(
+                &document,
+                start,
+                end,
+                first_doc,
+                full,
+                &snapshot,
+                &range_info,
+                corpus,
+                doc,
+                release,
+            )
+        };
+        chars_used += header.chars().count() + body_chars;
+        out.push_str(&header);
+        out.push_str(&body);
         blocks.push(ReadBlock {
-            document: Document::new(corpus, doc),
+            document,
             start,
             end,
             lines: source_lines,
         });
-        let range_start = out.len();
-        let _ = writeln!(out, " | 第 {start}-{end} 行 / 共 {} 行", thousands(total));
-        chars_used += out[range_start..].chars().count();
-        out.push_str(body.trim_end_matches('\n'));
-
         if end < total {
             continuation_at = Some((doc, end + 1, batch));
-            let _ = write!(
-                out,
-                "\n\n— 已达本次{}上限。继续：{}",
-                if lines_used >= line_budget {
-                    "行数"
-                } else {
-                    "字数"
-                },
-                continuation(&corpus.doc_id(doc), end + 1, args, follow)
-            );
             break;
         }
         let next = if let Some(ds) = &batch_docs {
@@ -249,13 +290,13 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
         } else {
             corpus.next_in_group(doc)
         };
-        let continuing = follow || batch_docs.is_some();
         match next {
-            Some(n)
-                if continuing
-                    && lines_used < line_budget
-                    && chars_used + FOLLOW_MIN_CHARS < char_budget =>
-            {
+            Some(n) if follow || batch_docs.is_some() => {
+                if lines_used >= line_budget {
+                    continuation_at = Some((n, 1, batch + usize::from(batch_docs.is_some())));
+                    exhausted_before_doc = true;
+                    break;
+                }
                 if batch_docs.is_some() {
                     batch += 1;
                 }
@@ -264,40 +305,25 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
                 first_doc = false;
             }
             Some(n) => {
-                if continuing {
-                    continuation_at = Some((n, 1, batch + usize::from(batch_docs.is_some())));
-                }
-                let call = continuation(&corpus.doc_id(n), 1, args, follow);
-                let _ = write!(
-                    out,
-                    "\n\n— 本篇完。下一篇（目录相邻，非剧情后继）：{} 「{}」 → {call}",
-                    corpus.doc_id(n),
-                    corpus.docs[n].title
-                );
+                let mut value = serde_json::to_value(args)
+                    .map_err(|_| super::ToolError("无法生成下一篇参数".into()))?;
+                value["cursor"] = json!(null);
+                value["docIds"] = json!(null);
+                value["batchIndex"] = json!(null);
+                value["originSelector"] = json!(null);
+                value["docId"] = json!(corpus.doc_id(n));
+                value["offset"] = json!(1);
+                value["follow"] = json!(false);
+                next_document = Some(NextDocument {
+                    doc_id: corpus.doc_id(n),
+                    title: corpus.docs[n].title.clone(),
+                    group_id: corpus.groups[corpus.docs[n].group as usize].id.clone(),
+                    relation: "catalogAdjacent".into(),
+                    next_read: NextCall::new("ik_read", value),
+                });
                 break;
             }
-            None => {
-                let g = d.group as usize;
-                let _ = write!(
-                    out,
-                    "\n\n— 已到「{}」目录末尾；全章覆盖请用 ik_coverage 核对。",
-                    corpus.groups[g].label
-                );
-                if let Some(ng) = corpus
-                    .groups
-                    .get(g + 1)
-                    .filter(|ng| ng.kind == corpus.groups[g].kind)
-                {
-                    let _ = write!(
-                        out,
-                        "下一组：{} {} → {}",
-                        ng.id,
-                        ng.label,
-                        continuation(&ng.id, 1, args, follow)
-                    );
-                }
-                break;
-            }
+            None => break,
         }
     }
     let next_call = if let Some((d, start, index)) = continuation_at {
@@ -308,6 +334,7 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
         if batch_docs.is_some() {
             value["batchIndex"] = json!(index);
         } else {
+            value["originSelector"] = json!(selector);
             value["docId"] = json!(corpus.doc_id(d));
             value["follow"] = json!(follow);
         }
@@ -330,42 +357,140 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
         coverage_delta,
         complete: next_call.is_none(),
         next_call,
+        next_document,
+        range_info: Some(range_info),
     };
-    if full && batch_docs.is_some() {
-        if let Some(end) = out.rfind("\n\n—") {
-            out.truncate(end);
-        }
-        if let Some(call) = &result.next_call {
-            let _ = write!(out, "\n\n继续本次批量：{}", call.text());
-        } else {
-            out.push_str("\n\n本次批量目标已到末尾；资料覆盖请用 ik_coverage 核对。");
-        }
-    }
-    if !full {
-        out.clear();
-        for b in &result.blocks {
-            let _ = writeln!(
-                out,
-                "[ik_read] {} 「{}」 | 第 {}-{} 行 / 共 {} 行",
-                b.document.doc_id, b.document.title, b.start, b.end, b.document.line_count
-            );
-            for l in &b.lines {
-                if numbers {
-                    let _ = write!(out, "L{} ", l.number);
-                }
-                out.push_str(&l.display());
-                if args.include_sources == Some(true) || args.include_evidence == Some(true) {
-                    l.push_sources(&mut out);
-                }
-                if let Some(e) = &l.evidence {
-                    let _ = write!(out, " [提取证据：{e}]");
-                }
-                out.push('\n');
+    if let Some((d, start, _)) = continuation_at {
+        if exhausted_before_doc {
+            if batch_docs.is_some() {
+                let _ = write!(
+                    out,
+                    "\n\n— 本次批量下一篇：{} 「{}」；",
+                    corpus.doc_id(d),
+                    title_preview(&corpus.docs[d].title)
+                );
+            } else {
+                let _ = write!(
+                    out,
+                    "\n\n— 本篇完。下一篇（目录相邻，非剧情后继）：{} 「{}」；",
+                    corpus.doc_id(d),
+                    title_preview(&corpus.docs[d].title)
+                );
             }
+        } else {
+            let _ = write!(
+                out,
+                "\n\n— 已达本次{}上限。",
+                if lines_used >= line_budget {
+                    "行数"
+                } else {
+                    "字数"
+                }
+            );
         }
-        if let Some(call) = &result.next_call {
+        if full && batch_docs.is_none() {
+            let _ = write!(
+                out,
+                "继续：{}",
+                continuation(&corpus.doc_id(d), start, args, follow)
+            );
+        } else if let Some(call) = &result.next_call {
             let _ = write!(out, "继续：{}", call.text());
         }
+    } else if let Some(next) = &result.next_document {
+        let _ = write!(
+            out,
+            "\n\n— 本篇完。下一篇（目录相邻，非剧情后继）：{} 「{}」 → {}",
+            next.doc_id,
+            title_preview(&next.title),
+            next.next_read.text()
+        );
+    } else if batch_docs.is_some() {
+        out.push_str("\n\n— 本次批量目标已到末尾；资料覆盖请用 ik_coverage 核对。");
+    } else {
+        let g = corpus.docs[doc].group as usize;
+        let _ = write!(
+            out,
+            "\n\n— 已到「{}」目录末尾；全章覆盖请用 ik_coverage 核对。",
+            corpus.groups[g].label
+        );
+        // Preserve the detailed presentation's optional navigation without crossing into another chapter automatically.
+        if full {
+            if let Some(ng) = corpus
+                .groups
+                .get(g + 1)
+                .filter(|ng| ng.kind == corpus.groups[g].kind)
+            {
+                let _ = write!(
+                    out,
+                    "下一组：{} {} → {}",
+                    ng.id,
+                    ng.label,
+                    continuation(&ng.id, 1, args, follow)
+                );
+            }
+        }
     }
-    Ok(ToolOutput::new(corpus, out, ToolData::Read(result)))
+    Ok(ToolOutput::with_rendered_snapshot(
+        corpus,
+        out,
+        ToolData::Read(result),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn block_header(
+    document: &Document,
+    start: usize,
+    end: usize,
+    first: bool,
+    full: bool,
+    snapshot: &str,
+    range: &RangeInfo,
+    corpus: &Corpus,
+    doc: usize,
+    release: Option<&super::releases::Release>,
+) -> String {
+    let mut out = String::new();
+    if !first {
+        out.push('\n');
+    }
+    let _ = writeln!(
+        out,
+        "{} {} 「{}」 | 第 {start}-{end} 行 / 共 {} 行",
+        if first || !full { "[ik_read]" } else { "##" },
+        document.doc_id,
+        document.title,
+        thousands(document.line_count)
+    );
+    if first {
+        out.push_str(snapshot);
+        range.push_text(&mut out);
+        if full {
+            if let Some(release) = release {
+                super::releases::push_note(&mut out, corpus, release);
+            }
+        }
+    }
+    let _ = writeln!(out, "{}", document.path);
+    if full && corpus.docs[doc].kind != crate::corpus::DocKind::Lore {
+        let d = &corpus.docs[doc];
+        let _ = writeln!(
+            out,
+            "顺序来源：{} | 剧情先后：{}。目录位置不代表剧情后继或故事内时间。",
+            d.order_source.as_deref().unwrap_or("旧语料未记录"),
+            d.chronology_status.as_deref().unwrap_or("unknown")
+        );
+    }
+    document.push_summary(&mut out, full);
+    let _ = writeln!(out, "完整返回行：{} {start}-{end}", document.doc_id);
+    out
+}
+
+fn title_preview(title: &str) -> String {
+    let mut value = title.chars().take(80).collect::<String>();
+    if title.chars().count() > 80 {
+        value.push('…');
+    }
+    value
 }

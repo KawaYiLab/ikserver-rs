@@ -1,10 +1,12 @@
 # 剧情 MCP 改进实施计划
 
-日期：2026-10-22。状态：首批 M0～M2 已实现，M3～M7 待实施。
+日期：2026-10-22。状态：M0～M3、M5已实现并本地核验；M4篇内窗口已实现，跨文档关系待证据；M6待实施，M7性能、真实模型与发布验收待完成。
 
 目标是让查询者找到相关原文、判断证据边界，并核对长任务的资料覆盖范围。
 实施涉及 `ikserver-rs/crates/story`；提取器 `zzz-story-extractor` 负责补充确有来源的证据与发布映射。
 本文件规划六项改进并记录实施进展；首批后端变更与核验见 [M0～M2 阶段报告](story-mcp-m0-m2-report.md)。
+M3～M5实施后暴露的默认输出遗漏、输入纠错和章节导航已补齐，见 [公共 MCP 优化方案](story-mcp-usability-optimization-plan.md)
+和 [实施报告](story-mcp-usability-optimization-report.md)。性能目标、真实模型验收与经核验的聚合入口仍未完成。
 
 ## 起点与完成边界
 

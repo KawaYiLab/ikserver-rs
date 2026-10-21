@@ -1,6 +1,7 @@
 # 剧情库检索与版本别名
 
 后续六项改进的阶段、依赖和验收标准见 [剧情 MCP 改进实施计划](story-mcp-improvement-plan.md)。
+M3～M5之后的默认输出补齐与章节纠错（U0～U3）已实现，契约及验证边界见 [调用体验优化实施报告](story-mcp-usability-optimization-report.md)；后续客户端与模型验收见 [调用体验优化方案](story-mcp-usability-optimization-plan.md)。
 
 多词检索先在同一篇文档中找全词匹配（AND）；词可分布在不同行、标题、路径或姓名元数据中。
 无完整匹配时默认返回部分匹配，优先按正文词覆盖、有效署名覆盖排序，再比较总覆盖与相关度，逐篇列出缺失词。
@@ -88,3 +89,38 @@ ik_read(docIds=["返回的docId1", "返回的docId2"], maxChars=16000)
 - 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`，返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
 
 本轮未增加数据库表或修改 HTTP 路由/DTO；OpenAPI 的既有动态 JSON-RPC 请求契约不变。版本目录扩充、带执行依据的跨文档关系和真实模型效果评测仍需后续资料与验证。
+
+## 默认输出补齐与章节纠错（U0～U3）
+
+六个工具的成功compact文本现在统一带一次快照头：`语料=3.3.0 | 模式=default | corpusRevision=<完整值>`。
+版本缺失显示“未声明”；full已有完整快照头的工具保留旧格式。结构化快照字段仍保留，公共新增字段均为附加字段，`schemaVersion=1`不变。
+这些行为适用于所有MCP客户端，不按AstrBot、Gemini或其他客户端提供专用分支；客户端是否把文本或
+structuredContent交给模型，以及是否截断大结果，仍须在实际客户端验证。
+
+catalog/search/read新增`rangeInfo`，区分原请求`selector`、实际`groupIds`、`selectionMode`和别名的
+`releaseVersion`；发布别名使用`selectionMode=addedMainStory`，只表示该版新增主线，既有`resolvedRange`
+语义不变。根目录展示已核验的`releaseAliases`及当前收录状态，`manifest=true`时展示`manifestId`。
+full手动续读使用返回的具体docId；快照cursor保存原别名及读取偏好，因此续页仍可说明最初请求的发布范围。
+
+公共文档卡增加整篇`order`、`evidenceSummary`、`speakerSummary`和`speakerCoverage`。
+篇序来源、行序来源与计数、局部核验状态、剧情先后和上下文关联分别保留；混合与未知状态不会取首行代替。
+署名摘要compact最多展示6个逐句姓名，推断名单独立，full展开完整名单；旧包缺少核验证据单列。
+搜索命中窗口的局部状态与整篇摘要采用不同范围，不以窗口代表整篇。
+
+署名覆盖提供总行数、有名字行数及“resolved、inferred、旧包未声明状态、其他/未知状态、无名字”五类互斥计数。
+有名字率的分母是所选范围的全部行，包含占位、选项和旁白；根目录明确标记为主线全行署名率。
+设定及零分母显示不适用。证据缺口可与署名分类交叉，不能直接相加，也不把有名字率称为对白准确率或阅读覆盖率。
+
+单篇读取结束后可返回`nextDocument`及`nextRead`，关系标作`catalogAdjacent`，只提供同组目录相邻入口。
+`complete=true`仍表示当前指定续读目标已到末尾，可能同时存在下一篇；整章是否读全仍由`ik_coverage`核对。
+未读完、follow和batch使用各自`nextCall`，读取预算统一计入实际快照头、整篇摘要及正文；首行过长仍完整返回以保证推进。
+每块文本提供docId和`coverageDelta`区间，目录与coverage提供清单标识及缺口入口。
+
+无效或歧义的章节选择器保持`isError=true`，给至多5个确定排序的候选及可执行重试；重试只替换错误范围，保留其他筛选。
+裸`ch:`/`lore:`说明缺少名称并给目录入口；未知版本只列已核验映射；损坏或过期cursor沿用重查错误。
+超大参数的重试文本有长度上限，超限时保留候选ID并提示缩短查询，不把模糊候选自动当作成功范围。
+
+未限定内容类型的根目录增加`chapterRelations`：当前标签相同的组标记`sharedLabel/labelOnly`，
+已核查的补充与间章归属标记`reviewedExtractorMapping`并保留提取器来源。
+这些是导航线索；原始groupId/docId、精确选择器和目录成员不合并，同名或归属关系不证明剧情先后。
+关系只展示当前可见成员，范围筛选和整篇排除不额外暴露其他分组。版本目录扩充、可选聚合选择器和真实模型效果验收仍属后续工作。

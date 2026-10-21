@@ -349,8 +349,12 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
             mentioned_lines: s.mentions,
             name_table_scenes: s.name_table,
             inferred_lines: s.inferred,
-            first_directory_appearance: s.first_appear.map(|d| Document::new(corpus, d)),
-            first_directory_mention: s.first_mention.map(|d| Document::new(corpus, d)),
+            first_directory_appearance: s
+                .first_appear
+                .map(|d| Document::new(corpus, d).with_summary_detail(corpus, d, full)),
+            first_directory_mention: s
+                .first_mention
+                .map(|d| Document::new(corpus, d).with_summary_detail(corpus, d, full)),
         })
         .collect();
     let result = CharacterResult {
@@ -362,7 +366,11 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
                 .copied()
                 .collect::<std::collections::BTreeSet<_>>()
                 .into_iter()
-                .map(|d| Document::new(corpus, d).with_evidence(corpus, d, true))
+                .map(|d| {
+                    Document::new(corpus, d)
+                        .with_summary_detail(corpus, d, full)
+                        .with_evidence(corpus, d, true)
+                })
                 .collect()
         } else {
             Vec::new()
@@ -383,7 +391,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
         profiles: profiles
             .iter()
             .take(8)
-            .map(|&d| Document::new(corpus, d))
+            .map(|&d| Document::new(corpus, d).with_summary_detail(corpus, d, full))
             .collect(),
         next_calls: {
             let mut calls = Vec::new();
@@ -413,6 +421,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
                 p.title,
                 p.next_read.text()
             );
+            p.push_summary(&mut out, full);
         }
         for chapter in &result.chapters {
             let _ = writeln!(
@@ -420,9 +429,20 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
                 "{} {} | 台词 {} · 提及 {}",
                 chapter.group_id, chapter.title, chapter.spoken_lines, chapter.mentioned_lines
             );
+            if let Some(d) = &chapter.first_directory_appearance {
+                let _ = writeln!(
+                    out,
+                    "目录首见：{} 「{}」 → {}",
+                    d.doc_id,
+                    d.title,
+                    d.next_read.text()
+                );
+                d.push_summary(&mut out, full);
+            }
         }
         for d in &result.evidence_documents {
             let _ = writeln!(out, "{} 「{}」", d.doc_id, d.title);
+            d.push_summary(&mut out, full);
             for l in &d.evidence_preview {
                 let _ = write!(out, "L{}", l.number);
                 l.push_sources(&mut out);
@@ -436,5 +456,25 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
             let _ = writeln!(out, "下一步：{}", call.text());
         }
     }
-    Ok(ToolOutput::new(corpus, out, ToolData::Character(result)))
+    if full {
+        for d in result
+            .profiles
+            .iter()
+            .chain(
+                result
+                    .chapters
+                    .iter()
+                    .filter_map(|ch| ch.first_directory_appearance.as_ref()),
+            )
+            .chain(result.evidence_documents.iter())
+        {
+            let _ = writeln!(out, "文档摘要：{}", d.doc_id);
+            d.push_summary(&mut out, true);
+        }
+    }
+    Ok(if full {
+        ToolOutput::with_rendered_snapshot(corpus, out, ToolData::Character(result))
+    } else {
+        ToolOutput::new(corpus, out, ToolData::Character(result))
+    })
 }
