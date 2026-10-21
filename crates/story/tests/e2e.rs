@@ -911,6 +911,10 @@ fn mcp_contract_leaves_workflow_and_answer_format_to_client() {
         for (tool, mut args) in [
             ("ik_catalog", json!({})),
             ("ik_catalog", json!({"path":"ch:Chapter00"})),
+            (
+                "ik_catalog",
+                json!({"path":"ch:Chapter00","manifest":true,"maxResults":1}),
+            ),
             ("ik_search", json!({"keyword":"狡兔屋"})),
             ("ik_read", json!({"docId":"ch:Chapter00","follow":true})),
             ("ik_read", json!({"docIds":[c.doc_id(0)]})),
@@ -941,6 +945,7 @@ fn mcp_contract_leaves_workflow_and_answer_format_to_client() {
             "整章总结前",
             "下一步：",
             "请用 ik_coverage",
+            "累计 ik_read.coverageDelta 后用",
             "读原文确认登场经过",
             "不要补写",
             "提及请用",

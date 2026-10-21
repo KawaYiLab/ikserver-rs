@@ -720,7 +720,7 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
             "manifestId={} | 清单={}篇/{}行",
             manifest.manifest_id, manifest.total_documents, manifest.total_lines
         );
-        text.push_str("\n范围清单已生成；累计 ik_read.coverageDelta 后用 ik_coverage 核对。过滤以整篇为单位，仅排除全部为占位/未关联行的文档，混合文档保留。\n");
+        text.push_str("\n范围清单已生成；ik_coverage 的 manifestId 对应该清单，ranges 接收 ik_read.coverageDelta 的完整返回行记录。过滤以整篇为单位，仅排除全部为占位/未关联行的文档，混合文档保留。\n");
     }
     Ok(if legacy_text {
         ToolOutput::with_rendered_snapshot(c, text, ToolData::Catalog(result))
