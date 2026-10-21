@@ -91,8 +91,11 @@ pub fn run(corpus: &Corpus, args: &ReadArgs) -> ToolResult {
     }
 
     let mut out = String::with_capacity(char_budget * 3 + 1024);
+    if let Some(release) = super::releases::lookup(id)? {
+        super::releases::push_note(&mut out, corpus, release);
+    }
     let mut lines_used = 0usize;
-    let mut chars_used = 0usize;
+    let mut chars_used = out.chars().count();
     let mut first_doc = true;
     let mut line_buf = String::new();
     loop {

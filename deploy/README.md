@@ -120,8 +120,11 @@ cargo run --release -p ik-server -- story call --source ../zzz-story-extractor/o
 }
 ```
 
-工具：`ik_catalog`（章节与场景目录）、`ik_search`（全文检索，空格分隔多词为同篇 AND）、`ik_read`（按字数预算顺读，
+工具：`ik_catalog`（章节与场景目录）、`ik_search`（多词先同篇 AND，无完整匹配时默认标注部分匹配；`allowPartial=false` 要求严格匹配）、`ik_read`（按字数预算顺读，
 `follow=true` 跨场景读完整章）、`ik_character`（角色出场与档案）、`ik_guide`（剧情总结 / 角色弧线 / 时间线 / 查证的方法指引）。
+
+版本别名支持 `ik_catalog(path="3.3版本")`、`ik_search(keyword="3.3 核心")` 和
+`ik_read(docId="v3.3")`，限定该版新增主线。别名映射与检索规则见 [剧情库检索说明](../docs/story-search.md)。
 
 ## 回滚
 

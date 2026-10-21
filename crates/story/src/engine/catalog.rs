@@ -30,6 +30,13 @@ pub fn run(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
         if keyword.is_empty() {
             return Ok(root(corpus));
         }
+        if let Some(release) = super::releases::lookup(keyword)? {
+            let group = super::releases::resolve(corpus, release)?;
+            let mut out = String::new();
+            super::releases::push_note(&mut out, corpus, release);
+            out.push_str(&group_listing(corpus, group, "", offset, max));
+            return Ok(out);
+        }
         return Ok(titles_everywhere(corpus, keyword, offset, max));
     }
     if path.starts_with("doc_") {
@@ -37,7 +44,12 @@ pub fn run(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
         return Ok(doc_card(corpus, doc));
     }
     let group = resolve_group(corpus, path)?;
-    Ok(group_listing(corpus, group, keyword, offset, max))
+    let mut out = String::new();
+    if let Some(release) = super::releases::lookup(path)? {
+        super::releases::push_note(&mut out, corpus, release);
+    }
+    out.push_str(&group_listing(corpus, group, keyword, offset, max));
+    Ok(out)
 }
 
 fn root(corpus: &Corpus) -> String {
@@ -115,6 +127,9 @@ fn root(corpus: &Corpus) -> String {
         );
         if sup > 0 {
             let _ = write!(out, " | 补充 {sup} 篇");
+        }
+        if let Some(release) = super::releases::for_group(&g.id) {
+            let _ = write!(out, " | 版本别名：{}（该版新增主线）", release.version);
         }
         out.push('\n');
     }

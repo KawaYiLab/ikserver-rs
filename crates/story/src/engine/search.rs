@@ -1,7 +1,7 @@
 //! ik_search：全文检索。
 //!
 //! 多个关键词用空格分隔，按「同一文档内全部出现」求交（AND）；没有文档同时包含全部关键词时
-//! 仅 allowPartial=true 时返回部分匹配。文档打分用行级 BM25，标题/路径命中额外加分。
+//! 默认明确标注并返回部分匹配，allowPartial=false 可要求严格 AND。文档打分用行级 BM25，标题/路径命中额外加分。
 //! 指定 docId 时变为文档内检索，逐行列出命中与行号。
 
 use std::fmt::Write as _;
@@ -13,7 +13,7 @@ use super::{
 };
 use crate::corpus::{Corpus, DocKind};
 use crate::index::{Candidates, intersect, union_sorted};
-use crate::text::{find_folded, fold, query_terms, snippet, thousands};
+use crate::text::{find_folded, fold, snippet, thousands};
 
 const MAX_TERMS: usize = 8;
 const SNIPPET_WIDTH: usize = 90;
@@ -50,6 +50,7 @@ struct Filter {
     group: Option<u32>,
     doc: Option<usize>,
     speakers: Option<Vec<u32>>,
+    list_group: bool,
 }
 
 impl Filter {
@@ -120,7 +121,7 @@ struct Hits {
 
 pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
     let keyword = args.keyword.as_deref().unwrap_or("").trim();
-    let mut terms = query_terms(keyword);
+    let (mut terms, keyword_release) = super::releases::query(keyword)?;
     let truncated = terms.len() > MAX_TERMS;
     terms.truncate(MAX_TERMS);
 
@@ -130,15 +131,25 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
         .map(str::trim)
         .filter(|s| !s.is_empty());
     let doc = doc.map(|id| resolve_doc(corpus, id)).transpose()?;
-    let group = args
+    let path = args
         .path
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty());
-    let group = group
+    let path_release = path.map(super::releases::lookup).transpose()?.flatten();
+    let release = keyword_release.or(path_release);
+    let mut group = path
         .map(|p| resolve_group(corpus, p))
         .transpose()?
         .map(|g| g as u32);
+    if let Some(release) = release {
+        let target = super::releases::resolve(corpus, release)? as u32;
+        if group.is_some_and(|g| g != target) || doc.is_some_and(|d| corpus.docs[d].group != target)
+        {
+            return err("版本别名与 path/docId 指定的章节范围冲突；请使用一致的章节范围。");
+        }
+        group = Some(target);
+    }
     let speaker_name = args
         .speaker
         .as_deref()
@@ -156,7 +167,8 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
         }
         None => None,
     };
-    if terms.is_empty() && speakers.is_none() {
+    let list_group = terms.is_empty() && speakers.is_none() && release.is_some();
+    if terms.is_empty() && speakers.is_none() && !list_group {
         return err("keyword 不能为空（或至少提供 speaker）");
     }
     let filter = Filter {
@@ -164,14 +176,15 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
         group,
         doc,
         speakers,
+        list_group,
     };
 
     let term_hits = collect_term_hits(corpus, &terms, &filter);
     let df: Vec<usize> = term_hits.iter().map(|t| t.docs.len()).collect();
-    let hits = assemble(corpus, &term_hits, args.allow_partial.unwrap_or(false));
+    let hits = assemble(corpus, &term_hits, args.allow_partial.unwrap_or(true));
 
-    match doc {
-        Some(d) => Ok(render_in_doc(
+    let rendered = match doc {
+        Some(d) => render_in_doc(
             corpus,
             d,
             keyword,
@@ -180,8 +193,8 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
             &hits,
             truncated,
             args.max_results,
-        )),
-        None => Ok(render_ranked(
+        ),
+        None => render_ranked(
             corpus,
             keyword,
             speaker_name,
@@ -191,8 +204,14 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
             &filter,
             hits,
             args,
-        )),
+        ),
+    };
+    let mut out = String::new();
+    if let Some(release) = release {
+        super::releases::push_note(&mut out, corpus, release);
     }
+    out.push_str(&rendered);
+    Ok(out)
 }
 
 /// 一个检索词（或「只按说话人」时的一个虚拟词）的命中。
@@ -215,6 +234,21 @@ fn collect_term_hits(corpus: &Corpus, terms: &[String], filter: &Filter) -> Vec<
     let mut out = Vec::with_capacity(terms.len().max(1));
 
     if terms.is_empty() {
+        if filter.list_group {
+            let docs = corpus
+                .docs
+                .iter()
+                .enumerate()
+                .filter(|(d, _)| filter.accepts_doc(corpus, *d))
+                .map(|(d, _)| d as u32)
+                .collect();
+            out.push(TermHits {
+                lines: Vec::new(),
+                title_docs: Vec::new(),
+                docs,
+            });
+            return out;
+        }
         // 只按说话人筛：遍历范围内全部行。
         let (lo, hi) = line_range.unwrap_or((0, corpus.lines.len() as u32));
         let mut cursor = DocCursor::new();
@@ -325,7 +359,7 @@ fn docs_of_lines(corpus: &Corpus, lines: &[u32]) -> Vec<u32> {
     out
 }
 
-/// 先在文档集合上求交（AND），仅显式允许时退化为并集（部分匹配）。
+/// 先在文档集合上求交（AND），允许部分匹配时退化为并集；筛选范围保持不变。
 fn assemble(corpus: &Corpus, terms: &[TermHits], allow_partial: bool) -> Hits {
     let mut sets: Vec<&[u32]> = terms.iter().map(|t| t.docs.as_slice()).collect();
     sets.sort_by_key(|s| s.len());
@@ -529,14 +563,17 @@ fn render_ranked(
         hits.len()
     );
     super::push_version(&mut out, corpus);
+    if filter.list_group {
+        out.push_str("仅按版本范围列出候选场景，未执行正文关键词匹配。\n");
+    }
     if truncated {
         let _ = writeln!(out, "注意：最多使用前 {MAX_TERMS} 个关键词。");
     }
     if partial {
-        out.push_str("没有文档同时包含全部关键词，以下按覆盖的关键词数排序（部分匹配）。\n");
+        out.push_str("没有文档同时包含全部关键词，以下按覆盖的关键词数排序（部分匹配）。部分匹配不证明全部关键词共现；allowPartial=false 可要求严格匹配。\n");
     }
     if hits.is_empty() {
-        if terms.len() > 1 {
+        if terms.len() > 1 && !partial {
             out.push_str("AND 查询没有共同命中；可显式设置 allowPartial=true 查看部分匹配。\n");
         }
         out.push_str(
@@ -662,9 +699,14 @@ fn render_in_doc(
         let _ = write!(out, " | 说话人: {s}");
     }
     let shown = &hits.lines;
+    let mode = if hits.partial {
+        "部分匹配"
+    } else {
+        "同篇 AND"
+    };
     let _ = writeln!(
         out,
-        " | 命中 {} 行（同篇 AND，列出各关键词的命中行）",
+        " | 命中 {} 行（{mode}，列出各关键词的命中行）",
         shown.len()
     );
     super::push_version(&mut out, corpus);
@@ -686,7 +728,11 @@ fn render_in_doc(
             .filter(|(i, _)| mask & (1 << i) == 0)
             .map(|(_, t)| t.as_str())
             .collect();
-        let _ = writeln!(out, "部分匹配；未命中关键词：{}", missing.join("、"));
+        let _ = writeln!(
+            out,
+            "部分匹配；未命中关键词：{}。不证明全部关键词共现；allowPartial=false 可要求严格匹配。",
+            missing.join("、")
+        );
     } else if hits.docs.is_empty() && terms.len() > 1 {
         out.push_str("AND 查询没有共同命中；可显式设置 allowPartial=true 查看部分匹配。\n");
     }

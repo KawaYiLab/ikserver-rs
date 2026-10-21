@@ -42,6 +42,195 @@ fn first_doc_id(text: &str) -> String {
     text[at..at + 16].to_owned()
 }
 
+fn release_corpus() -> Corpus {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    bundle.story = [
+        json!({"chapter":"Chapter230", "chapter_label":"第三季 第三章 她与她的隐秘往事", "scene":"1", "family":"GalGame", "speaker":"Fairy", "text":"上一章的核心。"}),
+        json!({"chapter":"Chapter240", "chapter_label":"第三季 第四章 重返天空的旅程", "scene":"1", "family":"GalGame", "speaker":"Fairy", "text":"天空之城。", "order":1}),
+        json!({"chapter":"Chapter240", "chapter_label":"第三季 第四章 重返天空的旅程", "scene":"1", "family":"GalGame", "speaker":"Fairy", "text":"核心就在这里。", "order":2}),
+        json!({"chapter":"Chapter240", "chapter_label":"第三季 第四章 重返天空的旅程", "scene":"2", "family":"GalGame", "speaker":"哲", "text":"天空很远。", "order":3}),
+        json!({"chapter":"Chapter250", "chapter_label":"未知新章", "scene":"1", "family":"GalGame", "speaker":"Fairy", "text":"未来的核心，增幅3.3%。"}),
+    ].iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+    bundle.supplement = None;
+    bundle.lore.clear();
+    bundle.manifest.as_mut().unwrap()["source_version"] = json!("3.3.0");
+    build_from_bundle(&bundle).unwrap()
+}
+
+#[test]
+fn search_usability_default_fallback_keeps_filters_and_coverage_order() {
+    let c = release_corpus();
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"天空 核心 秘密", "path":"Chapter240"}),
+    );
+    assert!(out.contains("部分匹配"), "{out}");
+    assert!(out.contains("命中 2 篇"), "{out}");
+    assert!(out.contains("未命中关键词：秘密"), "{out}");
+    assert!(
+        out.find("核心就在这里").unwrap() < out.find("天空很远").unwrap(),
+        "{out}"
+    );
+    assert!(
+        !out.contains("上一章的核心") && !out.contains("未来的核心"),
+        "{out}"
+    );
+    let strict = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"天空 核心 秘密", "path":"Chapter240", "allowPartial":false}),
+    );
+    assert!(strict.contains("命中 0 篇"), "{strict}");
+    let filtered = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"天空 核心 秘密", "path":"Chapter240", "speaker":"Fairy"}),
+    );
+    assert!(
+        filtered.contains("命中 1 篇") && !filtered.contains("天空很远"),
+        "{filtered}"
+    );
+    let complete = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"天空 核心", "path":"Chapter240"}),
+    );
+    assert!(
+        complete.contains("命中 1 篇") && !complete.contains("部分匹配"),
+        "{complete}"
+    );
+    let doc = first_doc_id(&complete);
+    let local = ok(&c, "ik_search", json!({"docId":doc,"keyword":"天空 秘密"}));
+    assert!(
+        local.contains("命中 1 行") && local.contains("未命中关键词：秘密"),
+        "{local}"
+    );
+}
+
+#[test]
+fn search_usability_release_aliases_cover_catalog_read_and_keywords() {
+    let c = release_corpus();
+    for alias in ["3.3", "3.3.0", "v3.3", "3.3版本", "版本 3.3", "３．３版本"] {
+        let out = ok(&c, "ik_catalog", json!({"path":alias}));
+        assert!(
+            out.contains("ch:Chapter240") && out.contains("版本别名"),
+            "{out}"
+        );
+        assert!(!out.contains("上一章的核心"), "{out}");
+        let read = ok(&c, "ik_read", json!({"docId":alias,"limit":1}));
+        assert!(
+            read.contains("天空之城") && read.contains("版本别名"),
+            "{read}"
+        );
+        assert!(read.contains("limit=1"), "{read}");
+    }
+    let root = ok(&c, "ik_catalog", json!({}));
+    assert!(
+        root.contains("版本别名：3.2") && root.contains("版本别名：3.3"),
+        "{root}"
+    );
+    let titles = ok(&c, "ik_catalog", json!({"keyword":"3.3版本"}));
+    assert!(
+        titles.contains("ch:Chapter240") && titles.contains("版本别名"),
+        "{titles}"
+    );
+    let out = ok(&c, "ik_search", json!({"keyword":"3.3版本 核心"}));
+    assert!(
+        out.contains("命中 1 篇") && out.contains("核心就在这里"),
+        "{out}"
+    );
+    assert!(
+        out.contains("该版新增主线")
+            && !out.contains("上一章的核心")
+            && !out.contains("未来的核心"),
+        "{out}"
+    );
+    let all = ok(&c, "ik_search", json!({"keyword":"v3.3.0"}));
+    assert!(
+        all.contains("命中 2 篇") && all.contains("版本别名"),
+        "{all}"
+    );
+    let older = ok(&c, "ik_search", json!({"keyword":"3.2 核心"}));
+    assert!(
+        older.contains("上一章的核心") && !older.contains("核心就在这里"),
+        "{older}"
+    );
+    let literal = ok(&c, "ik_search", json!({"keyword":"3.3%"}));
+    assert!(
+        literal.contains("未来的核心") && !literal.contains("版本别名"),
+        "{literal}"
+    );
+}
+
+#[test]
+fn search_usability_release_constraints_are_never_relaxed_or_guessed() {
+    let c = release_corpus();
+    let out = ok(&c, "ik_search", json!({"keyword":"3.3 天空 核心 秘密"}));
+    assert!(
+        out.contains("部分匹配") && out.contains("命中 2 篇"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("上一章的核心") && !out.contains("未来的核心"),
+        "{out}"
+    );
+    assert!(
+        call(
+            &c,
+            "ik_search",
+            json!({"keyword":"3.3 核心", "path":"Chapter230"})
+        )
+        .is_err()
+    );
+    assert!(call(&c, "ik_search", json!({"keyword":"3.2 3.3 核心"})).is_err());
+    let unavailable = call(&corpus(), "ik_search", json!({"keyword":"3.3 核心"})).unwrap_err();
+    assert!(
+        unavailable.contains("Chapter240") && unavailable.contains("当前语料"),
+        "{unavailable}"
+    );
+    let unknown = call(&c, "ik_catalog", json!({"path":"3.4版本"})).unwrap_err();
+    assert!(
+        unknown.contains("没有已确认") && unknown.contains("版本"),
+        "{unknown}"
+    );
+    let filtered = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"3.3 天空 核心", "scope":"lore"}),
+    );
+    assert!(filtered.contains("命中 0 篇"), "{filtered}");
+    let no_hits = ok(&c, "ik_search", json!({"keyword":"完全不存在 仍不存在"}));
+    assert!(
+        no_hits.contains("命中 0 篇") && no_hits.contains("没有命中"),
+        "{no_hits}"
+    );
+    let truncated = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"天空 核心 一 二 三 四 五 六 七 3.3版本"}),
+    );
+    assert!(
+        truncated.contains("前 8") && truncated.contains("版本别名"),
+        "{truncated}"
+    );
+    assert!(
+        !truncated.contains("上一章的核心") && !truncated.contains("未来的核心"),
+        "{truncated}"
+    );
+    let doc = first_doc_id(&ok(&c, "ik_search", json!({"keyword":"3.2 核心"})));
+    assert!(call(&c, "ik_search", json!({"keyword":"3.3 核心","docId":doc})).is_err());
+    assert!(
+        call(
+            &c,
+            "ik_search",
+            json!({"keyword":"核心","path":"3.3版本","docId":doc})
+        )
+        .is_err()
+    );
+    assert!(call(&c, "ik_catalog", json!({"path":"v3.3.1"})).is_err());
+}
+
 #[test]
 fn review_numeric_arguments() {
     let c = corpus();
@@ -328,8 +517,12 @@ fn search_and_semantics_with_speaker_and_scope() {
     assert!(out.contains("妮可（妮可·德玛拉）"), "{out}");
     assert!(!out.contains("主线 ›"), "{out}");
 
-    // AND 查询不应静默退化；只有显式请求时才返回部分匹配。
-    let out = ok(&c, "ik_search", json!({ "keyword": "猫又 赫利俄斯" }));
+    // 严格 AND 可显式要求；默认回退必须标注部分匹配。
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({ "keyword": "猫又 赫利俄斯", "allowPartial":false }),
+    );
     assert!(out.contains("命中 0 篇"), "{out}");
     assert!(!out.contains("以下按覆盖"), "{out}");
     let out = ok(
@@ -431,13 +624,13 @@ fn search_context_is_ordered_unique_and_bounded() {
 }
 
 #[test]
-fn search_within_doc_requires_all_terms_without_opt_in() {
+fn search_within_doc_requires_all_terms_in_strict_mode() {
     let c = corpus();
     let doc = c.doc_id(0);
     let out = ok(
         &c,
         "ik_search",
-        json!({ "docId": doc, "keyword": "录像店 赫利俄斯" }),
+        json!({ "docId": doc, "keyword": "录像店 赫利俄斯", "allowPartial":false }),
     );
     assert!(out.contains("命中 0 行"), "{out}");
     let out = ok(

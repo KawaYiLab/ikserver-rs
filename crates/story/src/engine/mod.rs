@@ -6,6 +6,7 @@ pub mod catalog;
 pub mod character;
 pub mod guide;
 pub mod read;
+mod releases;
 pub mod search;
 
 use std::fmt::Write as _;
@@ -135,6 +136,9 @@ pub(crate) fn parse_scope(scope: Option<&str>) -> Result<Option<DocKind>, ToolEr
 
 /// 解析 `path`：分组 id / 章节 token / 章节名。
 pub(crate) fn resolve_group(corpus: &Corpus, path: &str) -> Result<usize, ToolError> {
+    if let Some(release) = releases::lookup(path)? {
+        return releases::resolve(corpus, release);
+    }
     corpus.find_group(path).ok_or_else(|| {
         ToolError(format!(
             "找不到分组「{path}」或名称有歧义。用 ik_catalog() 查看全部章节，并使用精确 id（如 ch:Chapter110 / lore:agents）"

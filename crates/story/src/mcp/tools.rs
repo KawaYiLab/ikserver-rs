@@ -18,11 +18,11 @@ pub fn definitions() -> Value {
             "description": "浏览绝区零剧情库目录。不带参数：列出全部主线章节（游戏顺序，含场景数/台词数/字数）与设定资料分类。\
     path=章节或分类 id（如 ch:Chapter110、lore:agents，也可写章节名「云霞同归处」）：按目录顺序列出该组全部文档，\
     主线按内容类型与可解析的任务分节，并给出每篇的 docId、句数与出场角色——总结一章前先用它规划阅读范围。目录相邻不代表剧情先后。\
-    path=docId：查看该篇所在位置与前后篇。keyword：按标题/路径筛选。",
+    path=docId：查看该篇所在位置与前后篇。keyword：按标题/路径筛选。已确认版本别名（3.2/3.3）可作 path 或单独的 keyword，定位该版新增主线；与整份语料快照版本不同。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "path": { "type": "string", "description": "分组 id（ch:Chapter110 / lore:agents）、章节名，或 docId；留空为根目录。" },
+                    "path": { "type": "string", "description": "分组 id（ch:Chapter110 / lore:agents）、章节名、版本别名（如 3.3版本），或 docId；留空为根目录。" },
                     "keyword": { "type": "string", "description": "可选，只列出标题或路径包含该词的文档；path 留空时在全库标题中查找。" },
                     "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "分页起点（跳过前 N 篇）。" },
                     "maxResults": { "type": "integer", "minimum": 1, "maximum": 500, "default": 100, "description": "最多列出多少篇。" }
@@ -36,19 +36,20 @@ pub fn definitions() -> Value {
             "title": "绝区零剧情检索",
             "description": "绝区零（Zenless Zone Zero）游戏文本全文检索：主线剧情台词、过场字幕/漫画、世界观设定（代理人档案、音擎/驱动盘/邦布、\
     绳网委托与私信、录像店影片、街区闲聊）。涉及剧情、人物、阵营、地点、事件、台词出处时先用它找候选，再用 ik_read 读原文。\
-    多个关键词用空格分隔，表示同一篇内同时出现（AND）；不会自动放宽，allowPartial=true 才返回部分匹配并列出缺失关键词。建议用角色名、地名、组织名、台词短语等实体词。\
+    多个关键词用空格分隔，先检索同一篇内全部出现（AND，不要求同一句）；没有完整匹配时默认返回明确标注的部分匹配，按覆盖词数排序并列出缺失词。allowPartial=false 要求严格匹配。\
+    已确认版本别名（3.2/3.3，兼容 v3.3、3.3.0、3.3版本）可作 path 或独立关键词，限定该版新增主线；部分匹配不会放宽章节、scope、speaker 或 docId。\
     结果按相关度排序，每篇给出 docId、路径与命中行（L行号）。提供 docId 时改为篇内检索，列出该篇全部命中行。",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "keyword": { "type": "string", "description": "关键词，空格分隔多个词（同篇同时出现）。只按说话人筛选时可留空。" },
+                    "keyword": { "type": "string", "description": "关键词，空格分隔多个词；可写 3.3版本 核心，版本词限定章节。只按说话人筛选时可留空。" },
                     "scope": { "type": "string", "enum": ["all", "story", "supplement", "lore"], "default": "all", "description": "范围：all 全部 / story 主线 / supplement 过场与漫画 / lore 设定资料。" },
-                    "path": { "type": "string", "description": "可选，限定在某章或某设定分类内（ch:Chapter110 / lore:agents / 章节名）。" },
+                    "path": { "type": "string", "description": "可选，限定某章或设定分类（ch:Chapter110 / lore:agents / 章节名）；可用已确认版本别名，如 3.3。" },
                     "docId": { "type": "string", "description": "可选，篇内检索：只在这一篇里找，返回全部命中行。" },
                     "speaker": { "type": "string", "description": "可选，只看这个说话人的台词（如「妮可」「哲」）；已记录角色身份的服装/形态会合并匹配，原文显示名保留。" },
                     "maxResults": { "type": "integer", "minimum": 1, "maximum": 500, "description": "最多返回多少篇（默认 10，上限 50）；篇内检索时为最多多少行（默认 50）。" },
                     "hitsPerDoc": { "type": "integer", "minimum": 1, "maximum": 20, "default": 3, "description": "每篇展示的命中行数。" },
-                    "allowPartial": { "type": "boolean", "default": false, "description": "AND 无共同命中时，是否显式允许返回任一关键词的部分匹配；全库和篇内检索都适用。" },
+                    "allowPartial": { "type": "boolean", "default": true, "description": "无同篇完整匹配时返回部分匹配，标出缺失词；设 false 要求严格 AND。全库和篇内检索都适用，筛选范围保持不变。" },
                     "contextLines": { "type": "integer", "minimum": 0, "maximum": 3, "description": "全库检索每个命中前后展示几行同篇上下文，合并去重并按行号排列。默认 1；有 speaker 筛选时默认 0。上下文可以含其他说话人。" }
                 },
                 "additionalProperties": false
@@ -65,7 +66,7 @@ pub fn definitions() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "docId": { "type": "string", "description": "doc_… 或分组 id（ch:Chapter110 / lore:agents）。" },
+                    "docId": { "type": "string", "description": "doc_…、分组 id（ch:Chapter110 / lore:agents），或已确认版本别名（如 3.3版本）。" },
                     "offset": { "type": "integer", "minimum": 1, "default": 1, "description": "起始行号（1 起）。" },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 5000, "default": 2000, "description": "本次最多读多少行（通常由 maxChars 先生效）。" },
                     "maxChars": { "type": "integer", "minimum": 500, "maximum": 60000, "default": 16000, "description": "标题、来源与正文的字数预算；首行过长时仍输出一行以推进游标，末尾续读提示不计入。" },
