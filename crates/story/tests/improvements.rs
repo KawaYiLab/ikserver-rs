@@ -95,7 +95,7 @@ fn classified_search_keeps_metadata_out_of_body_quota_and_supports_body_and() {
     assert!(out.contains("命中 0 篇"), "{out}");
     let out = call(&c, "ik_search", json!({"keyword":"独有标题"}));
     assert!(
-        out.contains("目录建议 1 篇") && out.contains("读上下文：ik_read"),
+        out.contains("目录建议 1 篇") && out.contains("原文入口：ik_read"),
         "{out}"
     );
     let out = call(&c, "ik_search", json!({"keyword":"Fairy"}));

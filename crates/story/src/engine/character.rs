@@ -254,7 +254,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
         if attributed_docs.len() > max {
             let _ = writeln!(
                 out,
-                "另有 {} 篇逐句署名证据未展开；用 ik_search(speaker=\"{name}\", includeEvidence=true) 缩小范围。",
+                "另有 {} 篇逐句署名证据未展开；署名检索入口：ik_search(speaker=\"{name}\", includeEvidence=true)。",
                 attributed_docs.len() - max
             );
         }
@@ -272,7 +272,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
         if association_docs.len() > max {
             let _ = writeln!(
                 out,
-                "另有 {} 篇关联未显示；用 ik_search(keyword=\"{name}\") 查看。",
+                "另有 {} 篇关联未显示；姓名检索入口：ik_search(keyword=\"{name}\")。",
                 association_docs.len() - max
             );
         }
@@ -329,13 +329,13 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
         let _ = writeln!(out, "\n常同场角色（共同出场场景数）：{}", list.join("、"));
     }
 
-    out.push_str("\n下一步：");
+    out.push_str("\n相关入口：");
     if !ids.is_empty() {
-        let _ = write!(out, "ik_search(keyword=…, speaker=\"{name}\") 查本人台词；");
+        let _ = write!(out, "ik_search(speaker=\"{name}\") 为逐句署名检索；");
     }
     let _ = write!(
         out,
-        "ik_search(keyword=\"{name}\") 查被提及处；ik_read(docId=目录首见场景) 读原文确认登场经过。"
+        "ik_search(keyword=\"{name}\", matchIn=\"body\") 为正文姓名检索；目录首见文档的 nextRead 为原文入口。"
     );
     let chapters = groups
         .iter()
@@ -453,7 +453,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
             }
         }
         for call in &result.next_calls {
-            let _ = writeln!(out, "下一步：{}", call.text());
+            let _ = writeln!(out, "相关检索：{}", call.text());
         }
     }
     if full {

@@ -668,7 +668,7 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
             }
             out.push('\n');
         }
-        let _ = writeln!(out, "读上下文：{}", d.next_read.text());
+        let _ = writeln!(out, "原文入口：{}", d.next_read.text());
         if let Some(call) = &item.next_matches {
             let _ = writeln!(out, "篇内更多命中：{}", call.text());
         }
@@ -685,7 +685,7 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
         }
     }
     for call in &r.suggestions {
-        let _ = writeln!(out, "建议重查：{}", call.text());
+        let _ = writeln!(out, "相关查询：{}", call.text());
     }
     out
 }

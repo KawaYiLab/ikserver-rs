@@ -3,6 +3,20 @@
 本文说明当前六个只读工具的检索、证据、分页与资料覆盖契约。服务部署与访问配置见
 [部署说明](../deploy/README.md#剧情库mcp)。
 
+## 工具与模型的职责
+
+MCP 提供资料、参数语义、分页入口与来源状态。模型自行决定工具调用顺序、阅读范围、分析方法和回答形式。
+初始化的 `instructions` 只介绍知识库范围、工具能力与当前提取模式；工具描述只说明输入输出及数据含义。
+来源标识、未知署名、占位说明、未关联片段和顺序状态随资料返回。
+
+`ik_guide` 保留原工具名及 `summary` / `character` / `timeline` / `verify` 模式，返回各主题的参数与结果字段参考。
+它不再包含角色设定、强制搜索/阅读流程、分层压缩、引用格式或最终回答模板。
+MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fact_check` 名称及原参数，
+仅返回用户选用的任务文本，不自动附加 guide 内容。
+
+`mcp_contract_leaves_workflow_and_answer_format_to_client` 与 `mcp_prompts_only_contain_the_selected_task`
+回归检查初始化、工具描述、guide、工具返回文本与 prompts 的这项边界。
+
 ## 检索与版本别名
 
 多词检索先在同一篇文档中找全词匹配（AND）；词可分布在不同行、标题、路径或姓名元数据中。

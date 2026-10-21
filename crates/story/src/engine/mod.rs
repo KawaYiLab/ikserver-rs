@@ -113,7 +113,9 @@ pub(crate) fn push_order_note(out: &mut String, corpus: &Corpus, doc: usize) {
         d.chronology_status.as_deref().unwrap_or("unknown")
     );
     if d.section == "Comic" && d.context_status.as_deref() != Some("linked") {
-        out.push_str("漫画片段尚未关联完整场景；没有说话人和时间信息时不要补写，目录前后片段也不构成上下文。\n");
+        out.push_str(
+            "漫画片段尚未关联完整场景；说话人与时间信息可能缺失，目录前后片段的上下文关系未知。\n",
+        );
     }
     push_evidence_note(out, corpus, doc);
 }

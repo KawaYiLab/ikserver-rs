@@ -205,8 +205,8 @@ fn root(corpus: &Corpus) -> String {
         }
     }
     out.push_str(
-        "\n下一步：ik_catalog(path=\"ch:…\") 列出一章的场景；ik_read(docId=\"ch:…\") 从章首顺读；\
-         ik_search(keyword=…) 全文检索。",
+        "\n相关入口：ik_catalog(path=\"ch:…\") 为章节目录；ik_read(docId=\"ch:…\") 为章节原文；\
+         ik_search(keyword=…) 为全文检索。",
     );
     out
 }
@@ -304,7 +304,7 @@ fn group_listing(
 
     super::push_version(&mut out, corpus);
     if g.kind == GroupKind::Chapter {
-        out.push_str("以下为目录顺序，未确认的场景先后不能据此作为剧情时间线。\n");
+        out.push_str("以下为目录顺序；场景剧情先后未核验。\n");
         let scenes: Vec<_> = members
             .iter()
             .map(|&d| &corpus.docs[d])

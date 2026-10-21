@@ -342,7 +342,7 @@ fn review_metadata_search_consistency() {
     bundle.lore.clear();
     let c = build_from_bundle(&bundle).unwrap();
     let global = ok(&c, "ik_search", json!({"keyword":"标题词"}));
-    assert!(global.contains("读上下文：ik_read"));
+    assert!(global.contains("原文入口：ik_read"));
     let local = ok(
         &c,
         "ik_search",
@@ -786,7 +786,7 @@ fn read_pages_and_follows_across_docs() {
         "supplement comes last: {out}"
     );
     assert!(
-        out.contains("目录末尾") && out.contains("ik_coverage"),
+        out.contains("目录末尾") && out.contains("coverageDelta 仅记录本次完整返回行"),
         "{out}"
     );
     assert!(out.contains("下一组：ch:Chapter01"), "{out}");
@@ -888,13 +888,106 @@ fn character_profile() {
 #[test]
 fn guide_modes() {
     let c = corpus();
-    assert!(ok(&c, "ik_guide", json!({ "mode": "summary" })).contains("分层压缩"));
+    assert!(ok(&c, "ik_guide", json!({ "mode": "summary" })).contains("coverageDelta"));
     assert!(ok(&c, "ik_guide", json!({ "mode": "查证" })).contains("原文查证"));
     assert!(
         call(&c, "ik_guide", json!({ "mode": "x" }))
             .unwrap_err()
             .contains("可选")
     );
+}
+
+#[test]
+fn mcp_contract_leaves_workflow_and_answer_format_to_client() {
+    let c = corpus();
+    let mut descriptions = vec![
+        ik_story::mcp::instructions(&c),
+        ik_story::mcp::tools::definitions().unwrap().to_string(),
+    ];
+    for mode in ["summary", "character", "timeline", "verify"] {
+        descriptions.push(ok(&c, "ik_guide", json!({"mode":mode})));
+    }
+    for detail in ["compact", "full"] {
+        for (tool, mut args) in [
+            ("ik_catalog", json!({})),
+            ("ik_catalog", json!({"path":"ch:Chapter00"})),
+            ("ik_search", json!({"keyword":"狡兔屋"})),
+            ("ik_read", json!({"docId":"ch:Chapter00","follow":true})),
+            ("ik_read", json!({"docIds":[c.doc_id(0)]})),
+            ("ik_character", json!({"name":"安比"})),
+            (
+                "ik_character",
+                json!({"name":"妮可","maxResults":1,"includeEvidence":true}),
+            ),
+        ] {
+            args["detail"] = json!(detail);
+            descriptions.push(ok(&c, tool, args));
+        }
+    }
+    for text in descriptions {
+        for directive in [
+            "先用 ik_search",
+            "先读原文",
+            "分层压缩",
+            "输出建议",
+            "结论三选一",
+            "条目格式",
+            "人物小传",
+            "每章记一条",
+            "不要替原文",
+            "没有说话人的行不要",
+            "不要排进同一条精确时间轴",
+            "较大任务开始前读一次",
+            "整章总结前",
+            "下一步：",
+            "请用 ik_coverage",
+            "读原文确认登场经过",
+            "不要补写",
+            "提及请用",
+            "优先使用游标",
+            "读上下文：",
+            "建议重查：",
+            "缩小范围",
+        ] {
+            assert!(!text.contains(directive), "{directive}: {text}");
+        }
+    }
+}
+
+#[test]
+fn mcp_prompts_only_contain_the_selected_task() {
+    let s = server();
+    for (name, argument, expected) in [
+        (
+            "chapter_summary",
+            "chapter",
+            "请总结绝区零主线章节「测试对象」的剧情。",
+        ),
+        (
+            "character_arc",
+            "name",
+            "请梳理角色「测试对象」在绝区零主线中的角色弧线。",
+        ),
+        (
+            "event_timeline",
+            "topic",
+            "请整理「测试对象」相关的事件时间线。",
+        ),
+        (
+            "fact_check",
+            "claim",
+            "请查证这个说法是否出自绝区零原文：测试对象",
+        ),
+    ] {
+        let response = rpc(
+            &s,
+            json!({"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":name,"arguments":{(argument):"测试对象"}}}),
+        );
+        let messages = response["result"]["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 1, "{response}");
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"]["text"], expected);
+    }
 }
 
 struct Rpc {

@@ -1,18 +1,20 @@
-# 原文查证
+# 原文查证参考
 
-目标：确认一句台词、一个说法或一个设定是否出自原文，并给出精确出处。
+## 匹配参数
 
-## 工作流
-1. 从说法中抽取最有区分度的短语（专有名词、罕见词、台词片段 2~8 个字），`ik_search(keyword=…, purpose="verify")`。
-   - 原句记不清时用 2~3 个关键词空格分隔。查证无完整结果时可执行 suggestions 中保留范围的建议，部分匹配须单独标注。
-   - 已知说话人时加 `speaker=…`；已知章节时加 `path="ch:…"`。
-2. 按结果的 `document.nextRead` 读取上下文；需要该篇全部命中时再用 `ik_search(docId=…, keyword=…)`。查局部共现用 `matchUnit="window", windowLines=12`，窗口仅指原文行距，检查 `orderSource/localOrderStatus`，不能当成连续播放。原文引用保留 docId + 行号及可用 sourceKey/lineId。
-3. 结论三选一：**原文确有**（引用原句 + docId + 行号）/ **原文有近似表述**（并列原句与说法的差别）/ **未找到**（说明检索过哪些词与范围）。
+- `purpose=verify` 默认使用 `matchIn=body`、严格 AND 与两行邻行；显式参数优先。
+- `purpose=locate` 默认每篇两个命中与一行邻行；`browse` 保持一般检索行为。
+- `matchIn=all` 允许正文、逐句署名、标题、路径及姓名元数据参与匹配；`body` 仅允许正文参与匹配。
+- 无完整匹配时一般检索默认返回部分匹配及缺失词；`allowPartial=false` 关闭部分匹配回退。
+- `speaker` 按逐句署名筛选，`path` / `docId` 限定范围。已核验版本别名限定该版新增主线。
+- `matchUnit=window` 匹配指定行距内的共现，窗口状态与原文播放顺序分别记录。
 
-## 注意
-- 当前数据版本见工具输出。默认提取是男主视角，完整性校对模式保留双方候选；未找到只能说明当前语料和检索范围中没有匹配，不能说明游戏中不存在。
-- 多词先同篇 AND，无完整匹配时默认明确返回部分匹配；检查逐词匹配字段与缺失词。`matchIn=all` 的标题/路径/姓名表可以参与 AND；查证正文共现时设 `matchIn="body", allowPartial=false`。
-- 正文或逐句署名结果与仅元数据的目录建议分开计数；目录建议只提供浏览入口，不是正文证据。按 `nextCall` / `nextDirectoryCall` 的 arguments 续页，只传 cursor 即保留全部筛选。
-- 占位说明不是正式角色对白；姓名表关联与推断署名不是实际登场证据。`includeEvidence=true` 可查内容、署名、配音、局部行序与资源摘要；`resolved` 仅说明姓名已关联，资源引用与 `has_voice` 都不确认播放。
-- `path="3.3版本"` 或 `keyword="3.3 核心"` 可限定已确认的该版新增主线；快照版本包含历史章节，不能把版本号当作故事内章节号。
-- 说话人为空不代表是旁白，也可能是未解析的 NPC；不要替原文补说话人。
+## 结果与出处
+
+- 正文或逐句署名命中与仅元数据目录建议分别计数、分页；逐词匹配字段及正文缺失词独立返回。
+- `nextCall` / `nextDirectoryCall` 提供快照绑定的分页游标；`document.nextRead` 提供对应原文读取入口。
+- 原文定位字段包括 `docId`、文档行号及可用的 `sourceKey` / `lineId`。
+- 搜索长行可能截为片段，`complete=false` 标记截断；邻行通过 `isContext` 标识，搜索片段不生成 `coverageDelta`。
+- `includeEvidence=true` 展开内容状态、署名来源、配音关联、局部行序与资源摘要。
+- 占位说明与正式对白分别标记；未知署名、推断署名和姓名表关联独立记录。`resolved`、`has_voice` 与资源引用均不表示实际播放已核验。
+- 未找到表示当前语料快照与查询范围内无匹配，不表示游戏中不存在。快照版本与分支范围由 `snapshotVersion` / `extractionMode` 标识。

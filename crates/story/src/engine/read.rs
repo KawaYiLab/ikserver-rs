@@ -1,7 +1,7 @@
 //! ik_read：读原文。
 //!
 //! 按行分页，并受字数预算约束；`follow=true` 时读完一篇自动接着读同组下一篇，
-//! 总结型 AI 可以用一串 ik_read 调用把整章按阅读顺序读完，每次结尾都给出精确的续读游标。
+//! 结果包含当前调用完整返回行的覆盖记录及续读游标；目录顺序不表示剧情先后。
 //! docId 也可以直接写分组 id（如 `ch:Chapter110`），等价于从该组第一篇开始 follow。
 
 use std::fmt::Write as _;
@@ -406,12 +406,12 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
             next.next_read.text()
         );
     } else if batch_docs.is_some() {
-        out.push_str("\n\n— 本次批量目标已到末尾；资料覆盖请用 ik_coverage 核对。");
+        out.push_str("\n\n— 本次批量目标已到末尾；coverageDelta 仅记录本次完整返回行。");
     } else {
         let g = corpus.docs[doc].group as usize;
         let _ = write!(
             out,
-            "\n\n— 已到「{}」目录末尾；全章覆盖请用 ik_coverage 核对。",
+            "\n\n— 已到「{}」目录末尾；coverageDelta 仅记录本次完整返回行。",
             corpus.groups[g].label
         );
         // Preserve the detailed presentation's optional navigation without crossing into another chapter automatically.

@@ -7,7 +7,7 @@ fn read_only() -> Value {
     json!({"readOnlyHint":true,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false})
 }
 pub fn definitions() -> Result<Value, serde_json::Error> {
-    let cursor = json!({"type":"string","maxLength":16384,"description":"续接时仅传返回的cursor；修改条件请重新查询。"});
+    let cursor = json!({"type":"string","maxLength":16384,"description":"快照绑定的分页游标，包含原查询条件；与其他查询参数互斥。"});
     let detail = json!({"type":"string","enum":["compact","full"],"default":"compact","description":"compact 简明结果；full 展开说明。逐行证据由 includeEvidence 控制。"});
     let scope = json!({"type":"string","enum":["all","story","supplement","lore"]});
     let evidence = json!({"type":"boolean","default":false,"description":"展开逐行来源证据，未知状态保持未知。"});
@@ -17,31 +17,31 @@ pub fn definitions() -> Result<Value, serde_json::Error> {
         (
             "ik_catalog",
             "剧情目录",
-            "浏览章节与设定目录，path 可为分组ID、章节名、已核验3.2/3.3版本别名或docId。manifest=true 生成固定范围清单供 ik_coverage 核对，按nextRead读原文。目录相邻不证明剧情先后。",
-            json!({"path":{"type":"string"},"keyword":{"type":"string","description":"标题/路径筛选；生成清单时使用path/scope。"},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,500,100),"cursor":cursor,"detail":detail,"includeEvidence":evidence,"manifest":{"type":"boolean","default":false},"scope":scope,"excludePlaceholders":{"type":"boolean","default":false,"description":"仅排除整篇全部为占位的文档，混合文档保留。"},"excludeUnlinked":{"type":"boolean","default":false,"description":"仅排除整篇全部为未关联候选的文档，混合文档保留。"}}),
+            "返回章节与设定目录。path 支持分组ID、章节名、已核验版本别名或docId。manifest=true 返回固定范围清单；nextRead 为原文入口。目录相邻不表示剧情先后。",
+            json!({"path":{"type":"string"},"keyword":{"type":"string","description":"标题/路径筛选；标题筛选与manifest=true互斥，path未指定时支持已核验版本别名。"},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,500,100),"cursor":cursor,"detail":detail,"includeEvidence":evidence,"manifest":{"type":"boolean","default":false},"scope":scope,"excludePlaceholders":{"type":"boolean","default":false,"description":"仅排除整篇全部为占位的文档，混合文档保留。"},"excludeUnlinked":{"type":"boolean","default":false,"description":"仅排除整篇全部为未关联候选的文档，混合文档保留。"}}),
         ),
         (
             "ik_search",
             "剧情检索",
-            "全文检索剧情与设定，空格分词。先同篇AND，无完整匹配时明确返回部分匹配。purpose=locate找出处，verify默认正文严格匹配，browse浏览。matchUnit=window 检查windowLines内的文档行共现，不证明连续播放。正文结果及仅元数据目录建议分别分页，按nextCall/nextDirectoryCall续页、nextRead读原文。回退保留范围。",
-            json!({"keyword":{"type":"string"},"scope":scope,"path":{"type":"string","description":"章节/分类/已核验版本别名；版本别名定位该版新增主线，区别于语料快照版本。"},"docId":{"type":"string"},"speaker":{"type":"string","description":"逐句署名；已记录身份变体合并。提及请用keyword。"},"purpose":{"type":"string","enum":["browse","locate","verify"]},"matchIn":{"type":"string","enum":["all","body"],"description":"all允许正文及元数据参与同篇AND；body仅正文。"},"matchUnit":{"type":"string","enum":["doc","window"],"default":"doc"},"windowLines":integer(1,100,12),"includeEvidence":evidence,"detail":detail,"cursor":cursor,"offset":integer(0,usize::MAX,0),"directoryOffset":integer(0,usize::MAX,0),"maxDirectoryResults":integer(1,50,10),"maxResults":{"type":"integer","minimum":1,"maximum":500,"description":"全库文档页默认10、上限50；篇内命中行页默认50、上限500。"},"hitsPerDoc":integer(1,20,3),"allowPartial":{"type":"boolean","description":"默认true；verify默认false；显式值优先。"},"contextLines":{"type":"integer","minimum":0,"maximum":3,"description":"展示邻行，不参与窗口匹配；默认1，speaker筛选默认0。"},"pagePart":{"type":"string","enum":["both","body","directory"],"description":"分页内部选择，优先使用游标。"}}),
+            "检索剧情与设定，空格分词，同篇AND；无完整匹配时默认返回部分匹配及缺失词，回退保留范围。purpose=locate 定位出处，verify 默认正文严格匹配，browse 浏览。window 匹配表示文档行窗口内共现，不表示连续播放。正文与仅元数据目录建议分别分页，返回 nextCall、nextDirectoryCall 和原文入口 nextRead。",
+            json!({"keyword":{"type":"string"},"scope":scope,"path":{"type":"string","description":"章节/分类/已核验版本别名；版本别名定位该版新增主线，区别于语料快照版本。"},"docId":{"type":"string"},"speaker":{"type":"string","description":"逐句署名；已记录身份变体合并。正文提及属于keyword匹配范围。"},"purpose":{"type":"string","enum":["browse","locate","verify"]},"matchIn":{"type":"string","enum":["all","body"],"description":"all允许正文及元数据参与同篇AND；body仅正文。"},"matchUnit":{"type":"string","enum":["doc","window"],"default":"doc"},"windowLines":integer(1,100,12),"includeEvidence":evidence,"detail":detail,"cursor":cursor,"offset":integer(0,usize::MAX,0),"directoryOffset":integer(0,usize::MAX,0),"maxDirectoryResults":integer(1,50,10),"maxResults":{"type":"integer","minimum":1,"maximum":500,"description":"全库文档页默认10、上限50；篇内命中行页默认50、上限500。"},"hitsPerDoc":integer(1,20,3),"allowPartial":{"type":"boolean","description":"默认true；verify默认false；显式值优先。"},"contextLines":{"type":"integer","minimum":0,"maximum":3,"description":"展示邻行，不参与窗口匹配；默认1，speaker筛选默认0。"},"pagePart":{"type":"string","enum":["both","body","directory"],"description":"指定正文/目录分页部分；返回游标包含此值。"}}),
         ),
         (
             "ik_read",
             "读取原文",
-            "读完整原文，保留占位/未知/推断署名。docId为返回的文档ID或分组/已核验版本别名；分组默认目录顺读。docIds批量读1～16篇，共用预算。按nextCall.arguments续接；coverageDelta只记录本次完整返回行。目录顺读不证明剧情时间线。",
+            "按行数与字数预算返回原文，保留占位、未知与推断署名状态。docId 支持文档ID、分组或已核验版本别名；分组按目录顺读，目录顺序不表示剧情时间线。docIds 批量读取1～16篇，共用预算。nextCall 为续读入口；coverageDelta 记录本次完整返回行。",
             json!({"docId":{"type":"string"},"docIds":{"type":"array","minItems":1,"maxItems":16,"items":{"type":"string"},"description":"批量文档ID；与docId/follow=true互斥。"},"offset":integer(1,usize::MAX,1),"limit":integer(1,5000,2000),"maxChars":integer(500,60000,16000),"follow":{"type":"boolean"},"lineNumbers":{"type":"boolean","default":true},"includeSources":{"type":"boolean","default":false},"includeEvidence":evidence,"cursor":cursor,"detail":detail,"batchIndex":integer(0,15,0)}),
         ),
         (
             "ik_character",
             "角色速览",
-            "角色档案、逐句署名、提及、姓名表和推断署名独立统计。已知身份变体合并，目录首见不证明实际首次登场。按nextCalls检索并读原文。",
+            "返回角色档案及章节统计，逐句署名、提及、姓名表和推断署名分别计数。已知身份变体合并，目录首见不表示实际首次登场。nextCalls 提供相关检索入口。",
             json!({"name":{"type":"string"},"maxResults":integer(1,200,40),"includeEvidence":evidence,"detail":detail}),
         ),
         (
             "ik_guide",
-            "任务指引",
-            "较大任务开始前读一次summary/character/timeline/verify方法指引，同一任务无需重复读取。",
+            "契约参考",
+            "返回工具参数与结果字段的参考说明。summary 为章节资料，character 为角色资料，timeline 为顺序与时间，verify 为检索与出处。",
             json!({"mode":{"type":"string","enum":["summary","character","timeline","verify"]}}),
         ),
     ];
@@ -61,7 +61,7 @@ pub fn definitions() -> Result<Value, serde_json::Error> {
         entries.push(json!({"name":name,"title":title,"description":description,"inputSchema":schema,"outputSchema":engine::response::output_schema(name)?,"annotations":read_only()}));
     }
     use utoipa::PartialSchema;
-    entries.push(json!({"name":"ik_coverage","title":"资料覆盖核对","description":"核对catalog.manifest与调用者累计的read.coverageDelta。合并重复和交叠区间，局部读取不计整篇；仅统计记录描述的已返回行，不证明模型理解或历史请求。返回合并ledger、缺口nextRead和分页nextCall；客户端保存ledger。","inputSchema":{"type":"object","properties":{"manifestId":{"type":"string","maxLength":16384},"ranges":{"type":"array","maxItems":512,"items":engine::response::LineRange::schema()},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,100,20)},"required":["manifestId"],"additionalProperties":false},"outputSchema":engine::response::output_schema("ik_coverage")?,"annotations":read_only()}));
+    entries.push(json!({"name":"ik_coverage","title":"资料覆盖核对","description":"对照 catalog.manifest 核对提交的 read.coverageDelta，合并重复和交叠区间，局部读取不计整篇。返回 ledger、完整/部分/未读统计、缺口 nextRead 和分页 nextCall。统计依据仅为提交的返回行记录，不表示模型理解或服务器请求历史；服务端不保存 ledger。","inputSchema":{"type":"object","properties":{"manifestId":{"type":"string","maxLength":16384},"ranges":{"type":"array","maxItems":512,"items":engine::response::LineRange::schema()},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,100,20)},"required":["manifestId"],"additionalProperties":false},"outputSchema":engine::response::output_schema("ik_coverage")?,"annotations":read_only()}));
     Ok(json!({"tools":entries}))
 }
 

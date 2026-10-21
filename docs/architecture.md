@@ -91,7 +91,7 @@ flowchart LR
   跟上，SIGHUP 立即重查；切换经 `ArcSwap` 原子替换，失败保留当前语料。上传在事务外校验与构建，
   事务内用 advisory 锁串行化「换生效版本」，同一事务写审计。`IK_STORY__SOURCE` 指向本地输出目录或语料包时
   用本地语料、不读库（开发用）。六个只读工具提供目录、检索、顺读、角色速览、指引及资料覆盖核对，
-  指引另以 MCP prompts 提供；具体契约见 [剧情库检索与 MCP 工具](story-search.md)。
+  指引提供参数与结果字段参考，MCP prompts 只提供用户选用的任务文本；具体契约见 [剧情库检索与 MCP 工具](story-search.md)。
   访问：`IK_STORY__ACCESS_KEY`（Bearer）或 `IK_STORY__PUBLIC=true`，都没有时拒绝所有请求。
   JSON-RPC 查询在请求线程里执行，在全站限流里按「读」计。
   新语料保留 `speaker_id`（已知角色形态的归一身份）、原始 `source_key` / `line_id` 和顺序来源；旧包字段可省略。

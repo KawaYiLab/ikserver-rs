@@ -255,24 +255,14 @@ pub fn instructions(c: &Corpus) -> String {
     };
     format!(
         "绳网档案（绝区零 Zenless Zone Zero 剧情与世界观知识库），数据版本 {version}（{}），主线 {} 场景、设定 {} 篇。\
-             涉及绝区零的剧情、人物、阵营、地点、事件、台词出处时，先用 ik_search 检索、再用 ik_read 读原文确认，不要凭记忆作答。\
-             总结整章时先 ik_catalog(path=\"ch:…\", manifest=true) 规划，再 ik_read(docId=\"ch:…\", follow=true) 顺读并分层压缩；\
-             角色相关先用 ik_character。较大的总结/考据任务开始前可读一次 ik_guide(mode=summary|character|timeline|verify)。\
-             docId 必须原样使用工具返回的值。提取模式：{}；没有说话人的行不要臆测说话人。\
-             多词检索先同篇 AND，无完整匹配时默认明确标注部分匹配及缺失词；allowPartial=false 要求严格匹配。\
-             逐词匹配字段区分正文和元数据；仅元数据命中为独立目录建议，正文共现须用 matchIn=body。\
-             占位说明不是正式对白，TextMap姓名表不证明出场，推断署名单独统计；includeEvidence=true 展开来源证据，姓名解析和资源引用均不确认播放。\
-             3.2/3.3 等已确认版本别名定位该版新增主线，可作目录 path、顺读 docId 或检索中的独立版本词；语料快照仍包含历史章节，未知版本不推演。\
-             结果包含structuredContent及兼容文本，默认compact，detail=full展开说明；按nextCall.arguments仅带cursor续接，按nextRead读原文。\
-             查出处可用purpose=locate；正文查证用purpose=verify；matchUnit=window检查文档行窗口，局部顺序仍需核验。\
-             客户端累计read.coverageDelta，整章总结前用ik_coverage(manifestId=清单标识,ranges=已返回区间)核对；覆盖只证明提交记录描述的资料返回，不证明理解。\
-             目录排列未证实为剧情先后，follow按目录续读；未关联的Comic不可按相邻位置拼接。",
+             提供 ik_catalog 目录、ik_search 检索、ik_read 原文、ik_character 角色资料、ik_guide 契约参考与 ik_coverage 返回行覆盖核对。\
+             结果包含文本、structuredContent、快照标识及来源状态。提取模式：{}。",
         c.meta.language,
         thousands(story_docs),
         thousands(lore_docs),
         match c.meta.accuracy_first {
             Some(true) => "完整性校对（双方分支候选保留）",
-            Some(false) => "男主分支筛选（默认哲视角）",
+            Some(false) => "默认哲视角；不确定分支保留，非严格单一路线",
             None => "旧语料未声明",
         }
     )

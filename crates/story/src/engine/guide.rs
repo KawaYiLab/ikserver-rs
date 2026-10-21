@@ -1,4 +1,4 @@
-//! ik_guide：任务方法指引（同时以 MCP prompts 形式提供）。
+//! ik_guide：按主题返回工具参数与结果字段的参考说明。
 
 use serde::Deserialize;
 
@@ -14,26 +14,26 @@ pub struct Guide {
 pub const GUIDES: &[Guide] = &[
     Guide {
         mode: "summary",
-        title: "剧情总结",
-        description: "总结一章、一个任务或若干场景：规划阅读范围、顺读、分层压缩、带出处输出",
+        title: "章节资料参考",
+        description: "章节选择、原文读取、分页与返回行覆盖字段",
         body: include_str!("../../guides/summary.md"),
     },
     Guide {
         mode: "character",
-        title: "角色弧线",
-        description: "梳理一个角色的登场、关系与变化，输出有出处的人物小传",
+        title: "角色资料参考",
+        description: "角色档案、身份变体、署名与提及统计字段",
         body: include_str!("../../guides/character.md"),
     },
     Guide {
         mode: "timeline",
-        title: "事件时间线",
-        description: "围绕事件、组织或谜团按剧情顺序整理时间线",
+        title: "顺序与时间参考",
+        description: "目录排列、文档行序与剧情时间的区别及相关字段",
         body: include_str!("../../guides/timeline.md"),
     },
     Guide {
         mode: "verify",
         title: "原文查证",
-        description: "确认台词或说法是否出自原文并给出精确出处",
+        description: "检索匹配、来源标识与证据状态字段",
         body: include_str!("../../guides/verify.md"),
     },
 ];
