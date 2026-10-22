@@ -102,3 +102,36 @@ fn a_term_with_no_hits_does_not_degrade_the_query_into_the_other_terms_union() {
     );
     assert_eq!(data["candidateCount"], 0);
 }
+
+#[test]
+fn batch_read_reports_documents_it_did_not_reach() {
+    let c = corpus();
+    let group = c.groups.iter().find(|g| g.id == "ch:Chapter00").unwrap();
+    let first = c.doc_id(group.docs[0] as usize);
+    let second = c.doc_id(group.docs[1] as usize);
+    let first_lines = c.docs[group.docs[0] as usize].line_count;
+
+    // 第一篇没读完：第二篇一行都没读，必须点名。
+    let (text, data) = mcp(&c, "ik_read", json!({"docIds":[first, second],"limit":2}));
+    assert!(text.contains("剩余 1 篇未开始"), "{text}");
+    assert!(text.contains(&second), "{text}");
+    assert_eq!(data["pendingDocuments"], json!([second]));
+
+    // 第一篇恰好读完、预算用尽：同样点名第二篇。
+    let (text, data) = mcp(
+        &c,
+        "ik_read",
+        json!({"docIds":[first, second],"limit":first_lines}),
+    );
+    assert!(text.contains("剩余 1 篇未开始"), "{text}");
+    assert_eq!(data["pendingDocuments"], json!([second]));
+
+    // 全部读完：没有未读提示。
+    let (text, data) = mcp(&c, "ik_read", json!({"docIds":[first, second]}));
+    assert!(!text.contains("未开始"), "{text}");
+    assert!(data.get("pendingDocuments").is_none(), "{data}");
+
+    // 单篇读取路径不受影响。
+    let (text, _) = mcp(&c, "ik_read", json!({"docId":first,"limit":2}));
+    assert!(!text.contains("未开始"), "{text}");
+}

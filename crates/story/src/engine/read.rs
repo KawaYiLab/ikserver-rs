@@ -352,9 +352,21 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
             complete: true,
         })
         .collect();
+    // 批量读取预算耗尽时，点名本次一行都没读到的篇目，避免调用方误以为整批已读。
+    let pending_documents: Vec<String> = match (&batch_docs, continuation_at) {
+        (Some(ds), Some((_, start, index))) => {
+            let first_unstarted = if start == 1 { index } else { index + 1 };
+            ds.iter()
+                .skip(first_unstarted)
+                .map(|&d| corpus.doc_id(d))
+                .collect()
+        }
+        _ => Vec::new(),
+    };
     let result = ReadResult {
         blocks,
         coverage_delta,
+        pending_documents,
         complete: next_call.is_none(),
         next_call,
         next_document,
@@ -385,6 +397,30 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
                     "行数"
                 } else {
                     "字数"
+                }
+            );
+        }
+        if let Some(ds) = &batch_docs
+            && !result.pending_documents.is_empty()
+        {
+            let shown: Vec<&str> = result
+                .pending_documents
+                .iter()
+                .take(5)
+                .map(String::as_str)
+                .collect();
+            let more = result.pending_documents.len() - shown.len();
+            let _ = write!(
+                out,
+                "本批 {} 篇已开始 {} 篇，剩余 {} 篇未开始（{}{}）；",
+                ds.len(),
+                ds.len() - result.pending_documents.len(),
+                result.pending_documents.len(),
+                shown.join("、"),
+                if more > 0 {
+                    format!(" 等另 {more} 篇")
+                } else {
+                    String::new()
                 }
             );
         }

@@ -520,6 +520,9 @@ pub struct ReadResult {
     pub coverage_delta: Vec<LineRange>,
     pub next_call: Option<NextCall>,
     pub complete: bool,
+    /// 批量读取中本次一行都没读到的篇目（预算耗尽），需要用 nextCall 继续。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pending_documents: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_document: Option<NextDocument>,
     #[serde(skip_serializing_if = "Option::is_none")]
