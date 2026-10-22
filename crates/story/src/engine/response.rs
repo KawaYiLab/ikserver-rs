@@ -600,6 +600,67 @@ pub struct CharacterChapter {
     pub first_directory_mention: Option<Document>,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaResult {
+    /// 固定为 "roleplay"。
+    pub purpose: String,
+    pub name: String,
+    pub resolved_names: Vec<String>,
+    pub related_names: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<PersonaCutoff>,
+    /// 范围内逐句署名已解析的对白数与场景数。
+    pub spoken_lines: usize,
+    pub scenes: usize,
+    /// 去重并满足字数范围、可被抽为样本的台词数。
+    pub candidate_lines: usize,
+    pub profiles: Vec<PersonaProfile>,
+    /// 设定标题含名字、但不在代理人分类里的篇数。
+    pub other_titled_lore: usize,
+    pub partners: Vec<PersonaPartner>,
+    pub samples: Vec<PersonaSample>,
+    pub next_calls: Vec<NextCall>,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaCutoff {
+    pub group_id: String,
+    pub title: String,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaProfile {
+    pub doc_id: String,
+    pub title: String,
+    pub excerpt: String,
+    pub excerpt_lines: usize,
+    pub line_count: usize,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_read: Option<NextCall>,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaPartner {
+    pub name: String,
+    /// 与该角色相邻的署名对白往来次数。
+    pub exchanges: usize,
+    pub scenes: usize,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaSample {
+    pub doc_id: String,
+    pub title: String,
+    pub group_id: String,
+    pub group_title: String,
+    pub line: SourceLine,
+    /// 文档内的前一句（占位说明除外）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<SourceLine>,
+    pub read: NextCall,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GuideResult {
     pub mode: String,
     pub text: String,
@@ -611,6 +672,7 @@ pub enum ToolData {
     Read(ReadResult),
     Catalog(CatalogResult),
     Character(CharacterResult),
+    Persona(PersonaResult),
     Guide(GuideResult),
     Coverage(CoverageResult),
 }
@@ -721,6 +783,11 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
         GroupCard,
         CharacterResult,
         CharacterChapter,
+        PersonaResult,
+        PersonaCutoff,
+        PersonaProfile,
+        PersonaPartner,
+        PersonaSample,
         GuideResult,
         Manifest,
         RangeScope,
@@ -752,23 +819,25 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
     }
     refs(&mut defs);
     let mut root = defs["ToolResponse"].clone();
+    let one = |name: &str| json!({"$ref":format!("#/$defs/{name}")});
     let data = match tool {
-        "ik_search" => "SearchResult",
-        "ik_read" => "ReadResult",
-        "ik_catalog" => "CatalogResult",
-        "ik_character" => "CharacterResult",
-        "ik_guide" => "GuideResult",
-        "ik_coverage" => "CoverageResult",
-        _ => "ToolData",
+        "ik_search" => one("SearchResult"),
+        "ik_read" => one("ReadResult"),
+        "ik_catalog" => one("CatalogResult"),
+        // purpose=roleplay 返回 PersonaResult，其余返回 CharacterResult。
+        "ik_character" => json!({"oneOf":[one("CharacterResult"), one("PersonaResult")]}),
+        "ik_guide" => one("GuideResult"),
+        "ik_coverage" => one("CoverageResult"),
+        _ => one("ToolData"),
     };
     // flatten produces allOf; the envelope remains generated and only its data ref is specialized.
-    fn specialize(v: &mut Value, data: &str) {
+    fn specialize(v: &mut Value, data: &Value) {
         match v {
             Value::Object(m) => {
                 if let Some(properties) = m.get_mut("properties")
                     && properties.get("data").is_some()
                 {
-                    properties["data"] = json!({"$ref":format!("#/$defs/{data}")});
+                    properties["data"] = data.clone();
                 }
                 for value in m.values_mut() {
                     specialize(value, data);
@@ -782,7 +851,7 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
             _ => {}
         }
     }
-    specialize(&mut root, data);
+    specialize(&mut root, &data);
     fn referenced(v: &Value, names: &mut std::collections::BTreeSet<String>) {
         match v {
             Value::Object(m) => {

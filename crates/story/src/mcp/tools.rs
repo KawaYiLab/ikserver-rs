@@ -35,8 +35,8 @@ pub fn definitions() -> Result<Value, serde_json::Error> {
         (
             "ik_character",
             "角色速览",
-            "返回角色档案及章节统计，逐句署名、提及、姓名表和推断署名分别计数。已知身份变体合并，目录首见不表示实际首次登场。nextCalls 提供相关检索入口。",
-            json!({"name":{"type":"string"},"maxResults":integer(1,200,40),"includeEvidence":evidence,"detail":detail}),
+            "返回角色档案及章节统计，逐句署名、提及、姓名表和推断署名分别计数。已知身份变体合并，目录首见不表示实际首次登场。nextCalls 提供相关检索入口。purpose=roleplay 返回扮演参考资料：代理人设定档案摘录、常对话对象，以及按章节分散抽取的逐句署名台词（附前一句与原文入口）；until 将台词限定到某章节或已核验版本（含）。",
+            json!({"name":{"type":"string"},"purpose":{"type":"string","enum":["overview","roleplay"],"default":"overview"},"until":{"type":"string","description":"仅roleplay：章节id/章节名/已核验版本别名，台词截止到该章（含）；设定档案不随之过滤。"},"maxResults":{"type":"integer","minimum":1,"maximum":200,"description":"overview为章节行数，默认40、上限200；roleplay为台词样本数，默认24、上限60。"},"includeEvidence":evidence,"detail":detail}),
         ),
         (
             "ik_guide",
