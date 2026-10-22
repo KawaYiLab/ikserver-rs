@@ -25,6 +25,9 @@ use utoipa_axum::routes;
 use crate::AiState;
 use crate::catalog::{Example, OutputMode};
 use crate::dto::{CharacterInput, ImportFile, ModelInput, ProviderInput, SettingsInput};
+use crate::mcp::{
+    self, AdminMcpServer, AdminMcpTool, McpRefreshResult, McpServerInput, McpToolInput,
+};
 use crate::repo::{self, JobFilter};
 use crate::service::apply;
 
@@ -41,6 +44,8 @@ pub struct AdminSettings {
     /// 可用的提供方名字：部署配置里的，加上后台启用的（模型的 `provider` 只能指向这些，
     /// 否则调用时退回默认模型）。
     pub providers: Vec<String>,
+    /// 剧情库已加载语料：角色卡开了剧情库工具时才真正提供（ADR 0004）。
+    pub story_available: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -123,6 +128,10 @@ pub struct AdminCharacter {
     /// 空 = 全部启用模型。
     pub allowed_model_keys: Vec<String>,
     pub suggested_questions: Vec<String>,
+    /// 提供剧情库工具（ADR 0004）。
+    pub story_tools: bool,
+    /// 启用的站外 MCP 服务（服务名）。
+    pub mcp_servers: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -192,6 +201,10 @@ pub async fn settings(state: &AiState) -> Result<AdminSettings, Problem> {
             .await?
             .into_iter()
             .collect(),
+        story_available: state
+            .story
+            .as_ref()
+            .is_some_and(|story| story.current().is_some()),
     })
 }
 
@@ -447,8 +460,10 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
     let mut conn = state.db.acquire().await?;
     let cards = repo::cards(&mut conn).await?;
     let models = repo::models(&mut conn).await?;
+    let servers = repo::mcp_servers(&mut conn).await?;
     drop(conn);
     let key_of = |id: i64| models.iter().find(|m| m.id == id).map(|m| m.key.clone());
+    let server_of = |id: i64| servers.iter().find(|s| s.id == id).map(|s| s.name.clone());
     let user_ids: Vec<i64> = cards.iter().map(|c| c.bound_user_id).collect();
     let authors = ik_auth::service::authors(&state.db, &user_ids).await?;
     Ok(cards
@@ -475,6 +490,8 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
             default_model_key: c.default_model_id.and_then(key_of),
             allowed_model_keys: c.allowed_model_ids.into_iter().filter_map(key_of).collect(),
             suggested_questions: c.suggested_questions,
+            story_tools: c.story_tools,
+            mcp_servers: c.mcp_server_ids.into_iter().filter_map(server_of).collect(),
         })
         .collect())
 }
@@ -619,6 +636,8 @@ pub async fn save_character(
         "commentEnabled": input.comment_enabled,
         "defaultModelKey": input.default_model_key,
         "allowedModelKeys": input.allowed_model_keys,
+        "storyTools": input.story_tools,
+        "mcpServers": input.mcp_servers,
         "systemPromptChars": input.system_prompt.chars().count(),
     });
     save(
@@ -752,6 +771,10 @@ where
         .routes(routes!(list_characters))
         .routes(routes!(put_character, remove_character))
         .routes(routes!(list_jobs))
+        .routes(routes!(list_mcp_servers))
+        .routes(routes!(put_mcp_server, remove_mcp_server))
+        .routes(routes!(post_mcp_refresh))
+        .routes(routes!(put_mcp_tool))
 }
 
 /// AI 全局设置
@@ -1011,4 +1034,115 @@ async fn list_jobs(
     Query(query): Query<JobQuery>,
 ) -> Result<Json<Paged<AdminJob>>, Problem> {
     Ok(Json(jobs(&state, query).await?))
+}
+
+/// 站外 MCP 服务（含工具与审批状态；鉴权头只回提示）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/ai/mcp-servers",
+    tag = "admin",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses((status = 200, body = Vec<AdminMcpServer>))
+)]
+async fn list_mcp_servers(
+    State(state): State<AiState>,
+    AdminOperator(_): AdminOperator,
+) -> Result<Json<Vec<AdminMcpServer>>, Problem> {
+    Ok(Json(mcp::servers(&state).await?))
+}
+
+/// 新建或修改站外 MCP 服务
+///
+/// 不传 `authHeader`（或传 null）保留原有的。保存后用「拉取工具」取得工具清单，工具要逐个确认后才会提供给模型。
+#[utoipa::path(
+    put,
+    path = "/v1/admin/ai/mcp-servers/{name}",
+    tag = "admin",
+    params(("name" = String, Path)),
+    request_body = McpServerInput,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AdminMcpServer),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn put_mcp_server(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path(name): Path<String>,
+    Json(input): Json<McpServerInput>,
+) -> Result<Json<AdminMcpServer>, Problem> {
+    Ok(Json(mcp::save_server(&state, &op, &name, input).await?))
+}
+
+/// 删除站外 MCP 服务（工具一起删除，角色卡里去掉它）
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/ai/mcp-servers/{name}",
+    tag = "admin",
+    params(("name" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn remove_mcp_server(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path(name): Path<String>,
+) -> Result<StatusCode, Problem> {
+    mcp::delete_server(&state, &op, &name).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 拉取站外 MCP 服务的工具清单
+///
+/// 新工具默认不启用；定义变了的工具停止提供，等重新确认。连不上时 `ok = false`，原因在 `error`。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/ai/mcp-servers/{name}/refresh",
+    tag = "admin",
+    params(("name" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = McpRefreshResult),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn post_mcp_refresh(
+    State(state): State<AiState>,
+    AdminOperator(_): AdminOperator,
+    Path(name): Path<String>,
+) -> Result<Json<McpRefreshResult>, Problem> {
+    Ok(Json(mcp::refresh_server(&state, &name).await?))
+}
+
+/// 启用、停用或重新确认一个 MCP 工具
+///
+/// 启用时带上后台看到的 `digest`：远端定义已经变了时拒绝（409 `AI_MCP_TOOL_CHANGED`）；
+/// 只能启用只读工具（409 `AI_MCP_TOOL_NOT_READ_ONLY`）。
+#[utoipa::path(
+    put,
+    path = "/v1/admin/ai/mcp-servers/{name}/tools/{tool}",
+    tag = "admin",
+    params(("name" = String, Path), ("tool" = String, Path, description = "远端工具名")),
+    request_body = McpToolInput,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AdminMcpTool),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn put_mcp_tool(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path((name, tool)): Path<(String, String)>,
+    Json(input): Json<McpToolInput>,
+) -> Result<Json<AdminMcpTool>, Problem> {
+    Ok(Json(
+        mcp::update_tool(&state, &op, &name, &tool, input).await?,
+    ))
 }

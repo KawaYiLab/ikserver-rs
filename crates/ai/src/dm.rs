@@ -25,6 +25,7 @@ use crate::llm::{ChatMessage, LlmError, Providers};
 use crate::quota::{self, Denial, Hold};
 use crate::repo::{self, JobOutcome, JobRow, SessionRow};
 use crate::sanitize;
+use crate::toolbox::Toolbox;
 use crate::tools::ToolContext;
 use crate::workflow::Workflow;
 
@@ -226,6 +227,8 @@ struct Prepared {
     reply_id: i64,
     hold: Hold,
     messages: Vec<ChatMessage>,
+    /// 本次可用的工具（按角色卡组装，ADR 0004）。
+    toolbox: Toolbox,
 }
 
 enum Prepare {
@@ -381,13 +384,16 @@ async fn prepare(
         .into_iter()
         .map(|(id, a)| (id, a.username))
         .collect();
-    let messages = build_messages(&card, &history, job.ai_user_id, &names);
+    let mut messages = build_messages(&card, &history, job.ai_user_id, &names);
+    let toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
+    toolbox.annotate_system(&mut messages);
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。
     let prompt_chars = messages
         .iter()
         .map(|m| i64::try_from(m.text().chars().count()).unwrap_or(i64::MAX))
-        .sum();
+        .sum::<i64>()
+        .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds));
     let amount = quota::estimate(
         state.config.estimated_context_tokens,
         state.config.max_tool_rounds,
@@ -472,6 +478,7 @@ async fn prepare(
         reply_id,
         hold,
         messages,
+        toolbox,
     })))
 }
 
@@ -512,6 +519,7 @@ pub async fn run_job(
         mode: prepared.card.output_mode,
         max_chars: sanitize::DM_MAX_CHARS,
         tools: Some(ToolContext::new(state, prepared.job.quota_user_id).await?),
+        toolbox: prepared.toolbox.clone(),
     };
     let mut workflow = Workflow::new(attempt, prepared.card.output_mode);
     let generated = generate(
@@ -734,6 +742,8 @@ mod tests {
             default_model_id: None,
             allowed_model_ids: Vec::new(),
             suggested_questions: Vec::new(),
+            story_tools: false,
+            mcp_server_ids: Vec::new(),
         }
     }
 

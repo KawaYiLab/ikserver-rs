@@ -11,10 +11,12 @@ use ik_media::MediaState;
 use ik_messaging::MessagingState;
 use ik_profile::ProfileState;
 use ik_search::SearchState;
+use ik_story::StoryState;
 use sqlx::PgPool;
 
 use crate::catalog::CatalogCache;
 use crate::llm::Providers;
+use crate::mcp_client::McpClient;
 
 #[derive(Clone)]
 pub struct AiState {
@@ -34,6 +36,10 @@ pub struct AiState {
     /// 部署配置里的提供方（启动时固定）。后台维护的在 `catalog` 里。
     pub providers: Providers,
     pub config: Arc<Ai>,
+    /// 剧情库（角色卡开了剧情库工具时在进程内调用，ADR 0004）。没有组装时不提供剧情库工具。
+    pub story: Option<StoryState>,
+    /// 站外 MCP 服务的客户端（连接池、会话、熔断）。
+    pub mcp: McpClient,
 }
 
 /// 论坛工具读取的各域：都以游客身份调用它们的 service，只读公开内容（TOOL-001/008）。
@@ -89,7 +95,16 @@ impl AiState {
             forum,
             providers,
             config: Arc::new(config),
+            story: None,
+            mcp: McpClient::default(),
         }
+    }
+
+    /// 接上剧情库（组装时调用一次）。
+    #[must_use]
+    pub fn with_story(mut self, story: StoryState) -> Self {
+        self.story = Some(story);
+        self
     }
 
     /// 按配置里的提供方建上游客户端。

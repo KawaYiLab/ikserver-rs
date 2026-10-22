@@ -33,6 +33,8 @@
 | 处罚 | sanction | 禁言（mute）/封禁（ban），带到期时间 |
 | 审计日志 | audit_log | 管理操作留痕 |
 | AI 助手 / 角色卡 | ai / role_card | 人格、模型、额度 |
+| MCP 服务（站外） / MCP 工具 | ai / mcp_server、mcp_tool | 管理后台接入的站外 MCP 服务及其工具；工具暴露给模型的名字是 `<服务名>__<工具名>`，要管理员按摘要确认后才提供（ADR 0004） |
+| 剧情库工具 | ai / story_tools | 角色卡开关：在进程内调用剧情库的六个工具（ADR 0004） |
 | 剧情库 | story | 绝区零剧情 / 设定语料的只读 MCP 服务（`/v1/story/mcp`）；一篇文档 `doc`（场景或设定条目），分组 `group`（章节 `ch:` / 设定分类 `lore:`） |
 | 剧情资料覆盖 | coverage / coverageDelta / manifest | 固定语料范围中的完整返回行区间；由调用者累计并用 `ik_coverage` 合并核对，不表示模型理解 |
 | 米游社 | mihoyo | 扫码登录/绑定 |

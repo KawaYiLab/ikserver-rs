@@ -4,6 +4,7 @@
 //! （`reasoning_content` / `reasoning`）、流末的用量帧、流中途的错误对象。上游只在这里出现；
 //! 业务代码面对的是 [`ChatProvider`]，测试用本地 SSE 桩服务替换上游地址即可。
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -90,8 +91,8 @@ impl Serialize for ToolCall {
 /// 提供给模型的一个工具。
 #[derive(Debug, Clone)]
 pub struct ToolSpec {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: Cow<'static, str>,
+    pub description: Cow<'static, str>,
     /// JSON Schema（object）。
     pub parameters: serde_json::Value,
 }
@@ -245,19 +246,25 @@ pub struct OpenAiCompatible {
 static HTTP_CLIENT: LazyLock<Result<reqwest13::Client, LlmError>> =
     LazyLock::new(build_http_client);
 
-fn build_http_client() -> Result<reqwest13::Client, LlmError> {
+/// rustls + ring + webpki 根证书的客户端构造器（MCP 客户端也用它）。
+pub(crate) fn client_builder() -> Result<reqwest13::ClientBuilder, String> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
     };
     let tls = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|e| LlmError::Upstream(format!("tls config: {e}")))?
+        .map_err(|e| format!("tls config: {e}"))?
         .with_root_certificates(roots)
         .with_no_client_auth();
-    reqwest13::Client::builder()
+    Ok(reqwest13::Client::builder()
         .tls_backend_preconfigured(tls)
-        .connect_timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(10)))
+}
+
+fn build_http_client() -> Result<reqwest13::Client, LlmError> {
+    client_builder()
+        .map_err(LlmError::Upstream)?
         // 两帧之间的最长间隔；总时长由生成方的墙钟预算控制（GEN-020）。
         .read_timeout(Duration::from_secs(120))
         .build()

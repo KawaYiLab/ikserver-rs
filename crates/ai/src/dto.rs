@@ -180,6 +180,12 @@ pub struct CharacterInput {
     pub allowed_model_keys: Vec<String>,
     #[serde(default)]
     pub suggested_questions: Vec<String>,
+    /// 提供剧情库工具（ADR 0004）。
+    #[serde(default)]
+    pub story_tools: bool,
+    /// 启用的站外 MCP 服务（服务名）。
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
 }
 
 fn one() -> f64 {

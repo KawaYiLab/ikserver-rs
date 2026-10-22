@@ -148,6 +148,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | AI_MODEL_IS_DEFAULT | 409 | 默认模型不能删除，请先把其他模型设为默认 | 管理后台删除模型 |
 | AI_PROVIDER_IN_USE | 409 | 还有模型在用这个提供方，请先把这些模型改到别的提供方或删除 | 管理后台删除提供方 |
 | AI_PROVIDER_FROM_CONFIG | 409 | 部署配置里的提供方只能在部署配置里修改 | 管理后台删除部署配置（`IK_AI__PROVIDERS__…`）里的提供方 |
+| AI_MCP_TOOL_CHANGED | 409 | 工具定义已经变了，请刷新后重新确认 | 管理后台启用 MCP 工具时带的 `digest` 与远端当前定义不同，或远端已没有这个工具（ADR 0004） |
+| AI_MCP_TOOL_NOT_READ_ONLY | 409 | 只能启用声明为只读（readOnlyHint）的工具 | 管理后台启用 MCP 工具（ADR 0004） |
 | AI_NOT_LATEST_REPLY | 409 | 只能重新生成最后一条 AI 回复 | GEN-013 |
 | AI_TRIGGER_WITHDRAWN | 409 | 触发这条回复的消息已撤回 | 重新生成时（GEN-014） |
 | REPORT_DUPLICATE | 409 | 你已举报过该内容，正在处理中 | 同一目标有未结案的举报；结案后可以再举报 |

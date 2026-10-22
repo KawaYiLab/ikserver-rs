@@ -134,7 +134,9 @@ impl AppState {
             feed: feed.clone(),
             search: search.clone(),
         };
-        let ai = AiState::from_config(messaging.clone(), forum, &config.ai)?;
+        let story = StoryState::new(&config.story, db.clone(), ids.clone())?;
+        let ai =
+            AiState::from_config(messaging.clone(), forum, &config.ai)?.with_story(story.clone());
         ai.install_hooks();
         let admin = AdminState::new(
             content.clone(),
@@ -143,7 +145,6 @@ impl AppState {
             moderation.clone(),
             search.clone(),
         );
-        let story = StoryState::new(&config.story, db.clone(), ids.clone())?;
         Ok(Self {
             story,
             admin,

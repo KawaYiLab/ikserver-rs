@@ -215,6 +215,8 @@ pub(crate) struct CardRow {
     pub default_model_id: Option<i64>,
     pub allowed_model_ids: Vec<i64>,
     pub suggested_questions: Vec<String>,
+    pub story_tools: bool,
+    pub mcp_server_ids: Vec<i64>,
 }
 
 pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>> {
@@ -222,7 +224,7 @@ pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>>
         CardRow,
         "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,
                 dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,
-                default_model_id, allowed_model_ids, suggested_questions
+                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids
          FROM ai_role_cards ORDER BY sort_order, id"
     )
     .fetch_all(conn)
@@ -247,6 +249,8 @@ pub(crate) struct NewCard<'a> {
     pub default_model_id: Option<i64>,
     pub allowed_model_ids: &'a [i64],
     pub suggested_questions: &'a [String],
+    pub story_tools: bool,
+    pub mcp_server_ids: &'a [i64],
     pub now: DateTime<Utc>,
 }
 
@@ -256,13 +260,15 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
         "INSERT INTO ai_role_cards (id, slug, display_name, bio, avatar_media_id, bound_user_id,
                                     enabled, knock_visible, dm_enabled, comment_enabled, sort_order,
                                     output_mode, system_prompt, examples, default_model_id,
-                                    allowed_model_ids, suggested_questions, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $18)
+                                    allowed_model_ids, suggested_questions, story_tools,
+                                    mcp_server_ids, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $19,
+                 $20, $18, $18)
          ON CONFLICT (slug) DO UPDATE SET display_name = $3, bio = $4, avatar_media_id = $5,
              bound_user_id = $6, enabled = $7, knock_visible = $8, dm_enabled = $9,
              comment_enabled = $10, sort_order = $11, output_mode = $12, system_prompt = $13,
              examples = $14, default_model_id = $15, allowed_model_ids = $16,
-             suggested_questions = $17, updated_at = $18
+             suggested_questions = $17, story_tools = $19, mcp_server_ids = $20, updated_at = $18
          RETURNING id",
         c.id,
         c.slug,
@@ -282,6 +288,8 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
         c.allowed_model_ids,
         c.suggested_questions,
         c.now,
+        c.story_tools,
+        c.mcp_server_ids,
     )
     .fetch_one(conn)
     .await
@@ -897,5 +905,280 @@ pub(crate) async fn failed_jobs_since(
         since,
     )
     .fetch_one(conn)
+    .await
+}
+
+// ---------- MCP 服务（ADR 0004） ----------
+
+pub(crate) struct McpServerRow {
+    pub id: i64,
+    pub name: String,
+    pub display_name: String,
+    pub url: String,
+    pub auth_header: String,
+    pub timeout_ms: i32,
+    pub max_result_chars: i32,
+    pub enabled: bool,
+    pub sort_order: i32,
+    pub last_listed_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+}
+
+pub(crate) async fn mcp_servers(conn: &mut PgConnection) -> sqlx::Result<Vec<McpServerRow>> {
+    sqlx::query_as!(
+        McpServerRow,
+        "SELECT id, name, display_name, url, auth_header, timeout_ms, max_result_chars, enabled,
+                sort_order, last_listed_at, last_error
+         FROM ai_mcp_servers ORDER BY sort_order, id"
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn mcp_server(
+    conn: &mut PgConnection,
+    name: &str,
+) -> sqlx::Result<Option<McpServerRow>> {
+    sqlx::query_as!(
+        McpServerRow,
+        "SELECT id, name, display_name, url, auth_header, timeout_ms, max_result_chars, enabled,
+                sort_order, last_listed_at, last_error
+         FROM ai_mcp_servers WHERE name = $1",
+        name,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct NewMcpServer<'a> {
+    pub id: i64,
+    pub name: &'a str,
+    pub display_name: &'a str,
+    pub url: &'a str,
+    /// None = 保留原有的（新建时为空串）。
+    pub auth_header: Option<&'a str>,
+    pub timeout_ms: i32,
+    pub max_result_chars: i32,
+    pub enabled: bool,
+    pub sort_order: i32,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn upsert_mcp_server(
+    conn: &mut PgConnection,
+    s: &NewMcpServer<'_>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        "INSERT INTO ai_mcp_servers (id, name, display_name, url, auth_header, timeout_ms,
+                                     max_result_chars, enabled, sort_order, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6, $7, $8, $9, $10, $10)
+         ON CONFLICT (name) DO UPDATE SET display_name = $3, url = $4,
+             auth_header = COALESCE($5, ai_mcp_servers.auth_header), timeout_ms = $6,
+             max_result_chars = $7, enabled = $8, sort_order = $9, updated_at = $10
+         RETURNING id",
+        s.id,
+        s.name,
+        s.display_name,
+        s.url,
+        s.auth_header,
+        s.timeout_ms,
+        s.max_result_chars,
+        s.enabled,
+        s.sort_order,
+        s.now,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 删除服务（工具级联删除），并从角色卡里去掉。返回是否删到。
+pub(crate) async fn delete_mcp_server(conn: &mut PgConnection, name: &str) -> sqlx::Result<bool> {
+    let Some(id) = sqlx::query_scalar!(
+        "DELETE FROM ai_mcp_servers WHERE name = $1 RETURNING id",
+        name,
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(false);
+    };
+    sqlx::query!(
+        "UPDATE ai_role_cards SET mcp_server_ids = array_remove(mcp_server_ids, $1)
+         WHERE $1 = ANY(mcp_server_ids)",
+        id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(true)
+}
+
+/// 记一次拉取清单的结果（成功时清空错误）。
+pub(crate) async fn set_mcp_listed(
+    conn: &mut PgConnection,
+    id: i64,
+    error: Option<&str>,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_mcp_servers SET last_listed_at = $2, last_error = $3 WHERE id = $1",
+        id,
+        now,
+        error,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 串行化工具清单的写入（暴露名跨服务唯一：先查冲突再写）。
+pub(crate) async fn lock_mcp_tools(conn: &mut PgConnection) -> sqlx::Result<()> {
+    sqlx::query!("SELECT pg_advisory_xact_lock(hashtextextended('ik:ai_mcp_tools', 0))")
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+pub(crate) struct McpToolRow {
+    pub id: i64,
+    pub server_id: i64,
+    pub remote_name: String,
+    pub exposed_name: String,
+    pub remote: serde_json::Value,
+    pub remote_digest: Vec<u8>,
+    pub approved_digest: Option<Vec<u8>>,
+    pub enabled: bool,
+    pub timeline_text: Option<String>,
+    pub missing: bool,
+}
+
+pub(crate) async fn mcp_tools(conn: &mut PgConnection) -> sqlx::Result<Vec<McpToolRow>> {
+    sqlx::query_as!(
+        McpToolRow,
+        "SELECT id, server_id, remote_name, exposed_name, remote, remote_digest, approved_digest,
+                enabled, timeline_text, missing
+         FROM ai_mcp_tools ORDER BY server_id, remote_name"
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct RemoteToolUpsert<'a> {
+    pub id: i64,
+    pub server_id: i64,
+    pub remote_name: &'a str,
+    pub exposed_name: &'a str,
+    pub remote: &'a serde_json::Value,
+    pub remote_digest: &'a [u8],
+    pub now: DateTime<Utc>,
+}
+
+/// 写入拉到的定义：新工具默认未启用；已有的只更新 `remote`，是否生效由摘要比较决定。
+pub(crate) async fn upsert_remote_tool(
+    conn: &mut PgConnection,
+    t: &RemoteToolUpsert<'_>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_mcp_tools (id, server_id, remote_name, exposed_name, remote, remote_digest,
+                                   created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+         ON CONFLICT (server_id, remote_name) DO UPDATE SET remote = $5, remote_digest = $6,
+             missing = FALSE,
+             updated_at = CASE WHEN ai_mcp_tools.remote_digest = $6 AND NOT ai_mcp_tools.missing
+                               THEN ai_mcp_tools.updated_at ELSE $7 END",
+        t.id,
+        t.server_id,
+        t.remote_name,
+        t.exposed_name,
+        t.remote,
+        t.remote_digest,
+        t.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 远端清单里没有的工具标记失效，有的清除标记。
+pub(crate) async fn mark_missing_tools(
+    conn: &mut PgConnection,
+    server_id: i64,
+    present: &[String],
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_mcp_tools SET missing = NOT (remote_name = ANY($2)), updated_at = $3
+         WHERE server_id = $1 AND missing IS DISTINCT FROM NOT (remote_name = ANY($2))",
+        server_id,
+        present,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 改一个工具：`approve` 时把当前远端定义记为已确认。返回改到的行数。
+pub(crate) async fn update_tool(
+    conn: &mut PgConnection,
+    id: i64,
+    enabled: bool,
+    approve: bool,
+    timeline_text: Option<&str>,
+    now: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "UPDATE ai_mcp_tools SET enabled = $2, timeline_text = $4, updated_at = $5,
+             approved = CASE WHEN $3 THEN remote ELSE approved END,
+             approved_digest = CASE WHEN $3 THEN remote_digest ELSE approved_digest END
+         WHERE id = $1",
+        id,
+        enabled,
+        approve,
+        timeline_text,
+        now,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 运行时生效的工具：服务启用、工具启用、远端还在、远端定义与确认过的一致。
+pub(crate) struct ActiveToolRow {
+    pub server_id: i64,
+    pub remote_name: String,
+    pub exposed_name: String,
+    pub approved: serde_json::Value,
+    pub timeline_text: Option<String>,
+}
+
+pub(crate) async fn active_mcp_tools(conn: &mut PgConnection) -> sqlx::Result<Vec<ActiveToolRow>> {
+    sqlx::query_as!(
+        ActiveToolRow,
+        r#"SELECT t.server_id, t.remote_name, t.exposed_name, t.approved AS "approved!",
+                  t.timeline_text
+           FROM ai_mcp_tools t JOIN ai_mcp_servers s ON s.id = t.server_id
+           WHERE s.enabled AND t.enabled AND NOT t.missing AND t.approved IS NOT NULL
+             AND t.approved_digest = t.remote_digest
+           ORDER BY s.sort_order, s.id, t.remote_name"#
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 审批时锁住这一行（先查摘要再写）。
+pub(crate) async fn mcp_tool_for_update(
+    conn: &mut PgConnection,
+    server_id: i64,
+    remote_name: &str,
+) -> sqlx::Result<Option<McpToolRow>> {
+    sqlx::query_as!(
+        McpToolRow,
+        "SELECT id, server_id, remote_name, exposed_name, remote, remote_digest, approved_digest,
+                enabled, timeline_text, missing
+         FROM ai_mcp_tools WHERE server_id = $1 AND remote_name = $2 FOR UPDATE",
+        server_id,
+        remote_name,
+    )
+    .fetch_optional(conn)
     .await
 }

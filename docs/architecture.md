@@ -42,7 +42,7 @@ flowchart LR
 |   | `moderation` | `auth, content, comments, notify, media` |
 |   | `profile` | `auth, social, economy, content, comments, media, cosmetics, mihoyo, realtime` |
 | 8 | `account` | `auth, mihoyo, profile` |
-|   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy` |
+|   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy, story` |
 | 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai, notify, profile` |
 | — | `legacy` | `media`（一次性数据导入，模块边界的例外，见 ADR 0003） |
 | — | `server` | 全部（唯一组装所有域的地方） |
@@ -130,6 +130,9 @@ flowchart LR
   生成核心在 `ik_ai::generate`（私信与评论共用）：工具循环（12 个只读论坛工具，`ik_ai::tools`，以游客身份调用
   content / comments / profile / feed / search 的 service，再按触发者做拉黑过滤）、逐轮计费、首帧看门狗与退回默认模型；
   私信另有工作流时间线与多气泡分段（`ik_ai::workflow`），评论没有（D-089 方案 A）。
+  工具清单按角色卡组装（`ik_ai::toolbox`，ADR 0004）：论坛工具之外，可以开剧情库工具（进程内调用
+  `ik_story::mcp::tools`，不走 HTTP）和管理后台接入的站外 MCP 服务（`ik_ai::mcp_client`，Streamable HTTP，
+  只读工具、经管理员按摘要确认后才提供，每小时重拉清单 `ai.refresh_mcp_tools`）。站外调用与拉取清单都在事务之外。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。

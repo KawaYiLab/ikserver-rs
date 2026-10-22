@@ -22,6 +22,7 @@ use crate::llm::{
 use crate::quota;
 use crate::repo;
 use crate::sanitize;
+use crate::toolbox::Toolbox;
 use crate::tools::{self, ToolContext};
 use crate::workflow::Workflow;
 
@@ -98,6 +99,8 @@ pub(crate) struct StreamCtx<'a> {
     pub max_chars: usize,
     /// 工具执行上下文（查看者 = 触发者）。None 时不提供工具。
     pub tools: Option<ToolContext>,
+    /// 本次可用的工具（论坛 + 角色卡启用的剧情库与站外服务，ADR 0004）。
+    pub toolbox: Toolbox,
 }
 
 impl StreamCtx<'_> {
@@ -376,7 +379,7 @@ async fn run_rounds(
             model: model.provider_model.clone(),
             messages: messages.clone(),
             tools: if offer_tools {
-                tools::specs()
+                ctx.toolbox.specs()
             } else {
                 Vec::new()
             },
@@ -421,12 +424,20 @@ async fn run_rounds(
             let query = (call.name == "search_posts")
                 .then(|| search_query(&call.arguments))
                 .flatten();
-            let step = workflow.tool_start(&call.name, query.as_deref());
+            let label = ctx.toolbox.label(&call.name);
+            let step = workflow.tool_start(&call.name, query.as_deref(), label);
             ctx.publish_workflow(workflow);
             let started = Instant::now();
             let executed = tokio::time::timeout_at(
                 deadline,
-                tools::execute(state, tool_ctx, &call.name, &call.arguments),
+                ctx.toolbox.execute(
+                    state,
+                    tool_ctx,
+                    &state.mcp,
+                    &call.name,
+                    &call.arguments,
+                    deadline,
+                ),
             )
             .await;
             let Ok(output) = executed else {
@@ -438,6 +449,7 @@ async fn run_rounds(
                 &call.name,
                 &output.meta,
                 started.elapsed().as_millis(),
+                label,
             );
             ctx.publish_workflow(workflow);
             messages.push(ChatMessage::Tool {

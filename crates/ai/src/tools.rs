@@ -8,6 +8,7 @@
 //! - 帖子一律写成 `[标题](/post/<id>)`（TOOL-003）；结果截 4000 字；执行出错只告诉模型
 //!   `工具执行失败：<名>`（TOOL-002）。
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
@@ -147,9 +148,11 @@ fn limit_param(max: u32, default: u32) -> Value {
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
-            name: "search_posts",
-            description: "在绳网站内搜索帖子。query 请拆成 2-4 个用顿号或逗号分隔的短词。\
+            name: Cow::Borrowed("search_posts"),
+            description: Cow::Borrowed(
+                "在绳网站内搜索帖子。query 请拆成 2-4 个用顿号或逗号分隔的短词。\
                  结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            ),
             parameters: object(
                 json!({
                     "query": { "type": "string", "description": "检索词，如「攻略、零号空洞」" },
@@ -159,42 +162,48 @@ pub fn specs() -> Vec<ToolSpec> {
             ),
         },
         ToolSpec {
-            name: "get_hot_posts",
-            description: "获取绳网当前的热门帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            name: Cow::Borrowed("get_hot_posts"),
+            description: Cow::Borrowed(
+                "获取绳网当前的热门帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            ),
             parameters: object(json!({ "limit": limit_param(10, 5) }), &[]),
         },
         ToolSpec {
-            name: "get_user_info",
-            description: "获取用户的公开资料：等级、丁尼、简介。",
+            name: Cow::Borrowed("get_user_info"),
+            description: Cow::Borrowed("获取用户的公开资料：等级、丁尼、简介。"),
             parameters: object(json!({ "username": username_param() }), &["username"]),
         },
         ToolSpec {
-            name: "get_post_content",
-            description: "读取一篇帖子的标题与正文。",
+            name: Cow::Borrowed("get_post_content"),
+            description: Cow::Borrowed("读取一篇帖子的标题与正文。"),
             parameters: object(
                 json!({ "document_id": document_id_param() }),
                 &["document_id"],
             ),
         },
         ToolSpec {
-            name: "get_post_comments",
-            description: "按热度读取一篇帖子的评论（含部分楼中楼回复）。",
+            name: Cow::Borrowed("get_post_comments"),
+            description: Cow::Borrowed("按热度读取一篇帖子的评论（含部分楼中楼回复）。"),
             parameters: object(
                 json!({ "document_id": document_id_param(), "limit": limit_param(20, 10) }),
                 &["document_id"],
             ),
         },
         ToolSpec {
-            name: "get_posts_by_author",
-            description: "获取某位用户近期公开发布的帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            name: Cow::Borrowed("get_posts_by_author"),
+            description: Cow::Borrowed(
+                "获取某位用户近期公开发布的帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            ),
             parameters: object(
                 json!({ "username": username_param(), "limit": limit_param(10, 5) }),
                 &["username"],
             ),
         },
         ToolSpec {
-            name: "search_posts_by_category",
-            description: "获取某个分区下的最新帖子。category 可以是分区 slug 或名称关键词。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            name: Cow::Borrowed("search_posts_by_category"),
+            description: Cow::Borrowed(
+                "获取某个分区下的最新帖子。category 可以是分区 slug 或名称关键词。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            ),
             parameters: object(
                 json!({
                     "category": { "type": "string", "description": "分区 slug 或名称关键词" },
@@ -204,34 +213,40 @@ pub fn specs() -> Vec<ToolSpec> {
             ),
         },
         ToolSpec {
-            name: "get_user_stats",
-            description: "获取用户的统计：等级、丁尼、发帖数、获赞总数、总阅读量、粉丝数、关注数。",
+            name: Cow::Borrowed("get_user_stats"),
+            description: Cow::Borrowed(
+                "获取用户的统计：等级、丁尼、发帖数、获赞总数、总阅读量、粉丝数、关注数。",
+            ),
             parameters: object(json!({ "username": username_param() }), &["username"]),
         },
         ToolSpec {
-            name: "get_related_posts",
-            description: "获取与某篇帖子相关的其他帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            name: Cow::Borrowed("get_related_posts"),
+            description: Cow::Borrowed(
+                "获取与某篇帖子相关的其他帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            ),
             parameters: object(
                 json!({ "document_id": document_id_param(), "limit": limit_param(10, 5) }),
                 &["document_id"],
             ),
         },
         ToolSpec {
-            name: "get_category_list",
-            description: "列出可以公开浏览的分区。",
+            name: Cow::Borrowed("get_category_list"),
+            description: Cow::Borrowed("列出可以公开浏览的分区。"),
             parameters: object(json!({}), &[]),
         },
         ToolSpec {
-            name: "get_post_engagement",
-            description: "获取一篇帖子的互动数据：阅读、点赞、收藏、评论、丁尼。",
+            name: Cow::Borrowed("get_post_engagement"),
+            description: Cow::Borrowed("获取一篇帖子的互动数据：阅读、点赞、收藏、评论、丁尼。"),
             parameters: object(
                 json!({ "document_id": document_id_param() }),
                 &["document_id"],
             ),
         },
         ToolSpec {
-            name: "get_user_activity",
-            description: "获取用户近期公开的发帖与评论。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            name: Cow::Borrowed("get_user_activity"),
+            description: Cow::Borrowed(
+                "获取用户近期公开的发帖与评论。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+            ),
             parameters: object(
                 json!({ "username": username_param(), "limit": limit_param(10, 5) }),
                 &["username"],
@@ -1042,7 +1057,7 @@ mod tests {
 
     #[test]
     fn specs_match_the_whitelist() {
-        let names: Vec<&str> = specs().iter().map(|s| s.name).collect();
+        let names: Vec<String> = specs().iter().map(|s| s.name.to_string()).collect();
         assert_eq!(names, TOOL_NAMES.to_vec());
         for spec in specs() {
             assert_eq!(spec.parameters["type"], "object");

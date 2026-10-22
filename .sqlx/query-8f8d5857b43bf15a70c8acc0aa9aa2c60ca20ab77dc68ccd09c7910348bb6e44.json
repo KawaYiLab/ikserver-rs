@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mcp_server_ids FROM ai_role_cards WHERE slug = 'fairy'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mcp_server_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "mcp_server_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8f8d5857b43bf15a70c8acc0aa9aa2c60ca20ab77dc68ccd09c7910348bb6e44"
+}

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_mcp_tools SET enabled = $2, timeline_text = $4, updated_at = $5,\n             approved = CASE WHEN $3 THEN remote ELSE approved END,\n             approved_digest = CASE WHEN $3 THEN remote_digest ELSE approved_digest END\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool",
+        "Bool",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "437a7b0800468a2b2c65b65b29617d2684d06bb4d6d4355ce4aa017f1c9f69eb"
+}

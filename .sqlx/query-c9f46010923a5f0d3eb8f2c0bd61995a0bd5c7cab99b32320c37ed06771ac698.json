@@ -1,0 +1,134 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, server_id, remote_name, exposed_name, remote, remote_digest, approved_digest,\n                enabled, timeline_text, missing\n         FROM ai_mcp_tools ORDER BY server_id, remote_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "remote_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "remote_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "exposed_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "exposed_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "remote",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "remote"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "remote_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "remote_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "approved_digest",
+        "type_info": "Bytea",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "approved_digest"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "timeline_text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "timeline_text"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "missing",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "missing"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "c9f46010923a5f0d3eb8f2c0bd61995a0bd5c7cab99b32320c37ed06771ac698"
+}

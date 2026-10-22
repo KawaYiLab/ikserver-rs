@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_role_cards SET mcp_server_ids = array_remove(mcp_server_ids, $1)\n         WHERE $1 = ANY(mcp_server_ids)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "35eda02dc66cf449819e5879bdc8193e0014470e7be7b9af5c02703002e05aa6"
+}

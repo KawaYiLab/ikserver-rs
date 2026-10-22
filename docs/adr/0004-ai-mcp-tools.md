@@ -1,11 +1,11 @@
 # ADR 0004：AI 助手调用 MCP 工具
 
-- 状态：提议（2026-10-22）
+- 状态：已接受（2026-10-22），第 1–3 期已实施
 - 涉及：`ik-ai`（工具循环、后台）、`ik-story`（进程内桥接）、`admin/`（AI 助手页）、主站 `app/utils/workflow.ts`
 
 ## 背景：现状
 
-**AI 助手目前不能调用 MCP。**
+**（实施前）AI 助手不能调用 MCP。**
 
 | 位置 | 现状 |
 |---|---|
@@ -64,6 +64,9 @@ enum Source {
 - 角色卡开关 `story_tools`（默认关）；语料未上传（`state.current()` 为 `None`）时不提供这些工具；
 - 名字保留 `ik_catalog`、`ik_search` 等原名（本身带 `ik_` 前缀，不会与论坛工具冲突）。
 
+剧情库结果截 12000 字，`ik_read` 的 `maxChars` 不超过 6000（不传按 6000），续读走结果里的 `nextCall`；
+`ik_read` 定义里顶层的 `anyOf` 去掉（有的上游不接受），三选一的约束写在描述里，参数错了工具自己会说明。
+
 剧情库是游戏文本，HTTP 端点默认不公开；这里只把结果交给模型，不原样下发给客户端（工作流事件本来就不带工具结果，见 7.1 节），
 与「默认不公开游戏文本」不冲突。是否允许角色大段复述原文，是角色卡提示词的事，见待决问题 3。
 
@@ -98,7 +101,8 @@ enum Source {
 #### 3.3 名字与展示
 
 - 暴露给模型的名字：`<服务名>__<工具名>`，非法字符替换成 `_`，截到 64 字符（OpenAI 兼容接口要求 `^[a-zA-Z0-9_-]{1,64}$`）；
-  冲突时后台保存失败并提示改服务名。服务名规则同 `ai_providers.name`（`^[a-z0-9][a-z0-9_-]{0,63}$`）。
+  冲突（不同服务的工具规整后撞名）时拉取清单跳过那个工具并在结果的 `skipped` 里说明，管理员改服务名后重拉。
+  服务名 `^[a-z0-9][a-z0-9_-]{0,31}$`（比提供方名短，给工具名留出 32 字符）。
 - 管理员可以给每个工具填「时间线文案」（如「检索虚空终端」），缺省用 MCP 的 `title`，再缺省用 `使用 <工具名> 工具`。
 
 #### 3.4 执行约束（沿用 TOOL-002/004，补站外特有的）
@@ -126,61 +130,18 @@ enum Source {
 
 ### 4. 数据模型
 
-```sql
--- 站外 MCP 服务（管理后台维护）。归 ik-ai。
-CREATE TABLE ai_mcp_servers (
-    id                BIGINT      PRIMARY KEY,
-    name              TEXT        NOT NULL,          -- 工具名前缀
-    display_name      TEXT        NOT NULL,
-    url               TEXT        NOT NULL,          -- Streamable HTTP 端点
-    -- 只在服务端流转；后台接口只回末四位提示。形如 `Authorization: Bearer xxx` 的整行，空串表示不带。
-    auth_header       TEXT        NOT NULL DEFAULT '',
-    timeout_ms        INTEGER     NOT NULL DEFAULT 15000,
-    max_result_chars  INTEGER     NOT NULL DEFAULT 4000,
-    enabled           BOOLEAN     NOT NULL DEFAULT TRUE,
-    last_listed_at    TIMESTAMPTZ,
-    last_error        TEXT,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ai_mcp_servers_name_uq UNIQUE (name),
-    CONSTRAINT ai_mcp_servers_name_shape CHECK (name ~ '^[a-z0-9][a-z0-9_-]{0,63}$'),
-    CONSTRAINT ai_mcp_servers_timeout CHECK (timeout_ms BETWEEN 1000 AND 60000),
-    CONSTRAINT ai_mcp_servers_max_result CHECK (max_result_chars BETWEEN 500 AND 16000)
-);
+迁移 `migrations/20261109000001_ai_mcp.sql`，说明见 `docs/schema.md`「AI 调用 MCP 工具」：
 
--- 管理员审批过的工具快照：运行时用这里的描述与 schema，不用远端实时返回的。
-CREATE TABLE ai_mcp_tools (
-    id            BIGINT      PRIMARY KEY,
-    server_id     BIGINT      NOT NULL REFERENCES ai_mcp_servers (id) ON DELETE CASCADE,
-    remote_name   TEXT        NOT NULL,
-    exposed_name  TEXT        NOT NULL,              -- <服务名>__<工具名>
-    title         TEXT,
-    timeline_text TEXT,                              -- 时间线文案（后台填）
-    description   TEXT        NOT NULL,
-    input_schema  JSONB       NOT NULL,
-    read_only     BOOLEAN     NOT NULL,
-    digest        BYTEA       NOT NULL,              -- 审批时的 SHA-256
-    remote_digest BYTEA,                             -- 最近一次拉取的；与 digest 不同即需重新确认
-    enabled       BOOLEAN     NOT NULL DEFAULT FALSE,
-    missing       BOOLEAN     NOT NULL DEFAULT FALSE,
-    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT ai_mcp_tools_remote_uq UNIQUE (server_id, remote_name),
-    CONSTRAINT ai_mcp_tools_exposed_uq UNIQUE (exposed_name),
-    CONSTRAINT ai_mcp_tools_enabled_read_only CHECK (NOT enabled OR read_only)
-);
+- `ai_mcp_servers`：`name`（工具名前缀，`^[a-z0-9][a-z0-9_-]{0,31}$`，留出 32 字符给工具名）、`display_name`、`url`、
+  `auth_header`（整行请求头，只回提示）、`timeout_ms`（1000–60000）、`max_result_chars`（500–16000）、`enabled`、
+  `sort_order`、`last_listed_at` / `last_error`。
+- `ai_mcp_tools`：`remote` / `remote_digest`（最近一次拉到的定义）、`approved` / `approved_digest`（管理员确认过的定义）、
+  `exposed_name`（全表唯一）、`enabled`、`timeline_text`、`missing`。定义的形状是 `{title, description, inputSchema, readOnly}`，
+  摘要是键排序后的 JSON 的 SHA-256。CHECK 约束保证只有确认过的只读工具能启用。
+- 角色卡加两列：`story_tools`、`mcp_server_ids BIGINT[]`。与已有的 `allowed_model_ids` 一样用数组而不是关联表，
+  删服务时用 `array_remove` 去掉（原草案是关联表 `ai_role_card_mcp_servers`，实施时改成与现有写法一致）。
 
--- 角色卡启用哪些站外服务（多对多）；剧情库是角色卡上的一个开关。
-CREATE TABLE ai_role_card_mcp_servers (
-    role_card_id BIGINT NOT NULL REFERENCES ai_role_cards (id) ON DELETE CASCADE,
-    server_id    BIGINT NOT NULL REFERENCES ai_mcp_servers (id) ON DELETE CASCADE,
-    PRIMARY KEY (role_card_id, server_id)
-);
-CREATE INDEX ai_role_card_mcp_servers_server_idx ON ai_role_card_mcp_servers (server_id);
-
-ALTER TABLE ai_role_cards ADD COLUMN story_tools BOOLEAN NOT NULL DEFAULT FALSE;
-```
-
-运行时生效的工具 = 角色卡绑定且启用的服务里，`enabled AND NOT missing AND digest = remote_digest` 的工具。
+运行时生效的工具 = 角色卡启用、服务启用、`enabled AND NOT missing AND approved_digest = remote_digest` 的工具。
 单次提供给模型的工具总数上限 32 个（论坛 12 + 剧情 6 + 站外最多 14），超出时按后台排序截断并告警。
 
 ### 5. 接口
@@ -195,8 +156,9 @@ ALTER TABLE ai_role_cards ADD COLUMN story_tools BOOLEAN NOT NULL DEFAULT FALSE;
 | PUT | `/mcp-servers/{name}/tools/{remoteName}` | 启用 / 停用、确认新版本、改时间线文案 |
 | PUT | `/characters/{slug}`（已有） | 增加 `storyTools`、`mcpServers`（服务名数组）字段 |
 
-新错误码（登记进 `docs/api-guidelines.md`）：`AI_MCP_SERVER_NOT_FOUND`（404）、`AI_MCP_NAME_TAKEN`（409）、
-`AI_MCP_URL_INVALID`（422）、`AI_MCP_UNREACHABLE`（502，拉取清单失败，`detail` 只给概括）、`AI_MCP_TOOL_NOT_READ_ONLY`（422）。
+新错误码（已登记进 `docs/api-guidelines.md`）：`AI_MCP_TOOL_CHANGED`（409，启用时带的摘要与远端当前定义不同，
+或远端已没有这个工具）、`AI_MCP_TOOL_NOT_READ_ONLY`（409）。服务不存在用通用的 `NOT_FOUND`，名字与地址格式错误用字段校验错误；
+拉取清单连不上不算接口错误：返回 200 与 `ok = false`、`error`（与「测试提供方连接」一致），同时记进服务的 `lastError`。
 
 ### 6. 工作流事件
 
@@ -204,22 +166,25 @@ ALTER TABLE ai_role_cards ADD COLUMN story_tools BOOLEAN NOT NULL DEFAULT FALSE;
   （`story` 或服务名）；参数与结果照旧不下发（7.1 节脱敏规则不变）。表里预留的 `mcp.start` 不启用，避免前端多一套分支。
 - 主站 `app/utils/workflow.ts` 的 `toolTitle` 改为优先用 `d.title`，再查 `TOOL_TITLES`，再回落到 `使用 <工具> 工具`；
   旧版前端忽略新字段，展示回落文案，不会坏。
-- 剧情库工具（`ik_search`、`ik_read` 等）在 `TOOL_TITLES` 里补展示文案；读取原文可以考虑后续做成 `story.read.*` 专用事件。
+- 剧情库工具的 `title` 取 MCP 定义里的 title（如「剧情检索」）；读取原文可以考虑后续做成 `story.read.*` 专用事件。
 
 ### 7. 额度
 
 - 工具清单变长、结果变长都会抬高 prompt token，按实际用量计费（LLM-006），不需要改口径；
-- 预占估算（QUOTA-007）的「2×500 工具回灌」对剧情库偏低：有剧情库或站外工具的角色卡，预占时按
-  `2 × max_result_chars / 2` 估回灌（字符折 token 按 0.5），宁可估高；
+- 预占估算（QUOTA-007）的「每轮 500 工具回灌」对剧情库偏低：有剧情库或站外工具时另加这些工具清单本身的估算，
+  以及每轮回灌比论坛工具多出的部分（按最大结果上限的一半估，`Toolbox::extra_estimate_tokens`），宁可估高；
 - 剧情库 / 站外调用本身不额外收费。
 
 ## 实施分期
+
+第 1–3 期已实施（代码：`crates/ai/src/{toolbox,mcp,mcp_client}.rs`；测试：`crates/ai/tests/mcp.rs`、
+`crates/server/tests/admin.rs` 的 `ai_mcp_servers_are_managed_in_admin`）。业务规则登记为 `ai-assistant.md` 的 TOOL-030～036。
 
 | 期 | 内容 | 验收 |
 |---|---|---|
 | 1 | `ToolSpec` 改为 `Cow`；`Toolbox` 抽象；论坛工具迁进去 | 现有 `crates/ai/tests` 全过，没有绑定 MCP 的角色卡行为不变 |
 | 2 | 剧情库进程内桥接 + 角色卡 `story_tools` 开关 + 前端文案 | 角色卡开启后能查剧情；语料未上传时不提供工具 |
-| 3 | `mcp_client`（Streamable HTTP）+ 三张表 + 后台接口与页面 + 每小时重拉清单的任务 | 见下方测试 |
+| 3 | `mcp_client`（Streamable HTTP）+ 两张表与角色卡两列 + 后台接口与页面 + 每小时重拉清单的任务 | 见下方测试 |
 | 4（可选） | 写操作工具（需用户在私信里确认）、OAuth 2.1 鉴权、`resources` | 另起 ADR |
 
 ## 测试
