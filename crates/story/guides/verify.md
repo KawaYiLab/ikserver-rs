@@ -5,7 +5,7 @@
 - `purpose=verify` 默认使用 `matchIn=body`、严格 AND 与两行邻行；显式参数优先。
 - `purpose=locate` 默认每篇两个命中与一行邻行；`browse` 保持一般检索行为。
 - `matchIn=all` 允许正文、逐句署名、标题、路径及姓名元数据参与匹配；`body` 仅允许正文参与匹配。
-- 无完整匹配时一般检索默认返回部分匹配及缺失词；`allowPartial=false` 关闭部分匹配回退。
+- 无完整匹配时一般检索默认返回部分匹配及缺失词；`allowPartial=false` 关闭部分匹配回退。未显式指定 `allowPartial` 时，有词在当前范围内零命中则不退化（并集只等于单独检索其余词），改为给出去掉该词的建议调用。
 - `speaker` 按逐句署名筛选，`path` / `docId` 限定范围。已核验版本别名限定该版新增主线。
 - `matchUnit=window` 匹配指定行距内的共现，窗口状态与原文播放顺序分别记录。
 

@@ -58,12 +58,22 @@ fn release_corpus() -> Corpus {
 }
 
 #[test]
-fn search_usability_default_fallback_keeps_filters_and_coverage_order() {
+fn search_usability_partial_fallback_keeps_filters_and_coverage_order() {
     let c = release_corpus();
-    let out = ok(
+    // 「秘密」全库零命中：默认不退化，显式 allowPartial=true 才返回部分匹配。
+    let default = ok(
         &c,
         "ik_search",
         json!({"keyword":"天空 核心 秘密", "path":"Chapter240"}),
+    );
+    assert!(
+        default.contains("命中 0 篇") && default.contains("未退化为部分匹配"),
+        "{default}"
+    );
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"天空 核心 秘密", "path":"Chapter240", "allowPartial":true}),
     );
     assert!(out.contains("部分匹配"), "{out}");
     assert!(out.contains("命中 2 篇"), "{out}");
@@ -85,7 +95,7 @@ fn search_usability_default_fallback_keeps_filters_and_coverage_order() {
     let filtered = ok(
         &c,
         "ik_search",
-        json!({"keyword":"天空 核心 秘密", "path":"Chapter240", "speaker":"Fairy"}),
+        json!({"keyword":"天空 核心 秘密", "path":"Chapter240", "speaker":"Fairy", "allowPartial":true}),
     );
     assert!(
         filtered.contains("命中 1 篇") && !filtered.contains("天空很远"),
@@ -101,7 +111,11 @@ fn search_usability_default_fallback_keeps_filters_and_coverage_order() {
         "{complete}"
     );
     let doc = first_doc_id(&complete);
-    let local = ok(&c, "ik_search", json!({"docId":doc,"keyword":"天空 秘密"}));
+    let local = ok(
+        &c,
+        "ik_search",
+        json!({"docId":doc,"keyword":"天空 秘密","allowPartial":true}),
+    );
     assert!(
         local.contains("命中 1 行") && local.contains("未命中关键词：秘密"),
         "{local}"
@@ -166,7 +180,11 @@ fn search_usability_release_aliases_cover_catalog_read_and_keywords() {
 #[test]
 fn search_usability_release_constraints_are_never_relaxed_or_guessed() {
     let c = release_corpus();
-    let out = ok(&c, "ik_search", json!({"keyword":"3.3 天空 核心 秘密"}));
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"3.3 天空 核心 秘密", "allowPartial":true}),
+    );
     assert!(
         out.contains("部分匹配") && out.contains("命中 2 篇"),
         "{out}"

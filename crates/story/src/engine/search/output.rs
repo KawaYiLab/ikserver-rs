@@ -473,10 +473,29 @@ pub(super) fn typed_result(
             base["allowPartial"] = json!(true);
             suggestions.push(NextCall::new("ik_search", base));
         }
-        if let Some(term) = terms.first() {
+        // 有零命中词时去掉这些词重查；否则退回只搜第一个词。单个词时这就是原调用本身，
+        // 不给这种原地重试的建议。版本选择器原样保留，建议不能悄悄扩大范围。
+        let hitting: Vec<&str> = terms
+            .iter()
+            .zip(df)
+            .filter(|(_, n)| **n > 0)
+            .map(|(t, _)| t.as_str())
+            .collect();
+        let retry_terms: Vec<&str> = if !hitting.is_empty() && hitting.len() < terms.len() {
+            hitting
+        } else {
+            terms.iter().take(1).map(String::as_str).collect()
+        };
+        if terms.len() > 1 && !retry_terms.is_empty() {
+            let mut keyword = retry_terms.join(" ");
+            if let (_, Some(release)) =
+                super::super::releases::query(args.keyword.as_deref().unwrap_or(""))?
+            {
+                keyword = format!("{} {keyword}", release.version);
+            }
             let mut retry = serde_json::to_value(args)
                 .map_err(|_| super::super::ToolError("无法生成建议参数".into()))?;
-            retry["keyword"] = json!(term);
+            retry["keyword"] = json!(keyword);
             retry["offset"] = json!(0);
             retry["directoryOffset"] = json!(0);
             retry["cursor"] = json!(null);
@@ -528,6 +547,7 @@ pub(super) fn typed_result(
         directory_count: directory.len(),
         hit_count: hits.docs.iter().map(DocHits::line_count).sum(),
         missing_terms: Vec::new(),
+        missing_term_counts: Vec::new(),
         results,
         directory_suggestions,
         next_call,
@@ -554,7 +574,18 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
         out.push_str("部分匹配，不证明全部关键词共现。\n");
     }
     if r.candidate_count == 0 {
-        out.push_str("没有命中。可使用 suggestions 中的调用调整条件，范围保持不变。\n");
+        // 去掉范围筛选的建议只在「范围外仍有该词」时出现，必须如实说明它会扩大范围。
+        let widens = r.suggestions.iter().any(|s| {
+            s.arguments.get("speaker").is_none() && r.resolved_range.speaker.is_some()
+                || s.arguments.get("path").is_none() && r.resolved_range.group_id.is_some()
+                || s.arguments.get("docId").is_none() && r.resolved_range.doc_id.is_some()
+                || s.arguments.get("scope").is_none() && r.resolved_range.scope != "all"
+        });
+        out.push_str(if widens {
+            "没有命中。可使用 suggestions 中的调用调整条件；其中去掉范围筛选的调用会扩大检索范围。\n"
+        } else {
+            "没有命中。可使用 suggestions 中的调用调整条件，范围保持不变。\n"
+        });
     }
     let labels = [
         ("body", "正文"),

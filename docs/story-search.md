@@ -21,9 +21,12 @@ MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fac
 
 多词检索先在同一篇文档中找全词匹配（AND）；词可分布在不同行、标题、路径或姓名元数据中。
 无完整匹配时默认返回部分匹配，优先按正文词覆盖、有效署名覆盖排序，再比较总覆盖与相关度，逐篇列出缺失词。
-`allowPartial=false` 保持严格 AND。部分匹配不能证明全部词在同篇共现，也不提供概念同义词推理。
+`allowPartial=false` 保持严格 AND。未显式指定 `allowPartial` 时，若有词在当前范围内零命中则不退化为并集（那只等于单独检索其余词），
+改为页眉说明并给出去掉该词的建议调用；显式 `allowPartial=true` 仍按要求返回部分匹配。部分匹配不能证明全部词在同篇共现，也不提供概念同义词推理。
 回退始终保留 `path`、`scope`、`speaker`、`docId` 和版本限定，不会通过移除范围来扩大命中。
 检索词超过 8 个时提示截断；版本选择器先解析为范围，不占检索词配额。
+当前范围内零命中的词会再按同一 `matchIn`、不带范围筛选查一次全库：范围外仍有时写「当前范围内无命中：X（全库 N 篇）」并给出去掉范围筛选的建议调用，
+全库也没有时写「全库无此词：X」；`structuredContent.missingTermCounts` 给出对应篇数。
 
 ```text
 ik_search(keyword="天空 核心 秘密", path="3.3版本")
@@ -94,7 +97,7 @@ ik_read(docIds=["返回的docId1", "返回的docId2"], maxChars=16000)
 - `docIds` 每次最多16个实际文档ID，与 `docId/follow=true` 互斥，共用读取预算；分块保留文档身份。读取 `complete` 表示本次指定续读目标已到末尾，不证明章首或过去的请求已覆盖。
 - catalog 的 `manifest` 固定范围与整篇排除选项；只有全部行均为占位/未关联候选的文档才会被对应选项排除，混合文档保留。总行数、排除数、占位和候选计数分别报告，状态计数可能交叉。
 - 角色 `chapterCount/chaptersTruncated`、文档 `evidencePreviewTruncated`明确展示上限；更多实际署名结果使用角色返回的搜索入口。
-- 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`，返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
+- 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`（每段可只填 `docId`/`start`/`end`，快照由 manifestId 决定；显式 `corpusRevision` 不一致仍报错），返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
 
 查询与阅读覆盖核对不使用数据库会话；HTTP 接口使用动态 JSON-RPC 请求契约。
 
@@ -113,6 +116,8 @@ full手动续读使用返回的具体docId；快照cursor保存原别名及读�
 公共文档卡增加整篇`order`、`evidenceSummary`、`speakerSummary`和`speakerCoverage`。
 篇序来源、行序来源与计数、局部核验状态、剧情先后和上下文关联分别保留；混合与未知状态不会取首行代替。
 署名摘要compact最多展示6个逐句姓名，推断名单独立，full展开完整名单；旧包缺少核验证据单列。
+compact 的逐篇摘要默认一行：署名覆盖（只列非零的推断/旧未核验/待核验）、非零缺口计数、已知的篇序/行序/局部/剧情先后/上下文与逐句署名；
+值为 unknown / 未提供的顺序字段不逐篇写出，设定文档不再逐篇写「不适用」，超出 180 字预算时退回分段压缩格式。full 与 structuredContent 不变。
 搜索命中窗口的局部状态与整篇摘要采用不同范围，不以窗口代表整篇。
 
 署名覆盖提供总行数、有名字行数及“resolved、inferred、旧包未声明状态、其他/未知状态、无名字”五类互斥计数。

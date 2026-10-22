@@ -106,13 +106,28 @@ pub(crate) fn manifest(c: &Corpus, scope: RangeScope) -> Result<Manifest, super:
     })
 }
 
+/// ik_coverage 的输入区间。read.coverageDelta 的记录可以原样提交；也可以只填 docId/start/end：
+/// 语料快照由 manifestId 决定，complete 缺省视为 true（coverageDelta 只记录完整返回行）。
+/// 显式提交的 corpusRevision 与当前快照不一致时仍然报错。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RangeInput {
+    #[serde(default)]
+    pub corpus_revision: Option<String>,
+    pub doc_id: String,
+    pub start: usize,
+    pub end: usize,
+    #[serde(default)]
+    pub complete: Option<bool>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CoverageArgs {
     #[serde(default)]
     pub manifest_id: String,
     #[serde(default)]
-    pub ranges: Vec<LineRange>,
+    pub ranges: Vec<RangeInput>,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
     pub offset: Option<usize>,
     #[serde(default, deserialize_with = "crate::de::opt_usize")]
@@ -162,7 +177,10 @@ pub fn execute(c: &Corpus, args: &CoverageArgs) -> OutputResult {
     let (members, _) = members(c, &scope)?;
     let mut rows: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
     for r in &args.ranges {
-        if r.corpus_revision != c.revision {
+        if r.corpus_revision
+            .as_ref()
+            .is_some_and(|rev| *rev != c.revision)
+        {
             return err("记录与当前语料快照不一致；请重新获取清单并读取原文");
         }
         let d = resolve_doc(c, &r.doc_id)?;
@@ -178,7 +196,7 @@ pub fn execute(c: &Corpus, args: &CoverageArgs) -> OutputResult {
                 r.doc_id
             ));
         }
-        if r.complete {
+        if r.complete.unwrap_or(true) {
             rows.entry(d).or_default().push((r.start, r.end));
         }
     }
@@ -249,7 +267,17 @@ pub fn execute(c: &Corpus, args: &CoverageArgs) -> OutputResult {
         });
     }
     let more = offset.saturating_add(max) < pending_count;
-    let next_call=more.then(||NextCall::new("ik_coverage",json!({"manifestId":args.manifest_id,"ranges":ledger,"offset":offset.saturating_add(max),"maxResults":max})));
+    // 续页只需重交合并后的区间；用 docId/start/end 短格式，避免每段重复 corpusRevision。
+    let next_call = more.then(|| {
+        let ranges: Vec<_> = ledger
+            .iter()
+            .map(|r| json!({"docId": r.doc_id, "start": r.start, "end": r.end}))
+            .collect();
+        NextCall::new(
+            "ik_coverage",
+            json!({"manifestId": args.manifest_id, "ranges": ranges, "offset": offset.saturating_add(max), "maxResults": max}),
+        )
+    });
     let result = CoverageResult {
         manifest,
         accounting_basis: "调用者提交记录所描述的完整返回行；不证明模型已理解或服务器历史请求"

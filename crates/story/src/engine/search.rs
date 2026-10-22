@@ -92,6 +92,60 @@ impl Filter {
     }
 }
 
+impl Filter {
+    /// 没有任何范围限定（全库、全部说话人）时，范围内零命中即全库零命中。
+    fn is_unrestricted(&self) -> bool {
+        self.kind.is_none()
+            && self.group.is_none()
+            && self.doc.is_none()
+            && self.speakers.is_none()
+            && !self.list_group
+    }
+}
+
+/// 不带范围筛选、按同一 matchIn 统计一个词在全库命中的篇数。
+fn corpus_doc_count(corpus: &Corpus, term: &str, body_only: bool) -> usize {
+    let everything = Filter {
+        kind: None,
+        group: None,
+        doc: None,
+        speakers: None,
+        list_group: false,
+        body_only,
+    };
+    collect_term_hits(corpus, &[term.to_owned()], &everything)
+        .first()
+        .map_or(0, |t| t.docs.len())
+}
+
+fn push_missing_terms(out: &mut String, missing: &[super::response::TermCount], body_only: bool) {
+    let elsewhere: Vec<String> = missing
+        .iter()
+        .filter(|m| m.corpus_documents > 0)
+        .map(|m| format!("{}（全库 {} 篇）", m.term, m.corpus_documents))
+        .collect();
+    if !elsewhere.is_empty() {
+        let _ = writeln!(
+            out,
+            "当前范围内无命中：{}；范围外仍有，不代表资料库没有。",
+            elsewhere.join("、")
+        );
+    }
+    let nowhere: Vec<&str> = missing
+        .iter()
+        .filter(|m| m.corpus_documents == 0)
+        .map(|m| m.term.as_str())
+        .collect();
+    if !nowhere.is_empty() {
+        let _ = writeln!(
+            out,
+            "全库无此词：{}（当前语料快照，matchIn={}）。",
+            nowhere.join("、"),
+            if body_only { "body" } else { "all" }
+        );
+    }
+}
+
 /// 说话人解析：先精确匹配（折叠后相等），没有再用包含匹配。
 pub(crate) fn match_speakers(corpus: &Corpus, name: &str) -> Vec<u32> {
     let folded = fold(name.trim());
@@ -234,11 +288,17 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
     let term_hits = collect_term_hits(corpus, &terms, &filter);
     let df: Vec<usize> = term_hits.iter().map(|t| t.docs.len()).collect();
     let window_mode = args.match_unit.as_deref() == Some("window");
+    // 有词在范围内零命中时，并集只会等于单独检索其余词，不算「部分匹配」：不退化，
+    // 改为在页眉说明并给出去掉该词的建议调用。
+    // 显式 allowPartial=true 仍按调用方要求退化（显式值优先）。
+    let zero_term = args.allow_partial.is_none()
+        && terms.len() > 1
+        && term_hits.iter().any(|t| t.docs.is_empty());
     let mut hits = assemble(
         corpus,
         &term_hits,
-        args.allow_partial.unwrap_or(true),
-        window_mode,
+        args.allow_partial.unwrap_or(true) && !zero_term,
+        window_mode && !zero_term,
     );
     match args.match_unit.as_deref().unwrap_or("doc") {
         "doc" => {}
@@ -250,15 +310,42 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
         }
         _ => return err("matchUnit 只能是 doc / window"),
     }
-    let global_missing: Vec<&str> = terms
+    // 范围内零命中的词：再按同一 matchIn、不带范围筛选查一次全库，
+    // 区分「范围外仍有」与「全库无此词」，避免模型把前者误读为资料库里没有。
+    let missing_counts: Vec<super::response::TermCount> = terms
         .iter()
         .zip(&term_hits)
         .filter(|(_, h)| h.docs.is_empty())
-        .map(|(t, _)| t.as_str())
+        .map(|(t, _)| super::response::TermCount {
+            term: t.clone(),
+            corpus_documents: if filter.is_unrestricted() {
+                0
+            } else {
+                corpus_doc_count(corpus, t, filter.body_only)
+            },
+        })
         .collect();
 
     let mut result = typed_result(corpus, keyword, &terms, &df, &filter, &hits, args)?;
-    result.missing_terms = global_missing.iter().map(|s| (*s).into()).collect();
+    result.missing_terms = missing_counts.iter().map(|m| m.term.clone()).collect();
+    if terms.len() == 1
+        && missing_counts
+            .first()
+            .is_some_and(|m| m.corpus_documents > 0)
+    {
+        // 单个词只是不在当前范围：给一个去掉范围筛选的调用（建议是调用，不替换结果）。
+        let mut widen =
+            serde_json::to_value(args).map_err(|_| super::ToolError("无法生成建议参数".into()))?;
+        for key in ["cursor", "speaker", "path", "docId", "scope", "pagePart"] {
+            widen[key] = serde_json::Value::Null;
+        }
+        widen["offset"] = serde_json::json!(0);
+        widen["directoryOffset"] = serde_json::json!(0);
+        result
+            .suggestions
+            .push(super::response::NextCall::new("ik_search", widen));
+    }
+    result.missing_term_counts = missing_counts;
     let rendered = render_typed(corpus, &result, doc.is_some(), full);
     let mut out = String::new();
     if let Some(release) = release {
@@ -267,11 +354,10 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
     if truncated {
         out.push_str("关键词过多，仅检索前 8 个。\n");
     }
-    if !global_missing.is_empty() {
-        let _ = writeln!(
-            out,
-            "全局缺失词：{}（当前筛选范围与 matchIn）。",
-            global_missing.join("、")
+    push_missing_terms(&mut out, &result.missing_term_counts, filter.body_only);
+    if zero_term {
+        out.push_str(
+            "未退化为部分匹配：有检索词在当前范围内零命中，并集只会等同于单独检索其余词；需要时使用建议调用。\n",
         );
     }
     out.push_str(&rendered);

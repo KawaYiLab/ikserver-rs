@@ -213,7 +213,9 @@ fn compact_summary_fits_budget_and_mixed_scope_excludes_lore() {
     document.push_summary(&mut summary, false);
     assert!(summary.chars().count() <= 180, "{summary}");
     assert!(summary.contains("archive_table"), "{summary}");
-    assert!(summary.contains("剧情先后=unknown"), "{summary}");
+    // 未知的顺序字段不再逐篇写出；已知的（如上下文）照常保留。
+    assert!(!summary.contains("剧情先后=unknown"), "{summary}");
+    assert!(summary.contains("上下文=unlinked"), "{summary}");
     assert!(summary.contains("未关联1"), "{summary}");
     assert!(summary.contains("署名4/6"), "{summary}");
 }
