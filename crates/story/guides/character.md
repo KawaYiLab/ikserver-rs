@@ -18,10 +18,12 @@
 
 ## 扮演资料（purpose=roleplay）
 
-- `ik_character(name=…, purpose="roleplay")` 返回 `PersonaResult`：代理人设定档案摘录、常对话对象与台词样本；`purpose` 缺省为 `overview`，即上面的出场统计。
-- `samples[]` 只取逐句署名已解析的对白：不含推断署名、署名未核验、选项、旁白与占位；同文去重，字数 6～120。每篇取较长的句子，按章节分散，按语料行序排列；同一快照同一参数结果相同。
-- `samples[].context` 是文档内的前一句，`samples[].read` 为样本附近原文入口。`maxResults` 为样本数，默认 24、上限 60；`candidateLines` 为可抽样台词总数。
-- `partners[].exchanges` 为与该角色相邻的署名对白往来次数，`scenes` 为有往来的场景数；前几位对话对象各保底一条往来样本。相关名称（`relatedNames`）不合并、不计为对话对象。
-- `profiles[]` 为代理人分类里标题含名字的档案，摘录按整行截断到约 1500 字，`truncated=true` 时 `nextRead` 为续读入口；`otherTitledLore` 为其他分类里标题含名字的篇数。
-- `until` 接受章节 id、章节名或已核验版本别名，台词与往来只统计到该章（含主线与补充），按章节目录顺序截止；设定档案不随之过滤，可能含之后的信息。
-- 名字只包含匹配到多个角色时报错并列出候选；`includeEvidence=true` 不适用于此模式，逐句证据见 `ik_search(speaker=…, includeEvidence=true)`。性格、语气等描述不是语料字段。
+- `ik_character(name=…, purpose="roleplay")` 返回 `PersonaResult`；`purpose` 缺省为 `overview`，即上面的出场统计。
+- `profile` 为选中的代理人档案：标题名或括号里的全名（忽略空格与「」）与 `name` 精确一致优先，否则标题含名字且只有一篇时使用；其余标题含名字的档案列在 `otherProfiles`。
+- `profile.sections[]`：`kind=profile`（开头、HIA 执照、深度身世与机密档案、录像店私密评语）附原文 `text`，每节按整行截断到约 1500 字，`truncated=true` 时 `read` 为续读入口；`kind=dialogue` 的内容见 `dialogueScenes`；`kind=other` 只给整节入口 `read`。
+- `dialogueScenes[]` 为档案对话原文片段（信赖邀约、街区日常、随行气泡），按档案行序；`maxScenes` 为段数，默认 6：信赖邀约 1 幕、随行气泡 1 段（等距取最多 10 组）、其余为街区日常（等距取，优先不少于 4 行的幕）；缺少某类时名额让给其余类。每段最多 30 行 / 约 1500 字，`truncated=true` 时 `read` 为续读入口，`sectionRead` 为整节入口。
+- 档案对话不逐句署名：`【名字】` 是原文标注的说话人，未标注的行可能是玩家选项、旁白或角色本人。`lines[].text` 保留原文（含行尾来源键），`lines[].number` 是档案内行号，可直接用于 `ik_read(docId, offset)`。
+- `storySamples[]` 只取主线逐句署名已解析的对白：不含推断署名、署名未核验、选项、旁白与占位；同文去重，字数 6～120。每篇取较长的句子，按章节分散，按语料行序排列；`maxResults` 为样本数，默认 8、上限 40。`context` 是文档内的前一句，`read` 为样本附近原文入口。
+- `partners[].exchanges` 为与该角色相邻的主线署名对白往来次数，`scenes` 为有往来的场景数；前几位对话对象各保底一条往来样本。相关名称（`relatedNames`）不合并、不计为对话对象。
+- `until` 接受章节 id、章节名或已核验版本别名，只作用于主线台词与往来，按章节目录顺序截止（含该章主线与补充）；档案不随之过滤，可能含之后的信息。
+- 抽样是确定性的，同一快照同一参数结果相同。名字只包含匹配到多个说话人时报错并列出候选；`includeEvidence=true` 不适用于此模式，逐句证据见 `ik_search(speaker=…, includeEvidence=true)`。性格、语气等描述不是语料字段。

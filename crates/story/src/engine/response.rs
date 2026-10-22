@@ -609,16 +609,20 @@ pub struct PersonaResult {
     pub related_names: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub until: Option<PersonaCutoff>,
-    /// 范围内逐句署名已解析的对白数与场景数。
-    pub spoken_lines: usize,
-    pub scenes: usize,
-    /// 去重并满足字数范围、可被抽为样本的台词数。
-    pub candidate_lines: usize,
-    pub profiles: Vec<PersonaProfile>,
-    /// 设定标题含名字、但不在代理人分类里的篇数。
-    pub other_titled_lore: usize,
+    /// 选中的代理人档案；身份与性格小节附原文，其余小节只给入口。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<PersonaProfile>,
+    /// 其余标题含名字的代理人档案标题。
+    pub other_profiles: Vec<String>,
+    /// 档案对话原文片段（信赖邀约、街区日常、随行气泡），按档案行序。
+    pub dialogue_scenes: Vec<PersonaScene>,
+    /// 范围内主线逐句署名已解析的对白数与场景数。
+    pub story_spoken_lines: usize,
+    pub story_scenes: usize,
+    /// 去重并满足字数范围、可被抽为主线样本的台词数。
+    pub story_candidate_lines: usize,
     pub partners: Vec<PersonaPartner>,
-    pub samples: Vec<PersonaSample>,
+    pub story_samples: Vec<PersonaSample>,
     pub next_calls: Vec<NextCall>,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -632,12 +636,47 @@ pub struct PersonaCutoff {
 pub struct PersonaProfile {
     pub doc_id: String,
     pub title: String,
-    pub excerpt: String,
-    pub excerpt_lines: usize,
     pub line_count: usize,
-    pub truncated: bool,
+    pub sections: Vec<PersonaSection>,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaSection {
+    pub heading: String,
+    /// profile（身份与性格，附原文）/ dialogue（对话，见 dialogueScenes）/ other（只给入口）。
+    pub kind: String,
+    /// 标题行在档案内的行号（1 起）；开头部分为首行。
+    pub line: usize,
+    pub line_count: usize,
+    pub scene_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_read: Option<NextCall>,
+    pub text: Option<String>,
+    pub truncated: bool,
+    /// profile 截断时为续读入口，其余为整节入口。
+    pub read: NextCall,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaScene {
+    pub section: String,
+    /// 幕标题；随行气泡为「k/n 组」。
+    pub heading: String,
+    pub line: usize,
+    /// 非空行数（随行气泡为所选各组之和）。
+    pub line_count: usize,
+    /// 原文行（含行尾来源键）。
+    pub lines: Vec<PersonaLine>,
+    pub truncated: bool,
+    /// 截断时为续读入口，否则为本段入口。
+    pub read: NextCall,
+    pub section_read: NextCall,
+    pub section_scenes: usize,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaLine {
+    pub number: usize,
+    pub text: String,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -786,6 +825,9 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
         PersonaResult,
         PersonaCutoff,
         PersonaProfile,
+        PersonaSection,
+        PersonaScene,
+        PersonaLine,
         PersonaPartner,
         PersonaSample,
         GuideResult,
