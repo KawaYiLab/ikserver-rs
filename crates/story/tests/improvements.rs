@@ -84,7 +84,7 @@ fn classified_search_keeps_metadata_out_of_body_quota_and_supports_body_and() {
         "{out}"
     );
     assert!(
-        out.contains("正文匹配词：天空、核心") && out.contains("全局缺失词：秘密"),
+        out.contains("正文匹配词：天空、核心") && out.contains("全库无此词：秘密"),
         "{out}"
     );
     let out = call(

@@ -1,0 +1,76 @@
+//! 会误导模型下判断的输出语义：缺失词的作用域、零命中词不退化为并集、批量读取未读完的篇目。
+//! 走 MCP 默认（compact）路径，断言模型实际看到的文本与 structuredContent。
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use std::path::PathBuf;
+
+use serde_json::{Value, json};
+
+use ik_story::corpus::{Corpus, build_from_dir};
+use ik_story::mcp::tools;
+
+fn corpus() -> Corpus {
+    build_from_dir(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sample"))
+        .unwrap()
+}
+
+/// MCP 调用：返回（文本，structuredContent.data）。
+fn mcp(c: &Corpus, tool: &str, args: Value) -> (String, Value) {
+    match tools::call_output(c, tool, Some(args)) {
+        Ok(Ok(out)) => {
+            let response = serde_json::to_value(&out.response).unwrap();
+            (out.text, response["data"].clone())
+        }
+        Ok(Err(e)) => panic!("{tool} failed: {}", e.0),
+        Err(_) => panic!("unknown tool {tool}"),
+    }
+}
+
+fn suggestion_keywords(data: &Value) -> Vec<(String, Option<String>)> {
+    data["suggestions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            let a = &s["arguments"];
+            (
+                a["keyword"].as_str().unwrap_or("").to_owned(),
+                a["speaker"].as_str().map(str::to_owned),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn missing_term_in_filtered_scope_is_not_reported_as_missing_from_the_corpus() {
+    let c = corpus();
+    // 「铃」在全库存在，但安比的台词里没有：不能说成「全局缺失」。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"铃","speaker":"安比"}));
+    assert!(!text.contains("全局"), "{text}");
+    assert!(text.contains("当前范围内无命中：铃（全库 "), "{text}");
+    // 给出的去掉 speaker 的调用会扩大范围，文案必须如实说明。
+    assert!(text.contains("会扩大检索范围"), "{text}");
+    assert!(
+        suggestion_keywords(&data).contains(&("铃".into(), None)),
+        "{data}"
+    );
+    assert_eq!(data["missingTerms"], json!(["铃"]));
+    assert!(
+        data["missingTermCounts"][0]["corpusDocuments"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    // 不再建议与刚才完全相同的调用（模型会原地重试）。
+    assert!(
+        !suggestion_keywords(&data).contains(&("铃".into(), Some("安比".into()))),
+        "{data}"
+    );
+
+    // 全库都没有的词明确说「全库无此词」。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"旧账"}));
+    assert!(text.contains("全库无此词：旧账"), "{text}");
+    assert!(!text.contains("全局"), "{text}");
+    assert_eq!(data["missingTermCounts"][0]["corpusDocuments"], 0);
+}

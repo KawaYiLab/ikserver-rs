@@ -473,7 +473,10 @@ pub(super) fn typed_result(
             base["allowPartial"] = json!(true);
             suggestions.push(NextCall::new("ik_search", base));
         }
-        if let Some(term) = terms.first() {
+        // 单个词时「只搜第一个词」就是原调用本身，不给这种原地重试的建议。
+        if terms.len() > 1
+            && let Some(term) = terms.first()
+        {
             let mut retry = serde_json::to_value(args)
                 .map_err(|_| super::super::ToolError("无法生成建议参数".into()))?;
             retry["keyword"] = json!(term);
@@ -528,6 +531,7 @@ pub(super) fn typed_result(
         directory_count: directory.len(),
         hit_count: hits.docs.iter().map(DocHits::line_count).sum(),
         missing_terms: Vec::new(),
+        missing_term_counts: Vec::new(),
         results,
         directory_suggestions,
         next_call,
@@ -554,7 +558,18 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
         out.push_str("部分匹配，不证明全部关键词共现。\n");
     }
     if r.candidate_count == 0 {
-        out.push_str("没有命中。可使用 suggestions 中的调用调整条件，范围保持不变。\n");
+        // 去掉范围筛选的建议只在「范围外仍有该词」时出现，必须如实说明它会扩大范围。
+        let widens = r.suggestions.iter().any(|s| {
+            s.arguments.get("speaker").is_none() && r.resolved_range.speaker.is_some()
+                || s.arguments.get("path").is_none() && r.resolved_range.group_id.is_some()
+                || s.arguments.get("docId").is_none() && r.resolved_range.doc_id.is_some()
+                || s.arguments.get("scope").is_none() && r.resolved_range.scope != "all"
+        });
+        out.push_str(if widens {
+            "没有命中。可使用 suggestions 中的调用调整条件；其中去掉范围筛选的调用会扩大检索范围。\n"
+        } else {
+            "没有命中。可使用 suggestions 中的调用调整条件，范围保持不变。\n"
+        });
     }
     let labels = [
         ("body", "正文"),

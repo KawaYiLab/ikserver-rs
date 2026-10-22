@@ -24,6 +24,8 @@ MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fac
 `allowPartial=false` 保持严格 AND。部分匹配不能证明全部词在同篇共现，也不提供概念同义词推理。
 回退始终保留 `path`、`scope`、`speaker`、`docId` 和版本限定，不会通过移除范围来扩大命中。
 检索词超过 8 个时提示截断；版本选择器先解析为范围，不占检索词配额。
+当前范围内零命中的词会再按同一 `matchIn`、不带范围筛选查一次全库：范围外仍有时写「当前范围内无命中：X（全库 N 篇）」并给出去掉范围筛选的建议调用，
+全库也没有时写「全库无此词：X」；`structuredContent.missingTermCounts` 给出对应篇数。
 
 ```text
 ik_search(keyword="天空 核心 秘密", path="3.3版本")

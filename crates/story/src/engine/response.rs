@@ -468,6 +468,13 @@ pub struct SearchItem {
     pub next_matches: Option<NextCall>,
     pub related_status: String,
 }
+/// 当前范围内零命中的检索词在全库（不带范围筛选、同一 matchIn）的命中篇数。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TermCount {
+    pub term: String,
+    pub corpus_documents: usize,
+}
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
@@ -481,6 +488,8 @@ pub struct SearchResult {
     pub directory_count: usize,
     pub hit_count: usize,
     pub missing_terms: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing_term_counts: Vec<TermCount>,
     pub results: Vec<SearchItem>,
     pub directory_suggestions: Vec<SearchItem>,
     pub next_call: Option<NextCall>,
