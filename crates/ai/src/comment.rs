@@ -24,7 +24,7 @@ use crate::catalog::{Catalog, CatalogCache, Model, OutputMode, RoleCard};
 use crate::dm::{self, RunOutcome};
 use crate::generate::{self, End, StreamCtx};
 use crate::immersion;
-use crate::llm::ChatMessage;
+use crate::llm::{ChatMessage, Providers};
 use crate::quota::{self, Hold};
 use crate::repo::{self, JobOutcome, JobRow, NewJob};
 use crate::sanitize;
@@ -265,6 +265,8 @@ struct Prepared {
     trigger_author: (i64, String),
     model: Model,
     default_model: Option<Model>,
+    /// 这次快照里可用的上游。
+    providers: Providers,
     hold: Hold,
     messages: Vec<ChatMessage>,
     /// 帖子标题 + 正文（沉浸守卫判定防诈骗帖用）。
@@ -368,9 +370,10 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         skip_with!("no_agent_target");
     };
     // 评论回复不看会话级选择（CTX-031）。
-    let Some(model) =
-        dm::pick_model(&catalog, &card, None, None, |p| state.providers.contains(p)).cloned()
-    else {
+    let Some(model) = dm::pick_model(&catalog, &card, None, None, |p| {
+        catalog.providers.contains(p)
+    })
+    .cloned() else {
         tracing::error!(
             job = job_id,
             "没有可用的 AI 模型（检查默认模型与提供方配置）"
@@ -379,7 +382,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
     };
     let default_model = catalog
         .default_model()
-        .filter(|m| state.providers.contains(&m.provider))
+        .filter(|m| catalog.providers.contains(&m.provider))
         .cloned();
 
     // 上下文（CTX-001～003）。
@@ -461,6 +464,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         trigger_author: (commenter.id, commenter.username),
         model,
         default_model,
+        providers: catalog.providers.clone(),
         hold,
         messages,
         post_text: format!("{}\n{}", post_context.title, post_context.body),
@@ -484,6 +488,7 @@ pub async fn run_job(
         state,
         job_id,
         live: None,
+        providers: prepared.providers.clone(),
         mode: OutputMode::Plain,
         max_chars: sanitize::COMMENT_MAX_CHARS,
         tools: Some(crate::tools::ToolContext::new(state, prepared.job.quota_user_id).await?),

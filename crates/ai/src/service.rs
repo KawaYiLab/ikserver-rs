@@ -247,8 +247,12 @@ pub(crate) async fn apply(
     {
         return Err(Problem::field("settings", "invalid", "上限不能为负数"));
     }
+    let configured = repo::providers(tx).await?;
     for model in &file.models {
-        if !state.providers.contains(&model.provider) {
+        let in_admin = configured
+            .iter()
+            .any(|p| p.enabled && p.name == model.provider);
+        if !in_admin && !state.providers.contains(&model.provider) {
             tracing::warn!(
                 key = %model.key,
                 provider = %model.provider,

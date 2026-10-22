@@ -84,6 +84,7 @@ pub struct Config {
 pub struct Ai {
     /// OpenAI 兼容的上游，按名字引用（`ai_models.provider`）。环境变量形如
     /// `IK_AI__PROVIDERS__DEEPSEEK__BASE_URL`、`IK_AI__PROVIDERS__DEEPSEEK__API_KEY`。
+    /// 也可以在管理后台维护（`ai_providers`）；同名时以这里为准。
     pub providers: std::collections::BTreeMap<String, AiProvider>,
     /// 预占的存活时长，覆盖一次最坏耗时的生成（QUOTA-010，60–7200 秒）。
     pub hold_ttl_secs: u64,

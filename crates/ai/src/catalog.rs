@@ -1,4 +1,4 @@
-//! 全局配置、模型、角色卡的进程内快照（AI-002、AI-004：缓存 60 秒，写入时主动失效）。
+//! 全局配置、提供方、模型、角色卡的进程内快照（AI-002、AI-004：缓存 60 秒，写入时主动失效）。
 //!
 //! 多实例部署时别的实例最多晚 60 秒看到后台的改动。
 
@@ -10,6 +10,7 @@ use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
+use crate::llm::{ChatProvider, OpenAiCompatible, Providers};
 use crate::quota::{self, Limits};
 use crate::repo;
 
@@ -102,6 +103,8 @@ impl RoleCard {
 #[derive(Debug, Clone)]
 pub struct Catalog {
     pub limits: Limits,
+    /// 可用的上游：部署配置里的，加上后台启用的（同名以部署配置为准）。
+    pub providers: Providers,
     pub models: Vec<Model>,
     pub cards: Vec<RoleCard>,
 }
@@ -181,13 +184,16 @@ impl Catalog {
 #[derive(Clone)]
 pub struct CatalogCache {
     db: PgPool,
+    /// 部署配置里的提供方（启动时建好，不随后台改动）。
+    fixed: Providers,
     cache: Cache<(), Arc<Catalog>>,
 }
 
 impl CatalogCache {
-    pub fn new(db: PgPool) -> Self {
+    pub fn new(db: PgPool, fixed: Providers) -> Self {
         Self {
             db,
+            fixed,
             cache: Cache::builder()
                 .max_capacity(1)
                 .time_to_live(CACHE_TTL)
@@ -197,19 +203,20 @@ impl CatalogCache {
 
     pub async fn get(&self) -> Result<Arc<Catalog>, Problem> {
         let db = self.db.clone();
+        let fixed = self.fixed.clone();
         self.cache
-            .try_get_with((), async move { load(&db).await.map(Arc::new) })
+            .try_get_with((), async move { load(&db, fixed).await.map(Arc::new) })
             .await
             .map_err(|e| (*e).clone())
     }
 
-    /// 后台改了配置、模型、角色卡之后调用。
+    /// 后台改了配置、提供方、模型、角色卡之后调用。
     pub async fn invalidate(&self) {
         self.cache.invalidate(&()).await;
     }
 }
 
-async fn load(db: &PgPool) -> Result<Catalog, Problem> {
+async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
     let mut conn = db.acquire().await?;
     // 配置行不存在时按默认值（AI-002）。
     let limits = repo::settings(&mut conn).await?.map_or(
@@ -224,6 +231,20 @@ async fn load(db: &PgPool) -> Result<Catalog, Problem> {
             site: row.daily_tokens,
         },
     );
+    let mut providers = fixed;
+    for row in repo::providers(&mut conn).await? {
+        if !row.enabled {
+            continue;
+        }
+        match OpenAiCompatible::connect(&row.base_url, &row.api_key) {
+            Ok(client) => {
+                let client: Arc<dyn ChatProvider> = Arc::new(client);
+                providers = providers.or_with(row.name, client);
+            }
+            // 建不出客户端（TLS 初始化失败）时这一家不可用，模型退回默认（LLM-011）。
+            Err(error) => tracing::error!(provider = %row.name, %error, "提供方客户端创建失败"),
+        }
+    }
     let models = repo::models(&mut conn)
         .await?
         .into_iter()
@@ -271,6 +292,7 @@ async fn load(db: &PgPool) -> Result<Catalog, Problem> {
         .collect();
     Ok(Catalog {
         limits,
+        providers,
         models,
         cards,
     })
@@ -327,6 +349,7 @@ mod tests {
                 per_user: 0,
                 site: 0,
             },
+            providers: Providers::default(),
             models,
             cards: Vec::new(),
         }

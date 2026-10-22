@@ -105,6 +105,24 @@ pub struct SettingsInput {
     pub daily_tokens: i64,
 }
 
+/// 管理后台维护的上游提供方（OpenAI 兼容接口）。按 `name` 新增或更新。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProviderInput {
+    /// 模型的 `provider` 按它引用。小写字母、数字、下划线、连字符，1–64 字符；创建后不可改。
+    pub name: String,
+    pub display_name: String,
+    /// 接口地址，例如 `https://api.deepseek.com/v1`（不含 `/chat/completions`）。
+    pub base_url: String,
+    /// 缺省或 null 保留原有密钥；空串表示不带密钥。
+    #[serde(default)]
+    pub api_key: Option<String>,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub sort_order: i32,
+}
+
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelInput {
@@ -114,7 +132,7 @@ pub struct ModelInput {
     pub description: String,
     #[serde(default)]
     pub badge: Option<String>,
-    /// 配置里的提供方名字（`IK_AI__PROVIDERS__<名字>__…`）。
+    /// 提供方名字：管理后台「提供方」里的，或部署配置里的（`IK_AI__PROVIDERS__<名字>__…`）。
     pub provider: String,
     /// 上游的模型名。
     pub provider_model: String,

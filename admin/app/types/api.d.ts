@@ -128,6 +128,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/ai/providers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** AI 上游提供方（部署配置里的只读，后台维护的可改；不回传密钥） */
+        get: operations["list_providers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ai/providers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 新建或修改提供方
+         * @description 不传 `apiKey`（或传 null）保留原有密钥。不能与部署配置里的提供方重名。
+         */
+        put: operations["put_provider"];
+        post?: never;
+        /**
+         * 删除提供方
+         * @description 还有模型指向它时拒绝（409 `AI_PROVIDER_IN_USE`）；部署配置里的不能删（409 `AI_PROVIDER_FROM_CONFIG`）。
+         */
+        delete: operations["remove_provider"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ai/providers/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 测试提供方连接并列出上游模型
+         * @description 用已保存的地址与密钥请求上游的 `GET /models`；连不上时 `ok = false`，原因在 `error`。
+         */
+        post: operations["post_provider_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/ai/settings": {
         parameters: {
             query?: never;
@@ -3566,7 +3627,7 @@ export interface components {
             isDefault: boolean;
             key: string;
             provider: string;
-            /** @description `provider` 在部署配置里存在。 */
+            /** @description `provider` 可用（部署配置里有，或后台里有且启用）。 */
             providerConfigured: boolean;
             providerModel: string;
             /** Format: int32 */
@@ -3602,6 +3663,21 @@ export interface components {
             id: string;
             name: string;
         };
+        AdminProvider: {
+            /** @description 密钥末尾几位（如 `…a1b2`），没有密钥时为 null。密钥本身不回传。 */
+            apiKeyHint?: string | null;
+            baseUrl: string;
+            displayName: string;
+            enabled: boolean;
+            /** @description 引用它的模型 key。 */
+            modelKeys: string[];
+            name: string;
+            /** @description 后台的这条与部署配置重名，实际生效的是部署配置里的。 */
+            shadowed: boolean;
+            /** Format: int32 */
+            sortOrder: number;
+            source: components["schemas"]["ProviderSource"];
+        };
         /** @description 后台看到的完整题目（含答案与解析）。 */
         AdminQuestion: {
             correctKeys: string[];
@@ -3631,7 +3707,10 @@ export interface components {
              */
             dailyTokensPerUser: number;
             globalEnabled: boolean;
-            /** @description 部署配置里已有的提供方名字（模型的 `provider` 只能指向这些，否则调用时退回默认模型）。 */
+            /**
+             * @description 可用的提供方名字：部署配置里的，加上后台启用的（模型的 `provider` 只能指向这些，
+             *     否则调用时退回默认模型）。
+             */
             providers: string[];
         };
         AdminTag: {
@@ -4913,7 +4992,7 @@ export interface components {
             enabled?: boolean;
             isDefault?: boolean;
             key: string;
-            /** @description 配置里的提供方名字（`IK_AI__PROVIDERS__<名字>__…`）。 */
+            /** @description 提供方名字：管理后台「提供方」里的，或部署配置里的（`IK_AI__PROVIDERS__<名字>__…`）。 */
             provider: string;
             /** @description 上游的模型名。 */
             providerModel: string;
@@ -5945,6 +6024,34 @@ export interface components {
             stats?: components["schemas"]["ProfileStats"] | null;
             username: string;
             zzz?: components["schemas"]["ZzzProfile"] | null;
+        };
+        /** @description 管理后台维护的上游提供方（OpenAI 兼容接口）。按 `name` 新增或更新。 */
+        ProviderInput: {
+            /** @description 缺省或 null 保留原有密钥；空串表示不带密钥。 */
+            apiKey?: string | null;
+            /** @description 接口地址，例如 `https://api.deepseek.com/v1`（不含 `/chat/completions`）。 */
+            baseUrl: string;
+            displayName: string;
+            enabled?: boolean;
+            /** @description 模型的 `provider` 按它引用。小写字母、数字、下划线、连字符，1–64 字符；创建后不可改。 */
+            name: string;
+            /** Format: int32 */
+            sortOrder?: number;
+        };
+        /**
+         * @description 提供方从哪来。
+         * @enum {string}
+         */
+        ProviderSource: "admin" | "config";
+        /** @description 测试连接的结果：上游的 `GET /models`。 */
+        ProviderTestResult: {
+            /** Format: int64 */
+            elapsedMs: number;
+            /** @description 失败原因（上游的状态码与报错摘要）。 */
+            error?: string | null;
+            /** @description 上游列出的模型名（按字母排序）。 */
+            models: string[];
+            ok: boolean;
         };
         QrCreated: {
             /**
@@ -7011,6 +7118,122 @@ export interface operations {
                 };
             };
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_providers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminProvider"][];
+                };
+            };
+        };
+    };
+    put_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProviderInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminProvider"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    remove_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    post_provider_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProviderTestResult"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

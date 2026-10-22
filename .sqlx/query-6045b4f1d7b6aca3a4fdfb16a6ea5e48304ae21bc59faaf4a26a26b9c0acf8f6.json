@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT api_key FROM ai_providers WHERE name = 'deepseek'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "api_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_providers",
+            "name": "api_key"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6045b4f1d7b6aca3a4fdfb16a6ea5e48304ae21bc59faaf4a26a26b9c0acf8f6"
+}

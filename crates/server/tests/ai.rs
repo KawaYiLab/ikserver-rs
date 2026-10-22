@@ -1,4 +1,5 @@
 //! AI 私聊的端到端接线：HTTP 建会话、发消息 → 后台任务执行器 → 本地 SSE 桩上游 → 定稿。
+//! 上游分别来自部署配置与管理后台（`ai_providers`）。
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -40,7 +41,14 @@ async fn stub_upstream() -> String {
     format!("http://{addr}/v1")
 }
 
-async fn setup(db: &PgPool) -> (Router, AppState) {
+/// 上游提供方放在哪。
+#[derive(Clone, Copy)]
+enum ProviderFrom {
+    Config,
+    Admin,
+}
+
+async fn setup(db: &PgPool, from: ProviderFrom) -> (Router, AppState) {
     // 只入队、不执行的进程要先建好任务队列的表（`ik-server migrate` 会做）。
     ik_kernel::jobs::Jobs::new(db.clone())
         .migrate()
@@ -67,13 +75,28 @@ async fn setup(db: &PgPool) -> (Router, AppState) {
     config.database.url = Secret::new("postgres://unused");
     config.http.allowed_origins = vec![ORIGIN.to_owned()];
     config.hot.enabled = false;
-    config.ai.providers.insert(
-        "stub".to_owned(),
-        AiProvider {
-            base_url: stub_upstream().await,
-            api_key: Secret::new("sk-test"),
-        },
-    );
+    let base_url = stub_upstream().await;
+    match from {
+        ProviderFrom::Config => {
+            config.ai.providers.insert(
+                "stub".to_owned(),
+                AiProvider {
+                    base_url,
+                    api_key: Secret::new("sk-test"),
+                },
+            );
+        }
+        ProviderFrom::Admin => {
+            sqlx::query!(
+                "INSERT INTO ai_providers (id, name, display_name, base_url, api_key)
+                 VALUES (1, 'stub', '桩', $1, 'sk-test')",
+                base_url
+            )
+            .execute(db)
+            .await
+            .unwrap();
+        }
+    }
     let state = AppState::new(config, db.clone()).unwrap();
     let file = serde_json::from_value(serde_json::json!({
         "models": [{ "key": "base", "displayName": "基础", "provider": "stub",
@@ -113,7 +136,19 @@ async fn call(
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn ai_session_reply_end_to_end(db: PgPool) {
-    let (app, state) = setup(&db).await;
+    let (app, state) = setup(&db, ProviderFrom::Config).await;
+    converse(&app, &state).await;
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn ai_reply_through_admin_managed_provider(db: PgPool) {
+    let (app, state) = setup(&db, ProviderFrom::Admin).await;
+    converse(&app, &state).await;
+}
+
+/// 建会话、发一条消息、跑一次任务，回复按桩上游定稿。
+async fn converse(app: &Router, state: &AppState) {
+    let app = app.clone();
     let (status, conversation) = call(
         &app,
         "POST",
@@ -135,7 +170,7 @@ async fn ai_session_reply_end_to_end(db: PgPool) {
     .await;
     assert!(status.is_success(), "{status} {sent}");
 
-    ik_server::jobs::worker_options(&state)
+    ik_server::jobs::worker_options(state)
         .unwrap()
         .concurrency(1)
         .init()
