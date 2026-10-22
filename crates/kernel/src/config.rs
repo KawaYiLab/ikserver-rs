@@ -96,7 +96,7 @@ pub struct Ai {
     pub stream_min_chars: usize,
     /// 私信历史最多带多少条消息（D-086，1–200）。
     pub max_history_messages: usize,
-    /// 一次回复最多几轮工具调用（D-086，0–10）；超出后要求模型基于已有结果作答。
+    /// 一次回复最多几轮工具调用（D-086，0–20）；超出后要求模型基于已有结果作答。
     pub max_tool_rounds: u32,
     /// 预占估算与无用量时的估算用的上下文基数（QUOTA-007、GEN-081，0–100000）。
     pub estimated_context_tokens: i64,
@@ -121,7 +121,7 @@ impl Default for Ai {
             first_delta_timeout_secs: 90,
             stream_min_chars: 16,
             max_history_messages: 40,
-            max_tool_rounds: 3,
+            max_tool_rounds: 8,
             estimated_context_tokens: 4000,
             max_attempts: 3,
         }
@@ -866,7 +866,7 @@ impl Config {
             || ai.first_delta_timeout_secs > ai.reply_timeout_secs
             || !(1..=1000).contains(&ai.stream_min_chars)
             || !(1..=200).contains(&ai.max_history_messages)
-            || ai.max_tool_rounds > 10
+            || ai.max_tool_rounds > 20
             || !(0..=100_000).contains(&ai.estimated_context_tokens)
             || !(1..=10).contains(&ai.max_attempts)
             || ai.providers.iter().any(|(name, p)| {
@@ -876,7 +876,7 @@ impl Config {
         {
             return Err(ConfigError::Invalid(
                 "ai 配置不合法：hold_ttl_secs 60–7200，reply_timeout_secs 10–1800，first_delta_timeout_secs 不超过总预算，\
-                 stream_min_chars 1–1000，max_history_messages 1–200，max_tool_rounds 0–10，\
+                 stream_min_chars 1–1000，max_history_messages 1–200，max_tool_rounds 0–20，\
                  estimated_context_tokens 0–100000，max_attempts 1–10，providers 的 base_url 须为 http(s)://"
                     .to_owned(),
             ));
