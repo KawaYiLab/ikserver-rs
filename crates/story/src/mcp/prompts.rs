@@ -30,6 +30,14 @@ const PROMPTS: &[PromptSpec] = &[
         task: "请梳理角色「{}」在绝区零主线中的角色弧线。",
     },
     PromptSpec {
+        name: "roleplay_profile",
+        title: "扮演资料",
+        description: "整理指定角色的角色扮演参考资料",
+        arg: "name",
+        arg_description: "角色名，如 妮可、星见雅",
+        task: "请整理绝区零角色「{}」的角色扮演参考资料。",
+    },
+    PromptSpec {
         name: "event_timeline",
         title: "事件时间线",
         description: "整理指定事件、组织或谜团的时间线",

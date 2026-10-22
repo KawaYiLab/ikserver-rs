@@ -11,11 +11,25 @@ MCP 提供资料、参数语义、分页入口与来源状态。模型自行决�
 
 `ik_guide` 保留原工具名及 `summary` / `character` / `timeline` / `verify` 模式，返回各主题的参数与结果字段参考。
 它不再包含角色设定、强制搜索/阅读流程、分层压缩、引用格式或最终回答模板。
-MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fact_check` 名称及原参数，
+MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fact_check` 名称及原参数，另有 `roleplay_profile`（参数 `name`），
 仅返回用户选用的任务文本，不自动附加 guide 内容。
 
 `mcp_contract_leaves_workflow_and_answer_format_to_client` 与 `mcp_prompts_only_contain_the_selected_task`
 回归检查初始化、工具描述、guide、工具返回文本与 prompts 的这项边界。
+
+## 角色扮演资料
+
+`ik_character(name, purpose="roleplay")` 面向角色扮演场景，只提供原文素材，不生成性格或语气归纳：
+
+- 代理人设定档案摘录（约 1500 字，按整行截断，附续读入口）；
+- 常对话对象：按相邻的两句署名对白统计往来次数与场景数；
+- 台词样本：只取逐句署名已解析的对白（排除推断署名、未核验署名、选项、旁白与占位），同文去重，字数 6～120；
+  先给前几位常对话对象各一条往来样本，再按篇轮流取最长的句子，名额少于篇数时在篇目间等距取，结果按语料行序排列。
+  抽样是确定性的，同一快照同一参数结果相同。每条样本附文档内前一句与 `ik_read` 原文入口。
+
+`until` 把台词与往来限定到某章（含），接受章节 id、章节名或已核验版本别名，按章节目录顺序截止；设定档案不随之过滤。
+名字只包含匹配到多个角色时直接报错并列出候选，避免把几个角色的台词混在一起。
+`structuredContent.data` 为 `PersonaResult`；`ik_character` 的 outputSchema 以 `oneOf` 覆盖 `CharacterResult` 与 `PersonaResult`。
 
 ## 检索与版本别名
 
