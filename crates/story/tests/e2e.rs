@@ -232,6 +232,29 @@ fn search_usability_release_constraints_are_never_relaxed_or_guessed() {
 }
 
 #[test]
+fn ambiguous_speaker_identity_is_left_unmerged_instead_of_failing_the_build() {
+    let mut bundle = Bundle::from_dir(&fixture()).unwrap();
+    // 同一显示名（如「？？？」）在不同场景对应不同角色：不应让整包构建失败，
+    // 也不能把它并进其中任何一个身份；一致的映射照常合并。
+    bundle.story.push_str(concat!(
+        "\n",
+        r#"{"chapter":"Chapter999","chapter_label":"身份测试","chapter_order":999,"scene":"s1","family":"GalGame","speaker":"？？？","speaker_id":"npc_a","text":"甲的台词","order":900001}"#,
+        "\n",
+        r#"{"chapter":"Chapter999","chapter_label":"身份测试","chapter_order":999,"scene":"s2","family":"GalGame","speaker":"？？？","speaker_id":"npc_b","text":"乙的台词","order":900002}"#,
+        "\n",
+        r#"{"chapter":"Chapter999","chapter_label":"身份测试","chapter_order":999,"scene":"s2","family":"GalGame","speaker":"甲的化名","speaker_id":"npc_a","text":"化名台词","order":900003}"#,
+        "\n",
+    ));
+    let c = build_from_bundle(&bundle).unwrap();
+    let identity = |name: &str| {
+        let i = c.speakers.iter().position(|s| s == name).unwrap();
+        c.speaker_identity_names[i].clone()
+    };
+    assert_eq!(identity("？？？"), "？？？");
+    assert_eq!(identity("甲的化名"), "npc_a");
+}
+
+#[test]
 fn bare_unreviewed_decimals_in_keywords_stay_literal() {
     let c = corpus();
     // 台词与设定里的普通小数不是版本选择器，不能因为没有版本映射而整次检索报错。

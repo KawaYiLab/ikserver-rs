@@ -7,7 +7,7 @@
 //! - `manifest.json`：数据版本（可选）
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -153,6 +153,8 @@ struct Builder {
     groups: Vec<DraftGroup>,
     group_by_id: HashMap<String, usize>,
     speaker_identities: HashMap<String, String>,
+    /// 同一显示名对应多个角色身份（如多个 NPC 共用「？？？」）：这些名字不参与身份合并。
+    ambiguous_speakers: BTreeSet<String>,
 }
 
 impl Builder {
@@ -478,7 +480,7 @@ fn ingest_jsonl(
                 .insert(display.clone(), identity.clone())
                 && previous != identity
             {
-                bail!("说话人 {display} 对应多个角色身份：{previous} / {identity}");
+                builder.ambiguous_speakers.insert(display.clone());
             }
         }
         if kind == DocKind::Story {
@@ -733,9 +735,25 @@ fn finish(builder: Builder, meta: Meta) -> Result<Corpus> {
     let Builder {
         docs: drafts,
         groups: mut draft_groups,
-        speaker_identities: identities,
+        speaker_identities: mut identities,
+        ambiguous_speakers,
         ..
     } = builder;
+    if !ambiguous_speakers.is_empty() {
+        let examples: Vec<&str> = ambiguous_speakers
+            .iter()
+            .take(5)
+            .map(String::as_str)
+            .collect();
+        tracing::warn!(
+            count = ambiguous_speakers.len(),
+            examples = ?examples,
+            "部分说话人显示名对应多个角色身份，这些名字不做身份合并"
+        );
+        for name in &ambiguous_speakers {
+            identities.remove(name);
+        }
+    }
 
     // 分组顺序：章节按游戏顺序，设定在后；文档按「分组顺序 → 组内阅读顺序」重新排列，
     // 让同一章的场景在行数组里也相邻（顺读时缓存友好）。
