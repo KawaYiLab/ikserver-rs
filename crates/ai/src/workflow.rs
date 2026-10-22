@@ -97,8 +97,8 @@ pub fn split_segments(text: &str) -> Vec<String> {
         if index < start {
             continue;
         }
-        // 句末：一串句末标点之后。
-        if is_terminal(c) {
+        // 句末：一串句末标点之后。数字后的 `.` 是序号或小数（`1. `、`2.5`），不算句末。
+        if is_terminal(c) && !(c == '.' && text[..index].ends_with(|p: char| p.is_ascii_digit())) {
             let mut end = index + c.len_utf8();
             while let Some(&(next, n)) = chars.peek() {
                 if is_terminal(n) {
@@ -599,6 +599,18 @@ mod tests {
         assert_eq!(
             split_segments("普通回答。\n\n- 列表"),
             vec!["普通回答。\n\n- 列表"]
+        );
+    }
+
+    #[test]
+    fn list_numbers_and_decimals_do_not_end_sentences() {
+        assert_eq!(
+            split_segments("正在整理结果：\n1. 检索到攻略A。\n2. 检索到攻略B。"),
+            vec!["正在整理结果：\n1. 检索到攻略A。\n2. 检索到攻略B。"]
+        );
+        assert_eq!(
+            split_segments("已更新到 2.5 版本。已确认无误。"),
+            vec!["已更新到 2.5 版本。", "已确认无误。"]
         );
     }
 
