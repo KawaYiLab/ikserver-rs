@@ -653,7 +653,9 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
                     .collect::<Vec<_>>();
                 let _ = writeln!(out, "{}：{}", m.term, names.join("、"));
             }
-            let _ = writeln!(out, "正文缺失词：{}", item.body_missing_terms.join("、"));
+            if !item.body_missing_terms.is_empty() {
+                let _ = writeln!(out, "正文缺失词：{}", item.body_missing_terms.join("、"));
+            }
             if item
                 .matches
                 .iter()

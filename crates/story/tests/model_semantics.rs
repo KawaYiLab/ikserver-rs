@@ -135,3 +135,20 @@ fn batch_read_reports_documents_it_did_not_reach() {
     let (text, _) = mcp(&c, "ik_read", json!({"docId":first,"limit":2}));
     assert!(!text.contains("未开始"), "{text}");
 }
+
+#[test]
+fn full_search_does_not_print_an_empty_body_missing_label() {
+    let c = corpus();
+    let (text, _) = mcp(&c, "ik_search", json!({"keyword":"安比","detail":"full"}));
+    assert!(
+        !text.lines().any(|l| l.trim_end() == "正文缺失词："),
+        "{text}"
+    );
+    // 真有缺失时照常列出。
+    let (text, _) = mcp(
+        &c,
+        "ik_search",
+        json!({"keyword":"录像店 以骸","detail":"full","allowPartial":true}),
+    );
+    assert!(text.contains("正文缺失词：以骸"), "{text}");
+}
