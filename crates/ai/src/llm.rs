@@ -29,6 +29,10 @@ pub enum ChatMessage {
     },
     Assistant {
         content: String,
+        /// 思考模式下这一轮的思考原文：带工具调用的轮次必须原样回传，否则 DeepSeek 等上游返回 400
+        /// （LLM-013）。没有思考时不发这个字段。
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reasoning_content: Option<String>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         tool_calls: Vec<ToolCall>,
     },
@@ -54,6 +58,7 @@ impl ChatMessage {
     pub fn assistant(content: impl Into<String>) -> Self {
         Self::Assistant {
             content: content.into(),
+            reasoning_content: None,
             tool_calls: Vec::new(),
         }
     }
@@ -594,6 +599,7 @@ mod tests {
             ChatMessage::system("s"),
             ChatMessage::Assistant {
                 content: String::new(),
+                reasoning_content: Some("先搜一下".into()),
                 tool_calls: vec![ToolCall {
                     id: "call_1".into(),
                     name: "search_posts".into(),
@@ -610,10 +616,14 @@ mod tests {
             json[0],
             serde_json::json!({"role": "system", "content": "s"})
         );
+        assert_eq!(json[1]["reasoning_content"], "先搜一下");
         assert_eq!(json[1]["tool_calls"][0]["function"]["name"], "search_posts");
         assert_eq!(json[1]["tool_calls"][0]["type"], "function");
         assert_eq!(json[2]["role"], "tool");
         assert_eq!(json[2]["tool_call_id"], "call_1");
+        // 没有思考的回复不带这个字段（OpenAI 等不认识它的上游不受影响）。
+        let plain = serde_json::to_value(ChatMessage::assistant("a")).unwrap();
+        assert!(plain.get("reasoning_content").is_none());
     }
 
     #[test]

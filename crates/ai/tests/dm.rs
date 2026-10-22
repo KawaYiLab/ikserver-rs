@@ -623,9 +623,12 @@ async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].tools.len(), 12);
     let second = &requests[1].messages;
+    // 思考模式：带工具调用的那一轮把思考原文回传给上游（LLM-013），否则 DeepSeek 返回 400。
     assert!(matches!(
         &second[second.len() - 2],
-        ChatMessage::Assistant { tool_calls, .. } if tool_calls[0].name == "search_posts"
+        ChatMessage::Assistant { tool_calls, reasoning_content, .. }
+            if tool_calls[0].name == "search_posts"
+                && reasoning_content.as_deref() == Some("用户想找攻略，先在站内搜一下。")
     ));
     let ChatMessage::Tool {
         tool_call_id,
@@ -719,6 +722,94 @@ async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
         .count();
     assert_eq!(workflow_events, events.len());
     assert_eq!(kinds.last(), Some(&"dm.message.edited"));
+
+    // 追问：上一条回复前附上当时的工具记录（CTX-012），模型知道之前读过哪篇。
+    let follow = h.send(conversation, "第一篇再详细说说").await;
+    let follow_job = h.job_for_trigger(follow).await;
+    h.fake.push(vec![content("好的。"), usage(10, 1)]);
+    assert_eq!(
+        dm::run_job(&h.state, follow_job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let requests = h.fake.requests();
+    let history = &requests[2].messages;
+    let previous = history
+        .iter()
+        .find_map(|m| match m {
+            ChatMessage::Assistant { content, .. } if content.contains("推荐阅读") => {
+                Some(content)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        previous.starts_with(&format!(
+            "【工具记录】检索「零号空洞、攻略」1 条：《零号空洞攻略》(/post/{post})"
+        )),
+        "{previous}"
+    );
+    assert!(history[0].text().contains("系统自动记下"));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn tools_in_one_round_run_together_and_reply_in_call_order(db: PgPool) {
+    let h = harness(db).await;
+    let post = h.guide_post().await;
+    let conversation = h.session().await;
+    let trigger = h.send(conversation, "热门和攻略都看看").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        tool_call("call_1", "get_hot_posts", "{}"),
+        Step::Emit(StreamEvent::ToolCallDelta {
+            index: 1,
+            id: Some("call_2".into()),
+            name: Some("get_post_content".into()),
+            arguments: Some(format!(r#"{{"post_id":"{post}"}}"#)),
+        }),
+        usage(10, 1),
+    ]);
+    h.fake.push(vec![content("看完了。"), usage(10, 1)]);
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let requests = h.fake.requests();
+    let second = &requests[1].messages;
+    let ids: Vec<&str> = second
+        .iter()
+        .filter_map(|m| match m {
+            ChatMessage::Tool { tool_call_id, .. } => Some(tool_call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ids, vec!["call_1", "call_2"]);
+    assert!(matches!(
+        second.last(),
+        Some(ChatMessage::Tool { content, .. }) if content.contains("先清怪")
+    ));
+    // 两个开始事件都在任何一个结束事件之前（并发执行）。
+    let (reply, _, _, _) = h.reply(job).await;
+    let stored: serde_json::Value =
+        sqlx::query_scalar!("SELECT ai_workflow FROM messages WHERE id = $1", reply)
+            .fetch_one(&h.db)
+            .await
+            .unwrap()
+            .unwrap();
+    let types: Vec<&str> = stored
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["type"].as_str().unwrap())
+        .collect();
+    let last_start = types
+        .iter()
+        .rposition(|t| t.ends_with(".start") && *t != "answer.start")
+        .unwrap();
+    let first_finish = types
+        .iter()
+        .position(|t| t.ends_with(".finish") && *t != "answer.finish")
+        .unwrap();
+    assert!(last_start < first_finish, "{types:?}");
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -751,4 +842,19 @@ async fn tool_rounds_are_capped(db: PgPool) {
         &requests[1].messages[requests[1].messages.len() - 2],
         ChatMessage::Tool { content, .. } if content == "当前没有可推荐的热帖。"
     ));
+    // 时间线上留一步「已达上限」。
+    let (reply, _, _, _) = h.reply(job).await;
+    let stored: serde_json::Value =
+        sqlx::query_scalar!("SELECT ai_workflow FROM messages WHERE id = $1", reply)
+            .fetch_one(&h.db)
+            .await
+            .unwrap()
+            .unwrap();
+    let limit = stored
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "tool.limit")
+        .unwrap();
+    assert_eq!(limit["data"], serde_json::json!({ "rounds": 1 }));
 }

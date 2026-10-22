@@ -10,6 +10,7 @@
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use futures_util::stream::FuturesUnordered;
 use ik_kernel::bus::{Audience, Event};
 use tokio::time::Instant;
 
@@ -149,6 +150,8 @@ impl StreamCtx<'_> {
 /// 一轮请求的产出。
 struct Round {
     content: String,
+    /// 这一轮的思考原文：只在带工具调用时回传给上游（LLM-013），不下发、不落库。
+    reasoning: String,
     received_chars: usize,
     usage: Option<Usage>,
     started: bool,
@@ -172,6 +175,7 @@ async fn stream_round(
 ) -> Round {
     let mut out = Round {
         content: String::new(),
+        reasoning: String::new(),
         received_chars: 0,
         usage: None,
         started: false,
@@ -228,6 +232,7 @@ async fn stream_round(
                         got_content = true;
                         let chars = text.chars().count();
                         out.received_chars += chars;
+                        out.reasoning.push_str(&text);
                         workflow.reasoning(chars);
                     }
                     StreamEvent::Content(text) => {
@@ -414,50 +419,79 @@ async fn run_rounds(
         out.tool_calls += round.tool_calls.len();
         messages.push(ChatMessage::Assistant {
             content: round.content.clone(),
+            reasoning_content: (!round.reasoning.is_empty()).then(|| round.reasoning.clone()),
             tool_calls: round.tool_calls.clone(),
         });
-        for call in &round.tool_calls {
-            if ctx.stop_requested().await {
-                out.end = End::Stopped;
-                return out;
-            }
+        // 同一轮的工具并发执行（LLM-005）：开始事件按调用顺序发，结束事件按完成顺序发，
+        // 结果按调用顺序回灌；执行期间照常轮询停止信号，总预算到点判超时。
+        let started = Instant::now();
+        let mut steps = Vec::with_capacity(round.tool_calls.len());
+        let mut pending = FuturesUnordered::new();
+        for (index, call) in round.tool_calls.iter().enumerate() {
             let query = (call.name == "search_posts")
                 .then(|| search_query(&call.arguments))
                 .flatten();
             let label = ctx.toolbox.label(&call.name);
-            let step = workflow.tool_start(&call.name, query.as_deref(), label);
-            ctx.publish_workflow(workflow);
-            let started = Instant::now();
-            let executed = tokio::time::timeout_at(
-                deadline,
-                ctx.toolbox.execute(
-                    state,
-                    tool_ctx,
-                    &state.mcp,
-                    &call.name,
-                    &call.arguments,
-                    deadline,
-                ),
-            )
-            .await;
-            let Ok(output) = executed else {
-                out.end = End::Failed(LlmError::Timeout);
-                return out;
-            };
-            workflow.tool_finish(
-                &step,
-                &call.name,
-                &output.meta,
-                started.elapsed().as_millis(),
+            steps.push((
+                workflow.tool_start(&call.name, query.as_deref(), label),
                 label,
-            );
-            ctx.publish_workflow(workflow);
+            ));
+            pending.push(async move {
+                let output = ctx
+                    .toolbox
+                    .execute(
+                        state,
+                        tool_ctx,
+                        &state.mcp,
+                        &call.name,
+                        &call.arguments,
+                        deadline,
+                    )
+                    .await;
+                (index, output)
+            });
+        }
+        ctx.publish_workflow(workflow);
+        let mut outputs: Vec<Option<String>> = vec![None; round.tool_calls.len()];
+        let mut stop_tick = tokio::time::interval(STOP_POLL);
+        loop {
+            tokio::select! {
+                next = pending.next() => {
+                    let Some((index, output)) = next else { break };
+                    let (step, label) = &steps[index];
+                    workflow.tool_finish(
+                        step,
+                        &round.tool_calls[index].name,
+                        &output.meta,
+                        started.elapsed().as_millis(),
+                        *label,
+                        output.is_error,
+                    );
+                    ctx.publish_workflow(workflow);
+                    outputs[index] = Some(output.text);
+                }
+                _ = stop_tick.tick() => {
+                    if ctx.stop_requested().await {
+                        out.end = End::Stopped;
+                        return out;
+                    }
+                }
+                () = tokio::time::sleep_until(deadline) => {
+                    out.end = End::Failed(LlmError::Timeout);
+                    return out;
+                }
+            }
+        }
+        drop(pending);
+        for (call, output) in round.tool_calls.iter().zip(outputs) {
             messages.push(ChatMessage::Tool {
                 tool_call_id: call.id.clone(),
-                content: output.text,
+                content: output.unwrap_or_default(),
             });
         }
         if rounds >= max_rounds {
+            workflow.tool_limit(max_rounds);
+            ctx.publish_workflow(workflow);
             messages.push(ChatMessage::user(NO_MORE_TOOLS));
         }
     }

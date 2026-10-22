@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, sender_id, content, created_at FROM messages\n         WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL\n           AND (ai_state IS NULL OR ai_state IN ('done', 'stopped'))\n           AND ($2::timestamptz IS NULL OR created_at > $2) AND created_at <= $3\n         ORDER BY created_at DESC, id DESC\n         LIMIT $4",
+  "query": "SELECT id, sender_id, content, created_at, ai_workflow FROM messages\n         WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL\n           AND (ai_state IS NULL OR ai_state IN ('done', 'stopped'))\n           AND ($2::timestamptz IS NULL OR created_at > $2) AND created_at <= $3\n         ORDER BY created_at DESC, id DESC\n         LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "ai_workflow",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_workflow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -60,8 +71,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "5a7549430eac06749c07d8acdc67c1d0f477f8a8127ec64819bf316a9aa9b4df"
+  "hash": "c64c73f79faef0bc107d77049838c33d0500137a7ab7fc5b4ba8393be13312c2"
 }
