@@ -116,3 +116,39 @@ fn coverage_ranges_only_need_doc_id_start_and_end() {
     required.sort();
     assert_eq!(required, ["docId", "end", "start"]);
 }
+
+#[test]
+fn cursors_carry_only_non_default_arguments_and_a_short_snapshot_tag() {
+    let c = corpus();
+    let group = c.groups.iter().find(|g| g.id == "ch:Chapter00").unwrap();
+    let ids: Vec<String> = group.docs.iter().map(|&d| c.doc_id(d as usize)).collect();
+    let (_, read) = mcp(&c, "ik_read", json!({"docIds":[ids[0], ids[1]],"limit":2}));
+    let token = read["nextCall"]["arguments"]["cursor"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // 旧编码约 326 字符：完整 71 位 revision、长键名、16 字节校验和、空参数 docId=""。
+    assert!(token.len() <= 200, "{} {token}", token.len());
+
+    let (_, cat) = mcp(
+        &c,
+        "ik_catalog",
+        json!({"path":"ch:Chapter00","manifest":true}),
+    );
+    let id = cat["manifest"]["manifestId"].as_str().unwrap().to_owned();
+    // 旧编码约 302 字符，其中一半是重复的 revision 与默认值 false。
+    assert!(id.len() <= 120, "{} {id}", id.len());
+
+    // 续读照常工作，并读到第二篇。
+    let (text, next) = mcp(&c, "ik_read", json!({"cursor": token}));
+    assert!(text.contains("第 3-"), "{text}");
+    assert!(next["nextCall"].is_object(), "{next}");
+
+    // 语料快照的任何变化（包括 revision 末尾）都让旧游标失效。
+    let mut changed = corpus();
+    changed.revision.push('x');
+    assert!(matches!(
+        tools::call_output(&changed, "ik_read", Some(json!({"cursor": token}))),
+        Ok(Err(_))
+    ));
+}
