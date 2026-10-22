@@ -1,4 +1,6 @@
 //! 从本地语料运行 MCP 工具，无需启动服务或连接数据库。
+use std::io::Write as _;
+
 use anyhow::{Context, Result, bail};
 use serde_json::Value;
 
@@ -16,7 +18,7 @@ fn main() -> Result<()> {
     let result = ik_story::mcp::tools::call(&corpus, &tool, Some(arguments))
         .map_err(|_| anyhow::anyhow!("未知工具：{tool}"))?;
     match result {
-        Ok(text) => println!("{text}"),
+        Ok(text) => writeln!(std::io::stdout().lock(), "{text}")?,
         Err(error) => bail!("{}", error.0),
     }
     Ok(())

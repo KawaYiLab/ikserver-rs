@@ -319,7 +319,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
         .into_iter()
         .filter(|(name, _)| !is_placeholder(name))
         .collect();
-    co.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    co.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
     if !co.is_empty() {
         let list: Vec<String> = co
             .iter()

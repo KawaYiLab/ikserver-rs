@@ -712,10 +712,10 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
     fn specialize(v: &mut Value, data: &str) {
         match v {
             Value::Object(m) => {
-                if let Some(properties) = m.get_mut("properties") {
-                    if properties.get("data").is_some() {
-                        properties["data"] = json!({"$ref":format!("#/$defs/{data}")});
-                    }
+                if let Some(properties) = m.get_mut("properties")
+                    && properties.get("data").is_some()
+                {
+                    properties["data"] = json!({"$ref":format!("#/$defs/{data}")});
                 }
                 for value in m.values_mut() {
                     specialize(value, data);

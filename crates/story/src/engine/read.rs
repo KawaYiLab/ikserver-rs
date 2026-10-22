@@ -415,20 +415,19 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
             corpus.groups[g].label
         );
         // Preserve the detailed presentation's optional navigation without crossing into another chapter automatically.
-        if full {
-            if let Some(ng) = corpus
+        if full
+            && let Some(ng) = corpus
                 .groups
                 .get(g + 1)
                 .filter(|ng| ng.kind == corpus.groups[g].kind)
-            {
-                let _ = write!(
-                    out,
-                    "下一组：{} {} → {}",
-                    ng.id,
-                    ng.label,
-                    continuation(&ng.id, 1, args, follow)
-                );
-            }
+        {
+            let _ = write!(
+                out,
+                "下一组：{} {} → {}",
+                ng.id,
+                ng.label,
+                continuation(&ng.id, 1, args, follow)
+            );
         }
     }
     Ok(ToolOutput::with_rendered_snapshot(
@@ -466,10 +465,8 @@ fn block_header(
     if first {
         out.push_str(snapshot);
         range.push_text(&mut out);
-        if full {
-            if let Some(release) = release {
-                super::releases::push_note(&mut out, corpus, release);
-            }
+        if full && let Some(release) = release {
+            super::releases::push_note(&mut out, corpus, release);
         }
     }
     let _ = writeln!(out, "{}", document.path);
