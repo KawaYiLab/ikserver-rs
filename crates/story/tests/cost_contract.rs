@@ -48,3 +48,71 @@ fn manifest_text_is_a_summary_not_a_replay_of_the_catalog() {
     assert!(!text.contains("ik_catalog(path="), "{text}");
     assert!(data["manifest"]["manifestId"].is_string());
 }
+
+fn coverage_counts(data: &Value) -> Vec<Value> {
+    [
+        "coveredLines",
+        "completeDocuments",
+        "partialDocuments",
+        "unreadDocuments",
+    ]
+    .iter()
+    .map(|k| data[*k].clone())
+    .collect()
+}
+
+#[test]
+fn coverage_ranges_only_need_doc_id_start_and_end() {
+    let c = corpus();
+    let (_, cat) = mcp(
+        &c,
+        "ik_catalog",
+        json!({"path":"ch:Chapter00","manifest":true}),
+    );
+    let id = cat["manifest"]["manifestId"].clone();
+    let (_, read) = mcp(&c, "ik_read", json!({"docId":"ch:Chapter00","limit":5}));
+    let delta = read["coverageDelta"].clone();
+    let (_, full) = mcp(&c, "ik_coverage", json!({"manifestId":id,"ranges":delta}));
+
+    // 只填 docId/start/end：revision 由 manifestId 决定，complete 默认 true。
+    let short: Vec<Value> = delta
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| json!({"docId":r["docId"],"start":r["start"],"end":r["end"]}))
+        .collect();
+    let (_, brief) = mcp(&c, "ik_coverage", json!({"manifestId":id,"ranges":short}));
+    assert_eq!(coverage_counts(&brief), coverage_counts(&full));
+    assert!(brief["coveredLines"].as_u64().unwrap() > 0);
+
+    // 显式传入且不一致的 revision 仍然报错，校验没有放松。
+    let mut wrong = short.clone();
+    wrong[0]["corpusRevision"] = json!("old");
+    assert!(matches!(
+        tools::call_output(
+            &c,
+            "ik_coverage",
+            Some(json!({"manifestId":id,"ranges":wrong}))
+        ),
+        Ok(Err(_))
+    ));
+
+    // 工具契约：ranges 每段只要求 docId/start/end。
+    let defs = tools::definitions().unwrap();
+    let coverage = defs["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "ik_coverage")
+        .unwrap()
+        .clone();
+    let mut required: Vec<String> =
+        coverage["inputSchema"]["properties"]["ranges"]["items"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect();
+    required.sort();
+    assert_eq!(required, ["docId", "end", "start"]);
+}

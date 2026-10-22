@@ -97,7 +97,7 @@ ik_read(docIds=["返回的docId1", "返回的docId2"], maxChars=16000)
 - `docIds` 每次最多16个实际文档ID，与 `docId/follow=true` 互斥，共用读取预算；分块保留文档身份。读取 `complete` 表示本次指定续读目标已到末尾，不证明章首或过去的请求已覆盖。
 - catalog 的 `manifest` 固定范围与整篇排除选项；只有全部行均为占位/未关联候选的文档才会被对应选项排除，混合文档保留。总行数、排除数、占位和候选计数分别报告，状态计数可能交叉。
 - 角色 `chapterCount/chaptersTruncated`、文档 `evidencePreviewTruncated`明确展示上限；更多实际署名结果使用角色返回的搜索入口。
-- 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`，返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
+- 客户端累计 read 的 `coverageDelta`，提交 `ik_coverage(manifestId=…, ranges=…)`（每段可只填 `docId`/`start`/`end`，快照由 manifestId 决定；显式 `corpusRevision` 不一致仍报错），返回合并 `ledger`、完整/部分/未读统计和缺口 `pending[].nextRead`。最多512个输入区间，缺口文档按20篇默认页、最多100篇分页；更大任务先合并记录或拆分范围。缺口 `missing` 使用独立类型，不会伪装成已返回回执。
 
 查询与阅读覆盖核对不使用数据库会话；HTTP 接口使用动态 JSON-RPC 请求契约。
 

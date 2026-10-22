@@ -61,7 +61,7 @@ pub fn definitions() -> Result<Value, serde_json::Error> {
         entries.push(json!({"name":name,"title":title,"description":description,"inputSchema":schema,"outputSchema":engine::response::output_schema(name)?,"annotations":read_only()}));
     }
     use utoipa::PartialSchema;
-    entries.push(json!({"name":"ik_coverage","title":"资料覆盖核对","description":"对照 catalog.manifest 核对提交的 read.coverageDelta，合并重复和交叠区间，局部读取不计整篇。返回 ledger、完整/部分/未读统计、缺口 nextRead 和分页 nextCall。统计依据仅为提交的返回行记录，不表示模型理解或服务器请求历史；服务端不保存 ledger。","inputSchema":{"type":"object","properties":{"manifestId":{"type":"string","maxLength":16384},"ranges":{"type":"array","maxItems":512,"items":engine::response::LineRange::schema()},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,100,20)},"required":["manifestId"],"additionalProperties":false},"outputSchema":engine::response::output_schema("ik_coverage")?,"annotations":read_only()}));
+    entries.push(json!({"name":"ik_coverage","title":"资料覆盖核对","description":"对照 catalog.manifest 核对提交的 read.coverageDelta（每段可只填 docId/start/end），合并重复和交叠区间，局部读取不计整篇。返回 ledger、完整/部分/未读统计、缺口 nextRead 和分页 nextCall。统计依据仅为提交的返回行记录，不表示模型理解或服务器请求历史；服务端不保存 ledger。","inputSchema":{"type":"object","properties":{"manifestId":{"type":"string","maxLength":16384},"ranges":{"type":"array","maxItems":512,"items":engine::coverage::RangeInput::schema()},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,100,20)},"required":["manifestId"],"additionalProperties":false},"outputSchema":engine::response::output_schema("ik_coverage")?,"annotations":read_only()}));
     Ok(json!({"tools":entries}))
 }
 
