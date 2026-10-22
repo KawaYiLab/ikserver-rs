@@ -288,11 +288,17 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
     let term_hits = collect_term_hits(corpus, &terms, &filter);
     let df: Vec<usize> = term_hits.iter().map(|t| t.docs.len()).collect();
     let window_mode = args.match_unit.as_deref() == Some("window");
+    // 有词在范围内零命中时，并集只会等于单独检索其余词，不算「部分匹配」：不退化，
+    // 改为在页眉说明并给出去掉该词的建议调用。
+    // 显式 allowPartial=true 仍按调用方要求退化（显式值优先）。
+    let zero_term = args.allow_partial.is_none()
+        && terms.len() > 1
+        && term_hits.iter().any(|t| t.docs.is_empty());
     let mut hits = assemble(
         corpus,
         &term_hits,
-        args.allow_partial.unwrap_or(true),
-        window_mode,
+        args.allow_partial.unwrap_or(true) && !zero_term,
+        window_mode && !zero_term,
     );
     match args.match_unit.as_deref().unwrap_or("doc") {
         "doc" => {}
@@ -349,6 +355,11 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
         out.push_str("关键词过多，仅检索前 8 个。\n");
     }
     push_missing_terms(&mut out, &result.missing_term_counts, filter.body_only);
+    if zero_term {
+        out.push_str(
+            "未退化为部分匹配：有检索词在当前范围内零命中，并集只会等同于单独检索其余词；需要时使用建议调用。\n",
+        );
+    }
     out.push_str(&rendered);
     Ok(if full {
         super::response::ToolOutput::with_rendered_snapshot(

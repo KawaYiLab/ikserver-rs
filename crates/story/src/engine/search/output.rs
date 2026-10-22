@@ -473,13 +473,29 @@ pub(super) fn typed_result(
             base["allowPartial"] = json!(true);
             suggestions.push(NextCall::new("ik_search", base));
         }
-        // 单个词时「只搜第一个词」就是原调用本身，不给这种原地重试的建议。
-        if terms.len() > 1
-            && let Some(term) = terms.first()
-        {
+        // 有零命中词时去掉这些词重查；否则退回只搜第一个词。单个词时这就是原调用本身，
+        // 不给这种原地重试的建议。版本选择器原样保留，建议不能悄悄扩大范围。
+        let hitting: Vec<&str> = terms
+            .iter()
+            .zip(df)
+            .filter(|(_, n)| **n > 0)
+            .map(|(t, _)| t.as_str())
+            .collect();
+        let retry_terms: Vec<&str> = if !hitting.is_empty() && hitting.len() < terms.len() {
+            hitting
+        } else {
+            terms.iter().take(1).map(String::as_str).collect()
+        };
+        if terms.len() > 1 && !retry_terms.is_empty() {
+            let mut keyword = retry_terms.join(" ");
+            if let (_, Some(release)) =
+                super::super::releases::query(args.keyword.as_deref().unwrap_or(""))?
+            {
+                keyword = format!("{} {keyword}", release.version);
+            }
             let mut retry = serde_json::to_value(args)
                 .map_err(|_| super::super::ToolError("无法生成建议参数".into()))?;
-            retry["keyword"] = json!(term);
+            retry["keyword"] = json!(keyword);
             retry["offset"] = json!(0);
             retry["directoryOffset"] = json!(0);
             retry["cursor"] = json!(null);

@@ -73,7 +73,7 @@ fn classified_search_keeps_metadata_out_of_body_quota_and_supports_body_and() {
     let out = call(
         &c,
         "ik_search",
-        json!({"keyword":"天空 核心 秘密","maxResults":1}),
+        json!({"keyword":"天空 核心 秘密","maxResults":1,"allowPartial":true}),
     );
     assert!(
         out.contains("正文结果 2 篇") && out.contains("目录建议 3 篇"),
@@ -229,7 +229,7 @@ fn match_fields_body_only_and_filters_are_consistent_globally_and_within_doc() {
 fn directory_pages_preserve_scope_and_do_not_repeat_entries() {
     let c = build_from_bundle(&sample()).unwrap();
     let mut seen = std::collections::HashSet::new();
-    let mut args = json!({"keyword":"天空 核心 秘密","path":"3.3版本","scope":"story","maxDirectoryResults":1});
+    let mut args = json!({"keyword":"天空 核心 秘密","path":"3.3版本","scope":"story","maxDirectoryResults":1,"allowPartial":true});
     loop {
         let output = tools::call_output(&c, "ik_search", Some(args))
             .ok()

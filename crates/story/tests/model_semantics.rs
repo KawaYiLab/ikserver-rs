@@ -74,3 +74,31 @@ fn missing_term_in_filtered_scope_is_not_reported_as_missing_from_the_corpus() {
     assert!(!text.contains("全局"), "{text}");
     assert_eq!(data["missingTermCounts"][0]["corpusDocuments"], 0);
 }
+
+#[test]
+fn a_term_with_no_hits_does_not_degrade_the_query_into_the_other_terms_union() {
+    let c = corpus();
+    // 「旧账」零命中：并集只会等于单搜「安比」，不能当作「部分匹配」铺满结果。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"安比 旧账"}));
+    assert_eq!(data["partial"], false, "{text}");
+    assert_eq!(data["candidateCount"], 0, "{text}");
+    assert!(!text.contains("未命中关键词"), "{text}");
+    assert!(text.contains("未退化为部分匹配"), "{text}");
+    assert!(
+        suggestion_keywords(&data).contains(&("安比".into(), None)),
+        "{data}"
+    );
+
+    // 两个词都存在、只是不同篇：部分匹配照常。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"录像店 以骸"}));
+    assert_eq!(data["partial"], true, "{text}");
+    assert!(data["candidateCount"].as_u64().unwrap() >= 2, "{text}");
+
+    // allowPartial=false 的严格语义不变。
+    let (_, data) = mcp(
+        &c,
+        "ik_search",
+        json!({"keyword":"录像店 以骸","allowPartial":false}),
+    );
+    assert_eq!(data["candidateCount"], 0);
+}
