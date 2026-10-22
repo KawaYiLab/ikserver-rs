@@ -1,8 +1,12 @@
 //! AI 配置的管理后台（media-ops.md ADMINCRUD：ai-model、ai-role-card、ai-agent-config；ADR 0001
-//! 「人格 / 模型 / 额度全部进 /v1/admin」）与任务审计（AI-027 死信查看）。
+//! 「人格 / 模型 / 额度全部进 /v1/admin」）、上游提供方与任务审计（AI-027 死信查看）。
 //!
 //! 全部只给管理员。校验与写入复用配置导入（[`crate::service::apply`]），与审计同一事务；
 //! 提交后让本进程的配置缓存失效（其他实例最长 60 秒后生效，AI-002）。
+
+use std::collections::BTreeSet;
+use std::sync::LazyLock;
+use std::time::Instant;
 
 use axum::extract::{FromRef, State};
 use chrono::{DateTime, Utc};
@@ -20,7 +24,7 @@ use utoipa_axum::routes;
 
 use crate::AiState;
 use crate::catalog::{Example, OutputMode};
-use crate::dto::{CharacterInput, ImportFile, ModelInput, SettingsInput};
+use crate::dto::{CharacterInput, ImportFile, ModelInput, ProviderInput, SettingsInput};
 use crate::repo::{self, JobFilter};
 use crate::service::apply;
 
@@ -34,7 +38,8 @@ pub struct AdminSettings {
     pub daily_tokens_per_user: i64,
     /// 全站每日加权 token，0 不限制。
     pub daily_tokens: i64,
-    /// 部署配置里已有的提供方名字（模型的 `provider` 只能指向这些，否则调用时退回默认模型）。
+    /// 可用的提供方名字：部署配置里的，加上后台启用的（模型的 `provider` 只能指向这些，
+    /// 否则调用时退回默认模型）。
     pub providers: Vec<String>,
 }
 
@@ -51,8 +56,47 @@ pub struct AdminModel {
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
-    /// `provider` 在部署配置里存在。
+    /// `provider` 可用（部署配置里有，或后台里有且启用）。
     pub provider_configured: bool,
+}
+
+/// 提供方从哪来。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderSource {
+    /// 管理后台维护，可改可删。
+    Admin,
+    /// 部署配置（`IK_AI__PROVIDERS__…`），后台只读。
+    Config,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminProvider {
+    pub name: String,
+    pub display_name: String,
+    pub base_url: String,
+    /// 密钥末尾几位（如 `…a1b2`），没有密钥时为 null。密钥本身不回传。
+    pub api_key_hint: Option<String>,
+    pub enabled: bool,
+    pub sort_order: i32,
+    pub source: ProviderSource,
+    /// 后台的这条与部署配置重名，实际生效的是部署配置里的。
+    pub shadowed: bool,
+    /// 引用它的模型 key。
+    pub model_keys: Vec<String>,
+}
+
+/// 测试连接的结果：上游的 `GET /models`。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderTestResult {
+    pub ok: bool,
+    /// 上游列出的模型名（按字母排序）。
+    pub models: Vec<String>,
+    /// 失败原因（上游的状态码与报错摘要）。
+    pub error: Option<String>,
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -121,6 +165,22 @@ pub struct AdminJob {
 
 // ---------- 服务 ----------
 
+/// 可用的提供方名字：部署配置里的，加上后台启用的（与配置快照的合并规则一致）。
+async fn usable_providers(
+    state: &AiState,
+    conn: &mut sqlx::PgConnection,
+) -> Result<BTreeSet<String>, Problem> {
+    let mut names: BTreeSet<String> = state.providers.names().into_iter().collect();
+    names.extend(
+        repo::providers(conn)
+            .await?
+            .into_iter()
+            .filter(|p| p.enabled)
+            .map(|p| p.name),
+    );
+    Ok(names)
+}
+
 pub async fn settings(state: &AiState) -> Result<AdminSettings, Problem> {
     let mut conn = state.db.acquire().await?;
     let row = repo::settings(&mut conn).await?;
@@ -128,17 +188,21 @@ pub async fn settings(state: &AiState) -> Result<AdminSettings, Problem> {
         global_enabled: row.as_ref().is_none_or(|r| r.global_enabled),
         daily_tokens_per_user: row.as_ref().map_or(1_000_000, |r| r.daily_tokens_per_user),
         daily_tokens: row.as_ref().map_or(0, |r| r.daily_tokens),
-        providers: state.providers.names(),
+        providers: usable_providers(state, &mut conn)
+            .await?
+            .into_iter()
+            .collect(),
     })
 }
 
 pub async fn models(state: &AiState) -> Result<Vec<AdminModel>, Problem> {
     let mut conn = state.db.acquire().await?;
+    let usable = usable_providers(state, &mut conn).await?;
     Ok(repo::models(&mut conn)
         .await?
         .into_iter()
         .map(|m| AdminModel {
-            provider_configured: state.providers.contains(&m.provider),
+            provider_configured: usable.contains(&m.provider),
             key: m.key,
             display_name: m.display_name,
             description: m.description,
@@ -151,6 +215,232 @@ pub async fn models(state: &AiState) -> Result<Vec<AdminModel>, Problem> {
             sort_order: m.sort_order,
         })
         .collect())
+}
+
+/// 密钥只回末尾几位；太短的整个遮住。
+fn key_hint(key: &str) -> Option<String> {
+    let chars: Vec<char> = key.chars().collect();
+    match chars.len() {
+        0 => None,
+        n if n < 12 => Some("…".to_owned()),
+        n => Some(format!("…{}", chars[n - 4..].iter().collect::<String>())),
+    }
+}
+
+/// 部署配置里的提供方 + 后台的提供方。部署配置里的排在前面。
+pub async fn providers(state: &AiState) -> Result<Vec<AdminProvider>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let rows = repo::providers(&mut conn).await?;
+    let models = repo::models(&mut conn).await?;
+    drop(conn);
+    let model_keys = |name: &str| -> Vec<String> {
+        models
+            .iter()
+            .filter(|m| m.provider == name)
+            .map(|m| m.key.clone())
+            .collect()
+    };
+    let fixed = state.providers.names();
+    let mut out: Vec<AdminProvider> = fixed
+        .iter()
+        .map(|name| {
+            let config = state.config.providers.get(name);
+            AdminProvider {
+                name: name.clone(),
+                display_name: name.clone(),
+                base_url: config.map(|c| c.base_url.clone()).unwrap_or_default(),
+                api_key_hint: config.and_then(|c| key_hint(c.api_key.expose())),
+                enabled: true,
+                sort_order: 0,
+                source: ProviderSource::Config,
+                shadowed: false,
+                model_keys: model_keys(name),
+            }
+        })
+        .collect();
+    out.extend(rows.into_iter().map(|row| AdminProvider {
+        shadowed: fixed.contains(&row.name),
+        model_keys: model_keys(&row.name),
+        api_key_hint: key_hint(&row.api_key),
+        name: row.name,
+        display_name: row.display_name,
+        base_url: row.base_url,
+        enabled: row.enabled,
+        sort_order: row.sort_order,
+        source: ProviderSource::Admin,
+    }));
+    Ok(out)
+}
+
+static PROVIDER_NAME: LazyLock<Option<regex::Regex>> =
+    LazyLock::new(|| regex::Regex::new(r"^[a-z0-9][a-z0-9_-]{0,63}$").ok());
+
+/// 校验并规整（去掉首尾空白与地址末尾的 `/`）。
+fn validate_provider(state: &AiState, input: &mut ProviderInput) -> Result<(), Problem> {
+    let field = |name: &str, detail: &str| Problem::field(name, "invalid", detail);
+    if !PROVIDER_NAME
+        .as_ref()
+        .is_some_and(|re| re.is_match(&input.name))
+    {
+        return Err(field("name", "小写字母、数字、下划线、连字符，1–64 字符"));
+    }
+    if state.providers.contains(&input.name) {
+        return Err(field("name", "与部署配置里的提供方重名"));
+    }
+    input.display_name = input.display_name.trim().to_owned();
+    if !(1..=64).contains(&input.display_name.chars().count()) {
+        return Err(field("displayName", "1–64 字"));
+    }
+    input.base_url = input.base_url.trim().trim_end_matches('/').to_owned();
+    let has_host = input
+        .base_url
+        .strip_prefix("https://")
+        .or_else(|| input.base_url.strip_prefix("http://"))
+        .is_some_and(|rest| !rest.is_empty());
+    if !has_host
+        || input.base_url.chars().any(char::is_whitespace)
+        || input.base_url.chars().count() > 512
+    {
+        return Err(field(
+            "baseUrl",
+            "以 http:// 或 https:// 开头的地址，最多 512 字符",
+        ));
+    }
+    if let Some(key) = input.api_key.as_mut() {
+        *key = key.trim().to_owned();
+        if key.chars().count() > 4096 {
+            return Err(field("apiKey", "最多 4096 字符"));
+        }
+    }
+    Ok(())
+}
+
+/// 新建或修改后台的提供方（按名字）。不传密钥时保留原有的。
+pub async fn save_provider(
+    state: &AiState,
+    op: &Operator,
+    name: &str,
+    mut input: ProviderInput,
+) -> Result<AdminProvider, Problem> {
+    if input.name != name {
+        return Err(key_mismatch("name"));
+    }
+    validate_provider(state, &mut input)?;
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    repo::upsert_provider(
+        &mut tx,
+        &repo::NewProvider {
+            id: state.ids.next_raw(),
+            name: &input.name,
+            display_name: &input.display_name,
+            base_url: &input.base_url,
+            api_key: input.api_key.as_deref(),
+            enabled: input.enabled,
+            sort_order: input.sort_order,
+            now,
+        },
+    )
+    .await?;
+    // 密钥不进审计，只记有没有换。
+    admin::record(
+        &mut tx,
+        &state.ids,
+        op,
+        Audit {
+            action: "ai.provider.save",
+            target_type: "ai_provider",
+            target_id: Some(name.to_owned()),
+            details: serde_json::json!({
+                "displayName": input.display_name,
+                "baseUrl": input.base_url,
+                "enabled": input.enabled,
+                "apiKeyChanged": input.api_key.is_some(),
+            }),
+        },
+        now,
+    )
+    .await?;
+    tx.commit().await?;
+    state.catalog.invalidate().await;
+    providers(state)
+        .await?
+        .into_iter()
+        .find(|p| p.source == ProviderSource::Admin && p.name == name)
+        .ok_or_else(Problem::internal)
+}
+
+/// 删除后台的提供方。还有模型指向它时拒绝（与部署配置重名的除外：删了模型照样走部署配置）。
+pub async fn delete_provider(state: &AiState, op: &Operator, name: &str) -> Result<(), Problem> {
+    let shadowed = state.providers.contains(name);
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    // 只是防误删的提示：并发新建的模型若指向已删的提供方，调用时退回默认模型（LLM-011）。
+    if !shadowed && !repo::models_using_provider(&mut tx, name).await?.is_empty() {
+        return Err(Problem::conflict(
+            "AI_PROVIDER_IN_USE",
+            "还有模型在用这个提供方，请先把这些模型改到别的提供方或删除",
+        ));
+    }
+    if !repo::delete_provider(&mut tx, name).await? {
+        return Err(if shadowed {
+            Problem::conflict(
+                "AI_PROVIDER_FROM_CONFIG",
+                "部署配置里的提供方只能在部署配置里修改",
+            )
+        } else {
+            Problem::not_found()
+        });
+    }
+    admin::record(
+        &mut tx,
+        &state.ids,
+        op,
+        Audit {
+            action: "ai.provider.delete",
+            target_type: "ai_provider",
+            target_id: Some(name.to_owned()),
+            details: serde_json::json!({}),
+        },
+        now,
+    )
+    .await?;
+    tx.commit().await?;
+    state.catalog.invalidate().await;
+    Ok(())
+}
+
+/// 用保存好的地址与密钥请求上游的 `GET /models`（同名时用部署配置里的，与调用一致）。
+/// 停用的后台提供方也能测，方便启用前先确认。
+pub async fn test_provider(state: &AiState, name: &str) -> Result<ProviderTestResult, Problem> {
+    let (base_url, api_key) = if let Some(config) = state.config.providers.get(name) {
+        (config.base_url.clone(), config.api_key.expose().to_owned())
+    } else {
+        let mut conn = state.db.acquire().await?;
+        let row = repo::providers(&mut conn)
+            .await?
+            .into_iter()
+            .find(|p| p.name == name)
+            .ok_or_else(Problem::not_found)?;
+        (row.base_url, row.api_key)
+    };
+    let started = Instant::now();
+    let listed = crate::llm::list_models(&base_url, &api_key).await;
+    let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    Ok(match listed {
+        Ok(models) => ProviderTestResult {
+            ok: true,
+            models,
+            error: None,
+            elapsed_ms,
+        },
+        Err(error) => ProviderTestResult {
+            ok: false,
+            models: Vec::new(),
+            error: Some(error.to_string()),
+            elapsed_ms,
+        },
+    })
 }
 
 pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem> {
@@ -454,6 +744,9 @@ where
 {
     OpenApiRouter::new()
         .routes(routes!(get_settings, put_settings))
+        .routes(routes!(list_providers))
+        .routes(routes!(put_provider, remove_provider))
+        .routes(routes!(post_provider_test))
         .routes(routes!(list_models))
         .routes(routes!(put_model, remove_model))
         .routes(routes!(list_characters))
@@ -497,6 +790,91 @@ async fn put_settings(
     Json(input): Json<SettingsInput>,
 ) -> Result<Json<AdminSettings>, Problem> {
     Ok(Json(update_settings(&state, &op, input).await?))
+}
+
+/// AI 上游提供方（部署配置里的只读，后台维护的可改；不回传密钥）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/ai/providers",
+    tag = "admin",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses((status = 200, body = Vec<AdminProvider>))
+)]
+async fn list_providers(
+    State(state): State<AiState>,
+    AdminOperator(_): AdminOperator,
+) -> Result<Json<Vec<AdminProvider>>, Problem> {
+    Ok(Json(providers(&state).await?))
+}
+
+/// 新建或修改提供方
+///
+/// 不传 `apiKey`（或传 null）保留原有密钥。不能与部署配置里的提供方重名。
+#[utoipa::path(
+    put,
+    path = "/v1/admin/ai/providers/{name}",
+    tag = "admin",
+    params(("name" = String, Path)),
+    request_body = ProviderInput,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = AdminProvider),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn put_provider(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path(name): Path<String>,
+    Json(input): Json<ProviderInput>,
+) -> Result<Json<AdminProvider>, Problem> {
+    Ok(Json(save_provider(&state, &op, &name, input).await?))
+}
+
+/// 删除提供方
+///
+/// 还有模型指向它时拒绝（409 `AI_PROVIDER_IN_USE`）；部署配置里的不能删（409 `AI_PROVIDER_FROM_CONFIG`）。
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/ai/providers/{name}",
+    tag = "admin",
+    params(("name" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn remove_provider(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path(name): Path<String>,
+) -> Result<StatusCode, Problem> {
+    delete_provider(&state, &op, &name).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 测试提供方连接并列出上游模型
+///
+/// 用已保存的地址与密钥请求上游的 `GET /models`；连不上时 `ok = false`，原因在 `error`。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/ai/providers/{name}/test",
+    tag = "admin",
+    params(("name" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = ProviderTestResult),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn post_provider_test(
+    State(state): State<AiState>,
+    AdminOperator(_): AdminOperator,
+    Path(name): Path<String>,
+) -> Result<Json<ProviderTestResult>, Problem> {
+    Ok(Json(test_provider(&state, &name).await?))
 }
 
 /// AI 模型（含停用的，含上游路由与计费倍率）

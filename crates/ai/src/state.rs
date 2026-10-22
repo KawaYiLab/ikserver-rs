@@ -29,7 +29,9 @@ pub struct AiState {
     /// 论坛工具读取的各域（TOOL 第 8 节）。
     pub forum: Forum,
     pub jobs: Jobs,
+    /// 含可用的提供方（[`crate::catalog::Catalog::providers`]）；生成时从这里取上游。
     pub catalog: CatalogCache,
+    /// 部署配置里的提供方（启动时固定）。后台维护的在 `catalog` 里。
     pub providers: Providers,
     pub config: Arc<Ai>,
 }
@@ -76,7 +78,7 @@ impl AiState {
     /// 数据库、ID、事件总线、媒体与私信共用。
     pub fn new(messaging: MessagingState, forum: Forum, config: Ai, providers: Providers) -> Self {
         Self {
-            catalog: CatalogCache::new(messaging.db.clone()),
+            catalog: CatalogCache::new(messaging.db.clone(), providers.clone()),
             jobs: Jobs::new(messaging.db.clone()),
             db: messaging.db.clone(),
             ids: messaging.ids.clone(),

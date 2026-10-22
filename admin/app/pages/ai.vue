@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Plus, X } from '@lucide/vue'
+import { Download, Plus, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -18,26 +18,30 @@ import { formatNumber, formatTime, jobStatusVariant } from '~/lib/format'
 
 definePageMeta({ admin: true })
 
+type Provider = Schemas['AdminProvider']
 type Model = Schemas['AdminModel']
 type Character = Schemas['AdminCharacter']
 
 const siteLink = useSiteLink()
-const { run, failure } = useNotify()
+const { run, success, failure } = useNotify()
 const confirm = useConfirm()
 const tab = useQueryParam<string>('tab', 'settings')
 const loading = ref(false)
 
 const settings = ref<Schemas['AdminSettings'] | null>(null)
+const providers = ref<Provider[] | null>(null)
 const models = ref<Model[] | null>(null)
 const characters = ref<Character[] | null>(null)
 
 async function loadConfig() {
-  const [s, m, c] = await Promise.all([
+  const [s, p, m, c] = await Promise.all([
     unwrap(api.GET('/v1/admin/ai/settings')),
+    unwrap(api.GET('/v1/admin/ai/providers')),
     unwrap(api.GET('/v1/admin/ai/models')),
     unwrap(api.GET('/v1/admin/ai/characters')),
   ])
   settings.value = s
+  providers.value = p
   settingsForm.value = { globalEnabled: s.globalEnabled, dailyTokens: s.dailyTokens, dailyTokensPerUser: s.dailyTokensPerUser }
   models.value = m
   characters.value = c
@@ -70,6 +74,107 @@ async function saveSettings() {
   const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/settings', { body: settingsForm.value })), '设置已保存')
   if (saved) settings.value = saved
 }
+
+// ---------- 提供方 ----------
+interface ProviderDraft {
+  isNew: boolean
+  name: string
+  displayName: string
+  baseUrl: string
+  /** 留空 = 保留原密钥（新建时即不带密钥）。 */
+  apiKey: string
+  clearApiKey: boolean
+  apiKeyHint: string | null
+  enabled: boolean
+  sortOrder: number
+}
+
+const providerDraft = ref<ProviderDraft | null>(null)
+/** 每个提供方最近一次测试连接列出的上游模型（填写上游模型名时提示）。 */
+const upstreamModels = ref<Record<string, string[]>>({})
+const testing = ref<string | null>(null)
+
+function editProvider(provider?: Provider) {
+  providerDraft.value = provider
+    ? {
+        isNew: false,
+        name: provider.name,
+        displayName: provider.displayName,
+        baseUrl: provider.baseUrl,
+        apiKey: '',
+        clearApiKey: false,
+        apiKeyHint: provider.apiKeyHint ?? null,
+        enabled: provider.enabled,
+        sortOrder: provider.sortOrder,
+      }
+    : {
+        isNew: true,
+        name: '',
+        displayName: '',
+        baseUrl: '',
+        apiKey: '',
+        clearApiKey: false,
+        apiKeyHint: null,
+        enabled: true,
+        sortOrder: (providers.value?.length ?? 0) * 10,
+      }
+}
+
+async function saveProvider() {
+  const d = providerDraft.value
+  if (!d) return
+  const apiKey = d.clearApiKey ? '' : d.apiKey.trim() || (d.isNew ? '' : null)
+  const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/providers/{name}', {
+    params: { path: { name: d.name } },
+    body: {
+      name: d.name,
+      displayName: d.displayName.trim() || d.name,
+      baseUrl: d.baseUrl,
+      apiKey,
+      enabled: d.enabled,
+      sortOrder: d.sortOrder,
+    },
+  })), '提供方已保存')
+  if (saved) {
+    providerDraft.value = null
+    await loadConfig().catch(failure)
+  }
+}
+
+async function removeProvider(provider: Provider) {
+  const ok = await confirm({
+    title: `删除提供方「${provider.displayName}」？`,
+    description: '还有模型在用它时不能删除，请先把这些模型改到别的提供方。',
+    confirmLabel: '删除',
+    destructive: true,
+  })
+  if (!ok) return
+  const done = await run(() => unwrap(api.DELETE('/v1/admin/ai/providers/{name}', { params: { path: { name: provider.name } } })).then(() => true), '已删除')
+  if (done) await loadConfig().catch(failure)
+}
+
+/** 用已保存的地址与密钥请求上游的模型列表。 */
+async function testProvider(name: string, quiet = false) {
+  testing.value = name
+  try {
+    const result = await unwrap(api.POST('/v1/admin/ai/providers/{name}/test', { params: { path: { name } } }))
+    if (result.ok) {
+      upstreamModels.value = { ...upstreamModels.value, [name]: result.models }
+      if (!quiet) success(`连接成功，上游有 ${result.models.length} 个模型（${result.elapsedMs} ms）`)
+    }
+    else {
+      failure(new Error(`连接失败：${result.error ?? '未知错误'}`))
+    }
+  }
+  catch (error) {
+    failure(error)
+  }
+  finally {
+    testing.value = null
+  }
+}
+
+const providerSourceLabel: Record<Schemas['ProviderSource'], string> = { admin: '后台', config: '部署配置' }
 
 // ---------- 模型 ----------
 interface ModelDraft extends Required<Omit<Schemas['ModelInput'], 'badge'>> {
@@ -273,6 +378,9 @@ const jobFilters = jobList.filters
   <div>
     <AdminPageHeader title="AI 助手" description="修改在本实例立即生效，其他实例最长 60 秒后生效。">
       <AdminRefreshButton :loading="loading || jobList.loading.value" @click="refresh" />
+      <Button v-if="tab === 'providers'" size="sm" @click="editProvider()">
+        <Plus class="size-4" />新建提供方
+      </Button>
       <Button v-if="tab === 'models'" size="sm" @click="editModel()">
         <Plus class="size-4" />新建模型
       </Button>
@@ -284,6 +392,7 @@ const jobFilters = jobList.filters
     <Tabs v-model="tab">
       <TabsList class="mb-4">
         <TabsTrigger value="settings">全局设置</TabsTrigger>
+        <TabsTrigger value="providers">提供方</TabsTrigger>
         <TabsTrigger value="models">模型</TabsTrigger>
         <TabsTrigger value="characters">角色</TabsTrigger>
         <TabsTrigger value="jobs">任务</TabsTrigger>
@@ -309,15 +418,69 @@ const jobFilters = jobList.filters
               <Input v-model.number="settingsForm.dailyTokens" type="number" min="0" />
             </label>
             <div class="text-sm text-muted-foreground">
-              已配置的提供方：
+              可用的提供方：
               <template v-if="settings?.providers.length">
                 <Badge v-for="p in settings.providers" :key="p" variant="outline" class="mr-1">{{ p }}</Badge>
               </template>
-              <span v-else>无（需要在部署配置里添加）</span>
+              <span v-else>无（在「提供方」里添加）</span>
             </div>
             <Button @click="saveSettings">保存</Button>
           </CardContent>
         </Card>
+      </TabsContent>
+
+      <TabsContent value="providers">
+        <p class="mb-4 text-sm text-muted-foreground">
+          任何 OpenAI 兼容的接口都可以添加（DeepSeek、通义千问、智谱、Kimi、OpenRouter、硅基流动、本地 Ollama / vLLM……），
+          模型在「模型」里按提供方名字引用。部署配置（<code class="font-mono text-xs">IK_AI__PROVIDERS__…</code>）里的提供方在这里只读。
+        </p>
+        <div class="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>提供方</TableHead>
+                <TableHead class="hidden md:table-cell">接口地址</TableHead>
+                <TableHead class="hidden sm:table-cell">密钥</TableHead>
+                <TableHead class="hidden lg:table-cell">模型</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead class="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="provider in providers ?? []" :key="`${provider.source}:${provider.name}`">
+                <TableCell>
+                  <div class="font-medium">{{ provider.displayName }}</div>
+                  <div class="font-mono text-xs text-muted-foreground">{{ provider.name }}</div>
+                </TableCell>
+                <TableCell class="hidden max-w-xs truncate font-mono text-xs md:table-cell" :title="provider.baseUrl">{{ provider.baseUrl || '—' }}</TableCell>
+                <TableCell class="hidden font-mono text-xs sm:table-cell">{{ provider.apiKeyHint ?? '无' }}</TableCell>
+                <TableCell class="hidden lg:table-cell">
+                  <span v-if="provider.modelKeys.length" class="font-mono text-xs">{{ provider.modelKeys.join('、') }}</span>
+                  <span v-else class="text-xs text-muted-foreground">未使用</span>
+                </TableCell>
+                <TableCell>
+                  <div class="flex flex-wrap gap-1">
+                    <Badge :variant="provider.source === 'config' ? 'secondary' : 'outline'">{{ providerSourceLabel[provider.source] }}</Badge>
+                    <Badge v-if="!provider.enabled" variant="outline">停用</Badge>
+                    <Badge v-if="provider.shadowed" variant="destructive" title="部署配置里有同名的提供方，这一条不生效">被部署配置覆盖</Badge>
+                  </div>
+                </TableCell>
+                <TableCell class="space-x-1 text-right whitespace-nowrap">
+                  <Button size="sm" variant="outline" :disabled="testing === provider.name" @click="testProvider(provider.name)">
+                    {{ testing === provider.name ? '测试中…' : '测试' }}
+                  </Button>
+                  <template v-if="provider.source === 'admin'">
+                    <Button size="sm" variant="outline" @click="editProvider(provider)">编辑</Button>
+                    <Button size="sm" variant="ghost" class="text-destructive" @click="removeProvider(provider)">删除</Button>
+                  </template>
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="providers && providers.length === 0">
+                <TableCell colspan="6" class="py-10 text-center text-muted-foreground">还没有提供方</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
       </TabsContent>
 
       <TabsContent value="models">
@@ -472,6 +635,57 @@ const jobFilters = jobList.filters
       </TabsContent>
     </Tabs>
 
+    <!-- 提供方编辑 -->
+    <Dialog :open="!!providerDraft" @update:open="(v) => { if (!v) providerDraft = null }">
+      <DialogScrollContent v-if="providerDraft" class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{{ providerDraft.isNew ? '新建提供方' : `编辑提供方 ${providerDraft.name}` }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">标识（创建后不可改）</span>
+              <Input v-model="providerDraft.name" :readonly="!providerDraft.isNew" class="font-mono" placeholder="如 deepseek" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">显示名称</span>
+              <Input v-model="providerDraft.displayName" placeholder="如 DeepSeek 官方" />
+            </label>
+          </div>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">接口地址（Base URL）</span>
+            <Input v-model="providerDraft.baseUrl" class="font-mono" placeholder="https://api.deepseek.com/v1" />
+            <span class="text-xs text-muted-foreground">OpenAI 兼容接口的根地址，不含 /chat/completions。</span>
+          </label>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">API Key</span>
+            <Input
+              v-model="providerDraft.apiKey" type="password" autocomplete="off" class="font-mono"
+              :disabled="providerDraft.clearApiKey"
+              :placeholder="providerDraft.isNew ? 'sk-…（本地部署可留空）' : `留空则保留原密钥${providerDraft.apiKeyHint ? `（${providerDraft.apiKeyHint}）` : ''}`"
+            />
+          </label>
+          <label v-if="!providerDraft.isNew && providerDraft.apiKeyHint" class="flex items-center gap-2 text-sm">
+            <Checkbox v-model="providerDraft.clearApiKey" />
+            清除密钥（不带密钥请求上游）
+          </label>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">排序</span>
+            <Input v-model.number="providerDraft.sortOrder" type="number" />
+          </label>
+          <label class="flex items-center justify-between gap-4 text-sm">
+            启用
+            <Switch v-model="providerDraft.enabled" />
+          </label>
+          <p class="text-xs text-muted-foreground">保存后可以在列表里点「测试」确认连通，并获取上游的模型列表。</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="providerDraft = null">取消</Button>
+          <Button :disabled="!providerDraft.name.trim() || !providerDraft.baseUrl.trim()" @click="saveProvider">保存</Button>
+        </DialogFooter>
+      </DialogScrollContent>
+    </Dialog>
+
     <!-- 模型编辑 -->
     <Dialog :open="!!modelDraft" @update:open="(v) => { if (!v) modelDraft = null }">
       <DialogScrollContent v-if="modelDraft" class="sm:max-w-xl">
@@ -490,18 +704,33 @@ const jobFilters = jobList.filters
             </label>
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">提供方</span>
-              <Input v-model="modelDraft.provider" list="ai-providers" class="font-mono" placeholder="部署配置里的提供方名" />
+              <Input v-model="modelDraft.provider" list="ai-providers" class="font-mono" placeholder="「提供方」里的名字" />
               <datalist id="ai-providers">
                 <option v-for="p in settings?.providers ?? []" :key="p" :value="p" />
               </datalist>
               <span v-if="modelDraft.provider && !settings?.providers.includes(modelDraft.provider)" class="text-xs text-warning">
-                部署配置里没有这个提供方，调用时会退回默认模型
+                没有这个提供方或已停用，调用时会退回默认模型
               </span>
             </label>
-            <label class="grid gap-2">
-              <span class="text-sm leading-none font-medium">上游模型名</span>
-              <Input v-model="modelDraft.providerModel" class="font-mono" />
-            </label>
+            <div class="grid gap-2">
+              <Label for="ai-provider-model">上游模型名</Label>
+              <div class="flex gap-2">
+                <Input id="ai-provider-model" v-model="modelDraft.providerModel" list="ai-upstream-models" class="font-mono" />
+                <Button
+                  size="icon" variant="outline" title="从上游获取模型列表" aria-label="从上游获取模型列表"
+                  :disabled="!modelDraft.provider || testing === modelDraft.provider || !providers?.some(p => p.name === modelDraft?.provider)"
+                  @click="testProvider(modelDraft.provider, true)"
+                >
+                  <Download class="size-4" />
+                </Button>
+              </div>
+              <datalist id="ai-upstream-models">
+                <option v-for="m in upstreamModels[modelDraft.provider] ?? []" :key="m" :value="m" />
+              </datalist>
+              <span v-if="upstreamModels[modelDraft.provider]" class="text-xs text-muted-foreground">
+                上游有 {{ upstreamModels[modelDraft.provider]?.length }} 个模型，输入时可选
+              </span>
+            </div>
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">成本权重</span>
               <Input v-model.number="modelDraft.costWeight" type="number" min="0" step="0.1" />

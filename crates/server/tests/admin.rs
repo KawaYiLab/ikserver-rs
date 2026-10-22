@@ -375,6 +375,213 @@ async fn ai_config_is_admin_only_and_round_trips(db: PgPool) {
     );
 }
 
+/// OpenAI 兼容的 `GET /models` 桩：只认给定的密钥。
+async fn models_stub(key: &'static str) -> String {
+    let app = axum::Router::new().route(
+        "/v1/models",
+        axum::routing::get(move |headers: http::HeaderMap| async move {
+            let auth = headers
+                .get(http::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok());
+            if auth == Some(&format!("Bearer {key}")) {
+                (
+                    StatusCode::OK,
+                    axum::Json(json!({ "object": "list",
+                        "data": [{ "id": "deepseek-reasoner" }, { "id": "deepseek-chat" }] })),
+                )
+            } else {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    axum::Json(json!({ "error": { "message": "invalid api key" } })),
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}/v1")
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn ai_providers_are_managed_in_admin(db: PgPool) {
+    let app = setup(&db).await;
+    let base = "/v1/admin/ai/providers";
+    assert_eq!(
+        call(&app, MODERATOR, "GET", base, Value::Null).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, list) = call(&app, ADMIN, "GET", base, Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list, json!([]));
+
+    let key = "sk-admin-0123456789abcd";
+    let url = models_stub(key).await;
+    let provider = |api_key: Value, enabled: bool| {
+        json!({ "name": "deepseek", "displayName": " DeepSeek ", "baseUrl": format!("{url}/"),
+                "apiKey": api_key, "enabled": enabled })
+    };
+
+    // 校验：地址必须是 http(s)，路径与请求体的名字一致。
+    let mut bad = provider(json!(key), true);
+    bad["baseUrl"] = json!("ftp://example.com");
+    let (status, body) = call(&app, ADMIN, "PUT", &format!("{base}/deepseek"), bad).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/other"),
+        provider(json!(key), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // 新建：密钥不回传，只给末四位；名称去空白、地址去掉末尾的 /。
+    let (status, saved) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/deepseek"),
+        provider(json!(key), true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["source"], "admin");
+    assert_eq!(saved["displayName"], "DeepSeek");
+    assert_eq!(saved["baseUrl"], json!(url));
+    assert_eq!(saved["apiKeyHint"], "…abcd");
+    assert!(!saved.to_string().contains(key));
+
+    // 测试连接：用保存的密钥列出上游模型。
+    let (status, tested) = call(
+        &app,
+        ADMIN,
+        "POST",
+        &format!("{base}/deepseek/test"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tested["ok"], true, "{tested}");
+    assert_eq!(
+        tested["models"],
+        json!(["deepseek-chat", "deepseek-reasoner"])
+    );
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "POST",
+        &format!("{base}/nowhere/test"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // 模型可以指向它；全局设置里列出它。
+    let (status, model) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/ai/models/ds",
+        json!({ "key": "ds", "displayName": "DS", "provider": "deepseek",
+                "providerModel": "deepseek-chat" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{model}");
+    assert_eq!(model["providerConfigured"], true);
+    let (_, settings) = call(&app, ADMIN, "GET", "/v1/admin/ai/settings", Value::Null).await;
+    assert_eq!(settings["providers"], json!(["deepseek"]));
+
+    // 不传密钥 = 保留原有的；停用后模型显示提供方不可用。
+    let (status, saved) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/deepseek"),
+        provider(Value::Null, false),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["apiKeyHint"], "…abcd");
+    assert_eq!(saved["modelKeys"], json!(["ds"]));
+    let stored: String =
+        sqlx::query_scalar!("SELECT api_key FROM ai_providers WHERE name = 'deepseek'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(stored, key);
+    let (_, models) = call(&app, ADMIN, "GET", "/v1/admin/ai/models", Value::Null).await;
+    assert_eq!(models[0]["providerConfigured"], false);
+
+    // 换一个错的密钥：测试连接报上游的错误，不是 5xx。
+    call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/deepseek"),
+        provider(json!("sk-wrong-000000000000"), false),
+    )
+    .await;
+    let (status, tested) = call(
+        &app,
+        ADMIN,
+        "POST",
+        &format!("{base}/deepseek/test"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(tested["ok"], false);
+    assert!(
+        tested["error"].as_str().unwrap().contains("401"),
+        "{tested}"
+    );
+
+    // 还有模型在用时不能删。
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        &format!("{base}/deepseek"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "AI_PROVIDER_IN_USE");
+    call(&app, ADMIN, "DELETE", "/v1/admin/ai/models/ds", Value::Null).await;
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        &format!("{base}/deepseek"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "DELETE",
+        &format!("{base}/deepseek"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // 审计里记了是否换密钥，不记密钥本身。
+    let details: Vec<Value> = sqlx::query_scalar!(
+        "SELECT details FROM admin_audit_log WHERE action = 'ai.provider.save'
+         ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(details.len(), 3);
+    assert_eq!(details[1]["apiKeyChanged"], false);
+    assert!(details.iter().all(|d| !d.to_string().contains("sk-")));
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn categories_and_tags(db: PgPool) {
     let app = setup(&db).await;

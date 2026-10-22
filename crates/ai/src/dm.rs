@@ -21,7 +21,7 @@ use sqlx::PgConnection;
 use crate::AiState;
 use crate::catalog::{Catalog, Model, OutputMode, RoleCard};
 use crate::generate::{End, Live, StreamCtx, Streamed, generate};
-use crate::llm::{ChatMessage, LlmError};
+use crate::llm::{ChatMessage, LlmError, Providers};
 use crate::quota::{self, Denial, Hold};
 use crate::repo::{self, JobOutcome, JobRow, SessionRow};
 use crate::sanitize;
@@ -221,6 +221,8 @@ struct Prepared {
     card: RoleCard,
     model: Model,
     default_model: Option<Model>,
+    /// 这次快照里可用的上游。
+    providers: Providers,
     reply_id: i64,
     hold: Hold,
     messages: Vec<ChatMessage>,
@@ -347,7 +349,7 @@ async fn prepare(
         &card,
         job.model_override.as_deref(),
         session.model_key.as_deref(),
-        |p| state.providers.contains(p),
+        |p| catalog.providers.contains(p),
     )
     .cloned() else {
         tracing::error!(
@@ -358,7 +360,7 @@ async fn prepare(
     };
     let default_model = catalog
         .default_model()
-        .filter(|m| state.providers.contains(&m.provider))
+        .filter(|m| catalog.providers.contains(&m.provider))
         .cloned();
 
     // 历史（LLM-001）：当前代际、触发消息为止、最近 N 条。
@@ -466,6 +468,7 @@ async fn prepare(
         card,
         model,
         default_model,
+        providers: catalog.providers.clone(),
         reply_id,
         hold,
         messages,
@@ -505,6 +508,7 @@ pub async fn run_job(
             ai_user_id: prepared.job.ai_user_id,
             audience,
         }),
+        providers: prepared.providers.clone(),
         mode: prepared.card.output_mode,
         max_chars: sanitize::DM_MAX_CHARS,
         tools: Some(ToolContext::new(state, prepared.job.quota_user_id).await?),

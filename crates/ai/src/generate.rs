@@ -16,8 +16,8 @@ use tokio::time::Instant;
 use crate::AiState;
 use crate::catalog::{Model, OutputMode};
 use crate::llm::{
-    ChatMessage, ChatProvider, ChatRequest, LlmError, StreamEvent, ToolCall, ToolCallAssembler,
-    Usage,
+    ChatMessage, ChatProvider, ChatRequest, LlmError, Providers, StreamEvent, ToolCall,
+    ToolCallAssembler, Usage,
 };
 use crate::quota;
 use crate::repo;
@@ -91,6 +91,8 @@ pub(crate) struct StreamCtx<'a> {
     pub job_id: i64,
     /// 有推送目标时推送累计正文、「正在输入」与工作流事件，并轮询停止信号。
     pub live: Option<Live>,
+    /// 可用的上游（准备阶段那份配置快照里的）。
+    pub providers: Providers,
     pub mode: OutputMode,
     /// 正文上限（私信 2500，评论 1500）。
     pub max_chars: usize,
@@ -355,7 +357,7 @@ async fn run_rounds(
     first_delta: Option<Duration>,
 ) -> Streamed {
     let state = ctx.state;
-    let provider = match state.providers.get(&model.provider) {
+    let provider = match ctx.providers.get(&model.provider) {
         Ok(provider) => provider,
         Err(error) => return Streamed::failed(error),
     };
@@ -474,7 +476,7 @@ pub(crate) async fn generate(
     if matches!(streamed.end, End::FirstDeltaTimeout)
         && let Some(fallback) = default_model.filter(|d| d.key != model.key)
         && deadline.saturating_duration_since(Instant::now()) >= FALLBACK_MIN_REMAINING
-        && state.providers.contains(&fallback.provider)
+        && ctx.providers.contains(&fallback.provider)
     {
         tracing::warn!(job = ctx.job_id, from = %model.key, to = %fallback.key, "首帧超时，退回默认模型");
         let earlier = streamed.charged;

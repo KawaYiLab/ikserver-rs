@@ -320,7 +320,7 @@
 ## AI 助手（`20261027000001_ai.sql`）
 
 - 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。
-- `ai_models`：`key` 对外；`provider`（部署配置里的提供方名字）与 `provider_model` 是上游路由，只在服务端流转。
+- `ai_models`：`key` 对外；`provider`（提供方名字，见下面的 `ai_providers`）与 `provider_model` 是上游路由，只在服务端流转。
   部分唯一索引保证最多一条默认模型，CHECK 保证默认模型启用（D-005 方案 A：默认模型是一条有自己倍率的记录）。
 - `ai_role_cards`：角色卡直接持有 system prompt 与示例对话（`examples` JSONB，few-shot，GEN-071）；
   `allowed_model_ids` 为空表示不限制；「某用户的角色卡」= 启用的、按 `sort_order, id` 取第一张（部分索引）。
@@ -328,6 +328,13 @@
   04:00 切换的配额日；计数含在飞预占，并发请求在行锁上串行。`ai_quota_holds` 一份预占一行，删除即认领；
   过期的由每分钟的定时任务回收。`ai_quota_settlements` 是结算去重标记（键 `hold:<id>` 或 `exec:<执行 id>`，
   保留 48 小时）。计数器保留 90 天。
+
+## AI 上游提供方（`20261108000001_ai_providers.sql`）
+
+- `ai_providers` 归 ik-ai：管理后台维护的 OpenAI 兼容上游（`name`、`base_url`、`api_key`、启停）。模型按 `name` 引用，
+  不建外键：部署配置（`IK_AI__PROVIDERS__<名字>__…`）里的提供方不在表里，名字也可能暂时指向不存在的提供方
+  （调用时退回默认模型，LLM-011）。同名时以部署配置为准，后台不允许新建同名的。
+- `api_key` 明文存储、只在服务端流转：后台接口只回末四位，审计只记「是否更换」。与配置快照一起缓存 60 秒。
 
 ## AI 私聊（`20261028000001_ai_sessions.sql`）
 

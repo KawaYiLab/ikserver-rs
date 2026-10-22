@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_providers (id, name, display_name, base_url, api_key, enabled, sort_order,\n                                   created_at, updated_at)\n         VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6, $7, $8, $8)\n         ON CONFLICT (name) DO UPDATE SET display_name = $3, base_url = $4,\n             api_key = COALESCE($5, ai_providers.api_key), enabled = $6, sort_order = $7,\n             updated_at = $8",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9c1f993cb685f235129acfd8873635c84163c69457c2b7fe2044c5f4abe90fd"
+}

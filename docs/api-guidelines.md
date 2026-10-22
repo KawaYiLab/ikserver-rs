@@ -146,6 +146,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REINDEX_RUNNING | 409 | 索引正在重建，请稍后再试 | |
 | SEARCH_ENGINE_NOT_CONFIGURED | 409 | 没有配置搜索引擎 | 重建索引时 |
 | AI_MODEL_IS_DEFAULT | 409 | 默认模型不能删除，请先把其他模型设为默认 | 管理后台删除模型 |
+| AI_PROVIDER_IN_USE | 409 | 还有模型在用这个提供方，请先把这些模型改到别的提供方或删除 | 管理后台删除提供方 |
+| AI_PROVIDER_FROM_CONFIG | 409 | 部署配置里的提供方只能在部署配置里修改 | 管理后台删除部署配置（`IK_AI__PROVIDERS__…`）里的提供方 |
 | AI_NOT_LATEST_REPLY | 409 | 只能重新生成最后一条 AI 回复 | GEN-013 |
 | AI_TRIGGER_WITHDRAWN | 409 | 触发这条回复的消息已撤回 | 重新生成时（GEN-014） |
 | REPORT_DUPLICATE | 409 | 你已举报过该内容，正在处理中 | 同一目标有未结案的举报；结案后可以再举报 |

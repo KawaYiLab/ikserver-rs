@@ -1,4 +1,4 @@
-//! SQL。表都归 ik-ai：`ai_settings`、`ai_models`、`ai_role_cards`、`ai_quota_*`。
+//! SQL。表都归 ik-ai：`ai_settings`、`ai_providers`、`ai_models`、`ai_role_cards`、`ai_quota_*`。
 
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgConnection;
@@ -40,6 +40,86 @@ pub(crate) async fn upsert_settings(
     .execute(conn)
     .await?;
     Ok(())
+}
+
+pub(crate) struct ProviderRow {
+    pub name: String,
+    pub display_name: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub enabled: bool,
+    pub sort_order: i32,
+}
+
+pub(crate) async fn providers(conn: &mut PgConnection) -> sqlx::Result<Vec<ProviderRow>> {
+    sqlx::query_as!(
+        ProviderRow,
+        "SELECT name, display_name, base_url, api_key, enabled, sort_order
+         FROM ai_providers ORDER BY sort_order, id"
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct NewProvider<'a> {
+    pub id: i64,
+    pub name: &'a str,
+    pub display_name: &'a str,
+    pub base_url: &'a str,
+    /// None = 保留原有密钥（新建时为空串）。
+    pub api_key: Option<&'a str>,
+    pub enabled: bool,
+    pub sort_order: i32,
+    pub now: DateTime<Utc>,
+}
+
+/// 按名字新增或更新。
+pub(crate) async fn upsert_provider(
+    conn: &mut PgConnection,
+    p: &NewProvider<'_>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_providers (id, name, display_name, base_url, api_key, enabled, sort_order,
+                                   created_at, updated_at)
+         VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6, $7, $8, $8)
+         ON CONFLICT (name) DO UPDATE SET display_name = $3, base_url = $4,
+             api_key = COALESCE($5, ai_providers.api_key), enabled = $6, sort_order = $7,
+             updated_at = $8",
+        p.id,
+        p.name,
+        p.display_name,
+        p.base_url,
+        p.api_key,
+        p.enabled,
+        p.sort_order,
+        p.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn models_using_provider(
+    conn: &mut PgConnection,
+    name: &str,
+) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar!(
+        "SELECT key FROM ai_models WHERE provider = $1 ORDER BY sort_order, id",
+        name
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 返回是否删到了。
+pub(crate) async fn delete_provider(conn: &mut PgConnection, name: &str) -> sqlx::Result<bool> {
+    Ok(
+        sqlx::query!("DELETE FROM ai_providers WHERE name = $1", name)
+            .execute(conn)
+            .await?
+            .rows_affected()
+            > 0,
+    )
 }
 
 pub(crate) struct ModelRow {

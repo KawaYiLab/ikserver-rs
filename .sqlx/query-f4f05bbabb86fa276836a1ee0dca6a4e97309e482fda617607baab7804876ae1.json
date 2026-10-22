@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_providers (id, name, display_name, base_url, api_key)\n                 VALUES (1, 'stub', '桩', $1, 'sk-test')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f4f05bbabb86fa276836a1ee0dca6a4e97309e482fda617607baab7804876ae1"
+}

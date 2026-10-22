@@ -241,8 +241,11 @@ pub struct OpenAiCompatible {
     client: Client<OpenAIConfig>,
 }
 
-/// rustls + ring + webpki 根证书（不引入 aws-lc）。
-fn http_client() -> Result<reqwest13::Client, LlmError> {
+/// rustls + ring + webpki 根证书（不引入 aws-lc）。进程内只建一次，各提供方共用连接池。
+static HTTP_CLIENT: LazyLock<Result<reqwest13::Client, LlmError>> =
+    LazyLock::new(build_http_client);
+
+fn build_http_client() -> Result<reqwest13::Client, LlmError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
@@ -261,15 +264,64 @@ fn http_client() -> Result<reqwest13::Client, LlmError> {
         .map_err(|e| LlmError::Upstream(format!("http client: {e}")))
 }
 
+fn http_client() -> Result<reqwest13::Client, LlmError> {
+    HTTP_CLIENT.clone()
+}
+
 impl OpenAiCompatible {
     pub fn new(provider: &AiProvider) -> Result<Self, LlmError> {
+        Self::connect(&provider.base_url, provider.api_key.expose())
+    }
+
+    /// `base_url` 例如 `https://api.deepseek.com/v1`。
+    pub fn connect(base_url: &str, api_key: &str) -> Result<Self, LlmError> {
         let config = OpenAIConfig::new()
-            .with_api_base(provider.base_url.trim_end_matches('/'))
-            .with_api_key(provider.api_key.expose());
+            .with_api_base(base_url.trim_end_matches('/'))
+            .with_api_key(api_key);
         Ok(Self {
             client: Client::build(http_client()?, config),
         })
     }
+}
+
+/// 上游列出的模型名（`GET {base_url}/models`），管理后台测试连接与填写上游模型名时用。
+pub async fn list_models(base_url: &str, api_key: &str) -> Result<Vec<String>, LlmError> {
+    #[derive(Deserialize)]
+    struct Listed {
+        #[serde(default)]
+        data: Vec<Entry>,
+    }
+    #[derive(Deserialize)]
+    struct Entry {
+        id: String,
+    }
+
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let mut request = http_client()?.get(url).timeout(Duration::from_secs(15));
+    if !api_key.is_empty() {
+        request = request.bearer_auth(api_key);
+    }
+    let response = request.send().await.map_err(|e| {
+        if e.is_timeout() {
+            LlmError::Timeout
+        } else {
+            LlmError::Upstream(e.to_string())
+        }
+    })?;
+    let status = response.status();
+    if !status.is_success() {
+        let body = response.text().await.unwrap_or_default();
+        let body: String = body.chars().take(300).collect();
+        return Err(classify(format!("{} {body}", status.as_u16())));
+    }
+    let listed: Listed = response
+        .json()
+        .await
+        .map_err(|e| LlmError::Upstream(format!("unexpected response: {e}")))?;
+    let mut ids: Vec<String> = listed.data.into_iter().map(|m| m.id).collect();
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
 }
 
 #[derive(Debug, Deserialize)]
@@ -415,6 +467,12 @@ pub struct Providers {
     by_name: BTreeMap<String, Arc<dyn ChatProvider>>,
 }
 
+impl std::fmt::Debug for Providers {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_set().entries(self.by_name.keys()).finish()
+    }
+}
+
 impl Providers {
     pub fn from_config(config: &BTreeMap<String, AiProvider>) -> Result<Self, LlmError> {
         let mut by_name = BTreeMap::new();
@@ -428,6 +486,12 @@ impl Providers {
     /// 测试或别的实现直接注册。
     pub fn with(mut self, name: impl Into<String>, provider: Arc<dyn ChatProvider>) -> Self {
         self.by_name.insert(name.into(), provider);
+        self
+    }
+
+    /// 补上没有的名字；已有的（部署配置里的）不被覆盖。
+    pub fn or_with(mut self, name: impl Into<String>, provider: Arc<dyn ChatProvider>) -> Self {
+        self.by_name.entry(name.into()).or_insert(provider);
         self
     }
 
