@@ -109,7 +109,7 @@ fn unknown_version_lists_only_reviewed_aliases_and_not_a_guessed_retry() {
     assert!(text.contains("3.2 → ch:Chapter230"), "{text}");
     assert!(text.contains("3.3 → ch:Chapter240"), "{text}");
     assert!(!text.contains("建议重试："), "{text}");
-    let keyword = error_text(&c, "ik_search", json!({"keyword":"3.4 核心"}));
+    let keyword = error_text(&c, "ik_search", json!({"keyword":"3.4版本 核心"}));
     assert!(keyword.contains("已核验版本"), "{keyword}");
     assert!(!keyword.contains("keyword=\"3.3 核心\""), "{keyword}");
 }

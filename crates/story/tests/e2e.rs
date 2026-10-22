@@ -232,6 +232,27 @@ fn search_usability_release_constraints_are_never_relaxed_or_guessed() {
 }
 
 #[test]
+fn bare_unreviewed_decimals_in_keywords_stay_literal() {
+    let c = corpus();
+    // 台词与设定里的普通小数不是版本选择器，不能因为没有版本映射而整次检索报错。
+    for keyword in ["1.5", "2.0", "0.5", "铃 1.5", "v1.5x"] {
+        assert!(
+            call(&c, "ik_search", json!({"keyword": keyword})).is_ok(),
+            "{keyword}"
+        );
+        assert!(
+            call(&c, "ik_catalog", json!({"keyword": keyword})).is_ok(),
+            "{keyword}"
+        );
+    }
+    // 显式标注的版本仍是硬条件：未核验版本照旧报错，不退化为普通文本。
+    for keyword in ["1.5版本", "版本 1.5", "v1.5", "3.4版本 核心"] {
+        let error = call(&c, "ik_search", json!({"keyword": keyword})).unwrap_err();
+        assert!(error.contains("没有已确认"), "{keyword}: {error}");
+    }
+}
+
+#[test]
 fn review_numeric_arguments() {
     let c = corpus();
     assert!(

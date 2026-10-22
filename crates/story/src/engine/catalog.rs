@@ -46,7 +46,7 @@ fn legacy(corpus: &Corpus, args: &CatalogArgs) -> ToolResult {
         if keyword.is_empty() {
             return Ok(root(corpus));
         }
-        if let Some(release) = super::releases::lookup(keyword)? {
+        if let Some(release) = super::releases::lookup_in_text(keyword)? {
             let group = super::releases::resolve(corpus, release)?;
             let mut out = String::new();
             super::releases::push_note(&mut out, corpus, release);
@@ -444,7 +444,7 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     let path = args.path.as_deref().unwrap_or("").trim();
     let keyword = args.keyword.as_deref().unwrap_or("").trim();
     let release = if path.is_empty() {
-        super::releases::lookup(keyword)?
+        super::releases::lookup_in_text(keyword)?
     } else {
         None
     };

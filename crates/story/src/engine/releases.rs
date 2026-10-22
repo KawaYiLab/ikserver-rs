@@ -34,21 +34,33 @@ pub(crate) fn revision_data() -> Vec<(&'static str, &'static str)> {
 /// Recognize only a whole version expression. Percentages, decimal values in
 /// phrases and arbitrary substrings remain literal search terms.
 fn version_expression(query: &str) -> Option<String> {
+    parse_version(query).map(|(version, _)| version)
+}
+
+/// 解析版本表达式，并返回是否带有显式版本标记（版本 / 版 / version / v）。
+/// 无标记的裸小数（如「1.5」）在自由文本里可能只是普通数字。
+fn parse_version(query: &str) -> Option<(String, bool)> {
     let folded = fold(query);
     let mut value = folded.trim();
+    let mut marked = false;
     for prefix in ["版本", "version "] {
         if let Some(rest) = value.strip_prefix(prefix) {
             value = rest.trim();
+            marked = true;
             break;
         }
     }
     for suffix in ["版本", "版", " version"] {
         if let Some(rest) = value.strip_suffix(suffix) {
             value = rest.trim();
+            marked = true;
             break;
         }
     }
-    value = value.strip_prefix('v').unwrap_or(value);
+    if let Some(rest) = value.strip_prefix('v') {
+        value = rest;
+        marked = true;
+    }
     let parts: Vec<&str> = value.split('.').collect();
     if !(2..=3).contains(&parts.len())
         || parts
@@ -59,11 +71,12 @@ fn version_expression(query: &str) -> Option<String> {
     }
     // Only the reviewed x.y / x.y.0 expressions are aliases. An unknown patch
     // retains its full version so it produces an explicit unmapped result.
-    Some(if parts.len() == 3 && parts[2] == "0" {
+    let version = if parts.len() == 3 && parts[2] == "0" {
         format!("{}.{}", parts[0], parts[1])
     } else {
         value.to_owned()
-    })
+    };
+    Some((version, marked))
 }
 
 pub(crate) fn lookup(query: &str) -> Result<Option<&'static Release>, ToolError> {
@@ -73,6 +86,15 @@ pub(crate) fn lookup(query: &str) -> Result<Option<&'static Release>, ToolError>
     RELEASES.iter().find(|r| r.version == version).map(Some).ok_or_else(|| {
         ToolError(format!("版本「{query}」没有已确认的主线章节映射。请用 ik_catalog() 查看章节，并传入章节名或精确 ch:… id；不会按版本周期猜测。"))
     })
+}
+
+/// 自由文本（检索关键词、目录标题筛选）里的版本识别：已核验版本照常作为选择器；
+/// 未核验的裸小数当作普通文本返回 None，显式标注的未核验版本仍然报错。
+pub(crate) fn lookup_in_text(query: &str) -> Result<Option<&'static Release>, ToolError> {
+    match parse_version(query) {
+        Some((version, false)) if !RELEASES.iter().any(|r| r.version == version) => Ok(None),
+        _ => lookup(query),
+    }
 }
 
 pub(crate) fn for_group(group: &str) -> Option<&'static Release> {
@@ -122,7 +144,7 @@ pub(crate) fn query(keyword: &str) -> Result<(Vec<String>, Option<&'static Relea
                 consumed = 2;
             }
         }
-        if let Some(release) = lookup(expression)? {
+        if let Some(release) = lookup_in_text(expression)? {
             if selected.is_some_and(|r| r.group != release.group) {
                 return err(
                     "一次检索只能指定一个版本章节范围；请分别查询，或使用 ik_catalog() 浏览。",
