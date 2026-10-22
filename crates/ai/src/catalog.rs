@@ -90,6 +90,10 @@ pub struct RoleCard {
     /// 空 = 全部启用模型。
     pub allowed_model_ids: Vec<i64>,
     pub suggested_questions: Vec<String>,
+    /// 提供剧情库工具（ADR 0004）。
+    pub story_tools: bool,
+    /// 启用的站外 MCP 服务。
+    pub mcp_server_ids: Vec<i64>,
 }
 
 impl RoleCard {
@@ -97,6 +101,30 @@ impl RoleCard {
         model.enabled
             && (self.allowed_model_ids.is_empty() || self.allowed_model_ids.contains(&model.id))
     }
+}
+
+/// 站外 MCP 服务（启用的）与它生效的工具（ADR 0004）。
+#[derive(Debug, Clone)]
+pub struct McpServer {
+    pub id: i64,
+    pub name: String,
+    pub display_name: String,
+    pub url: String,
+    pub auth_header: String,
+    pub timeout: Duration,
+    pub max_result_chars: usize,
+    pub tools: Vec<McpTool>,
+}
+
+/// 管理员确认过的工具定义（运行时用它，不用远端实时返回的）。
+#[derive(Debug, Clone)]
+pub struct McpTool {
+    pub exposed_name: String,
+    pub remote_name: String,
+    /// 时间线文案：后台填的，否则 MCP 的 title。
+    pub label: Option<String>,
+    pub description: String,
+    pub input_schema: serde_json::Value,
 }
 
 /// 一份快照。模型、角色卡都按 `sort_order, id` 排好。
@@ -107,6 +135,8 @@ pub struct Catalog {
     pub providers: Providers,
     pub models: Vec<Model>,
     pub cards: Vec<RoleCard>,
+    /// 启用的站外 MCP 服务（含生效的工具）。
+    pub mcp_servers: Vec<Arc<McpServer>>,
 }
 
 impl Catalog {
@@ -288,14 +318,71 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
                 .into_iter()
                 .filter(|q| !q.trim().is_empty())
                 .collect(),
+            story_tools: row.story_tools,
+            mcp_server_ids: row.mcp_server_ids,
         })
         .collect();
+    let mcp_servers = load_mcp(&mut conn).await?;
     Ok(Catalog {
         limits,
         providers,
         models,
         cards,
+        mcp_servers,
     })
+}
+
+async fn load_mcp(conn: &mut sqlx::PgConnection) -> Result<Vec<Arc<McpServer>>, Problem> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Definition {
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        description: String,
+        #[serde(default)]
+        input_schema: serde_json::Value,
+    }
+    let mut tools = repo::active_mcp_tools(conn).await?;
+    let mut out = Vec::new();
+    for row in repo::mcp_servers(conn).await? {
+        if !row.enabled {
+            continue;
+        }
+        let server_tools = tools
+            .extract_if(.., |t| t.server_id == row.id)
+            .filter_map(|t| {
+                // 坏数据跳过这个工具，不阻塞生成。
+                let def: Definition = serde_json::from_value(t.approved).ok()?;
+                let input_schema = if def.input_schema.is_object() {
+                    def.input_schema
+                } else {
+                    serde_json::json!({ "type": "object", "properties": {} })
+                };
+                Some(McpTool {
+                    exposed_name: t.exposed_name,
+                    remote_name: t.remote_name,
+                    label: t
+                        .timeline_text
+                        .filter(|l| !l.trim().is_empty())
+                        .or(def.title),
+                    description: def.description,
+                    input_schema,
+                })
+            })
+            .collect();
+        out.push(Arc::new(McpServer {
+            id: row.id,
+            name: row.name,
+            display_name: row.display_name,
+            url: row.url,
+            auth_header: row.auth_header,
+            timeout: Duration::from_millis(u64::try_from(row.timeout_ms).unwrap_or(15_000)),
+            max_result_chars: usize::try_from(row.max_result_chars).unwrap_or(4000),
+            tools: server_tools,
+        }));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -339,6 +426,8 @@ mod tests {
             default_model_id,
             allowed_model_ids: allowed,
             suggested_questions: Vec::new(),
+            story_tools: false,
+            mcp_server_ids: Vec::new(),
         }
     }
 
@@ -352,6 +441,7 @@ mod tests {
             providers: Providers::default(),
             models,
             cards: Vec::new(),
+            mcp_servers: Vec::new(),
         }
     }
 

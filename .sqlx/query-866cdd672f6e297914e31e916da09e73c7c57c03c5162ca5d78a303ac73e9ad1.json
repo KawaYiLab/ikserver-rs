@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_mcp_tools SET missing = NOT (remote_name = ANY($2)), updated_at = $3\n         WHERE server_id = $1 AND missing IS DISTINCT FROM NOT (remote_name = ANY($2))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "866cdd672f6e297914e31e916da09e73c7c57c03c5162ca5d78a303ac73e9ad1"
+}

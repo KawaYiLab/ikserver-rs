@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 use crate::catalog::OutputMode;
 use crate::llm::Usage;
 use crate::sanitize;
+use crate::toolbox::ToolLabel;
 use crate::tools::ToolMeta;
 
 /// 单条消息最多保存的事件数（WF-005）。
@@ -23,6 +24,8 @@ const REASONING_STEP_CHARS: usize = 16;
 const ATTEMPT_SPAN: i64 = 1_000_000;
 const ERROR_MAX_CHARS: usize = 80;
 const TITLE_MAX_CHARS: usize = 80;
+/// 时间线文案上限。
+const TOOL_TITLE_MAX_CHARS: usize = 32;
 const SEARCH_ITEMS: usize = 10;
 
 struct Patterns {
@@ -61,6 +64,21 @@ fn starts_with_status(text: &str) -> bool {
 fn is_status_segment(segment: &str) -> bool {
     let trimmed = segment.trim();
     starts_with_status(trimmed) && trimmed.chars().next_back().is_some_and(is_terminal)
+}
+
+/// 通用工具事件的 data：`{tool, title?, source?, ms?}`（剧情库与站外工具带时间线文案与来源，ADR 0004）。
+fn tool_data(name: &str, label: ToolLabel<'_>, ms: Option<u64>) -> Value {
+    let mut data = json!({ "tool": name });
+    if let Some(title) = label.title {
+        data["title"] = json!(truncate(title, TOOL_TITLE_MAX_CHARS));
+    }
+    if let Some(source) = label.source {
+        data["source"] = json!(source);
+    }
+    if let Some(ms) = ms {
+        data["ms"] = json!(ms);
+    }
+    data
 }
 
 /// 把正文切成气泡（GEN-050）：前一段是状态短句，且后一句也以状态词开头，或后面是报告边界
@@ -339,7 +357,7 @@ impl Workflow {
     }
 
     /// 工具开始（WF-008）。返回步骤 id，结束时传回。
-    pub fn tool_start(&mut self, name: &str, query: Option<&str>) -> String {
+    pub fn tool_start(&mut self, name: &str, query: Option<&str>, label: ToolLabel<'_>) -> String {
         self.flush();
         self.finish_reasoning();
         let step = self.next_step();
@@ -351,13 +369,25 @@ impl Workflow {
                 None,
             ),
             "get_post_content" => self.emit("forum.read.start", &step, None, None),
-            _ => self.emit("tool.start", &step, Some(json!({ "tool": name })), None),
+            _ => self.emit(
+                "tool.start",
+                &step,
+                Some(tool_data(name, label, None)),
+                None,
+            ),
         }
         step
     }
 
     /// 工具结束（WF-008/009）。
-    pub fn tool_finish(&mut self, step: &str, name: &str, meta: &ToolMeta, ms: u128) {
+    pub fn tool_finish(
+        &mut self,
+        step: &str,
+        name: &str,
+        meta: &ToolMeta,
+        ms: u128,
+        label: ToolLabel<'_>,
+    ) {
         let ms = u64::try_from(ms).unwrap_or(u64::MAX);
         match (name, meta) {
             ("search_posts", ToolMeta::Search { query, hits, items }) => {
@@ -399,7 +429,7 @@ impl Workflow {
             _ => self.emit(
                 "tool.finish",
                 step,
-                Some(json!({ "tool": name, "ms": ms })),
+                Some(tool_data(name, label, Some(ms))),
                 None,
             ),
         }
@@ -499,12 +529,46 @@ mod tests {
     }
 
     #[test]
+    fn generic_tool_events_carry_title_and_source() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        let label = ToolLabel {
+            title: Some("检索虚空终端"),
+            source: Some("akasha"),
+        };
+        let step = wf.tool_start("akasha__search", None, label);
+        wf.tool_finish(&step, "akasha__search", &ToolMeta::None, 7, label);
+        let plain = wf.tool_start("get_hot_posts", None, ToolLabel::default());
+        wf.tool_finish(
+            &plain,
+            "get_hot_posts",
+            &ToolMeta::None,
+            1,
+            ToolLabel::default(),
+        );
+        let events = wf.take_pending();
+        assert_eq!(
+            events[0]["data"],
+            json!({ "tool": "akasha__search", "title": "检索虚空终端", "source": "akasha" })
+        );
+        assert_eq!(
+            events[1]["data"],
+            json!({ "tool": "akasha__search", "title": "检索虚空终端", "source": "akasha", "ms": 7 })
+        );
+        // 论坛工具不带新字段，与以前一致。
+        assert_eq!(events[2]["data"], json!({ "tool": "get_hot_posts" }));
+        assert_eq!(
+            events[3]["data"],
+            json!({ "tool": "get_hot_posts", "ms": 1 })
+        );
+    }
+
+    #[test]
     fn events_are_ordered_redacted_and_capped() {
         let mut wf = Workflow::new(1, OutputMode::Plain);
         wf.reasoning(10);
         wf.reasoning(10);
         wf.content("正在检索。");
-        let search = wf.tool_start("search_posts", Some("攻略"));
+        let search = wf.tool_start("search_posts", Some("攻略"), ToolLabel::default());
         wf.tool_finish(
             &search,
             "search_posts",
@@ -514,8 +578,9 @@ mod tests {
                 items: vec![(9, "标题".into())],
             },
             12,
+            ToolLabel::default(),
         );
-        let read = wf.tool_start("get_post_content", None);
+        let read = wf.tool_start("get_post_content", None, ToolLabel::default());
         wf.tool_finish(
             &read,
             "get_post_content",
@@ -523,6 +588,7 @@ mod tests {
                 post: Some((9, "标题".into())),
             },
             3,
+            ToolLabel::default(),
         );
         wf.content("**结论**：可信。");
         wf.cite(9, "标题");

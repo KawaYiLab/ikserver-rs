@@ -29,6 +29,11 @@ pub fn crontabs() -> anyhow::Result<Vec<Crontab>> {
             .payload(ik_ai::jobs::ReclaimQuotaHolds::default())?
             .max_attempts(1)
             .build(),
+        Cron::hourly_at::<ik_ai::mcp::RefreshMcpTools>(53)
+            .map_err(invalid)?
+            .payload(ik_ai::mcp::RefreshMcpTools::default())?
+            .max_attempts(1)
+            .build(),
     ])
 }
 
@@ -45,6 +50,7 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<crate::idempotency::PruneIdempotencyKeys>()
         .define_job::<ik_mihoyo::jobs::PruneQrLogins>()
         .define_job::<ik_ai::jobs::ReclaimQuotaHolds>()
+        .define_job::<ik_ai::mcp::RefreshMcpTools>()
         .define_job::<ik_ai::dm::DmReply>()
         .define_job::<ik_ai::comment::CommentReply>()
         .add_extension(state.mihoyo.clone())
@@ -75,13 +81,14 @@ mod tests {
     #[test]
     fn cron_payloads_decode_into_their_tasks() {
         let crontabs = crontabs().unwrap();
-        assert_eq!(crontabs.len(), 4);
+        assert_eq!(crontabs.len(), 5);
         for crontab in &crontabs {
             assert!(
                 decodes::<ik_media::jobs::SweepStaging>(crontab)
                     && decodes::<crate::idempotency::PruneIdempotencyKeys>(crontab)
                     && decodes::<ik_mihoyo::jobs::PruneQrLogins>(crontab)
-                    && decodes::<ik_ai::jobs::ReclaimQuotaHolds>(crontab),
+                    && decodes::<ik_ai::jobs::ReclaimQuotaHolds>(crontab)
+                    && decodes::<ik_ai::mcp::RefreshMcpTools>(crontab),
                 "{} 的 payload 解不出任务结构体",
                 crontab.task_identifier
             );

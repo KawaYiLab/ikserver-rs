@@ -2055,3 +2055,130 @@ async fn story_corpus_keeps_recent_versions_and_loads_on_startup(db: PgPool) {
             .contains("命中 1 篇")
     );
 }
+
+/// 最小的 MCP 服务桩（Streamable HTTP，无会话）：一个只读工具 `search`。
+async fn mcp_stub() -> String {
+    use axum::response::IntoResponse;
+
+    let app = axum::Router::new().route(
+        "/mcp",
+        axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+            let result = match body["method"].as_str() {
+                Some("initialize") => json!({ "protocolVersion": "2025-06-18", "capabilities": {},
+                                              "serverInfo": { "name": "stub", "version": "1" } }),
+                Some("tools/list") => json!({ "tools": [{
+                    "name": "search", "description": "检索", "inputSchema": { "type": "object" },
+                    "annotations": { "readOnlyHint": true } }] }),
+                _ => return StatusCode::ACCEPTED.into_response(),
+            };
+            axum::Json(json!({ "jsonrpc": "2.0", "id": body["id"], "result": result }))
+                .into_response()
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}/mcp")
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn ai_mcp_servers_are_managed_in_admin(db: PgPool) {
+    let app = setup(&db).await;
+    let base = "/v1/admin/ai/mcp-servers";
+    assert_eq!(
+        call(&app, MODERATOR, "GET", base, Value::Null).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let url = mcp_stub().await;
+    let secret = "Authorization: Bearer mcp-secret-0123456789";
+    let (status, saved) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/kb"),
+        json!({ "name": "kb", "displayName": "知识库", "url": url, "authHeader": secret }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["authHeaderHint"], "Authorization: …6789");
+    assert!(!saved.to_string().contains("mcp-secret"));
+    assert_eq!(saved["timeoutMs"], 15000);
+
+    let (status, refreshed) = call(
+        &app,
+        ADMIN,
+        "POST",
+        &format!("{base}/kb/refresh"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(refreshed["ok"], true, "{refreshed}");
+    assert_eq!(refreshed["added"], json!(["search"]));
+    let tool = &refreshed["server"]["tools"][0];
+    assert_eq!(tool["exposedName"], "kb__search");
+    assert_eq!(tool["status"], "disabled");
+
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/kb/tools/search"),
+        json!({ "enabled": true, "digest": "stale" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "AI_MCP_TOOL_CHANGED");
+    let (status, enabled) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        &format!("{base}/kb/tools/search"),
+        json!({ "enabled": true, "digest": tool["digest"], "timelineText": "检索知识库" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    assert_eq!(enabled["status"], "active");
+    assert_eq!(enabled["timelineText"], "检索知识库");
+
+    let (status, card) = call(
+        &app,
+        ADMIN,
+        "PUT",
+        "/v1/admin/ai/characters/fairy",
+        json!({ "slug": "fairy", "displayName": "Fairy", "username": "fairy",
+                "storyTools": true, "mcpServers": ["kb"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{card}");
+    assert_eq!(card["storyTools"], true);
+    assert_eq!(card["mcpServers"], json!(["kb"]));
+    let (_, list) = call(&app, ADMIN, "GET", base, Value::Null).await;
+    assert_eq!(list[0]["characters"], json!(["fairy"]));
+
+    let (status, _) = call(&app, ADMIN, "DELETE", &format!("{base}/kb"), Value::Null).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, cards) = call(&app, ADMIN, "GET", "/v1/admin/ai/characters", Value::Null).await;
+    assert_eq!(cards[0]["mcpServers"], json!([]));
+    assert_eq!(
+        call(&app, ADMIN, "DELETE", &format!("{base}/kb"), Value::Null)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+
+    let audited: Vec<String> = sqlx::query_scalar!(
+        "SELECT action FROM admin_audit_log WHERE action LIKE 'ai.mcp%' ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        audited,
+        vec![
+            "ai.mcp_server.save",
+            "ai.mcp_tool.save",
+            "ai.mcp_server.delete"
+        ]
+    );
+}

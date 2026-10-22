@@ -309,6 +309,11 @@ pub(crate) async fn apply(
                 )
             })
     };
+    let mcp_servers = if file.characters.iter().any(|c| !c.mcp_servers.is_empty()) {
+        repo::mcp_servers(tx).await?
+    } else {
+        Vec::new()
+    };
     let mut seen = HashSet::new();
     for (index, c) in file.characters.iter().enumerate() {
         if !seen.insert(c.slug.as_str()) {
@@ -328,6 +333,23 @@ pub(crate) async fn apply(
             .iter()
             .map(|key| model_id(index, key))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut mcp_server_ids = Vec::with_capacity(c.mcp_servers.len());
+        for name in &c.mcp_servers {
+            let id = mcp_servers
+                .iter()
+                .find(|s| &s.name == name)
+                .map(|s| s.id)
+                .ok_or_else(|| {
+                    Problem::field(
+                        &format!("characters[{index}].mcpServers"),
+                        "unknown_mcp_server",
+                        format!("MCP 服务 {name} 不存在"),
+                    )
+                })?;
+            if !mcp_server_ids.contains(&id) {
+                mcp_server_ids.push(id);
+            }
+        }
         let avatar_media_id = match c.avatar_id.as_deref() {
             None => None,
             Some(raw) => {
@@ -382,6 +404,8 @@ pub(crate) async fn apply(
                 default_model_id,
                 allowed_model_ids: &allowed_model_ids,
                 suggested_questions: &questions,
+                story_tools: c.story_tools,
+                mcp_server_ids: &mcp_server_ids,
                 now,
             },
         )

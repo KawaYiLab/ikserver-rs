@@ -39,6 +39,11 @@ export const auditActionLabel: Record<string, string> = {
   'ai.model.delete': '删除模型',
   'ai.character.save': '保存角色',
   'ai.character.delete': '删除角色',
+  'ai.provider.save': '保存提供方',
+  'ai.provider.delete': '删除提供方',
+  'ai.mcp_server.save': '保存 MCP 服务',
+  'ai.mcp_server.delete': '删除 MCP 服务',
+  'ai.mcp_tool.save': '修改 MCP 工具',
   'search.reindex': '重建索引',
 }
 
@@ -54,5 +59,8 @@ export const auditTargetLabel: Record<string, string> = {
   ai_settings: 'AI 设置',
   ai_model: 'AI 模型',
   ai_character: 'AI 角色',
+  ai_provider: 'AI 提供方',
+  ai_mcp_server: 'MCP 服务',
+  ai_mcp_tool: 'MCP 工具',
   search: '搜索',
 }

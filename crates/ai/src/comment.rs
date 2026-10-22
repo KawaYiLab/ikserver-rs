@@ -28,6 +28,7 @@ use crate::llm::{ChatMessage, Providers};
 use crate::quota::{self, Hold};
 use crate::repo::{self, JobOutcome, JobRow, NewJob};
 use crate::sanitize;
+use crate::toolbox::Toolbox;
 
 /// 帖子正文进上下文的上限（CTX-001）。
 const POST_BODY_MAX_CHARS: usize = 4000;
@@ -269,6 +270,8 @@ struct Prepared {
     providers: Providers,
     hold: Hold,
     messages: Vec<ChatMessage>,
+    /// 本次可用的工具（按角色卡组装，ADR 0004）。
+    toolbox: Toolbox,
     /// 帖子标题 + 正文（沉浸守卫判定防诈骗帖用）。
     post_text: String,
 }
@@ -423,7 +426,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         })
         .collect();
     let parent_text = parent.map(|p| truncate(&comment_text(&p.body), PARENT_MAX_CHARS));
-    let messages = build_messages(
+    let mut messages = build_messages(
         &card,
         &post_context,
         parent_text.as_deref(),
@@ -431,12 +434,15 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         &comment_text(&trigger.body),
         &memory,
     );
+    let toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
+    toolbox.annotate_system(&mut messages);
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。不足时静默跳过。
     let prompt_chars = messages
         .iter()
         .map(|m| i64::try_from(m.text().chars().count()).unwrap_or(i64::MAX))
-        .sum();
+        .sum::<i64>()
+        .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds));
     let amount = quota::estimate(
         state.config.estimated_context_tokens,
         state.config.max_tool_rounds,
@@ -467,6 +473,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         providers: catalog.providers.clone(),
         hold,
         messages,
+        toolbox,
         post_text: format!("{}\n{}", post_context.title, post_context.body),
         job,
     })))
@@ -492,6 +499,7 @@ pub async fn run_job(
         mode: OutputMode::Plain,
         max_chars: sanitize::COMMENT_MAX_CHARS,
         tools: Some(crate::tools::ToolContext::new(state, prepared.job.quota_user_id).await?),
+        toolbox: prepared.toolbox.clone(),
     };
     let mut workflow = crate::workflow::Workflow::disabled();
     let generated = generate::generate(

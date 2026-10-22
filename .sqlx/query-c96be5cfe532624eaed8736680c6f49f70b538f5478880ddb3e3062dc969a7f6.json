@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions\n         FROM ai_role_cards ORDER BY sort_order, id",
+  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids\n         FROM ai_role_cards ORDER BY sort_order, id",
   "describe": {
     "columns": [
       {
@@ -189,6 +189,28 @@
             "name": "suggested_questions"
           }
         }
+      },
+      {
+        "ordinal": 17,
+        "name": "story_tools",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "story_tools"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "mcp_server_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "mcp_server_ids"
+          }
+        }
       }
     ],
     "parameters": {
@@ -211,8 +233,10 @@
       false,
       true,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "bb40000779beaaf5c3c0a73e01281ae44e008d30e005d3c026ff2106fbbf77d9"
+  "hash": "c96be5cfe532624eaed8736680c6f49f70b538f5478880ddb3e3062dc969a7f6"
 }

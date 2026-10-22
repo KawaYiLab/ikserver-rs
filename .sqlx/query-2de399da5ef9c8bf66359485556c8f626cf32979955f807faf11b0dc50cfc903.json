@@ -1,0 +1,148 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, name, display_name, url, auth_header, timeout_ms, max_result_chars, enabled,\n                sort_order, last_listed_at, last_error\n         FROM ai_mcp_servers WHERE name = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "auth_header",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "auth_header"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "timeout_ms",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "timeout_ms"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "max_result_chars",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "max_result_chars"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "sort_order",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "sort_order"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "last_listed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "last_listed_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_servers",
+            "name": "last_error"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "2de399da5ef9c8bf66359485556c8f626cf32979955f807faf11b0dc50cfc903"
+}

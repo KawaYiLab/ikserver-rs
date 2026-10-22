@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download, Plus, X } from '@lucide/vue'
+import { Download, Plus, RefreshCw, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -21,6 +21,8 @@ definePageMeta({ admin: true })
 type Provider = Schemas['AdminProvider']
 type Model = Schemas['AdminModel']
 type Character = Schemas['AdminCharacter']
+type McpServer = Schemas['AdminMcpServer']
+type McpTool = Schemas['AdminMcpTool']
 
 const siteLink = useSiteLink()
 const { run, success, failure } = useNotify()
@@ -32,19 +34,22 @@ const settings = ref<Schemas['AdminSettings'] | null>(null)
 const providers = ref<Provider[] | null>(null)
 const models = ref<Model[] | null>(null)
 const characters = ref<Character[] | null>(null)
+const mcpServers = ref<McpServer[] | null>(null)
 
 async function loadConfig() {
-  const [s, p, m, c] = await Promise.all([
+  const [s, p, m, c, x] = await Promise.all([
     unwrap(api.GET('/v1/admin/ai/settings')),
     unwrap(api.GET('/v1/admin/ai/providers')),
     unwrap(api.GET('/v1/admin/ai/models')),
     unwrap(api.GET('/v1/admin/ai/characters')),
+    unwrap(api.GET('/v1/admin/ai/mcp-servers')),
   ])
   settings.value = s
   providers.value = p
   settingsForm.value = { globalEnabled: s.globalEnabled, dailyTokens: s.dailyTokens, dailyTokensPerUser: s.dailyTokensPerUser }
   models.value = m
   characters.value = c
+  mcpServers.value = x
 }
 
 async function load() {
@@ -248,6 +253,8 @@ interface CharacterDraft {
   defaultModelKey: string
   allowedModelKeys: string[]
   suggestedQuestions: string
+  storyTools: boolean
+  mcpServers: string[]
 }
 
 const characterDraft = ref<CharacterDraft | null>(null)
@@ -277,6 +284,8 @@ function editCharacter(character?: Character) {
         defaultModelKey: character.defaultModelKey ?? 'none',
         allowedModelKeys: [...character.allowedModelKeys],
         suggestedQuestions: character.suggestedQuestions.join('\n'),
+        storyTools: character.storyTools,
+        mcpServers: [...character.mcpServers],
       }
     : {
         isNew: true,
@@ -297,6 +306,8 @@ function editCharacter(character?: Character) {
         defaultModelKey: 'none',
         allowedModelKeys: [],
         suggestedQuestions: '',
+        storyTools: false,
+        mcpServers: [],
       }
 }
 
@@ -306,6 +317,14 @@ function toggleAllowed(key: string, on: boolean | 'indeterminate') {
   draft.allowedModelKeys = on === true
     ? [...new Set([...draft.allowedModelKeys, key])]
     : draft.allowedModelKeys.filter(k => k !== key)
+}
+
+function toggleMcpServer(name: string, on: boolean | 'indeterminate') {
+  const draft = characterDraft.value
+  if (!draft) return
+  draft.mcpServers = on === true
+    ? [...new Set([...draft.mcpServers, name])]
+    : draft.mcpServers.filter(n => n !== name)
 }
 
 async function saveCharacter() {
@@ -328,6 +347,8 @@ async function saveCharacter() {
     defaultModelKey: d.defaultModelKey === 'none' ? null : d.defaultModelKey,
     allowedModelKeys: d.allowedModelKeys,
     suggestedQuestions: d.suggestedQuestions.split('\n').map(q => q.trim()).filter(Boolean),
+    storyTools: d.storyTools,
+    mcpServers: d.mcpServers,
   }
   const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/characters/{slug}', {
     params: { path: { slug: d.slug } },
@@ -349,6 +370,163 @@ async function removeCharacter(character: Character) {
   if (!ok) return
   const done = await run(() => unwrap(api.DELETE('/v1/admin/ai/characters/{slug}', { params: { path: { slug: character.slug } } })).then(() => true), '已删除')
   if (done) await loadConfig().catch(failure)
+}
+
+// ---------- MCP 服务 ----------
+interface McpServerDraft {
+  isNew: boolean
+  name: string
+  displayName: string
+  url: string
+  /** 留空 = 保留原有的（新建时即不带）。 */
+  authHeader: string
+  clearAuthHeader: boolean
+  authHeaderHint: string | null
+  timeoutMs: number
+  maxResultChars: number
+  enabled: boolean
+  sortOrder: number
+}
+
+const mcpDraft = ref<McpServerDraft | null>(null)
+const mcpBusy = ref<string | null>(null)
+
+function editMcpServer(server?: McpServer) {
+  mcpDraft.value = server
+    ? {
+        isNew: false,
+        name: server.name,
+        displayName: server.displayName,
+        url: server.url,
+        authHeader: '',
+        clearAuthHeader: false,
+        authHeaderHint: server.authHeaderHint ?? null,
+        timeoutMs: server.timeoutMs,
+        maxResultChars: server.maxResultChars,
+        enabled: server.enabled,
+        sortOrder: server.sortOrder,
+      }
+    : {
+        isNew: true,
+        name: '',
+        displayName: '',
+        url: '',
+        authHeader: '',
+        clearAuthHeader: false,
+        authHeaderHint: null,
+        timeoutMs: 15000,
+        maxResultChars: 4000,
+        enabled: true,
+        sortOrder: (mcpServers.value?.length ?? 0) * 10,
+      }
+}
+
+async function saveMcpServer() {
+  const d = mcpDraft.value
+  if (!d) return
+  const authHeader = d.clearAuthHeader ? '' : d.authHeader.trim() || (d.isNew ? '' : null)
+  const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/mcp-servers/{name}', {
+    params: { path: { name: d.name } },
+    body: {
+      name: d.name,
+      displayName: d.displayName.trim() || d.name,
+      url: d.url.trim(),
+      authHeader,
+      timeoutMs: d.timeoutMs,
+      maxResultChars: d.maxResultChars,
+      enabled: d.enabled,
+      sortOrder: d.sortOrder,
+    },
+  })), 'MCP 服务已保存')
+  if (saved) {
+    const isNew = d.isNew
+    mcpDraft.value = null
+    await loadConfig().catch(failure)
+    if (isNew) await refreshMcpServer(saved.name)
+  }
+}
+
+async function removeMcpServer(server: McpServer) {
+  const ok = await confirm({
+    title: `删除 MCP 服务「${server.displayName}」？`,
+    description: '它的工具会一起删除，启用了它的角色不再提供这些工具。',
+    confirmLabel: '删除',
+    destructive: true,
+  })
+  if (!ok) return
+  const done = await run(() => unwrap(api.DELETE('/v1/admin/ai/mcp-servers/{name}', { params: { path: { name: server.name } } })).then(() => true), '已删除')
+  if (done) await loadConfig().catch(failure)
+}
+
+/** 拉取工具清单：新工具默认不启用，定义变了的停止提供、等重新确认。 */
+async function refreshMcpServer(name: string) {
+  mcpBusy.value = name
+  try {
+    const result = await unwrap(api.POST('/v1/admin/ai/mcp-servers/{name}/refresh', { params: { path: { name } } }))
+    replaceMcpServer(result.server)
+    if (!result.ok) {
+      failure(new Error(`拉取失败：${result.error ?? '未知错误'}`))
+      return
+    }
+    const parts = [
+      result.added.length ? `新增 ${result.added.length} 个（未启用）` : '',
+      result.changed.length ? `${result.changed.length} 个定义变了，需要重新确认` : '',
+      result.missing.length ? `${result.missing.length} 个已从远端移除` : '',
+      result.skipped.length ? `跳过 ${result.skipped.join('；')}` : '',
+    ].filter(Boolean)
+    success(`已拉取 ${result.server.tools.length} 个工具${parts.length ? `：${parts.join('，')}` : ''}`)
+  }
+  catch (error) {
+    failure(error)
+  }
+  finally {
+    mcpBusy.value = null
+  }
+}
+
+function replaceMcpServer(server: McpServer) {
+  if (!mcpServers.value) return
+  mcpServers.value = mcpServers.value.map(s => (s.name === server.name ? server : s))
+}
+
+async function updateMcpTool(server: McpServer, tool: McpTool, enabled: boolean, timelineText = tool.timelineText ?? null) {
+  const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/mcp-servers/{name}/tools/{tool}', {
+    params: { path: { name: server.name, tool: tool.remoteName } },
+    body: { enabled, digest: enabled ? tool.digest : null, timelineText },
+  })), enabled ? '工具已启用' : '已保存')
+  if (saved) {
+    replaceMcpServer({ ...server, tools: server.tools.map(t => (t.remoteName === saved.remoteName ? saved : t)) })
+  }
+}
+
+/** 启用（或确认新版本）前把模型会看到的描述给管理员过目。 */
+async function approveMcpTool(server: McpServer, tool: McpTool) {
+  const ok = await confirm({
+    title: `${tool.status === 'changed' ? '确认新版本' : '启用'}「${tool.title ?? tool.remoteName}」？`,
+    description: `模型会看到这段描述：${tool.description || '（无描述）'}`,
+    confirmLabel: tool.status === 'changed' ? '确认' : '启用',
+  })
+  if (ok) await updateMcpTool(server, tool, true)
+}
+
+/** 改时间线文案：不改变启用状态，也不会确认没看过的新版本。 */
+async function saveMcpTimeline(server: McpServer, tool: McpTool, value: string | number) {
+  const text = String(value).trim() || null
+  if (text === (tool.timelineText ?? null)) return
+  await updateMcpTool(server, tool, tool.status === 'active', text)
+}
+
+const mcpToolStatusLabel: Record<Schemas['McpToolStatus'], string> = {
+  active: '已启用',
+  disabled: '未启用',
+  changed: '定义已变，待确认',
+  missing: '远端已移除',
+}
+const mcpToolStatusVariant: Record<Schemas['McpToolStatus'], 'default' | 'outline' | 'destructive' | 'secondary'> = {
+  active: 'default',
+  disabled: 'outline',
+  changed: 'destructive',
+  missing: 'secondary',
 }
 
 // ---------- 任务 ----------
@@ -387,6 +565,9 @@ const jobFilters = jobList.filters
       <Button v-if="tab === 'characters'" size="sm" @click="editCharacter()">
         <Plus class="size-4" />新建角色
       </Button>
+      <Button v-if="tab === 'mcp'" size="sm" @click="editMcpServer()">
+        <Plus class="size-4" />接入 MCP 服务
+      </Button>
     </AdminPageHeader>
 
     <Tabs v-model="tab">
@@ -395,6 +576,7 @@ const jobFilters = jobList.filters
         <TabsTrigger value="providers">提供方</TabsTrigger>
         <TabsTrigger value="models">模型</TabsTrigger>
         <TabsTrigger value="characters">角色</TabsTrigger>
+        <TabsTrigger value="mcp">MCP 工具</TabsTrigger>
         <TabsTrigger value="jobs">任务</TabsTrigger>
       </TabsList>
 
@@ -574,6 +756,110 @@ const jobFilters = jobList.filters
               </TableRow>
             </TableBody>
           </Table>
+        </div>
+      </TabsContent>
+
+      <TabsContent value="mcp">
+        <div class="mb-4 space-y-2 text-sm text-muted-foreground">
+          <p>
+            角色除了论坛工具，还可以调用剧情库与站外 MCP 服务（Streamable HTTP）的工具，在「角色」里按角色开启。
+            站外工具拉取后默认不启用；启用前请看清描述——模型会照着它调用工具。远端改了工具定义时会自动停用，等你重新确认。
+          </p>
+          <p>
+            只能启用只读工具。调用时只发送模型生成的参数，不带用户身份；但参数里可能包含对话内容，请只接入可信的服务。
+          </p>
+          <p>
+            剧情库：
+            <Badge :variant="settings?.storyAvailable ? 'default' : 'outline'">{{ settings?.storyAvailable ? '语料已加载' : '没有语料，不会提供' }}</Badge>
+          </p>
+        </div>
+        <div class="space-y-4">
+          <Card v-for="server in mcpServers ?? []" :key="server.name">
+            <CardHeader>
+              <div class="flex flex-wrap items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <CardTitle class="flex flex-wrap items-center gap-2">
+                    {{ server.displayName }}
+                    <span class="font-mono text-xs font-normal text-muted-foreground">{{ server.name }}__*</span>
+                    <Badge v-if="!server.enabled" variant="outline">停用</Badge>
+                  </CardTitle>
+                  <CardDescription class="mt-1 space-y-1">
+                    <div class="truncate font-mono text-xs" :title="server.url">{{ server.url }}</div>
+                    <div class="text-xs">
+                      鉴权头：<span class="font-mono">{{ server.authHeaderHint ?? '无' }}</span>
+                      · 超时 {{ server.timeoutMs / 1000 }} 秒 · 结果上限 {{ formatNumber(server.maxResultChars) }} 字
+                      · 角色：{{ server.characters.length ? server.characters.join('、') : '未启用' }}
+                    </div>
+                    <div class="text-xs">
+                      最近拉取：{{ server.lastListedAt ? formatTime(server.lastListedAt) : '从未' }}
+                      <span v-if="server.lastError" class="text-destructive">（失败：{{ server.lastError }}）</span>
+                    </div>
+                  </CardDescription>
+                </div>
+                <div class="space-x-1 whitespace-nowrap">
+                  <Button size="sm" variant="outline" :disabled="mcpBusy === server.name" @click="refreshMcpServer(server.name)">
+                    <RefreshCw class="size-4" :class="{ 'animate-spin': mcpBusy === server.name }" />拉取工具
+                  </Button>
+                  <Button size="sm" variant="outline" @click="editMcpServer(server)">编辑</Button>
+                  <Button size="sm" variant="ghost" class="text-destructive" @click="removeMcpServer(server)">删除</Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div class="rounded-md border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>工具</TableHead>
+                      <TableHead class="hidden md:table-cell">描述</TableHead>
+                      <TableHead>状态</TableHead>
+                      <TableHead class="hidden sm:table-cell">时间线文案</TableHead>
+                      <TableHead class="text-right">操作</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    <TableRow v-for="tool in server.tools" :key="tool.remoteName">
+                      <TableCell>
+                        <div class="font-medium">{{ tool.title ?? tool.remoteName }}</div>
+                        <div class="font-mono text-xs text-muted-foreground">{{ tool.exposedName }}</div>
+                      </TableCell>
+                      <TableCell class="hidden max-w-sm md:table-cell">
+                        <div class="line-clamp-2 text-xs text-muted-foreground" :title="tool.description">{{ tool.description || '—' }}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div class="flex flex-wrap gap-1">
+                          <Badge :variant="mcpToolStatusVariant[tool.status]">{{ mcpToolStatusLabel[tool.status] }}</Badge>
+                          <Badge v-if="!tool.readOnly" variant="outline" title="没有声明 readOnlyHint，不能启用">非只读</Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell class="hidden sm:table-cell">
+                        <Input
+                          :model-value="tool.timelineText ?? ''" class="h-8 w-40 text-xs" maxlength="32"
+                          :placeholder="tool.title ?? '如 检索资料库'" :disabled="tool.status === 'changed' || tool.status === 'missing'"
+                          @change="(e: Event) => saveMcpTimeline(server, tool, (e.target as HTMLInputElement).value)"
+                        />
+                      </TableCell>
+                      <TableCell class="space-x-1 text-right whitespace-nowrap">
+                        <Button
+                          v-if="tool.status === 'disabled' || tool.status === 'changed'" size="sm" variant="outline"
+                          :disabled="!tool.readOnly" @click="approveMcpTool(server, tool)"
+                        >
+                          {{ tool.status === 'changed' ? '确认新版本' : '启用' }}
+                        </Button>
+                        <Button v-if="tool.enabled" size="sm" variant="ghost" @click="updateMcpTool(server, tool, false)">停用</Button>
+                      </TableCell>
+                    </TableRow>
+                    <TableRow v-if="server.tools.length === 0">
+                      <TableCell colspan="5" class="py-6 text-center text-muted-foreground">还没有工具，点「拉取工具」</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+          <div v-if="mcpServers && mcpServers.length === 0" class="rounded-md border py-10 text-center text-sm text-muted-foreground">
+            还没有接入 MCP 服务
+          </div>
         </div>
       </TabsContent>
 
@@ -764,6 +1050,67 @@ const jobFilters = jobList.filters
       </DialogScrollContent>
     </Dialog>
 
+    <!-- MCP 服务编辑 -->
+    <Dialog :open="!!mcpDraft" @update:open="(v) => { if (!v) mcpDraft = null }">
+      <DialogScrollContent v-if="mcpDraft" class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{{ mcpDraft.isNew ? '接入 MCP 服务' : `编辑 MCP 服务 ${mcpDraft.name}` }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-4">
+          <div class="grid gap-4 sm:grid-cols-2">
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">标识（工具名前缀，创建后不可改）</span>
+              <Input v-model="mcpDraft.name" :readonly="!mcpDraft.isNew" class="font-mono" placeholder="如 akasha" maxlength="32" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">显示名称</span>
+              <Input v-model="mcpDraft.displayName" placeholder="如 虚空终端" />
+            </label>
+          </div>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">端点地址（Streamable HTTP）</span>
+            <Input v-model="mcpDraft.url" class="font-mono" placeholder="https://example.com/mcp" />
+            <span class="text-xs text-muted-foreground">只接受 https://；http:// 只允许本机与内网地址。</span>
+          </label>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">鉴权请求头（整行）</span>
+            <Input
+              v-model="mcpDraft.authHeader" type="password" autocomplete="off" class="font-mono"
+              :disabled="mcpDraft.clearAuthHeader"
+              :placeholder="mcpDraft.isNew ? 'Authorization: Bearer …（不需要可留空）' : `留空则保留原有的${mcpDraft.authHeaderHint ? `（${mcpDraft.authHeaderHint}）` : ''}`"
+            />
+          </label>
+          <label v-if="!mcpDraft.isNew && mcpDraft.authHeaderHint" class="flex items-center gap-2 text-sm">
+            <Checkbox v-model="mcpDraft.clearAuthHeader" />
+            清除鉴权头
+          </label>
+          <div class="grid gap-4 sm:grid-cols-3">
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">超时（毫秒）</span>
+              <Input v-model.number="mcpDraft.timeoutMs" type="number" min="1000" max="60000" step="1000" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">结果上限（字）</span>
+              <Input v-model.number="mcpDraft.maxResultChars" type="number" min="500" max="16000" step="500" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">排序</span>
+              <Input v-model.number="mcpDraft.sortOrder" type="number" />
+            </label>
+          </div>
+          <label class="flex items-center justify-between gap-4 text-sm">
+            启用
+            <Switch v-model="mcpDraft.enabled" />
+          </label>
+          <p class="text-xs text-muted-foreground">新接入的服务保存后会自动拉取一次工具清单；工具要逐个启用才会提供给模型。</p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="mcpDraft = null">取消</Button>
+          <Button :disabled="!mcpDraft.name.trim() || !mcpDraft.url.trim()" @click="saveMcpServer">保存</Button>
+        </DialogFooter>
+      </DialogScrollContent>
+    </Dialog>
+
     <!-- 角色编辑 -->
     <Dialog :open="!!characterDraft" @update:open="(v) => { if (!v) characterDraft = null }">
       <DialogScrollContent v-if="characterDraft" class="sm:max-w-3xl">
@@ -831,6 +1178,24 @@ const jobFilters = jobList.filters
                 {{ m.displayName }}
               </label>
             </div>
+          </div>
+          <div class="space-y-2">
+            <Label>工具（论坛工具始终提供）</Label>
+            <label class="flex items-center justify-between gap-4 text-sm">
+              <span>
+                剧情库工具（检索、顺读绝区零剧情与设定）
+                <span v-if="!settings?.storyAvailable" class="text-xs text-muted-foreground">——当前没有语料，开启后上传语料才生效</span>
+              </span>
+              <Switch v-model="characterDraft.storyTools" />
+            </label>
+            <div v-if="mcpServers?.length" class="flex flex-wrap gap-4">
+              <label v-for="s in mcpServers" :key="s.name" class="flex items-center gap-2 text-sm">
+                <Checkbox :model-value="characterDraft.mcpServers.includes(s.name)" @update:model-value="(v) => toggleMcpServer(s.name, v)" />
+                {{ s.displayName }}
+                <span class="text-xs text-muted-foreground">（{{ s.tools.filter(t => t.status === 'active').length }} 个工具）</span>
+              </label>
+            </div>
+            <p v-else class="text-xs text-muted-foreground">没有接入站外 MCP 服务（在「MCP 工具」里接入）。</p>
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
             <label class="flex items-center justify-between gap-4 text-sm">启用 <Switch v-model="characterDraft.enabled" /></label>

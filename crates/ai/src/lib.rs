@@ -14,6 +14,8 @@ mod generate;
 pub mod immersion;
 pub mod jobs;
 pub mod llm;
+pub mod mcp;
+pub mod mcp_client;
 pub mod quota;
 mod repo;
 mod routes;
@@ -21,6 +23,7 @@ pub mod sanitize;
 pub mod service;
 pub mod sessions;
 mod state;
+pub mod toolbox;
 pub mod tools;
 pub mod workflow;
 

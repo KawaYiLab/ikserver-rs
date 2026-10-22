@@ -336,6 +336,20 @@
   （调用时退回默认模型，LLM-011）。同名时以部署配置为准，后台不允许新建同名的。
 - `api_key` 明文存储、只在服务端流转：后台接口只回末四位，审计只记「是否更换」。与配置快照一起缓存 60 秒。
 
+## AI 调用 MCP 工具（`20261109000001_ai_mcp.sql`，ADR 0004）
+
+- `ai_mcp_servers` 归 ik-ai：管理后台维护的站外 MCP 服务（Streamable HTTP）。`name` 是暴露给模型的工具名前缀
+  （`^[a-z0-9][a-z0-9_-]{0,31}$`）；`auth_header` 是整行请求头，明文存储、只在服务端流转，后台接口只回名字加值的末四位，
+  审计只记「是否更换」。`last_listed_at` / `last_error` 记最近一次拉取工具清单的结果。
+- `ai_mcp_tools`：每个服务的工具。`remote` 是最近一次拉到的定义（`{title, description, inputSchema, readOnly}`），
+  `approved` 是管理员确认过的定义，`*_digest` 是键排序后的 JSON 的 SHA-256。运行时只用 `approved`，且只在
+  `enabled AND NOT missing AND approved_digest = remote_digest` 时提供：远端改了定义就自动停用，等管理员重新确认。
+  CHECK 约束保证只有确认过的只读工具能启用。`exposed_name`（`<服务名>__<工具名>`）全表唯一；写入清单时先拿
+  `pg_advisory_xact_lock(hashtextextended('ik:ai_mcp_tools', 0))` 再查冲突。外键 `server_id` 由唯一约束
+  `(server_id, remote_name)` 的索引覆盖，删服务级联删工具。
+- `ai_role_cards.story_tools`：是否提供剧情库工具；`mcp_server_ids`：启用的站外服务（与 `allowed_model_ids` 一样用数组，
+  不建外键；删服务时用 `array_remove` 从各角色卡里去掉）。
+
 ## AI 私聊（`20261028000001_ai_sessions.sql`）
 
 - messaging 的表：`conversations.kind` 增加 `ai`（AI 会话，同一对用户可以有多条，CONV-012），`title` 只有 AI 会话有。

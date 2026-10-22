@@ -90,6 +90,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/ai/mcp-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 站外 MCP 服务（含工具与审批状态；鉴权头只回提示） */
+        get: operations["list_mcp_servers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ai/mcp-servers/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 新建或修改站外 MCP 服务
+         * @description 不传 `authHeader`（或传 null）保留原有的。保存后用「拉取工具」取得工具清单，工具要逐个确认后才会提供给模型。
+         */
+        put: operations["put_mcp_server"];
+        post?: never;
+        /** 删除站外 MCP 服务（工具一起删除，角色卡里去掉它） */
+        delete: operations["remove_mcp_server"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ai/mcp-servers/{name}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 拉取站外 MCP 服务的工具清单
+         * @description 新工具默认不启用；定义变了的工具停止提供，等重新确认。连不上时 `ok = false`，原因在 `error`。
+         */
+        post: operations["post_mcp_refresh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ai/mcp-servers/{name}/tools/{tool}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 启用、停用或重新确认一个 MCP 工具
+         * @description 启用时带上后台看到的 `digest`：远端定义已经变了时拒绝（409 `AI_MCP_TOOL_CHANGED`）；
+         *     只能启用只读工具（409 `AI_MCP_TOOL_NOT_READ_ONLY`）。
+         */
+        put: operations["put_mcp_tool"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/ai/models": {
         parameters: {
             query?: never;
@@ -3530,10 +3609,14 @@ export interface components {
             enabled: boolean;
             examples: components["schemas"]["Example"][];
             knockVisible: boolean;
+            /** @description 启用的站外 MCP 服务（服务名）。 */
+            mcpServers: string[];
             outputMode: components["schemas"]["OutputMode"];
             slug: string;
             /** Format: int32 */
             sortOrder: number;
+            /** @description 提供剧情库工具（ADR 0004）。 */
+            storyTools: boolean;
             suggestedQuestions: string[];
             systemPrompt: string;
             userId: string;
@@ -3616,6 +3699,45 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             userId: string;
+        };
+        AdminMcpServer: {
+            /** @description 鉴权头的提示：名字加值的末尾几位（如 `Authorization: …a1b2`），没有时为 null。值本身不回传。 */
+            authHeaderHint?: string | null;
+            /** @description 启用了它的角色卡（slug）。 */
+            characters: string[];
+            displayName: string;
+            enabled: boolean;
+            /** @description 最近一次拉取清单失败的原因。 */
+            lastError?: string | null;
+            /** Format: date-time */
+            lastListedAt?: string | null;
+            /** Format: int32 */
+            maxResultChars: number;
+            name: string;
+            /** Format: int32 */
+            sortOrder: number;
+            /** Format: int32 */
+            timeoutMs: number;
+            tools: components["schemas"]["AdminMcpTool"][];
+            url: string;
+        };
+        AdminMcpTool: {
+            description: string;
+            /** @description 远端定义的摘要（十六进制）。启用时原样带回，确认的是这一版。 */
+            digest: string;
+            enabled: boolean;
+            /** @description 暴露给模型的名字。 */
+            exposedName: string;
+            inputSchema: Record<string, never>;
+            /** @description 确认过的定义与远端不同（或从未确认过）。 */
+            needsReview: boolean;
+            /** @description `annotations.readOnlyHint = true`。只有只读工具能启用。 */
+            readOnly: boolean;
+            remoteName: string;
+            status: components["schemas"]["McpToolStatus"];
+            timelineText?: string | null;
+            /** @description 远端最近一次的定义（`approved` 与它不同时，启用前请先看清楚）。 */
+            title?: string | null;
         };
         AdminModel: {
             badge?: string | null;
@@ -3712,6 +3834,8 @@ export interface components {
              *     否则调用时退回默认模型）。
              */
             providers: string[];
+            /** @description 剧情库已加载语料：角色卡开了剧情库工具时才真正提供（ADR 0004）。 */
+            storyAvailable: boolean;
         };
         AdminTag: {
             /** Format: date-time */
@@ -4092,10 +4216,14 @@ export interface components {
             enabled?: boolean;
             examples?: components["schemas"]["Example"][];
             knockVisible?: boolean;
+            /** @description 启用的站外 MCP 服务（服务名）。 */
+            mcpServers?: string[];
             outputMode?: components["schemas"]["OutputMode"];
             slug: string;
             /** Format: int32 */
             sortOrder?: number;
+            /** @description 提供剧情库工具（ADR 0004）。 */
+            storyTools?: boolean;
             suggestedQuestions?: string[];
             systemPrompt?: string;
             /** @description 绑定的账号（用户名）；导入时会被标为 AI 账号。 */
@@ -4886,6 +5014,20 @@ export interface components {
              */
             marked: number;
         };
+        /** @description 拉取清单的结果。 */
+        McpRefreshResult: {
+            /** @description 新出现的工具（未启用）。 */
+            added: string[];
+            /** @description 定义变了的工具（启用的会停止提供，等重新确认）。 */
+            changed: string[];
+            error?: string | null;
+            /** @description 远端已经没有的工具。 */
+            missing: string[];
+            ok: boolean;
+            server: components["schemas"]["AdminMcpServer"];
+            /** @description 没有写入的工具与原因（如暴露名与别的服务冲突）。 */
+            skipped: string[];
+        };
         /** @description JSON-RPC 2.0 请求或通知（MCP）。也可以是这些对象组成的数组（批量）。 */
         McpRequest: {
             /** @description 请求 id（字符串或数字）；没有 id 的是通知，服务端回 202 且无响应体。 */
@@ -4910,6 +5052,43 @@ export interface components {
             jsonrpc: string;
             result: Record<string, never>;
         };
+        McpServerInput: {
+            /** @description 整行请求头，如 `Authorization: Bearer xxx`。不传（或 null）保留原有的；空串表示不带。 */
+            authHeader?: string | null;
+            displayName: string;
+            enabled?: boolean;
+            /**
+             * Format: int32
+             * @description 结果截断上限，500–16000 字符。
+             */
+            maxResultChars?: number;
+            /** @description 小写字母、数字、下划线、连字符，1–32 字符；是工具名的前缀。 */
+            name: string;
+            /** Format: int32 */
+            sortOrder?: number;
+            /**
+             * Format: int32
+             * @description 单次调用超时，1000–60000 毫秒。
+             */
+            timeoutMs?: number;
+            /** @description Streamable HTTP 端点。`https://`；`http://` 只允许回环与内网地址。 */
+            url: string;
+        };
+        McpToolInput: {
+            /**
+             * @description 启用时必填：后台看到的远端定义摘要（[`AdminMcpTool::digest`]）。与当前的不同时拒绝（409
+             *     `AI_MCP_TOOL_CHANGED`），避免确认了没看过的版本。
+             */
+            digest?: string | null;
+            enabled: boolean;
+            /** @description 时间线文案（最多 32 字），空时用 MCP 的 title。 */
+            timelineText?: string | null;
+        };
+        /**
+         * @description 一个工具在后台的状态。
+         * @enum {string}
+         */
+        McpToolStatus: "active" | "disabled" | "changed" | "missing";
         /** @description 当前登录用户的自我视图（含邮箱，只返回给本人）。 */
         MeView: {
             /** Format: date-time */
@@ -7036,6 +7215,165 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Paged_AdminJob"];
+                };
+            };
+        };
+    };
+    list_mcp_servers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMcpServer"][];
+                };
+            };
+        };
+    };
+    put_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMcpServer"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    remove_mcp_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    post_mcp_refresh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpRefreshResult"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_mcp_tool: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                /** @description 远端工具名 */
+                tool: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpToolInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminMcpTool"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };

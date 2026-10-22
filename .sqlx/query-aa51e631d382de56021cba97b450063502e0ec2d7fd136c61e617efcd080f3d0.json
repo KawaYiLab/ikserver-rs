@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.server_id, t.remote_name, t.exposed_name, t.approved AS \"approved!\",\n                  t.timeline_text\n           FROM ai_mcp_tools t JOIN ai_mcp_servers s ON s.id = t.server_id\n           WHERE s.enabled AND t.enabled AND NOT t.missing AND t.approved IS NOT NULL\n             AND t.approved_digest = t.remote_digest\n           ORDER BY s.sort_order, s.id, t.remote_name",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "server_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "remote_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "remote_name"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "exposed_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "exposed_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "approved!",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "approved"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "timeline_text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_mcp_tools",
+            "name": "timeline_text"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "aa51e631d382de56021cba97b450063502e0ec2d7fd136c61e617efcd080f3d0"
+}
