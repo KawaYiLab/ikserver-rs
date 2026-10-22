@@ -103,6 +103,54 @@ impl Filter {
     }
 }
 
+/// 给定的词里是否有任意两个在同一篇出现（范围内）。
+fn any_pair_cooccurs(term_hits: &[TermHits], terms: &[usize]) -> bool {
+    terms.iter().enumerate().any(|(a, &i)| {
+        terms[a + 1..]
+            .iter()
+            .any(|&j| !intersect(&term_hits[i].docs, &term_hits[j].docs).is_empty())
+    })
+}
+
+/// 不合并时的建议调用：有命中的词若彼此同篇出现，给一个检索这些词的调用（去掉零命中词）；
+/// 否则每个有命中的词各给一个调用。其余参数与版本选择器原样保留，建议不扩大范围。
+fn split_suggestions(
+    args: &SearchArgs,
+    terms: &[String],
+    term_hits: &[TermHits],
+) -> Result<Vec<super::response::NextCall>, super::ToolError> {
+    let hitting: Vec<usize> = (0..terms.len())
+        .filter(|&i| !term_hits[i].docs.is_empty())
+        .collect();
+    let groups: Vec<Vec<usize>> = if hitting.len() > 1 && any_pair_cooccurs(term_hits, &hitting) {
+        vec![hitting]
+    } else {
+        hitting.into_iter().map(|i| vec![i]).collect()
+    };
+    let (_, release) = super::releases::query(args.keyword.as_deref().unwrap_or(""))?;
+    groups
+        .into_iter()
+        .map(|group| {
+            let mut keyword = group
+                .iter()
+                .map(|&i| terms[i].as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if let Some(release) = release {
+                keyword = format!("{} {keyword}", release.version);
+            }
+            let mut retry = serde_json::to_value(args)
+                .map_err(|_| super::ToolError("无法生成建议参数".into()))?;
+            retry["keyword"] = serde_json::json!(keyword);
+            retry["offset"] = serde_json::json!(0);
+            retry["directoryOffset"] = serde_json::json!(0);
+            retry["cursor"] = serde_json::Value::Null;
+            retry["pagePart"] = serde_json::Value::Null;
+            Ok(super::response::NextCall::new("ik_search", retry))
+        })
+        .collect()
+}
+
 /// 不带范围筛选、按同一 matchIn 统计一个词在全库命中的篇数。
 fn corpus_doc_count(corpus: &Corpus, term: &str, body_only: bool) -> usize {
     let everything = Filter {
@@ -288,17 +336,19 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
     let term_hits = collect_term_hits(corpus, &terms, &filter);
     let df: Vec<usize> = term_hits.iter().map(|t| t.docs.len()).collect();
     let window_mode = args.match_unit.as_deref() == Some("window");
-    // 有词在范围内零命中时，并集只会等于单独检索其余词，不算「部分匹配」：不退化，
-    // 改为在页眉说明并给出去掉该词的建议调用。
-    // 显式 allowPartial=true 仍按调用方要求退化（显式值优先）。
-    let zero_term = args.allow_partial.is_none()
+    // 部分匹配只有在「至少两个词同篇出现」时才有信息量。有词零命中、或没有任何两个词同篇时，
+    // 并集只是各词单独结果的拼接：默认不合并，页眉一次报各词篇数，并在 suggestions 里给出
+    // 一跳可用的检索调用。显式 allowPartial 仍按调用方要求（显式值优先）。
+    let all_terms: Vec<usize> = (0..terms.len()).collect();
+    let zero_term = term_hits.iter().any(|t| t.docs.is_empty());
+    let skip_union = args.allow_partial.is_none()
         && terms.len() > 1
-        && term_hits.iter().any(|t| t.docs.is_empty());
+        && (zero_term || !any_pair_cooccurs(&term_hits, &all_terms));
     let mut hits = assemble(
         corpus,
         &term_hits,
-        args.allow_partial.unwrap_or(true) && !zero_term,
-        window_mode && !zero_term,
+        args.allow_partial.unwrap_or(true) && !skip_union,
+        window_mode && !skip_union,
     );
     match args.match_unit.as_deref().unwrap_or("doc") {
         "doc" => {}
@@ -346,6 +396,22 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
             .push(super::response::NextCall::new("ik_search", widen));
     }
     result.missing_term_counts = missing_counts;
+    if terms.len() > 1 {
+        result.term_documents = terms
+            .iter()
+            .zip(&df)
+            .map(|(t, &n)| super::response::TermDocuments {
+                term: t.clone(),
+                documents: n,
+            })
+            .collect();
+    }
+    // 所有词都零命中时没有可合并的东西，也没有可建议的拆分调用：按普通「没有命中」处理。
+    let withheld = skip_union && term_hits.iter().any(|t| !t.docs.is_empty());
+    if withheld {
+        result.partial_withheld = true;
+        result.suggestions = split_suggestions(args, &terms, &term_hits)?;
+    }
     let rendered = render_typed(corpus, &result, doc.is_some(), full);
     let mut out = String::new();
     if let Some(release) = release {
@@ -355,9 +421,20 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
         out.push_str("关键词过多，仅检索前 8 个。\n");
     }
     push_missing_terms(&mut out, &result.missing_term_counts, filter.body_only);
-    if zero_term {
-        out.push_str(
-            "未退化为部分匹配：有检索词在当前范围内零命中，并集只会等同于单独检索其余词；需要时使用建议调用。\n",
+    if withheld {
+        let counts = output::term_document_counts(&result.term_documents);
+        let _ = writeln!(
+            out,
+            "{}",
+            if zero_term {
+                format!(
+                    "未退化为部分匹配：有词在当前范围内零命中（{counts}），合并只会等同于单独检索其余词；直接使用 suggestions 中的调用。"
+                )
+            } else {
+                format!(
+                    "未退化为部分匹配：这些词在当前范围内没有任何两个出现在同一篇（{counts}），合并只是各词单独结果的拼接；可用 suggestions 分别检索。"
+                )
+            }
         );
     }
     out.push_str(&rendered);

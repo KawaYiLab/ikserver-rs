@@ -89,10 +89,57 @@ fn a_term_with_no_hits_does_not_degrade_the_query_into_the_other_terms_union() {
         "{data}"
     );
 
-    // 两个词都存在、只是不同篇：部分匹配照常。
+    // 两个词都存在、但没有任何一篇同时出现：合并只是各词单独结果的拼接，不含共现信息。
+    // 默认不合并，页眉一次报各词篇数，并按词分别给出检索调用。
     let (text, data) = mcp(&c, "ik_search", json!({"keyword":"录像店 以骸"}));
+    assert_eq!(data["partial"], false, "{text}");
+    assert_eq!(data["candidateCount"], 0, "{text}");
+    assert!(text.contains("未退化为部分匹配"), "{text}");
+    assert!(
+        text.contains("录像店 1 篇") && text.contains("以骸 1 篇"),
+        "{text}"
+    );
+    assert!(!text.contains("未命中关键词"), "{text}");
+    assert_eq!(data["partialWithheld"], true);
+    assert!(!text.contains("没有命中。"), "{text}");
+    assert_eq!(
+        data["termDocuments"],
+        json!([{"term":"录像店","documents":1},{"term":"以骸","documents":1}])
+    );
+    let keywords = suggestion_keywords(&data);
+    assert!(keywords.contains(&("录像店".into(), None)), "{data}");
+    assert!(keywords.contains(&("以骸".into(), None)), "{data}");
+
+    // 所有词都零命中：没有可合并的东西，按普通「没有命中」处理。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"旧账 不存在的词"}));
+    assert!(data.get("partialWithheld").is_none(), "{data}");
+    assert!(
+        text.contains("没有命中") && !text.contains("未退化"),
+        "{text}"
+    );
+
+    // 显式 allowPartial=true 仍按要求合并。
+    let (text, data) = mcp(
+        &c,
+        "ik_search",
+        json!({"keyword":"录像店 以骸","allowPartial":true}),
+    );
     assert_eq!(data["partial"], true, "{text}");
-    assert!(data["candidateCount"].as_u64().unwrap() >= 2, "{text}");
+    assert_eq!(data["candidateCount"], 2, "{text}");
+
+    // 有两词同篇（2/3）时，部分匹配才有信息量：照常合并，页眉一次说明最多命中几个词。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"以骸 狡兔屋 录像店"}));
+    assert_eq!(data["partial"], true, "{text}");
+    assert!(text.contains("最多命中 2/3 词"), "{text}");
+    assert!(text.contains("以骸 1 篇"), "{text}");
+
+    // 一个词零命中、其余两词同篇：建议直接检索其余两词的完整匹配，一跳到位。
+    let (text, data) = mcp(&c, "ik_search", json!({"keyword":"以骸 狡兔屋 旧账"}));
+    assert_eq!(data["candidateCount"], 0, "{text}");
+    assert!(
+        suggestion_keywords(&data).contains(&("以骸 狡兔屋".into(), None)),
+        "{data}"
+    );
 
     // allowPartial=false 的严格语义不变。
     let (_, data) = mcp(

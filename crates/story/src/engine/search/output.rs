@@ -542,18 +542,28 @@ pub(super) fn typed_result(
             window_lines: args.window_lines.unwrap_or(12).clamp(1, 100),
         },
         partial: hits.partial,
+        partial_withheld: false,
         candidate_count: docs.len(),
         body_result_count: body.len(),
         directory_count: directory.len(),
         hit_count: hits.docs.iter().map(DocHits::line_count).sum(),
         missing_terms: Vec::new(),
         missing_term_counts: Vec::new(),
+        term_documents: Vec::new(),
         results,
         directory_suggestions,
         next_call,
         next_directory_call,
         suggestions,
     })
+}
+
+pub(super) fn term_document_counts(terms: &[TermDocuments]) -> String {
+    terms
+        .iter()
+        .map(|t| format!("{} {} 篇", t.term, t.documents))
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool) -> String {
@@ -571,9 +581,25 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
         info.push_text(&mut out);
     }
     if r.partial {
-        out.push_str("部分匹配，不证明全部关键词共现。\n");
+        let most = r
+            .results
+            .iter()
+            .chain(&r.directory_suggestions)
+            .map(|item| {
+                r.term_documents
+                    .len()
+                    .saturating_sub(item.missing_terms.len())
+            })
+            .max()
+            .unwrap_or(0);
+        let _ = writeln!(
+            out,
+            "部分匹配：完整匹配 0 篇，以下按命中词数排序（最多命中 {most}/{} 词；{}），不证明全部关键词共现。",
+            r.term_documents.len(),
+            term_document_counts(&r.term_documents)
+        );
     }
-    if r.candidate_count == 0 {
+    if r.candidate_count == 0 && !r.partial_withheld {
         // 去掉范围筛选的建议只在「范围外仍有该词」时出现，必须如实说明它会扩大范围。
         let widens = r.suggestions.iter().any(|s| {
             s.arguments.get("speaker").is_none() && r.resolved_range.speaker.is_some()
