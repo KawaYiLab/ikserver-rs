@@ -173,6 +173,70 @@ fn usage_json(usage: Usage) -> Value {
     json!({ "promptTokens": usage.prompt_tokens, "completionTokens": usage.completion_tokens })
 }
 
+/// 工具记录的开头标记（CTX-012）：历史里 AI 回复前附的这一行由系统生成，模型照着写出来的会被清洗掉（GEN-045）。
+pub const DIGEST_MARK: &str = "【工具记录】";
+const DIGEST_MAX_CHARS: usize = 600;
+const DIGEST_ITEMS: usize = 5;
+
+/// 一条 AI 回复落库的时间线 → 一行工具记录（CTX-012）：检索了什么、命中哪些帖子、读了哪篇、调用了哪些工具。
+/// 只用已脱敏的字段；没有工具步骤返回 None。
+pub fn digest(events: &Value) -> Option<String> {
+    let events = events.as_array()?;
+    let mut sorted: Vec<&Value> = events.iter().collect();
+    sorted.sort_by_key(|e| e["seq"].as_i64().unwrap_or(0));
+    let post = |d: &Value| -> Option<String> {
+        let id = d["documentId"].as_str().filter(|s| !s.is_empty())?;
+        let title = d["title"].as_str().unwrap_or_default();
+        Some(format!("《{title}》(/post/{id})"))
+    };
+    let mut parts: Vec<String> = Vec::new();
+    for e in sorted {
+        let d = &e["data"];
+        let failed = if d["error"].as_bool() == Some(true) {
+            "（失败）"
+        } else {
+            ""
+        };
+        match e["type"].as_str().unwrap_or_default() {
+            "forum.search.finish" => {
+                let query = d["query"].as_str().unwrap_or_default();
+                let hits = d["hits"].as_i64().unwrap_or(0);
+                let items: Vec<String> = d["items"]
+                    .as_array()
+                    .map(|items| items.iter().take(DIGEST_ITEMS).filter_map(post).collect())
+                    .unwrap_or_default();
+                let mut part = format!("检索「{query}」{hits} 条{failed}");
+                if !items.is_empty() {
+                    part.push('：');
+                    part.push_str(&items.join("、"));
+                }
+                parts.push(part);
+            }
+            "forum.read.finish" => match post(d) {
+                Some(p) => parts.push(format!("阅读{p}{failed}")),
+                None => parts.push(format!("阅读帖子（未找到）{failed}")),
+            },
+            "tool.finish" => {
+                let name = d["title"]
+                    .as_str()
+                    .or_else(|| d["tool"].as_str())
+                    .unwrap_or_default();
+                if !name.is_empty() {
+                    parts.push(format!("调用 {name}{failed}"));
+                }
+            }
+            _ => {}
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(truncate(
+        &format!("{DIGEST_MARK}{}", parts.join("；")),
+        DIGEST_MAX_CHARS,
+    ))
+}
+
 /// 一次生成的时间线记录器。
 pub struct Workflow {
     enabled: bool,
@@ -379,7 +443,7 @@ impl Workflow {
         step
     }
 
-    /// 工具结束（WF-008/009）。
+    /// 工具结束（WF-008/009）。`failed` 时结束事件带 `error: true`，时间线把这一步标红（WF-010）。
     pub fn tool_finish(
         &mut self,
         step: &str,
@@ -387,8 +451,15 @@ impl Workflow {
         meta: &ToolMeta,
         ms: u128,
         label: ToolLabel<'_>,
+        failed: bool,
     ) {
         let ms = u64::try_from(ms).unwrap_or(u64::MAX);
+        let flag = |mut data: Value| {
+            if failed {
+                data["error"] = json!(true);
+            }
+            data
+        };
         match (name, meta) {
             ("search_posts", ToolMeta::Search { query, hits, items }) => {
                 let items: Vec<Value> = items
@@ -401,7 +472,9 @@ impl Workflow {
                 self.emit(
                     "forum.search.finish",
                     step,
-                    Some(json!({ "query": query, "hits": hits, "ms": ms, "items": items })),
+                    Some(flag(
+                        json!({ "query": query, "hits": hits, "ms": ms, "items": items }),
+                    )),
                     None,
                 );
             }
@@ -409,17 +482,17 @@ impl Workflow {
                 if let Some((id, title)) = post {
                     let data = json!({ "documentId": id.to_string(), "title": truncate(title, TITLE_MAX_CHARS) });
                     self.emit("forum.read.item", step, Some(data.clone()), None);
-                    self.emit("forum.read.finish", step, Some(data), None);
+                    self.emit("forum.read.finish", step, Some(flag(data)), None);
                     self.cite(*id, title);
                 } else {
-                    self.emit("forum.read.finish", step, None, None);
+                    self.emit("forum.read.finish", step, Some(flag(json!({}))), None);
                 }
             }
             (_, ToolMeta::Comments { post }) => {
                 self.emit(
                     "tool.finish",
                     step,
-                    Some(json!({ "tool": name, "ms": ms })),
+                    Some(flag(json!({ "tool": name, "ms": ms }))),
                     None,
                 );
                 if let Some((id, title)) = post {
@@ -429,10 +502,17 @@ impl Workflow {
             _ => self.emit(
                 "tool.finish",
                 step,
-                Some(tool_data(name, label, Some(ms))),
+                Some(flag(tool_data(name, label, Some(ms)))),
                 None,
             ),
         }
+    }
+
+    /// 工具轮数用完（LLM-005）：时间线上留一步「已达工具调用上限」，之后模型只能基于已有结果作答。
+    pub fn tool_limit(&mut self, rounds: u32) {
+        self.flush();
+        let step = self.next_step();
+        self.emit("tool.limit", &step, Some(json!({ "rounds": rounds })), None);
     }
 
     /// 引用一篇帖子（按 id 去重，WF-009）。
@@ -536,7 +616,7 @@ mod tests {
             source: Some("akasha"),
         };
         let step = wf.tool_start("akasha__search", None, label);
-        wf.tool_finish(&step, "akasha__search", &ToolMeta::None, 7, label);
+        wf.tool_finish(&step, "akasha__search", &ToolMeta::None, 7, label, false);
         let plain = wf.tool_start("get_hot_posts", None, ToolLabel::default());
         wf.tool_finish(
             &plain,
@@ -544,6 +624,7 @@ mod tests {
             &ToolMeta::None,
             1,
             ToolLabel::default(),
+            false,
         );
         let events = wf.take_pending();
         assert_eq!(
@@ -563,6 +644,85 @@ mod tests {
     }
 
     #[test]
+    fn digest_summarises_tool_steps() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        let search = wf.tool_start("search_posts", Some("攻略"), ToolLabel::default());
+        wf.tool_finish(
+            &search,
+            "search_posts",
+            &ToolMeta::Search {
+                query: "攻略".into(),
+                hits: 2,
+                items: vec![(9, "新手攻略".into()), (10, "进阶".into())],
+            },
+            12,
+            ToolLabel::default(),
+            false,
+        );
+        let read = wf.tool_start("get_post_content", None, ToolLabel::default());
+        wf.tool_finish(
+            &read,
+            "get_post_content",
+            &ToolMeta::Read {
+                post: Some((9, "新手攻略".into())),
+            },
+            3,
+            ToolLabel::default(),
+            false,
+        );
+        let label = ToolLabel {
+            title: Some("检索虚空终端"),
+            source: Some("akasha"),
+        };
+        let remote = wf.tool_start("akasha__search", None, label);
+        wf.tool_finish(&remote, "akasha__search", &ToolMeta::None, 5, label, true);
+        wf.content("答案。");
+        wf.finish(Usage::default());
+        assert_eq!(
+            digest(&wf.events()).as_deref(),
+            Some(
+                "【工具记录】检索「攻略」2 条：《新手攻略》(/post/9)、《进阶》(/post/10)；\
+                 阅读《新手攻略》(/post/9)；调用 检索虚空终端（失败）"
+            )
+        );
+        let mut plain = Workflow::new(1, OutputMode::Plain);
+        plain.content("只是聊天。");
+        plain.finish(Usage::default());
+        assert_eq!(digest(&plain.events()), None);
+        assert_eq!(digest(&Value::Null), None);
+    }
+
+    #[test]
+    fn failed_tools_are_flagged() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        let step = wf.tool_start("get_hot_posts", None, ToolLabel::default());
+        wf.tool_finish(
+            &step,
+            "get_hot_posts",
+            &ToolMeta::None,
+            4,
+            ToolLabel::default(),
+            true,
+        );
+        let read = wf.tool_start("get_post_content", None, ToolLabel::default());
+        wf.tool_finish(
+            &read,
+            "get_post_content",
+            &ToolMeta::Read { post: None },
+            2,
+            ToolLabel::default(),
+            true,
+        );
+        let events = wf.take_pending();
+        assert_eq!(
+            events[1]["data"],
+            json!({ "tool": "get_hot_posts", "ms": 4, "error": true })
+        );
+        assert_eq!(events[3]["type"], "forum.read.finish");
+        assert_eq!(events[3]["data"], json!({ "error": true }));
+    }
+
+    #[test]
     fn events_are_ordered_redacted_and_capped() {
         let mut wf = Workflow::new(1, OutputMode::Plain);
         wf.reasoning(10);
@@ -579,6 +739,7 @@ mod tests {
             },
             12,
             ToolLabel::default(),
+            false,
         );
         let read = wf.tool_start("get_post_content", None, ToolLabel::default());
         wf.tool_finish(
@@ -589,6 +750,7 @@ mod tests {
             },
             3,
             ToolLabel::default(),
+            false,
         );
         wf.content("**结论**：可信。");
         wf.cite(9, "标题");

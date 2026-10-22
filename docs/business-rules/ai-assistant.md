@@ -129,6 +129,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 
 - **CTX-010** 私信上下文字段：`quotaUserId`（发送者）、发送者展示名、最新用户消息原文、会话 documentId、会话当前代际 `contextEpoch`。旧实现**不下发历史**，历史由 AstrBot 按会话代际托管；直连实现须自行从库里构建（见 LLM-001）。`execute.ts:164-186`
 - **CTX-011** 发送者昵称随消息正文下发，格式 `<昵称> 说：<正文>`（模型会把它当称呼；会话身份用稳定 id，改名不影响记忆）。`prompt.ts:17-28`、`worker.ts:719-726`
+- **CTX-012** 工具记录（新设计）：历史里最近 6 条 AI 回复的正文前附一行 `【工具记录】……`，由该消息落库的已脱敏时间线（WF-003）生成：检索词与命中数、命中帖子（≤5 篇，`《标题》(/post/id)`）、读过的帖子、调用过的工具，失败的标「（失败）」，整行 ≤600 字；有记录时系统提示词追加一段说明（不是模型写的、不要复述、细节仍需重新读取）。追问「第二篇详细说说」时模型知道之前查过什么。
 
 ### 4.3 上下文重置（代际 epoch）
 
@@ -224,6 +225,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **GEN-042** markdown 模式（角色卡 `outputMode='markdown'`）保留标题、列表、代码块、链接语法，只做安全清洗：引用角标、`doc_` 引用、网络搜索引用（替换为 `[标题](url)`）、**代码块外**的 HTML 标签与提及注入；空行压缩同上；截断时留出余量 `max−5` 加 `…`，若截在未闭合的代码块里补 `\n` + 三个反引号，保证总长 ≤ 上限。前端按白名单渲染 markdown。`sanitize-reply.ts:201-240`、`tests/unit/sanitize-reply.test.ts`
 - **GEN-043** 网络搜索引用：工具结果中 `results[]` 的 `index` 匹配 `^[0-9a-f]{4}\.\d+$` 且有 title 或 url 才收录；正文中 `/\b[0-9a-f]{4}\.\d+\b/gi` 只替换收录过的 index，其余原样保留（防误伤 `2026.8` 这类数字），代码块内不替换。直连实现若接入联网搜索，保留同样的「只替换已知引用」原则。`sanitize-reply.ts:68-149`
 - **GEN-044** 清洗后为空的兜底：去引用角标、压缩空白后按 plain 再洗一次；仍为空报 `empty reply after sanitize`（走重试）。`worker.ts:177-197`
+- **GEN-045** 两种模式都删除行首的 `【工具记录】……` 整行（模型照着历史写出的工具记录，CTX-012）；正文中间出现这几个字不处理。
 
 ### 6.6 多气泡分段
 
@@ -280,6 +282,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **WF-007** 事件出现顺序：思考帧到来发 `reasoning.start`，累计思考比上次多 ≥16 字符发一次 `reasoning.delta`；正文第一次到来先结束思考（`reasoning.finish`）再发 `answer.start`；结束时补发流中没出现过的工具事件，再发 `answer.finish`（附 usage）。空回复也要收尾，避免时间线卡在「分析问题」。`worker.ts:446-473,536-559`
 - **WF-008** 工具事件分流：`search_posts` → `forum.search.start {query}` / `forum.search.finish {query, hits, items≤10, ms}`；`get_post_content` → `forum.read.start` / `forum.read.item` / `forum.read.finish {documentId, title, ms}`，标题取结果首行 `/^帖子标题[：:]\s*(.+)$/m`；`get_post_comments` → `tool.finish` 并计引用；其他工具 → `tool.start {tool}` / `tool.finish {tool, ms}`（新设计：剧情库与站外 MCP 工具另带 `title`（时间线文案）与 `source`（`story` 或服务名），见 TOOL-031）。只收到结果帧没收到开始帧的工具也补发 start。`workflow.ts:92-144`、`worker.ts:475-501`
 - **WF-009** 引用 `citation.add {documentId, title}` 按 documentId 去重：读正文、读评论区即计引用，最终回答中出现的帖子链接也计引用。帖子链接识别三种形态：`[标题](/post/id)`、`标题 (/post/id)`（标题 1-40 字符）、裸 `/post/id`；id 字符集 `[A-Za-z0-9_-]`。`workflow.ts:21-32,146-173`
+- **WF-010** 工具失败（新设计）：工具返回错误时，对应的结束事件（`forum.search.finish` / `forum.read.finish` / `tool.finish`）带 `error: true`，时间线把这一步标红；轮数用完发 `tool.limit {rounds}`（LLM-005）。
 
 ### 7.1 事件类型表
 
@@ -292,6 +295,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 | `forum.read.start` / `forum.read.item` / `forum.read.finish` | 阅读帖子正文 | `{documentId, title?, ms?}` | `{documentId?, title?}` |
 | `tool.start` | 通用工具开始 | `{tool, args}` | `{tool, title?, source?}`（参数不下发；`title`、`source` 只在剧情库与站外工具上有，TOOL-031） |
 | `tool.finish` | 通用工具结束 | `{tool, result?, ms}` | `{tool, title?, source?, ms?}`（结果不下发） |
+| `tool.limit` | 工具轮数用完（WF-010） | `{rounds}` | `{rounds}` |
 | `citation.add` | 新增帖子引用 | `{documentId, title}` | `{documentId, title}` |
 | `answer.start` / `answer.finish` | 正文开始 / 结束 | finish 附 `usage{promptTokens, completionTokens}` | 骨架 + usage |
 | `answer.delta` | 正文分段 | `{partIndex, text}` | `{partIndex, text}` |
@@ -378,6 +382,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **LLM-003 system prompt**：角色卡人格 + 输出模式要求（plain 时要求纯文本）+ 工具使用说明；人格读取失败用无人格兜底，不阻塞（GEN-072）。
 - **LLM-004 流式**：开启流式；思考增量（`reasoning_content` 等字段，各家字段名不同需适配）只驱动 `reasoning.*` 事件，不进正文、不下发文本；正文增量按 GEN-004 节流推送累计全文；分段规则 GEN-050 作用在正文上；首帧看门狗把「思考、正文、工具调用」都算作内容。
 - **LLM-005 工具调用循环**：模型返回 tool_calls 时在进程内执行（TOOL 第 8 节），结果回灌后继续请求，直到模型给出最终回答；每轮工具调用发 WF-008 事件；需设最大轮数，超出时要求模型基于已有结果作答。轮数上限旧实现无数值（由 AstrBot 托管），预占估算按 2 次工具调用（QUOTA-007）。
+  - 新设计：同一轮的多个工具调用**并发执行**；`*.start` 事件按调用顺序发出，`*.finish` 按完成顺序发出，结果按调用顺序回灌；执行期间照常轮询停止信号，总预算到点判超时。轮数用完时时间线追加 `tool.limit {rounds}`（WF-010）。
 - **LLM-006 用量累计**：多轮工具循环的每一次请求用量都要累加（与旧口径「后到覆盖累计上下文」不同，直连是逐请求独立计费）；开启流式末帧用量（如 `stream_options.include_usage`），拿不到按 GEN-081 估算并记日志。
 - **LLM-007 超时与降级链**：单条回复总预算 300s；首帧 90s 无内容 → 若指定了非默认模型，退回默认模型重试一次且不挂看门狗；剩余 <20s 直接失败；首帧超时为终态错误不进重试。普通错误按 TRIG-033 重试，限流错误 base 5s 并全局冷却。
 - **LLM-008 取消**：轮询停止信号（≤600ms 间隔）或用进程内取消令牌，立即中断 HTTP 流与工具循环；按 GEN-011 定稿；取消也要结算配额（已开始调用且无用量时按整份预占，QUOTA-019）。
@@ -385,6 +390,8 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **LLM-010 幂等**：以任务 id 作为占位消息 / AI 评论的唯一键；任务重放时已有结果直接返回、不重复计费（TRIG-037）；结算去重键见 QUOTA-015。
 - **LLM-011 配置容错**：模型映射缺失、提供方不可用时退回默认模型并告警；不得因配置问题让 AI 完全不回话；上游错误文本不得作为回复正文。
 - **LLM-012 上限保护**：单条回复的上游输出累计 >131072 字符即中止判失败（GEN-023）；工具结果每次 ≤4000 字符。
+- **LLM-013 思考回传**（新设计）：思考模式下，带工具调用的那一轮的思考原文（`reasoning_content`）随该轮 assistant 消息回传给上游；DeepSeek 等上游在思考模式下调用工具后不回传会返回 400。只在本次生成的轮次之间回传，不落库、不下发；没有思考时不发这个字段。
+- **LLM-014 当前日期**（新设计）：系统提示词带当前日期（北京时间，精确到天，含星期），同一天内提示词不变，不破坏上游前缀缓存。
 
 ## 11 测试中体现的关键用例
 

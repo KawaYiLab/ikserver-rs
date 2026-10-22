@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, sender_id, content, created_at FROM messages\n         WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL\n         ORDER BY created_at DESC, id DESC\n         LIMIT $2",
+  "query": "SELECT id, sender_id, content, created_at, ai_workflow FROM messages\n         WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL\n         ORDER BY created_at DESC, id DESC\n         LIMIT $2",
   "describe": {
     "columns": [
       {
@@ -46,6 +46,17 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 4,
+        "name": "ai_workflow",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "ai_workflow"
+          }
+        }
       }
     ],
     "parameters": {
@@ -58,8 +69,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "5fdba8581a785ba4b33e3c8e095088876bd3002751bb5be211d72989a7779c0b"
+  "hash": "a4cd68a8b1639bf2ded6bc88ea8f29e0670fc2d505add872d20dc162c8dc5852"
 }

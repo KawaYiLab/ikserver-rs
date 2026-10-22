@@ -287,6 +287,8 @@ pub struct HistoryItem {
     pub sender_id: i64,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    /// AI 回复落库的工作流时间线（已脱敏，WF-003）；用来把上一轮查过什么带进上下文（CTX-012）。
+    pub workflow: Option<serde_json::Value>,
 }
 
 fn history_items(rows: Vec<repo::HistoryRow>) -> Vec<HistoryItem> {
@@ -296,6 +298,7 @@ fn history_items(rows: Vec<repo::HistoryRow>) -> Vec<HistoryItem> {
             sender_id: r.sender_id,
             content: r.content,
             created_at: r.created_at,
+            workflow: r.ai_workflow,
         })
         .collect()
 }

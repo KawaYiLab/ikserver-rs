@@ -36,6 +36,8 @@ fn apply(rules: &[Rule], text: &str) -> String {
 /// 两种模式都做的安全清洗：引用角标、`doc_` 引用、HTML 标签、提及注入（GEN-041/042）。
 static SAFE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     vec![
+        // 模型照着历史写出的工具记录行（GEN-045、CTX-012）。
+        rule(r"(?m)^[ \t]*【工具记录】[^\n]*(?:\n|$)", ""),
         rule(r"(?i)\[(?:reference|citation|ref|source)[:\s]*\d+\]", ""),
         rule(r"\s*doc_[A-Za-z0-9_-]+\b", ""),
         rule(r"</?[a-zA-Z][^>]*>", ""),
@@ -219,6 +221,17 @@ mod tests {
             "标题\n重点 和 斜体 与 code\n· 一\n二\n粗\n@绳匠\n\n尾巴"
         );
         assert_eq!(plain("snake_case_name", 100), "snake_case_name");
+    }
+
+    #[test]
+    fn imitated_tool_digest_lines_are_removed() {
+        let raw = "【工具记录】检索「攻略」1 条\n\n找到了。";
+        assert_eq!(plain(raw, 2500), "找到了。");
+        assert_eq!(markdown(raw, 2500), "找到了。");
+        assert_eq!(
+            plain("正文里提到【工具记录】不算", 2500),
+            "正文里提到【工具记录】不算"
+        );
     }
 
     #[test]

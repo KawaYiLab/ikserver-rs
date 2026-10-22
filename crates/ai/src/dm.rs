@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use chrono::Utc;
+use chrono::{DateTime, Datelike, FixedOffset, Utc};
 use ik_kernel::bus::Effects;
 use ik_kernel::jobs::{IntoTaskHandlerResult, JobSpec, Jobs, TaskHandler, WorkerContext};
 use ik_kernel::{Problem, Snowflake};
@@ -27,7 +27,7 @@ use crate::repo::{self, JobOutcome, JobRow, SessionRow};
 use crate::sanitize;
 use crate::toolbox::Toolbox;
 use crate::tools::ToolContext;
-use crate::workflow::Workflow;
+use crate::workflow::{self, Workflow};
 
 const FAILED_TEXT: &str = "（生成失败，请重试）";
 const STOPPED_TEXT: &str = "（已停止）";
@@ -179,6 +179,7 @@ pub(crate) fn system_prompt(card: &RoleCard, mode: OutputMode) -> String {
         }
         OutputMode::Markdown => "\n\n【输出格式】可以使用 Markdown（标题、列表、代码块、链接）。",
     });
+    prompt.push_str(&date_note(Utc::now()));
     if !card.examples.is_empty() {
         prompt.push_str(
             "\n\n【示例对话】以下示例只用于说明语气和格式，不是真实的对话历史，不要当作之前的轮次；\
@@ -195,18 +196,61 @@ pub(crate) fn system_prompt(card: &RoleCard, mode: OutputMode) -> String {
     prompt
 }
 
-/// 对话消息（LLM-001、CTX-011）：用户消息带发送者昵称（`<昵称> 说：<正文>`），AI 自己的回复按 assistant。
+/// 当前日期（北京时间，精确到天）：模型不知道今天几号，「最近」「今天」类问题会答偏（LLM-014）。
+/// 只到天，同一天内提示词不变，不破坏上游的前缀缓存。
+fn date_note(now: DateTime<Utc>) -> String {
+    let local = FixedOffset::east_opt(8 * 3600).map_or_else(
+        || now.naive_utc(),
+        |tz| now.with_timezone(&tz).naive_local(),
+    );
+    let weekday =
+        ["一", "二", "三", "四", "五", "六", "日"][local.weekday().num_days_from_monday() as usize];
+    format!(
+        "\n\n【当前日期】{}年{}月{}日，星期{weekday}（北京时间）。",
+        local.year(),
+        local.month(),
+        local.day()
+    )
+}
+
+/// 最近几条 AI 回复附工具记录（CTX-012）；更早的只留正文，控制上下文长度。
+const DIGEST_REPLIES: usize = 6;
+
+const DIGEST_NOTE: &str = "\n\n【工具记录】历史里你的部分回复开头附有一行「【工具记录】……」，\
+    是系统自动记下的你当时查过的内容（检索词、命中与读过的帖子），供你接着之前的话题回答；\
+    它不是你写的，回复时不要写这样的行，也不要向用户复述它。需要帖子细节时仍应重新读取。";
+
+/// 对话消息（LLM-001、CTX-011）：用户消息带发送者昵称（`<昵称> 说：<正文>`），AI 自己的回复按 assistant；
+/// 最近几条 AI 回复前附上当时的工具记录（CTX-012），追问时模型知道之前查过、读过哪些帖子。
 pub(crate) fn build_messages(
     card: &RoleCard,
     history: &[HistoryItem],
     ai_user_id: i64,
     names: &HashMap<i64, String>,
 ) -> Vec<ChatMessage> {
+    let mut digests: Vec<Option<String>> = vec![None; history.len()];
+    let recent_ai = history
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, item)| item.sender_id == ai_user_id)
+        .take(DIGEST_REPLIES);
+    for (index, item) in recent_ai {
+        digests[index] = item.workflow.as_ref().and_then(workflow::digest);
+    }
+    let mut system = system_prompt(card, card.output_mode);
+    if digests.iter().any(Option::is_some) {
+        system.push_str(DIGEST_NOTE);
+    }
     let mut messages = Vec::with_capacity(history.len() + 1);
-    messages.push(ChatMessage::system(system_prompt(card, card.output_mode)));
-    for item in history {
+    messages.push(ChatMessage::system(system));
+    for (item, digest) in history.iter().zip(digests) {
         if item.sender_id == ai_user_id {
-            messages.push(ChatMessage::assistant(item.content.clone()));
+            let content = match digest {
+                Some(digest) => format!("{digest}\n\n{}", item.content),
+                None => item.content.clone(),
+            };
+            messages.push(ChatMessage::assistant(content));
         } else {
             let name = names.get(&item.sender_id).map_or("用户", String::as_str);
             messages.push(ChatMessage::user(format!("{name} 说：{}", item.content)));
@@ -757,6 +801,19 @@ mod tests {
     }
 
     #[test]
+    fn date_note_uses_beijing_time() {
+        // UTC 2026-10-22 17:30 = 北京时间 10 月 23 日凌晨（星期五）。
+        let now = DateTime::parse_from_rfc3339("2026-10-22T17:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            date_note(now),
+            "\n\n【当前日期】2026年10月23日，星期五（北京时间）。"
+        );
+        assert!(system_prompt(&card(), OutputMode::Plain).contains("【当前日期】"));
+    }
+
+    #[test]
     fn history_maps_to_roles_with_names() {
         let at = Utc::now();
         let history = vec![
@@ -765,12 +822,14 @@ mod tests {
                 sender_id: 5,
                 content: "在吗".into(),
                 created_at: at,
+                workflow: None,
             },
             HistoryItem {
                 id: 2,
                 sender_id: 9,
                 content: "在。".into(),
                 created_at: at,
+                workflow: None,
             },
         ];
         let names = HashMap::from([(5, "绳匠".to_owned())]);
@@ -778,6 +837,41 @@ mod tests {
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[1], ChatMessage::user("绳匠 说：在吗"));
         assert_eq!(messages[2], ChatMessage::assistant("在。"));
+        assert!(!messages[0].text().contains("系统自动记下"));
+    }
+
+    #[test]
+    fn recent_ai_replies_carry_tool_digest() {
+        let at = Utc::now();
+        let workflow = serde_json::json!([
+            {"type": "forum.search.start", "stepId": "s1", "seq": 1, "at": "", "data": {"query": "攻略"}},
+            {"type": "forum.search.finish", "stepId": "s1", "seq": 2, "at": "",
+             "data": {"query": "攻略", "hits": 1, "items": [{"documentId": "7", "title": "新手攻略"}]}},
+        ]);
+        let history = vec![
+            HistoryItem {
+                id: 1,
+                sender_id: 5,
+                content: "找找攻略".into(),
+                created_at: at,
+                workflow: None,
+            },
+            HistoryItem {
+                id: 2,
+                sender_id: 9,
+                content: "找到一篇。".into(),
+                created_at: at,
+                workflow: Some(workflow),
+            },
+        ];
+        let messages = build_messages(&card(), &history, 9, &HashMap::new());
+        assert_eq!(
+            messages[2],
+            ChatMessage::assistant(
+                "【工具记录】检索「攻略」1 条：《新手攻略》(/post/7)\n\n找到一篇。"
+            )
+        );
+        assert!(messages[0].text().contains("系统自动记下"));
     }
 
     #[test]

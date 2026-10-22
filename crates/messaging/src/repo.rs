@@ -708,6 +708,7 @@ pub(crate) struct HistoryRow {
     pub sender_id: i64,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    pub ai_workflow: Option<serde_json::Value>,
 }
 
 /// AI 上下文用的历史（LLM-001），新的在前：`(from, until]` 之间未撤回的文本消息；
@@ -721,7 +722,7 @@ pub(crate) async fn history(
 ) -> sqlx::Result<Vec<HistoryRow>> {
     sqlx::query_as!(
         HistoryRow,
-        "SELECT id, sender_id, content, created_at FROM messages
+        "SELECT id, sender_id, content, created_at, ai_workflow FROM messages
          WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL
            AND (ai_state IS NULL OR ai_state IN ('done', 'stopped'))
            AND ($2::timestamptz IS NULL OR created_at > $2) AND created_at <= $3
@@ -744,7 +745,7 @@ pub(crate) async fn recent_texts(
 ) -> sqlx::Result<Vec<HistoryRow>> {
     sqlx::query_as!(
         HistoryRow,
-        "SELECT id, sender_id, content, created_at FROM messages
+        "SELECT id, sender_id, content, created_at, ai_workflow FROM messages
          WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL
          ORDER BY created_at DESC, id DESC
          LIMIT $2",
