@@ -183,7 +183,17 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
             "catalog"
         },
     );
-    let snapshot = Snapshot::new(corpus).text();
+    let mut snapshot = Snapshot::new(corpus).text();
+    // compact 逐篇摘要省略 unknown 的顺序字段时，在快照头说明一次。头部在读取前就要定稿（计入字数预算），
+    // 所以按事先已知的篇目判断：批量读取看整批，其余看起始篇（同组顺读的提取状态一致）。
+    let known_docs: Vec<usize> = batch_docs.clone().unwrap_or_else(|| vec![doc]);
+    if !full
+        && known_docs
+            .iter()
+            .any(|&d| corpus.doc_summaries[d].order.has_unlisted_unknown())
+    {
+        snapshot.push_str(super::response::UNLISTED_ORDER_NOTE);
+    }
     let mut blocks = Vec::new();
     let mut continuation_at = None;
     let mut next_document = None;

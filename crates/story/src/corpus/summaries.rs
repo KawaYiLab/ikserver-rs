@@ -391,6 +391,19 @@ impl DocumentSummary {
     }
 }
 
+impl DocumentOrder {
+    /// compact 逐篇摘要会省略值为 unknown / 未提供的顺序字段；有省略时整份输出需要说明一次。
+    pub fn has_unlisted_unknown(&self) -> bool {
+        let unknown = |v: &str| matches!(v, "" | "unknown" | "notProvided");
+        self.applicable
+            && (unknown(&self.doc_order_source)
+                || unknown(&self.chronology_status)
+                || unknown(&self.context_status)
+                || self.line_order_sources.iter().any(|v| unknown(&v.value))
+                || self.line_order_statuses.iter().any(|v| unknown(&v.value)))
+    }
+}
+
 pub(super) fn build(c: &Corpus) -> Vec<DocumentSummary> {
     c.docs
         .iter()
