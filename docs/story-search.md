@@ -85,6 +85,15 @@ ik_read(docId="3.3版本", limit=20)
 
 MCP 默认 `detail="compact"`，需要展开解释时用 `full`，逐行证据由 `includeEvidence=true` 控制。CLI 的旧 `tools::call` 默认保留详细文本。客户端给模型提供一种主要结果表示，避免把 text 与 structuredContent 中同一批原文重复塞入上下文；具体 token 成本取决于客户端。游标是校验过的只读续接参数，不是访问凭证，鉴权仍由 HTTP 层处理。
 
+排查游标与快照不一致时：游标是 base64url（8 字节校验和 + JSON `{v, r, t, a}`），其中 `r` 是**完整 `corpusRevision` 的 SHA-256 前 8 字节**
+（16 位十六进制），不是 revision 的前缀，因此不能和响应头的 `corpusRevision=corpus_v1_…` 直接对视。用下面的命令算出标记再比对：
+
+```bash
+printf %s 'corpus_v1_…' | sha256sum | cut -c1-16
+```
+
+不用前缀是有意的：对整串取摘要，revision 任何位置的变化都会让旧游标失效。
+
 ```text
 ik_search(keyword="核心", path="3.3版本", purpose="locate")
 ik_search(keyword="天空 核心", path="3.3版本", purpose="verify", matchUnit="window", windowLines=12)
