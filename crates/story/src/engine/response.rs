@@ -468,6 +468,13 @@ pub struct SearchItem {
     pub next_matches: Option<NextCall>,
     pub related_status: String,
 }
+/// 多词检索时各词在当前范围内的命中篇数。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TermDocuments {
+    pub term: String,
+    pub documents: usize,
+}
 /// 当前范围内零命中的检索词在全库（不带范围筛选、同一 matchIn）的命中篇数。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -483,6 +490,9 @@ pub struct SearchResult {
     pub query: String,
     pub resolved_range: SearchRange,
     pub partial: bool,
+    /// 默认未合并为部分匹配（有词零命中或没有任何两词同篇），原因与建议调用见页眉与 suggestions。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub partial_withheld: bool,
     pub candidate_count: usize,
     pub body_result_count: usize,
     pub directory_count: usize,
@@ -490,6 +500,9 @@ pub struct SearchResult {
     pub missing_terms: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub missing_term_counts: Vec<TermCount>,
+    /// 多词检索时各词在当前范围内的命中篇数（单词检索时省略）。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub term_documents: Vec<TermDocuments>,
     pub results: Vec<SearchItem>,
     pub directory_suggestions: Vec<SearchItem>,
     pub next_call: Option<NextCall>,
@@ -612,6 +625,26 @@ pub struct ToolOutput {
     pub text: String,
     pub response: ToolResponse,
 }
+impl ToolData {
+    /// 文本里带逐篇 compact 摘要的文档（清单模式只给范围摘要，不算）。
+    fn summarized_documents(&self) -> Vec<&Document> {
+        match self {
+            ToolData::Search(r) => r
+                .results
+                .iter()
+                .chain(&r.directory_suggestions)
+                .map(|item| &item.document)
+                .collect(),
+            ToolData::Read(r) => r.blocks.iter().map(|b| &b.document).collect(),
+            ToolData::Catalog(r) if r.manifest.is_none() => r.documents.iter().collect(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// compact 逐篇摘要只列已知的顺序字段，整份输出说明一次，单篇层面「未知」与「已核验」才可区分。
+pub(crate) const UNLISTED_ORDER_NOTE: &str = "逐篇摘要只列已知的篇序/行序/局部/剧情先后/上下文；未列出即 unknown（未核验），不代表没有问题。\n";
+
 impl ToolOutput {
     pub fn new(c: &Corpus, mut text: String, data: ToolData) -> Self {
         let snapshot = Snapshot::new(c);
@@ -619,7 +652,15 @@ impl ToolOutput {
             text.push('\n');
         }
         let at = text.find('\n').map_or(0, |i| i + 1);
-        text.insert_str(at, &snapshot.text());
+        let mut header = snapshot.text();
+        if data
+            .summarized_documents()
+            .iter()
+            .any(|d| d.order.as_ref().is_some_and(|o| o.has_unlisted_unknown()))
+        {
+            header.push_str(UNLISTED_ORDER_NOTE);
+        }
+        text.insert_str(at, &header);
         Self {
             text,
             response: ToolResponse { snapshot, data },

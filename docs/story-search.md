@@ -21,8 +21,10 @@ MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fac
 
 多词检索先在同一篇文档中找全词匹配（AND）；词可分布在不同行、标题、路径或姓名元数据中。
 无完整匹配时默认返回部分匹配，优先按正文词覆盖、有效署名覆盖排序，再比较总覆盖与相关度，逐篇列出缺失词。
-`allowPartial=false` 保持严格 AND。未显式指定 `allowPartial` 时，若有词在当前范围内零命中则不退化为并集（那只等于单独检索其余词），
-改为页眉说明并给出去掉该词的建议调用；显式 `allowPartial=true` 仍按要求返回部分匹配。部分匹配不能证明全部词在同篇共现，也不提供概念同义词推理。
+`allowPartial=false` 保持严格 AND。部分匹配只有在至少两个词同篇出现时才有信息量。未显式指定 `allowPartial` 时，若有词在当前范围内零命中、或没有任何两个词同篇，
+就不合并：页眉一次报各词篇数，`structuredContent` 标 `partialWithheld=true` 并给出 `termDocuments`，`suggestions` 给出可直接使用的检索调用
+（有命中的词彼此同篇时合成一个调用，否则每词一个；版本选择器原样保留）。所有词都零命中时按普通「没有命中」处理。
+合并时页眉写明「最多命中 k/n 词」与各词篇数。显式 `allowPartial=true` 仍按要求返回部分匹配。部分匹配不能证明全部词在同篇共现，也不提供概念同义词推理。
 回退始终保留 `path`、`scope`、`speaker`、`docId` 和版本限定，不会通过移除范围来扩大命中。
 检索词超过 8 个时提示截断；版本选择器先解析为范围，不占检索词配额。
 当前范围内零命中的词会再按同一 `matchIn`、不带范围筛选查一次全库：范围外仍有时写「当前范围内无命中：X（全库 N 篇）」并给出去掉范围筛选的建议调用，
@@ -83,6 +85,15 @@ ik_read(docId="3.3版本", limit=20)
 
 MCP 默认 `detail="compact"`，需要展开解释时用 `full`，逐行证据由 `includeEvidence=true` 控制。CLI 的旧 `tools::call` 默认保留详细文本。客户端给模型提供一种主要结果表示，避免把 text 与 structuredContent 中同一批原文重复塞入上下文；具体 token 成本取决于客户端。游标是校验过的只读续接参数，不是访问凭证，鉴权仍由 HTTP 层处理。
 
+排查游标与快照不一致时：游标是 base64url（8 字节校验和 + JSON `{v, r, t, a}`），其中 `r` 是**完整 `corpusRevision` 的 SHA-256 前 8 字节**
+（16 位十六进制），不是 revision 的前缀，因此不能和响应头的 `corpusRevision=corpus_v1_…` 直接对视。用下面的命令算出标记再比对：
+
+```bash
+printf %s 'corpus_v1_…' | sha256sum | cut -c1-16
+```
+
+不用前缀是有意的：对整串取摘要，revision 任何位置的变化都会让旧游标失效。
+
 ```text
 ik_search(keyword="核心", path="3.3版本", purpose="locate")
 ik_search(keyword="天空 核心", path="3.3版本", purpose="verify", matchUnit="window", windowLines=12)
@@ -118,6 +129,8 @@ full手动续读使用返回的具体docId；快照cursor保存原别名及读�
 署名摘要compact最多展示6个逐句姓名，推断名单独立，full展开完整名单；旧包缺少核验证据单列。
 compact 的逐篇摘要默认一行：署名覆盖（只列非零的推断/旧未核验/待核验）、非零缺口计数、已知的篇序/行序/局部/剧情先后/上下文与逐句署名；
 值为 unknown / 未提供的顺序字段不逐篇写出，设定文档不再逐篇写「不适用」，超出 180 字预算时退回分段压缩格式。full 与 structuredContent 不变。
+有省略时，整份 compact 输出在快照头下说明一次「未列出即 unknown（未核验）」，单篇层面「未知」与「已核验」由此可区分；
+`ik_read` 的头部在读取前定稿，按批量篇目或起始篇判断。
 搜索命中窗口的局部状态与整篇摘要采用不同范围，不以窗口代表整篇。
 
 署名覆盖提供总行数、有名字行数及“resolved、inferred、旧包未声明状态、其他/未知状态、无名字”五类互斥计数。
