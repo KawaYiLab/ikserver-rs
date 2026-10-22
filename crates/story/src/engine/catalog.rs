@@ -610,6 +610,32 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
         manifest,
         resolved_range: range,
     };
+    // 清单模式只给范围摘要：篇目在 structuredContent.documents 里，需要逐篇目录时去掉 manifest 重查。
+    if let Some(manifest) = &result.manifest {
+        let mut text = format!(
+            "[ik_catalog] 范围清单 | {} 篇 · {} 行\n",
+            manifest.total_documents, manifest.total_lines
+        );
+        if let Some(info) = &result.range_info {
+            info.push_text(&mut text);
+        }
+        if let Some(counts) = &result.speaker_coverage {
+            let _ = writeln!(text, "范围{}", counts.text());
+        }
+        let _ = writeln!(
+            text,
+            "排除={} 篇 / {} 行（仅整篇全部为占位或未关联候选）；范围内占位 {} 行 · 未关联候选 {} 行（可交叉）",
+            manifest.excluded_documents,
+            manifest.excluded_lines,
+            manifest.placeholder_lines,
+            manifest.unlinked_lines
+        );
+        let _ = writeln!(text, "manifestId={}", manifest.manifest_id);
+        text.push_str(
+            "ik_read 的 coverageDelta 交给 ik_coverage(manifestId, ranges) 核对；需要逐篇目录时去掉 manifest 重查。\n",
+        );
+        return Ok(ToolOutput::new(c, text, ToolData::Catalog(result)));
+    }
     let legacy_text = full
         && args.scope.is_none()
         && args.exclude_placeholders != Some(true)

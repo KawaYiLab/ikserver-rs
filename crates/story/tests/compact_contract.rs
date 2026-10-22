@@ -151,6 +151,9 @@ fn compact_catalog_exposes_aliases_manifest_and_range_coverage() {
     assert_eq!(d["speakerCoverage"]["totalLines"], 2);
     let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains(d["manifest"]["manifestId"].as_str().unwrap()));
+    // 清单模式只给摘要；逐篇摘要（篇序、来源键）在普通目录里。
+    let r = rpc(&c, "ik_catalog", json!({"path":"3.3版本","maxResults":1}));
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("archive_table") && text.contains("source_key"),
         "{text}"

@@ -4,7 +4,7 @@
 
 - `ik_catalog(path=…)` 返回章节或分类的文档目录；`path` 支持分组 ID、章节名、文档 ID 和已核验版本别名。
 - 版本别名（如 `3.3`）对应该版新增主线；`snapshotVersion` 是整个语料快照的版本，包含历史章节。
-- `manifest=true` 返回固定范围清单，包括文档数、行数、排除数、占位与未关联候选计数。状态计数可能交叉。
+- `manifest=true` 返回固定范围清单，包括文档数、行数、排除数、占位与未关联候选计数。状态计数可能交叉。文本只给清单摘要，篇目在 `structuredContent.documents`；需要逐篇目录时去掉 `manifest` 重查。
 - `excludePlaceholders` / `excludeUnlinked` 只排除整篇全部属于对应状态的文档，混合文档保留。
 
 ## 原文与分页
