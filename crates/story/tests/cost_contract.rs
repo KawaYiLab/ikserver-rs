@@ -152,3 +152,45 @@ fn cursors_carry_only_non_default_arguments_and_a_short_snapshot_tag() {
         Ok(Err(_))
     ));
 }
+
+#[test]
+fn compact_document_summary_is_one_line_without_unknown_placeholders() {
+    let c = corpus();
+    let (text, data) = mcp(&c, "ik_catalog", json!({"path":"ch:Chapter00"}));
+    // 旧语料里篇序/行序/剧情先后/上下文全是 unknown/未提供，逐篇重复只是噪音。
+    assert!(!text.contains("整篇："), "{text}");
+    assert!(
+        !text.contains("未提供") && !text.contains("=unknown"),
+        "{text}"
+    );
+    // 关键事实保留：署名覆盖、缺口计数、逐句署名名单。
+    assert!(text.contains("署名3/6"), "{text}");
+    assert!(text.contains("缺署名证据6"), "{text}");
+    assert!(text.contains("逐句署名：铃、哲、妮可"), "{text}");
+    // 每篇：一行目录 + 一行摘要。
+    let docs = data["documents"].as_array().unwrap().len();
+    let doc_lines: Vec<&str> = text.lines().filter(|l| l.starts_with("doc_")).collect();
+    assert_eq!(doc_lines.len(), docs);
+    for (i, line) in text.lines().enumerate() {
+        if line.starts_with("doc_") {
+            let after: Vec<&str> = text.lines().skip(i + 1).take(2).collect();
+            assert!(
+                after.len() < 2 || after[1].starts_with("doc_") || !after[0].starts_with("doc_"),
+                "{text}"
+            );
+        }
+    }
+    assert!(text.lines().count() <= docs * 2 + 6, "{text}");
+
+    // 设定文档不再逐篇写「不适用（设定）」。
+    let (lore, _) = mcp(&c, "ik_catalog", json!({"path":"lore:agents"}));
+    assert!(!lore.contains("顺序与署名覆盖：不适用"), "{lore}");
+
+    // full 详情不变。
+    let (full, _) = mcp(
+        &c,
+        "ik_catalog",
+        json!({"path":"ch:Chapter00","detail":"full"}),
+    );
+    assert!(full.contains("整篇：篇序="), "{full}");
+}
