@@ -692,8 +692,10 @@ async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
     assert!(!bad.starts_with("工具执行失败") && !bad.is_empty(), "{bad}");
     let events = h.workflow(job).await;
     let start = events.iter().find(|e| e["type"] == "tool.start").unwrap();
-    assert_eq!(start["data"]["source"], "story");
-    assert_eq!(start["data"]["tool"], "ik_guide");
+    assert_eq!(
+        start["data"],
+        json!({ "tool": "ik_guide", "title": "查阅剧情库指引", "source": "story" })
+    );
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

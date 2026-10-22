@@ -79,7 +79,10 @@ static STORY_SPECS: LazyLock<Vec<(ToolSpec, Option<String>)>> = LazyLock::new(||
                 .filter_map(|t| {
                     let name = t["name"].as_str()?.to_owned();
                     let description = t["description"].as_str().unwrap_or_default().to_owned();
-                    let title = t["title"].as_str().map(str::to_owned);
+                    // 时间线文案用动词短语（前端显示为「正在…」），没有对照的用 MCP 定义里的 title。
+                    let title = story_label(&name)
+                        .map(str::to_owned)
+                        .or_else(|| t["title"].as_str().map(str::to_owned));
                     // 顶层的 anyOf（ik_read 的三选一）有的上游不接受；约束写在描述里，参数错误时工具会说明。
                     let mut parameters = t["inputSchema"].clone();
                     if let Some(schema) = parameters.as_object_mut() {
@@ -98,6 +101,19 @@ static STORY_SPECS: LazyLock<Vec<(ToolSpec, Option<String>)>> = LazyLock::new(||
         })
         .unwrap_or_default()
 });
+
+/// 剧情库工具在时间线上的文案。
+fn story_label(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "ik_catalog" => "浏览剧情目录",
+        "ik_search" => "检索剧情",
+        "ik_read" => "阅读剧情原文",
+        "ik_character" => "查阅角色档案",
+        "ik_guide" => "查阅剧情库指引",
+        "ik_coverage" => "核对阅读覆盖",
+        _ => return None,
+    })
+}
 
 impl Toolbox {
     /// 只有论坛工具。
