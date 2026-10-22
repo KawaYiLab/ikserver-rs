@@ -600,6 +600,106 @@ pub struct CharacterChapter {
     pub first_directory_mention: Option<Document>,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaResult {
+    /// 固定为 "roleplay"。
+    pub purpose: String,
+    pub name: String,
+    pub resolved_names: Vec<String>,
+    pub related_names: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until: Option<PersonaCutoff>,
+    /// 选中的代理人档案；身份与性格小节附原文，其余小节只给入口。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<PersonaProfile>,
+    /// 其余标题含名字的代理人档案标题。
+    pub other_profiles: Vec<String>,
+    /// 档案对话原文片段（信赖邀约、街区日常、随行气泡），按档案行序。
+    pub dialogue_scenes: Vec<PersonaScene>,
+    /// 范围内主线逐句署名已解析的对白数与场景数。
+    pub story_spoken_lines: usize,
+    pub story_scenes: usize,
+    /// 去重并满足字数范围、可被抽为主线样本的台词数。
+    pub story_candidate_lines: usize,
+    pub partners: Vec<PersonaPartner>,
+    pub story_samples: Vec<PersonaSample>,
+    pub next_calls: Vec<NextCall>,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaCutoff {
+    pub group_id: String,
+    pub title: String,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaProfile {
+    pub doc_id: String,
+    pub title: String,
+    pub line_count: usize,
+    pub sections: Vec<PersonaSection>,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaSection {
+    pub heading: String,
+    /// profile（身份与性格，附原文）/ dialogue（对话，见 dialogueScenes）/ other（只给入口）。
+    pub kind: String,
+    /// 标题行在档案内的行号（1 起）；开头部分为首行。
+    pub line: usize,
+    pub line_count: usize,
+    pub scene_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    pub truncated: bool,
+    /// profile 截断时为续读入口，其余为整节入口。
+    pub read: NextCall,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaScene {
+    pub section: String,
+    /// 幕标题；随行气泡为「k/n 组」。
+    pub heading: String,
+    pub line: usize,
+    /// 非空行数（随行气泡为所选各组之和）。
+    pub line_count: usize,
+    /// 原文行（含行尾来源键）。
+    pub lines: Vec<PersonaLine>,
+    pub truncated: bool,
+    /// 截断时为续读入口，否则为本段入口。
+    pub read: NextCall,
+    pub section_read: NextCall,
+    pub section_scenes: usize,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaLine {
+    pub number: usize,
+    pub text: String,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaPartner {
+    pub name: String,
+    /// 与该角色相邻的署名对白往来次数。
+    pub exchanges: usize,
+    pub scenes: usize,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaSample {
+    pub doc_id: String,
+    pub title: String,
+    pub group_id: String,
+    pub group_title: String,
+    pub line: SourceLine,
+    /// 文档内的前一句（占位说明除外）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<SourceLine>,
+    pub read: NextCall,
+}
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GuideResult {
     pub mode: String,
     pub text: String,
@@ -611,6 +711,7 @@ pub enum ToolData {
     Read(ReadResult),
     Catalog(CatalogResult),
     Character(CharacterResult),
+    Persona(PersonaResult),
     Guide(GuideResult),
     Coverage(CoverageResult),
 }
@@ -721,6 +822,14 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
         GroupCard,
         CharacterResult,
         CharacterChapter,
+        PersonaResult,
+        PersonaCutoff,
+        PersonaProfile,
+        PersonaSection,
+        PersonaScene,
+        PersonaLine,
+        PersonaPartner,
+        PersonaSample,
         GuideResult,
         Manifest,
         RangeScope,
@@ -752,23 +861,25 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
     }
     refs(&mut defs);
     let mut root = defs["ToolResponse"].clone();
+    let one = |name: &str| json!({"$ref":format!("#/$defs/{name}")});
     let data = match tool {
-        "ik_search" => "SearchResult",
-        "ik_read" => "ReadResult",
-        "ik_catalog" => "CatalogResult",
-        "ik_character" => "CharacterResult",
-        "ik_guide" => "GuideResult",
-        "ik_coverage" => "CoverageResult",
-        _ => "ToolData",
+        "ik_search" => one("SearchResult"),
+        "ik_read" => one("ReadResult"),
+        "ik_catalog" => one("CatalogResult"),
+        // purpose=roleplay 返回 PersonaResult，其余返回 CharacterResult。
+        "ik_character" => json!({"oneOf":[one("CharacterResult"), one("PersonaResult")]}),
+        "ik_guide" => one("GuideResult"),
+        "ik_coverage" => one("CoverageResult"),
+        _ => one("ToolData"),
     };
     // flatten produces allOf; the envelope remains generated and only its data ref is specialized.
-    fn specialize(v: &mut Value, data: &str) {
+    fn specialize(v: &mut Value, data: &Value) {
         match v {
             Value::Object(m) => {
                 if let Some(properties) = m.get_mut("properties")
                     && properties.get("data").is_some()
                 {
-                    properties["data"] = json!({"$ref":format!("#/$defs/{data}")});
+                    properties["data"] = data.clone();
                 }
                 for value in m.values_mut() {
                     specialize(value, data);
@@ -782,7 +893,7 @@ pub fn output_schema(tool: &str) -> Result<Value, serde_json::Error> {
             _ => {}
         }
     }
-    specialize(&mut root, data);
+    specialize(&mut root, &data);
     fn referenced(v: &Value, names: &mut std::collections::BTreeSet<String>) {
         match v {
             Value::Object(m) => {

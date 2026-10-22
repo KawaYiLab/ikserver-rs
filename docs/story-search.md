@@ -11,11 +11,30 @@ MCP 提供资料、参数语义、分页入口与来源状态。模型自行决�
 
 `ik_guide` 保留原工具名及 `summary` / `character` / `timeline` / `verify` 模式，返回各主题的参数与结果字段参考。
 它不再包含角色设定、强制搜索/阅读流程、分层压缩、引用格式或最终回答模板。
-MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fact_check` 名称及原参数，
+MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fact_check` 名称及原参数，另有 `roleplay_profile`（参数 `name`），
 仅返回用户选用的任务文本，不自动附加 guide 内容。
 
 `mcp_contract_leaves_workflow_and_answer_format_to_client` 与 `mcp_prompts_only_contain_the_selected_task`
 回归检查初始化、工具描述、guide、工具返回文本与 prompts 的这项边界。
+
+## 角色扮演资料
+
+`ik_character(name, purpose="roleplay")` 面向角色扮演场景，只提供原文素材，不生成性格或语气归纳。
+主要素材来自代理人档案，主线逐句署名台词作为辅助：线上语料里不少角色的主线署名台词只有几十到一百多句，
+而档案的街区日常、信赖邀约、随行气泡里有数百句角色直接对「店长」说的话。
+
+- **档案小节**：开头、HIA 执照、深度身世与机密档案、录像店私密评语原样给出（每节约 1500 字，按整行截断，附续读入口）；
+  意象影画、音擎等其余小节只给 `ik_read` 入口。小节按提取器输出的固定标题识别，不认识的小节归为「其他」，只给入口，不丢弃。
+- **档案对话**：默认 6 段，信赖邀约 1 幕、随行气泡 1 段（等距取最多 10 组）、其余为街区日常（等距取，优先不少于 4 行的幕）；
+  缺少某类时名额让给其余类。每段最多 30 行 / 约 1500 字。档案对话不逐句署名：`【名字】` 是原文标注，未标注的行可能是玩家选项、旁白或角色本人。
+  文本里省略行尾来源键，structuredContent 保留原文；行号是档案内行号，可直接 `ik_read`。
+- **主线**：常对话对象（相邻两句署名对白的往来次数与场景数）；样本只取逐句署名已解析的对白，同文去重，字数 6～120，
+  先给前几位常对话对象各一条往来样本，再按篇轮流取最长的句子，名额少于篇数时在篇目间等距取，结果按语料行序排列，每条附前一句与原文入口。
+
+档案的选择：标题名或括号里的全名（忽略空格与「」）与查询精确一致优先，否则标题含名字且只有一篇时使用，其余列为 `otherProfiles`。
+`until` 只把主线台词与往来限定到某章（含），接受章节 id、章节名或已核验版本别名；档案不随之过滤。
+名字只包含匹配到多个说话人时直接报错并列出候选。抽样是确定性的，同一快照同一参数结果相同。
+`structuredContent.data` 为 `PersonaResult`；`ik_character` 的 outputSchema 以 `oneOf` 覆盖 `CharacterResult` 与 `PersonaResult`。
 
 ## 检索与版本别名
 

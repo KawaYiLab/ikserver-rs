@@ -8,6 +8,7 @@ pub mod character;
 pub mod coverage;
 pub(crate) mod cursor;
 pub mod guide;
+pub(crate) mod persona;
 pub mod read;
 pub(crate) mod releases;
 pub mod response;

@@ -985,6 +985,11 @@ fn mcp_contract_leaves_workflow_and_answer_format_to_client() {
                 "ik_character",
                 json!({"name":"妮可","maxResults":1,"includeEvidence":true}),
             ),
+            ("ik_character", json!({"name":"妮可","purpose":"roleplay"})),
+            (
+                "ik_character",
+                json!({"name":"安比","purpose":"roleplay","until":"序章"}),
+            ),
         ] {
             args["detail"] = json!(detail);
             descriptions.push(ok(&c, tool, args));
@@ -1034,6 +1039,11 @@ fn mcp_prompts_only_contain_the_selected_task() {
             "character_arc",
             "name",
             "请梳理角色「测试对象」在绝区零主线中的角色弧线。",
+        ),
+        (
+            "roleplay_profile",
+            "name",
+            "请整理绝区零角色「测试对象」的角色扮演参考资料。",
         ),
         (
             "event_timeline",
@@ -1186,7 +1196,7 @@ fn jsonrpc_lifecycle() {
     assert_eq!(res["id"], Value::Null);
 
     let prompts = rpc(&s, json!({"jsonrpc":"2.0","id":9,"method":"prompts/list"}));
-    assert_eq!(prompts["result"]["prompts"].as_array().unwrap().len(), 4);
+    assert_eq!(prompts["result"]["prompts"].as_array().unwrap().len(), 5);
     let p = rpc(
         &s,
         json!({"jsonrpc":"2.0","id":10,"method":"prompts/get","params":{"name":"chapter_summary","arguments":{"chapter":"序章"}}}),

@@ -25,10 +25,19 @@ pub struct CharacterArgs {
     pub max_results: Option<usize>,
     #[serde(default, deserialize_with = "crate::de::opt_bool")]
     pub include_evidence: Option<bool>,
+    /// overview（默认）为出场统计；roleplay 为扮演参考资料。
+    #[serde(default)]
+    pub purpose: Option<String>,
+    /// 仅 roleplay：主线台词截止到该章节（含）。
+    #[serde(default)]
+    pub until: Option<String>,
+    /// 仅 roleplay：档案对话段数。
+    #[serde(default, deserialize_with = "crate::de::opt_usize")]
+    pub max_scenes: Option<usize>,
 }
 
 /// 场景名单里的非角色项。
-fn is_placeholder(name: &str) -> bool {
+pub(crate) fn is_placeholder(name: &str) -> bool {
     matches!(name, "？？？" | "???" | "旁白" | "选项" | "系统" | "广播")
         || name.chars().all(|c| c == '？' || c == '?')
 }
@@ -53,6 +62,25 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
     let name = args.name.trim();
     if name.is_empty() {
         return err("name 不能为空");
+    }
+    match args.purpose.as_deref().unwrap_or("overview") {
+        "overview" => {}
+        "roleplay" => {
+            return super::persona::execute(
+                corpus,
+                &super::persona::RoleplayArgs {
+                    name,
+                    until: args.until.as_deref(),
+                    max_samples: args.max_results,
+                    max_scenes: args.max_scenes,
+                    include_evidence: args.include_evidence,
+                },
+            );
+        }
+        _ => return err("purpose 只能是 overview / roleplay"),
+    }
+    if args.until.is_some() || args.max_scenes.is_some() {
+        return err("until / maxScenes 只用于 purpose=roleplay");
     }
     let max = clamp(args.max_results, 40, 200);
     let folded = fold(name);

@@ -357,6 +357,15 @@ fn generated_schemas_are_self_contained_and_match_results() {
             "ik_character",
             json!({"name":"测试角色0","detail":"full"}),
         );
+        let roleplay = rpc(
+            &details,
+            "ik_character",
+            json!({"name":"测试角色0","purpose":"roleplay"}),
+        );
+        assert_eq!(
+            roleplay["result"]["structuredContent"]["data"]["purpose"], "roleplay",
+            "{roleplay}"
+        );
         let full_read = rpc(
             &details,
             "ik_read",
@@ -378,6 +387,7 @@ fn generated_schemas_are_self_contained_and_match_results() {
             ("ik_read", full_read),
             ("ik_character", character),
             ("ik_character", full_character),
+            ("ik_character", roleplay),
             ("ik_coverage", coverage),
             ("ik_guide", guide),
         ]
