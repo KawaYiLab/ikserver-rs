@@ -198,7 +198,9 @@
 
 ### `messages`
 
-- `kind` 只有 `text`（D-021 图片消息不实现）与预留给 AI 会话分界的 `system`。正文 1～4000 字由 CHECK 兜底。
+- `kind` 只有 `text` 与预留给 AI 会话分界的 `system`；图片不是单独的 kind，而是文本消息上的 `image_ids`。正文 ≤4000 字由 CHECK 兜底。
+- `image_ids`：消息附图（MSG-030），有序，最多 4 张；带图时正文可以为空（CHECK 放行）。
+  和评论图片一样用数组而不是关系表（引用的文件从不物理删除，D-078），归属在写入时校验（D-012）。
 - 撤回只写 `withdrawn_at`，行与正文保留（举报复核需要），接口层对所有人隐藏正文。
 - `(sender_id, client_id)` 部分唯一索引实现发送去重。
 - 收件箱时间线（`/v1/inbox/dm-<id>/items`）把这里的消息与 `notifications` 里对方发来的通知按 `(created_at, id)` 归并，
@@ -321,6 +323,7 @@
 
 - 表都归 ik-ai。`ai_settings` 单行（`id = 1` 的 CHECK），两个上限的单位是加权 token，0 表示不限制（AI-001）。
 - `ai_models`：`key` 对外；`provider`（提供方名字，见下面的 `ai_providers`）与 `provider_model` 是上游路由，只在服务端流转。
+  `vision` 标记上游支持图片输入（LLM-015），默认关。
   部分唯一索引保证最多一条默认模型，CHECK 保证默认模型启用（D-005 方案 A：默认模型是一条有自己倍率的记录）。
 - `ai_role_cards`：角色卡直接持有 system prompt 与示例对话（`examples` JSONB，few-shot，GEN-071）；
   `allowed_model_ids` 为空表示不限制；「某用户的角色卡」= 启用的、按 `sort_order, id` 取第一张（部分索引）。

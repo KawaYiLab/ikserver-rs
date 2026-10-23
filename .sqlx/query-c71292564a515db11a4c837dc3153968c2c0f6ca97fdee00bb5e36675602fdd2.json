@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO media_uploaders (media_id, user_id) VALUES (900, $1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c71292564a515db11a4c837dc3153968c2c0f6ca97fdee00bb5e36675602fdd2"
+}

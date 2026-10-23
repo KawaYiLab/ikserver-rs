@@ -129,6 +129,7 @@ impl Harness {
                 content: format!("hi {to}"),
                 reply_to_id: None,
                 client_id: None,
+                image_ids: Vec::new(),
             },
         )
         .await

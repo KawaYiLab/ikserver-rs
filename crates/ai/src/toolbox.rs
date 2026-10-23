@@ -280,6 +280,7 @@ impl Toolbox {
                         text: truncate(&output.text, server.max_result_chars),
                         is_error: output.is_error,
                         meta: ToolMeta::None,
+                        images: Vec::new(),
                     },
                     Err(error) => {
                         tracing::warn!(server = %server.name, tool = %tool, %error, "MCP 工具调用失败");
@@ -314,12 +315,14 @@ async fn story(state: &AiState, name: &str, arguments: &str) -> ToolOutput {
             text: truncate(&output.text, STORY_MAX_RESULT_CHARS),
             is_error: false,
             meta: ToolMeta::None,
+            images: Vec::new(),
         },
         // 参数错误等工具自己的错误：原样告诉模型（不含内部细节），让它改参数重试。
         Ok(Ok(Err(error))) => ToolOutput {
             text: truncate(&error.0, tools::MAX_RESULT_CHARS),
             is_error: true,
             meta: ToolMeta::None,
+            images: Vec::new(),
         },
         Ok(Err(_unknown)) => error_output(format!("未知工具：{name}")),
         Err(join) => {
@@ -334,6 +337,7 @@ fn error_output(text: String) -> ToolOutput {
         text,
         is_error: true,
         meta: ToolMeta::None,
+        images: Vec::new(),
     }
 }
 

@@ -58,6 +58,8 @@ pub struct AdminModel {
     pub provider: String,
     pub provider_model: String,
     pub cost_weight: f64,
+    /// 支持识图（LLM-015）。
+    pub vision: bool,
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
@@ -223,6 +225,7 @@ pub async fn models(state: &AiState) -> Result<Vec<AdminModel>, Problem> {
             provider: m.provider,
             provider_model: m.provider_model,
             cost_weight: m.cost_weight,
+            vision: m.vision,
             enabled: m.enabled,
             is_default: m.is_default,
             sort_order: m.sort_order,
@@ -560,6 +563,7 @@ pub async fn save_model(
         "provider": input.provider,
         "providerModel": input.provider_model,
         "costWeight": input.cost_weight,
+        "vision": input.vision,
         "enabled": input.enabled,
         "isDefault": input.is_default,
     });

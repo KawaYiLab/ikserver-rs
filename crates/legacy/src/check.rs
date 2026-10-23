@@ -396,7 +396,8 @@ async fn messaging(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
     let m = sqlx::query!(
         r#"SELECT
                count(*) FILTER (WHERE kind = 'image') AS "images!",
-               count(*) FILTER (WHERE char_length(coalesce(new_content, '')) = 0) AS "empty!",
+               count(*) FILTER (WHERE char_length(coalesce(new_content, '')) = 0
+                                  AND cardinality(image_ids) = 0) AS "empty!",
                count(*) FILTER (WHERE char_length(btrim(coalesce(content, ''))) > 4000) AS "long!"
            FROM legacy.ik_messages"#
     )
@@ -406,7 +407,7 @@ async fn messaging(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
         "messaging.image_messages",
         Severity::Fixed,
         m.images,
-        "图片消息（不实现，D-021）改为正文里的图片地址；取不到图片时为「[图片]」",
+        "图片消息的附件转成消息图片（前 4 张，MSG-030）；读不到的、超出的改为正文里的图片地址，什么都取不到时为「[图片]」",
     ));
     out.push(Finding::new(
         "messaging.empty_messages",

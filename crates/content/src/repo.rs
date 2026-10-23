@@ -1586,6 +1586,16 @@ pub(crate) async fn public_post_meta(
     .await
 }
 
+/// 帖子的封面（有序）。帖子不存在时为空。
+pub(crate) async fn cover_ids(conn: &mut PgConnection, post_id: i64) -> sqlx::Result<Vec<i64>> {
+    Ok(
+        sqlx::query_scalar!("SELECT cover_ids FROM posts WHERE id = $1", post_id)
+            .fetch_optional(conn)
+            .await?
+            .unwrap_or_default(),
+    )
+}
+
 // ---------- 审核（moderation） ----------
 
 pub(crate) struct ReportableRow {

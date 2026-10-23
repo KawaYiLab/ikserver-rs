@@ -25,7 +25,7 @@ pub enum ChatMessage {
         content: String,
     },
     User {
-        content: String,
+        content: UserContent,
     },
     Assistant {
         content: String,
@@ -50,8 +50,17 @@ impl ChatMessage {
     }
 
     pub fn user(content: impl Into<String>) -> Self {
+        Self::user_with_images(content, Vec::new())
+    }
+
+    /// 带图片的用户消息（LLM-015）：`images` 是上游能直接拉取的图片地址，正文里应已写好「[图片]」占位，
+    /// 不识图的模型去掉图片后仍知道这里有图。
+    pub fn user_with_images(content: impl Into<String>, images: Vec<String>) -> Self {
         Self::User {
-            content: content.into(),
+            content: UserContent {
+                text: content.into(),
+                images,
+            },
         }
     }
 
@@ -67,10 +76,53 @@ impl ChatMessage {
     pub fn text(&self) -> &str {
         match self {
             Self::System { content }
-            | Self::User { content }
             | Self::Assistant { content, .. }
             | Self::Tool { content, .. } => content,
+            Self::User { content } => &content.text,
         }
+    }
+
+    /// 附带的图片数（预占估算用）。
+    pub fn image_count(&self) -> usize {
+        match self {
+            Self::User { content } => content.images.len(),
+            _ => 0,
+        }
+    }
+
+    /// 去掉图片（发给不识图的模型，LLM-015）：正文里的「[图片]」占位保留。
+    #[must_use]
+    pub fn without_images(&self) -> Self {
+        match self {
+            Self::User { content } if !content.images.is_empty() => {
+                Self::user(content.text.clone())
+            }
+            other => other.clone(),
+        }
+    }
+}
+
+/// 用户消息的内容：没有图片时序列化成字符串，有图片时序列化成 OpenAI 的内容块数组
+/// （`text` 在前，`image_url` 依次在后）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserContent {
+    pub text: String,
+    pub images: Vec<String>,
+}
+
+impl Serialize for UserContent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        if self.images.is_empty() {
+            return serializer.serialize_str(&self.text);
+        }
+        let mut parts = Vec::with_capacity(self.images.len() + 1);
+        if !self.text.is_empty() {
+            parts.push(serde_json::json!({ "type": "text", "text": self.text }));
+        }
+        for url in &self.images {
+            parts.push(serde_json::json!({ "type": "image_url", "image_url": { "url": url } }));
+        }
+        parts.serialize(serializer)
     }
 }
 
@@ -624,6 +676,31 @@ mod tests {
         // 没有思考的回复不带这个字段（OpenAI 等不认识它的上游不受影响）。
         let plain = serde_json::to_value(ChatMessage::assistant("a")).unwrap();
         assert!(plain.get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn user_images_serialize_as_content_parts() {
+        let text_only = serde_json::to_value(ChatMessage::user("你好")).unwrap();
+        assert_eq!(
+            text_only,
+            serde_json::json!({"role": "user", "content": "你好"})
+        );
+        let with_image =
+            ChatMessage::user_with_images("这是什么 [图片]", vec!["https://cdn.test/a.png".into()]);
+        assert_eq!(with_image.image_count(), 1);
+        assert_eq!(with_image.text(), "这是什么 [图片]");
+        assert_eq!(
+            serde_json::to_value(&with_image).unwrap(),
+            serde_json::json!({"role": "user", "content": [
+                {"type": "text", "text": "这是什么 [图片]"},
+                {"type": "image_url", "image_url": {"url": "https://cdn.test/a.png"}},
+            ]})
+        );
+        // 不识图的模型：去掉图片，占位留在正文里。
+        assert_eq!(
+            serde_json::to_value(with_image.without_images()).unwrap(),
+            serde_json::json!({"role": "user", "content": "这是什么 [图片]"})
+        );
     }
 
     #[test]

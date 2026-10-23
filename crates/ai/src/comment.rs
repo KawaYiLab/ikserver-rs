@@ -34,6 +34,10 @@ use crate::toolbox::Toolbox;
 const POST_BODY_MAX_CHARS: usize = 4000;
 /// 父评论进上下文的上限（CTX-001）。
 const PARENT_MAX_CHARS: usize = 500;
+/// 识图模型最多看本条评论的几张图（LLM-015）。
+const COMMENT_IMAGES: usize = 4;
+/// 识图模型最多看父评论的几张图（LLM-015）。
+const PARENT_IMAGES: usize = 2;
 
 /// 后台任务：生成一条 AI 评论回复。重试次数取配置 `ai.max_attempts`（TRIG-033）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,14 +185,26 @@ impl CommentHooks for Hooks {
     }
 }
 
-/// 评论正文进上下文的纯文本：提及与表情 token 转成可读文本，纯图片评论为「[图片]」。
-fn comment_text(body: &str) -> String {
+/// 图片占位（LLM-015）：1 张「[图片]」，多张「[图片×n]」，没有为空串。不识图的模型靠它知道这里有图。
+pub(crate) fn image_marker(count: usize) -> String {
+    match count {
+        0 => String::new(),
+        1 => "[图片]".to_owned(),
+        n => format!("[图片×{n}]"),
+    }
+}
+
+/// 评论正文进上下文的纯文本：提及与表情 token 转成可读文本，带图时末尾加图片占位；
+/// 正文为空又不知道图片数（只拿到正文的历史评论）时为「[图片]」。
+fn comment_text(body: &str, images: usize) -> String {
     let text = ik_comments::text::plain_text(body);
     let text = text.trim();
-    if text.is_empty() {
-        "[图片]".to_owned()
-    } else {
-        text.to_owned()
+    let marker = image_marker(images);
+    match (text.is_empty(), marker.is_empty()) {
+        (true, true) => "[图片]".to_owned(),
+        (true, false) => marker,
+        (false, true) => text.to_owned(),
+        (false, false) => format!("{text} {marker}"),
     }
 }
 
@@ -212,6 +228,14 @@ pub(crate) struct PostContext {
     pub id: i64,
     pub title: String,
     pub body: String,
+    /// 封面与正文插图（发给识图模型的地址，LLM-015）。
+    pub images: Vec<String>,
+}
+
+/// 一条评论进上下文：纯文本（已带图片占位）与图片地址。
+pub(crate) struct CommentContext {
+    pub text: String,
+    pub images: Vec<String>,
 }
 
 /// 一轮记忆：用户的评论与 AI 当时的回复（纯文本）。
@@ -221,13 +245,14 @@ pub(crate) struct Turn {
 }
 
 /// 发给模型的消息（LLM-002、CTX-002）：system（人格 + 评论回复要求 + 当前帖子）→ 之前的问答 →
-/// 本次评论（`当前帖子：…`、可选的 `父评论：…`、`<评论者> 说：<评论>`）。
+/// 本次评论（`当前帖子：…`、帖子有图时 `帖子图片：[图片×n]`、可选的 `父评论：…`、
+/// `<评论者> 说：<评论>`）。图片挂在最后一条消息上，顺序与占位一致：帖子、父评论、本条评论（LLM-015）。
 pub(crate) fn build_messages(
     card: &RoleCard,
     post: &PostContext,
-    parent: Option<&str>,
+    parent: Option<&CommentContext>,
     commenter: &str,
-    comment: &str,
+    comment: &CommentContext,
     memory: &[Turn],
 ) -> Vec<ChatMessage> {
     let mut system = dm::system_prompt(card, OutputMode::Plain);
@@ -251,11 +276,18 @@ pub(crate) fn build_messages(
         messages.push(ChatMessage::assistant(turn.assistant.clone()));
     }
     let mut last = format!("当前帖子：{title}（document_id: {}）", post.id);
-    if let Some(parent) = parent {
-        last.push_str(&format!("\n父评论：{parent}"));
+    let mut images = Vec::new();
+    if !post.images.is_empty() {
+        last.push_str(&format!("\n帖子图片：{}", image_marker(post.images.len())));
+        images.extend(post.images.iter().cloned());
     }
-    last.push_str(&format!("\n{commenter} 说：{comment}"));
-    messages.push(ChatMessage::user(last));
+    if let Some(parent) = parent {
+        last.push_str(&format!("\n父评论：{}", parent.text));
+        images.extend(parent.images.iter().cloned());
+    }
+    last.push_str(&format!("\n{commenter} 说：{}", comment.text));
+    images.extend(comment.images.iter().cloned());
+    messages.push(ChatMessage::user_with_images(last, images));
     messages
 }
 
@@ -389,16 +421,43 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         .cloned();
 
     // 上下文（CTX-001～003）。
-    let body = ik_content::interop::search_docs(&mut tx, &[post_id])
+    let raw_body = ik_content::interop::search_docs(&mut tx, &[post_id])
         .await?
         .into_iter()
         .next()
-        .map(|d| truncate(&d.body, POST_BODY_MAX_CHARS))
+        .map(|d| d.body)
         .unwrap_or_default();
+    // 图片（LLM-015）：只有识图模型才取地址；首帧超时退回不识图的默认模型时在生成阶段去掉。
+    let (post_images, parent_images, comment_images) = if model.vision {
+        let cover_ids = ik_content::interop::cover_ids(&mut tx, post_id).await?;
+        let parent_ids: Vec<i64> = parent
+            .as_ref()
+            .map(|p| p.image_ids.iter().copied().take(PARENT_IMAGES).collect())
+            .unwrap_or_default();
+        let comment_ids: Vec<i64> = trigger
+            .image_ids
+            .iter()
+            .copied()
+            .take(COMMENT_IMAGES)
+            .collect();
+        let all: Vec<i64> = parent_ids.iter().chain(&comment_ids).copied().collect();
+        let urls = state.media.vision_urls(&all).await?;
+        let pick = |ids: &[i64]| -> Vec<String> {
+            ids.iter().filter_map(|id| urls.get(id).cloned()).collect()
+        };
+        (
+            crate::tools::post_images(state, &cover_ids, &raw_body).await?,
+            pick(&parent_ids),
+            pick(&comment_ids),
+        )
+    } else {
+        (Vec::new(), Vec::new(), Vec::new())
+    };
     let post_context = PostContext {
         id: post.id,
         title: post.title.clone(),
-        body,
+        body: truncate(&raw_body, POST_BODY_MAX_CHARS),
+        images: post_images,
     };
     let turns = repo::comment_memory(
         &mut tx,
@@ -420,29 +479,38 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
             let user = bodies.get(&t.trigger_comment_id)?;
             let assistant = reply_text(bodies.get(&t.reply_comment_id)?);
             (!assistant.is_empty()).then(|| Turn {
-                user: comment_text(user),
+                user: comment_text(user, 0),
                 assistant,
             })
         })
         .collect();
-    let parent_text = parent.map(|p| truncate(&comment_text(&p.body), PARENT_MAX_CHARS));
+    let parent_context = parent.map(|p| CommentContext {
+        text: truncate(&comment_text(&p.body, p.image_ids.len()), PARENT_MAX_CHARS),
+        images: parent_images,
+    });
+    let comment_context = CommentContext {
+        text: comment_text(&trigger.body, trigger.image_ids.len()),
+        images: comment_images,
+    };
     let mut messages = build_messages(
         &card,
         &post_context,
-        parent_text.as_deref(),
+        parent_context.as_ref(),
         &commenter.username,
-        &comment_text(&trigger.body),
+        &comment_context,
         &memory,
     );
     let toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
     toolbox.annotate_system(&mut messages);
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。不足时静默跳过。
-    let prompt_chars = messages
-        .iter()
-        .map(|m| i64::try_from(m.text().chars().count()).unwrap_or(i64::MAX))
-        .sum::<i64>()
-        .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds));
+    let prompt_chars = quota::prompt_estimate(&messages, model.vision)
+        .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds))
+        .saturating_add(if model.vision {
+            quota::TOOL_IMAGE_TOKENS
+        } else {
+            0
+        });
     let amount = quota::estimate(
         state.config.estimated_context_tokens,
         state.config.max_tool_rounds,
@@ -661,10 +729,48 @@ mod tests {
     #[test]
     fn comment_text_handles_tokens_and_images() {
         assert_eq!(
-            comment_text("@[Fairy](9) 在吗 :ik-smile:"),
+            comment_text("@[Fairy](9) 在吗 :ik-smile:", 0),
             "@Fairy 在吗 [表情:smile]"
         );
-        assert_eq!(comment_text("  "), "[图片]");
+        assert_eq!(comment_text("  ", 0), "[图片]");
+        assert_eq!(comment_text("  ", 1), "[图片]");
+        assert_eq!(comment_text("看看这个", 3), "看看这个 [图片×3]");
+    }
+
+    #[test]
+    fn images_ride_on_the_last_message_in_marker_order() {
+        let card = crate::catalog::tests::card(None, Vec::new());
+        let post = PostContext {
+            id: 7,
+            title: "标题".into(),
+            body: "正文".into(),
+            images: vec!["https://cdn.test/cover.png".into()],
+        };
+        let parent = CommentContext {
+            text: "父 [图片]".into(),
+            images: vec!["https://cdn.test/parent.png".into()],
+        };
+        let comment = CommentContext {
+            text: "这是什么 [图片]".into(),
+            images: vec!["https://cdn.test/comment.png".into()],
+        };
+        let messages = build_messages(&card, &post, Some(&parent), "绳匠", &comment, &[]);
+        let last = messages.last().unwrap();
+        assert_eq!(
+            last.text(),
+            "当前帖子：标题（document_id: 7）\n帖子图片：[图片]\n父评论：父 [图片]\n绳匠 说：这是什么 [图片]"
+        );
+        let ChatMessage::User { content } = last else {
+            panic!("最后一条应是用户消息");
+        };
+        assert_eq!(
+            content.images,
+            vec![
+                "https://cdn.test/cover.png".to_owned(),
+                "https://cdn.test/parent.png".to_owned(),
+                "https://cdn.test/comment.png".to_owned(),
+            ]
+        );
     }
 
     #[test]

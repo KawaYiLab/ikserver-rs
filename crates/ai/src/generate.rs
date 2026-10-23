@@ -35,6 +35,10 @@ const TYPING_EVERY: Duration = Duration::from_secs(2);
 const FALLBACK_MIN_REMAINING: Duration = Duration::from_secs(20);
 /// 上游输出（正文 + 思考 + 工具参数）累计上限（GEN-023、LLM-012）。
 const MAX_STREAM_CHARS: usize = 131_072;
+/// 一次回复里工具结果最多附多少张图给识图模型（LLM-015）。
+const MAX_TOOL_IMAGES: usize = 8;
+/// 工具结果附图时那条消息的说明（LLM-015）。
+const TOOL_IMAGES_NOTE: &str = "（系统附上刚才工具读到的帖子图片，不是用户发的，按需参考）";
 /// 工具轮数用完后追加给模型的要求（LLM-005）。
 const NO_MORE_TOOLS: &str =
     "（系统提示）工具调用次数已达上限。请不要再调用工具，基于已有结果直接回答。";
@@ -326,7 +330,10 @@ pub(crate) fn prompt_tokens_estimate(state: &AiState, messages: &[ChatMessage]) 
     state.config.estimated_context_tokens
         + messages
             .iter()
-            .map(|m| quota::estimate_text_tokens(m.text()))
+            .map(|m| {
+                quota::estimate_text_tokens(m.text())
+                    + i64::try_from(m.image_count()).unwrap_or(0) * quota::IMAGE_TOKENS
+            })
             .sum::<i64>()
 }
 
@@ -374,7 +381,13 @@ async fn run_rounds(
     } else {
         0
     };
-    let mut messages = base.to_vec();
+    // 不识图的模型（包括首帧超时后退回的默认模型）收不到图片，只看正文里的「[图片]」占位（LLM-015）。
+    let mut messages: Vec<ChatMessage> = if model.vision {
+        base.to_vec()
+    } else {
+        base.iter().map(ChatMessage::without_images).collect()
+    };
+    let mut tool_images = 0usize;
     let mut out = Streamed::failed(LlmError::Timeout);
     out.end = End::Finished;
     let mut rounds = 0u32;
@@ -452,7 +465,7 @@ async fn run_rounds(
             });
         }
         ctx.publish_workflow(workflow);
-        let mut outputs: Vec<Option<String>> = vec![None; round.tool_calls.len()];
+        let mut outputs: Vec<Option<tools::ToolOutput>> = vec![None; round.tool_calls.len()];
         let mut stop_tick = tokio::time::interval(STOP_POLL);
         loop {
             tokio::select! {
@@ -468,7 +481,7 @@ async fn run_rounds(
                         output.is_error,
                     );
                     ctx.publish_workflow(workflow);
-                    outputs[index] = Some(output.text);
+                    outputs[index] = Some(output);
                 }
                 _ = stop_tick.tick() => {
                     if ctx.stop_requested().await {
@@ -483,11 +496,27 @@ async fn run_rounds(
             }
         }
         drop(pending);
+        let mut images = Vec::new();
         for (call, output) in round.tool_calls.iter().zip(outputs) {
+            let output = output.unwrap_or_else(|| tools::ToolOutput {
+                text: String::new(),
+                is_error: false,
+                meta: tools::ToolMeta::None,
+                images: Vec::new(),
+            });
             messages.push(ChatMessage::Tool {
                 tool_call_id: call.id.clone(),
-                content: output.unwrap_or_default(),
+                content: output.text,
             });
+            images.extend(output.images);
+        }
+        // 工具消息只能是文本：识图模型的图片另起一条用户消息跟在工具结果后面（LLM-015）。
+        if model.vision {
+            images.truncate(MAX_TOOL_IMAGES.saturating_sub(tool_images));
+            if !images.is_empty() {
+                tool_images += images.len();
+                messages.push(ChatMessage::user_with_images(TOOL_IMAGES_NOTE, images));
+            }
         }
         if rounds >= max_rounds {
             workflow.tool_limit(max_rounds);

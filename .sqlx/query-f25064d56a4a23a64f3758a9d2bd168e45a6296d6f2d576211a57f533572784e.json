@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, key, display_name, description, badge, provider, provider_model, cost_weight,\n                enabled, is_default, sort_order\n         FROM ai_models ORDER BY sort_order, id",
+  "query": "SELECT id, key, display_name, description, badge, provider, provider_model, cost_weight,\n                vision, enabled, is_default, sort_order\n         FROM ai_models ORDER BY sort_order, id",
   "describe": {
     "columns": [
       {
@@ -93,6 +93,17 @@
       },
       {
         "ordinal": 8,
+        "name": "vision",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "vision"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
         "name": "enabled",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "is_default",
         "type_info": "Bool",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "sort_order",
         "type_info": "Int4",
         "origin": {
@@ -139,8 +150,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3e7862e71f3aeecdce88122b5c714ea77200543a5d67b41d5306d17c5b6898fc"
+  "hash": "f25064d56a4a23a64f3758a9d2bd168e45a6296d6f2d576211a57f533572784e"
 }

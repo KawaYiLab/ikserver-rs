@@ -200,6 +200,7 @@ function editModel(model?: Model) {
         provider: settings.value?.providers[0] ?? '',
         providerModel: '',
         costWeight: 1,
+        vision: false,
         enabled: true,
         isDefault: false,
         sortOrder: (models.value?.length ?? 0) * 10,
@@ -697,6 +698,7 @@ const jobFilters = jobList.filters
                   <div class="flex flex-wrap gap-1">
                     <Badge :variant="model.enabled ? 'default' : 'outline'">{{ model.enabled ? '启用' : '停用' }}</Badge>
                     <Badge v-if="model.isDefault" variant="secondary">默认</Badge>
+                    <Badge v-if="model.vision" variant="secondary">识图</Badge>
                   </div>
                 </TableCell>
                 <TableCell class="space-x-1 text-right whitespace-nowrap">
@@ -1037,6 +1039,10 @@ const jobFilters = jobList.filters
           <label class="flex items-center justify-between gap-4 text-sm">
             启用
             <Switch v-model="modelDraft.enabled" />
+          </label>
+          <label class="flex items-center justify-between gap-4 text-sm">
+            支持识图（上游接受图片输入；不支持的模型收到图片会报错）
+            <Switch v-model="modelDraft.vision" />
           </label>
           <label class="flex items-center justify-between gap-4 text-sm">
             设为默认模型（同时取消其他模型的默认）

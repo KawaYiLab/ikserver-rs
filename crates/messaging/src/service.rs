@@ -12,6 +12,8 @@ use ik_auth::service::Author;
 use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::cursor::{self, Page};
 use ik_kernel::{Id, Problem};
+use ik_media::MediaState;
+use ik_media::dto::MediaView;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
@@ -25,6 +27,8 @@ use crate::repo::{self, MessageRow, NewMessage, SummaryRow};
 
 /// 正文上限（MSG-001）。
 pub const CONTENT_MAX_CHARS: usize = 4000;
+/// 一条消息最多几张图（MSG-030）。
+pub const MAX_IMAGES: usize = 4;
 /// 发出后可编辑、撤回的时间（MSG-015、MSG-016）。
 pub const EDIT_WINDOW: Duration = Duration::minutes(5);
 /// 每人最多置顶的会话数（CONV-023）。
@@ -57,8 +61,18 @@ pub fn preview(kind: &str, content: &str, withdrawn: bool) -> String {
     text
 }
 
-pub(crate) fn message_view(row: MessageRow) -> MessageView {
+/// 消息视图。`media` 是这些消息引用的图片（[`message_views`] 批量取）；不在里面的图片不出现。
+pub(crate) fn message_view(row: MessageRow, media: &HashMap<i64, MediaView>) -> MessageView {
     let withdrawn = row.withdrawn_at.is_some();
+    // 撤回后图片随正文一起隐藏。
+    let images = if withdrawn {
+        Vec::new()
+    } else {
+        row.image_ids
+            .iter()
+            .filter_map(|id| media.get(id).cloned())
+            .collect()
+    };
     let reply_to = row.reply_to_id.map(|id| {
         let reply_withdrawn = row.reply_withdrawn_at.is_some();
         ReplyView {
@@ -77,6 +91,7 @@ pub(crate) fn message_view(row: MessageRow) -> MessageView {
         sender_id: Id::new(row.sender_id),
         kind: row.kind,
         content: (!withdrawn).then_some(row.content),
+        images,
         reply_to,
         client_id: row.client_id,
         edited_at: row.edited_at,
@@ -93,6 +108,30 @@ pub(crate) fn message_view(row: MessageRow) -> MessageView {
                 .filter(|w: &Vec<WorkflowEvent>| !w.is_empty()),
         }),
     }
+}
+
+/// 批量生成消息视图，图片一次取齐。
+pub(crate) async fn message_views(
+    media: &MediaState,
+    rows: Vec<MessageRow>,
+) -> Result<Vec<MessageView>, Problem> {
+    let ids: Vec<i64> = rows
+        .iter()
+        .filter(|r| r.withdrawn_at.is_none())
+        .flat_map(|r| r.image_ids.iter().copied())
+        .collect();
+    let views = media.views(&ids).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| message_view(row, &views))
+        .collect())
+}
+
+pub(crate) async fn one_view(media: &MediaState, row: MessageRow) -> Result<MessageView, Problem> {
+    message_views(media, vec![row])
+        .await?
+        .pop()
+        .ok_or_else(Problem::internal)
 }
 
 pub(crate) fn peer_view(
@@ -184,6 +223,24 @@ fn validate_content(content: &str) -> Result<String, Problem> {
         ));
     }
     Ok(content.to_owned())
+}
+
+/// 图片 id：按原始条数拦截（不查库），通过后去重保序（MSG-030）。
+fn validate_images(ids: &[Id<ik_kernel::id::marker::Media>]) -> Result<Vec<i64>, Problem> {
+    if ids.len() > MAX_IMAGES {
+        return Err(Problem::field(
+            "imageIds",
+            "TOO_MANY",
+            format!("一条消息最多 {MAX_IMAGES} 张图片"),
+        ));
+    }
+    let mut out: Vec<i64> = Vec::with_capacity(ids.len());
+    for id in ids {
+        if !out.contains(&id.get()) {
+            out.push(id.get());
+        }
+    }
+    Ok(out)
 }
 
 fn validate_client_id(client_id: Option<&str>) -> Result<Option<&str>, Problem> {
@@ -384,8 +441,9 @@ pub async fn messages(
         return Err(Problem::not_found());
     }
     let rows = repo::messages(&mut conn, id, bound, limit + 1).await?;
+    drop(conn);
     Page::from_rows(
-        rows.into_iter().map(message_view).collect(),
+        message_views(&state.media, rows).await?,
         usize::try_from(limit).unwrap_or(50),
         |m: &MessageView| MessageCursor {
             c: m.created_at,
@@ -407,19 +465,35 @@ pub async fn send(
     principal.require_write()?;
     let me = principal.user_id.get();
     check_send_rate(state, me)?;
-    let content = validate_content(&request.content)?;
+    let image_ids = validate_images(&request.image_ids)?;
+    let content = if image_ids.is_empty() || !request.content.trim().is_empty() {
+        validate_content(&request.content)?
+    } else {
+        String::new()
+    };
     let client_id = validate_client_id(request.client_id.as_deref())?;
 
     let mut tx = state.db.begin().await?;
     if let Some(client_id) = client_id
         && let Some(existing) = repo::message_by_client_id(&mut tx, me, client_id).await?
     {
-        return replay(existing, conversation_id);
+        return replay(state, existing, conversation_id).await;
     }
     let peer = repo::active_peer(&mut tx, conversation_id, me)
         .await?
         .ok_or_else(Problem::not_found)?;
     ik_social::interop::ensure_no_block(&mut tx, me, peer).await?;
+    // 图片必须是自己图库里的（MSG-030、D-012 方案 A）。
+    if !image_ids.is_empty() {
+        let owned = ik_media::interop::owned_media(&mut tx, me, &image_ids).await?;
+        if !image_ids.iter().all(|id| owned.contains(id)) {
+            return Err(Problem::field(
+                "imageIds",
+                "NOT_FOUND",
+                "图片不存在或不在你的图库里",
+            ));
+        }
+    }
     if let Some(reply_to) = request.reply_to_id {
         let valid = repo::message(&mut tx, reply_to.get())
             .await?
@@ -443,6 +517,7 @@ pub async fn send(
             content: &content,
             reply_to_id: request.reply_to_id.map(Id::get),
             client_id,
+            image_ids: &image_ids,
             now,
         },
     )
@@ -455,14 +530,17 @@ pub async fn send(
             Some(client_id) => repo::message_by_client_id(&mut conn, me, client_id).await?,
             None => None,
         };
-        return existing.map_or_else(|| Err(Problem::internal()), |m| replay(m, conversation_id));
+        return match existing {
+            Some(existing) => replay(state, existing, conversation_id).await,
+            None => Err(Problem::internal()),
+        };
     }
     let members = repo::bump_members(&mut tx, conversation_id, now).await?;
     repo::mark_read(&mut tx, conversation_id, me, now).await?;
     let row = repo::message(&mut tx, id)
         .await?
         .ok_or_else(Problem::internal)?;
-    let view = message_view(row);
+    let view = one_view(&state.media, row).await?;
     let mut effects = Effects::new();
     effects.publish(event(
         "dm.message.created",
@@ -480,6 +558,7 @@ pub async fn send(
             sender_id: me,
             peer_id: peer,
             content: content.clone(),
+            image_count: image_ids.len(),
             created_at: now,
         };
         hooks.sent(&mut tx, &sent, &mut effects).await?;
@@ -490,9 +569,13 @@ pub async fn send(
 }
 
 /// 重放：同一个 clientId 已经发过。用在别的会话上视为冲突。
-fn replay(existing: MessageRow, conversation_id: i64) -> Result<(bool, MessageView), Problem> {
+async fn replay(
+    state: &MessagingState,
+    existing: MessageRow,
+    conversation_id: i64,
+) -> Result<(bool, MessageView), Problem> {
     if existing.conversation_id == conversation_id {
-        Ok((false, message_view(existing)))
+        Ok((false, one_view(&state.media, existing).await?))
     } else {
         Err(Problem::conflict(
             "ALREADY_EXISTS",
@@ -568,14 +651,16 @@ pub async fn edit(
     let now = Utc::now();
     ensure_editable(&row, now)?;
     if row.content == content {
-        return Ok(message_view(row));
+        return one_view(&state.media, row).await;
     }
     repo::edit_message(&mut tx, id, &content, now).await?;
-    let view = message_view(
+    let view = one_view(
+        &state.media,
         repo::message(&mut tx, id)
             .await?
             .ok_or_else(Problem::internal)?,
-    );
+    )
+    .await?;
     let effects = publish_change(&mut tx, "dm.message.edited", &view).await?;
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
@@ -592,15 +677,17 @@ pub async fn withdraw(
     let mut tx = state.db.begin().await?;
     let row = lock_own_message(&mut tx, id, me).await?;
     if row.withdrawn_at.is_some() {
-        return Ok(message_view(row));
+        return Ok(message_view(row, &HashMap::new()));
     }
     let now = Utc::now();
     ensure_editable(&row, now)?;
     repo::withdraw_message(&mut tx, id, now).await?;
+    // 撤回后不带图片，不必取。
     let view = message_view(
         repo::message(&mut tx, id)
             .await?
             .ok_or_else(Problem::internal)?,
+        &HashMap::new(),
     );
     let mut effects = publish_change(&mut tx, "dm.message.withdrawn", &view).await?;
     if let Some(hooks) = state.hooks() {

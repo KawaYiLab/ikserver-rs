@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT\n               count(*) FILTER (WHERE kind = 'image') AS \"images!\",\n               count(*) FILTER (WHERE char_length(coalesce(new_content, '')) = 0) AS \"empty!\",\n               count(*) FILTER (WHERE char_length(btrim(coalesce(content, ''))) > 4000) AS \"long!\"\n           FROM legacy.ik_messages",
+  "query": "SELECT\n               count(*) FILTER (WHERE kind = 'image') AS \"images!\",\n               count(*) FILTER (WHERE char_length(coalesce(new_content, '')) = 0\n                                  AND cardinality(image_ids) = 0) AS \"empty!\",\n               count(*) FILTER (WHERE char_length(btrim(coalesce(content, ''))) > 4000) AS \"long!\"\n           FROM legacy.ik_messages",
   "describe": {
     "columns": [
       {
@@ -31,5 +31,5 @@
       null
     ]
   },
-  "hash": "61bceadfe60aa36bf18413a76a2f4ee4fb143427f5fefdf332acecb2a8d55d1e"
+  "hash": "34aebfc74ab83b7b51ed20499a4f8ae9b6789c8fa88304dcce4777b7c928cd17"
 }

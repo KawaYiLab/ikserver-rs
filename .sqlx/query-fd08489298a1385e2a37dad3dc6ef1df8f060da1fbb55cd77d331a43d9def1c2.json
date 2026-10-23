@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key, x.ai_workflow\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.id = $1",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\",\n                  CASE WHEN r.content = '' AND cardinality(r.image_ids) > 0 THEN '[图片]'\n                       ELSE r.content END AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key, x.ai_workflow,\n                  x.image_ids\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.id = $1",
   "describe": {
     "columns": [
       {
@@ -128,12 +128,7 @@
         "ordinal": 11,
         "name": "reply_content?",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "messages",
-            "name": "content"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 12,
@@ -178,6 +173,17 @@
             "name": "ai_workflow"
           }
         }
+      },
+      {
+        "ordinal": 16,
+        "name": "image_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "image_ids"
+          }
+        }
       }
     ],
     "parameters": {
@@ -197,12 +203,13 @@
       false,
       true,
       true,
+      null,
       true,
       true,
       true,
       true,
-      true
+      false
     ]
   },
-  "hash": "a9b6397aa044afad84a5bfe5f062bc9e09dc22f6f5d40c62c59632f9947e2a1f"
+  "hash": "fd08489298a1385e2a37dad3dc6ef1df8f060da1fbb55cd77d331a43d9def1c2"
 }

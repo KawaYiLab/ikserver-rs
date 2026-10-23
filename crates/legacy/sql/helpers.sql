@@ -411,7 +411,22 @@ SELECT
                   OVER (PARTITION BY f.user_low, f.user_high, (f.low_ai = f.high_ai)) END AS survivor_id
 FROM flagged f;
 
--- 私信消息：会话换成存活的会话；图片消息（新系统不实现，D-021）把图片地址写进正文。
+-- 私信消息的附件：摘要读取成功的前 4 张转成消息图片（MSG-030），其余（读不到的、超出 4 张的）
+-- 只能把图片地址写进正文。
+CREATE VIEW legacy.ik_message_attachments AS
+SELECT
+    r.related_id AS message_id, r.file_id, r."order",
+    legacy.ik_fix_hosts(f.url) AS url,
+    d.file_id IS NOT NULL
+        AND row_number() OVER (PARTITION BY r.related_id, d.file_id IS NOT NULL
+                               ORDER BY r."order", r.file_id) <= 4 AS as_image
+FROM legacy.files_related_mph r
+JOIN legacy.files f ON f.id = r.file_id
+LEFT JOIN legacy.ik_media_digests d ON d.file_id = r.file_id AND d.error IS NULL
+WHERE r.related_type = 'api::message.message' AND r.field = 'attachments';
+
+-- 私信消息：会话换成存活的会话；附件按上面的规则转成图片（image_ids，媒体 id 就是旧文件 id）
+-- 或正文里的图片地址；图片消息什么都取不到时正文为「[图片]」。
 CREATE VIEW legacy.ik_messages AS
 SELECT
     msg.*,
@@ -421,16 +436,23 @@ SELECT
      ORDER BY l.id LIMIT 1) AS sender_id,
     (SELECT l.inv_message_id FROM legacy.messages_reply_to_lnk l WHERE l.message_id = msg.id
      ORDER BY l.id LIMIT 1) AS reply_to_legacy_id,
+    img.image_ids,
     left(coalesce(
-        nullif(btrim(coalesce(msg.content, '')), ''),
-        (SELECT string_agg(legacy.ik_fix_hosts(f.url), E'\n' ORDER BY r."order", r.file_id)
-         FROM legacy.files_related_mph r
-         JOIN legacy.files f ON f.id = r.file_id
-         WHERE r.related_type = 'api::message.message' AND r.field = 'attachments'
-           AND r.related_id = msg.id AND f.url IS NOT NULL),
-        CASE WHEN msg.kind = 'image' THEN '[图片]' END
+        nullif(concat_ws(E'\n', nullif(btrim(coalesce(msg.content, '')), ''), rest.urls), ''),
+        CASE WHEN msg.kind = 'image' AND cardinality(img.image_ids) = 0 THEN '[图片]' END,
+        ''
     ), 4000) AS new_content
 FROM legacy.messages msg
 JOIN LATERAL (SELECT l.conversation_id FROM legacy.messages_conversation_lnk l
               WHERE l.message_id = msg.id ORDER BY l.id LIMIT 1) ml ON true
-JOIN legacy.ik_conversations c ON c.id = ml.conversation_id;
+JOIN legacy.ik_conversations c ON c.id = ml.conversation_id
+CROSS JOIN LATERAL (
+    SELECT coalesce(array_agg(a.file_id ORDER BY a."order", a.file_id) FILTER (WHERE a.as_image),
+                    '{}') AS image_ids
+    FROM legacy.ik_message_attachments a WHERE a.message_id = msg.id
+) img
+CROSS JOIN LATERAL (
+    SELECT string_agg(a.url, E'\n' ORDER BY a."order", a.file_id) AS urls
+    FROM legacy.ik_message_attachments a
+    WHERE a.message_id = msg.id AND NOT a.as_image AND a.url IS NOT NULL
+) rest;

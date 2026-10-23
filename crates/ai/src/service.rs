@@ -92,6 +92,7 @@ pub async fn models(state: &AiState) -> Result<ModelList, Problem> {
             badge: m.badge.clone(),
             sort_order: m.sort_order,
             is_default: m.is_default,
+            vision: m.vision,
         })
         .collect();
     Ok(ModelList { items })
@@ -287,6 +288,7 @@ pub(crate) async fn apply(
                 provider: &model.provider,
                 provider_model: &model.provider_model,
                 cost_weight: model.cost_weight,
+                vision: model.vision,
                 enabled: model.enabled,
                 is_default: model.is_default,
                 sort_order: model.sort_order,

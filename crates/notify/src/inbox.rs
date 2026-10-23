@@ -328,7 +328,7 @@ pub async fn items(
                 None => Before::UpTo(c.t),
             });
             (
-                dm::messages(&mut conn, id, before, limit + 1).await?,
+                dm::messages(&mut conn, &state.media, id, before, limit + 1).await?,
                 user_bucket(peer),
             )
         }

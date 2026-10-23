@@ -43,7 +43,10 @@ pub struct SentMessage {
     pub conversation_kind: String,
     pub sender_id: i64,
     pub peer_id: i64,
+    /// 带图时可以为空串。
     pub content: String,
+    /// 图片数（MSG-030）。
+    pub image_count: usize,
     pub created_at: DateTime<Utc>,
 }
 

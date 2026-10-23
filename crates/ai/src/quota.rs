@@ -20,6 +20,10 @@ pub const SETTLEMENT_TTL: Duration = Duration::hours(48);
 pub const TOOL_FEEDBACK_TOKENS: i64 = 500;
 /// 每份预占估算里，回复正文的 token（QUOTA-007）。
 pub const REPLY_TOKENS: i64 = 1500;
+/// 一张图片的 token 估算（LLM-015）：各家高清模式一张图大致 700～1300 token，往高估。
+pub const IMAGE_TOKENS: i64 = 1000;
+/// 识图模型的预占另加：工具读帖子时附回的图片（按读一篇帖子、[`crate::tools::POST_IMAGES`] 张估）。
+pub const TOOL_IMAGE_TOKENS: i64 = crate::tools::POST_IMAGES as i64 * IMAGE_TOKENS;
 /// 计数器保留天数（额度条只读当天；留一段供排障）。
 pub const COUNTER_RETENTION_DAYS: i64 = 90;
 
@@ -100,6 +104,25 @@ pub fn estimate(context_tokens: i64, tool_rounds: u32, prompt_chars: i64, weight
         .saturating_add(REPLY_TOKENS)
         .saturating_add(prompt_chars.max(0));
     scale(tokens, weight).max(1)
+}
+
+/// 预占时提示部分的量（QUOTA-007）：字符数按 1 字符 = 1 token 估高，识图模型每张图另加
+/// [`IMAGE_TOKENS`]（不识图的模型收不到图片，不加）。
+pub fn prompt_estimate(messages: &[crate::llm::ChatMessage], vision: bool) -> i64 {
+    messages
+        .iter()
+        .map(|m| {
+            let chars = i64::try_from(m.text().chars().count()).unwrap_or(i64::MAX);
+            let images = if vision {
+                i64::try_from(m.image_count())
+                    .unwrap_or(i64::MAX)
+                    .saturating_mul(IMAGE_TOKENS)
+            } else {
+                0
+            };
+            chars.saturating_add(images)
+        })
+        .fold(0i64, i64::saturating_add)
 }
 
 /// 文本的 token 估算（GEN-082）：CJK、假名、谚文 1 字 1 token，其余每 4 字符 1 token（向上取整）。
