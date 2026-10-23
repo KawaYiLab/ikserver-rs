@@ -190,8 +190,23 @@ interface ModelDraft extends Required<Omit<Schemas['ModelInput'], 'badge'>> {
 const modelDraft = ref<ModelDraft | null>(null)
 
 function editModel(model?: Model) {
+  // 逐个取保存接口认识的字段：列表里的 providerConfigured 等只读字段不能带回去，
+  // 保存接口拒绝未知字段（deny_unknown_fields）。
   modelDraft.value = model
-    ? { ...model, badge: model.badge ?? '', isNew: false }
+    ? {
+        key: model.key,
+        displayName: model.displayName,
+        description: model.description,
+        badge: model.badge ?? '',
+        provider: model.provider,
+        providerModel: model.providerModel,
+        costWeight: model.costWeight,
+        vision: model.vision,
+        enabled: model.enabled,
+        isDefault: model.isDefault,
+        sortOrder: model.sortOrder,
+        isNew: false,
+      }
     : {
         key: '',
         displayName: '',
