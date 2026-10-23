@@ -215,6 +215,19 @@ fn date_note(now: DateTime<Utc>) -> String {
 
 /// 最近几条 AI 回复附工具记录（CTX-012）；更早的只留正文，控制上下文长度。
 const DIGEST_REPLIES: usize = 6;
+/// 私信历史最多带几张图给识图模型：从最新的消息往前数，更早的只留「[图片]」占位（LLM-015）。
+const HISTORY_IMAGES: usize = 4;
+
+/// 要发给识图模型的历史图片（媒体 id）：从最新的用户消息往前，最多 [`HISTORY_IMAGES`] 张。
+pub(crate) fn recent_image_ids(history: &[HistoryItem], ai_user_id: i64) -> Vec<i64> {
+    history
+        .iter()
+        .rev()
+        .filter(|item| item.sender_id != ai_user_id)
+        .flat_map(|item| item.image_ids.iter().rev().copied())
+        .take(HISTORY_IMAGES)
+        .collect()
+}
 
 const DIGEST_NOTE: &str = "\n\n【工具记录】历史里你的部分回复开头附有一行「【工具记录】……」，\
     是系统自动记下的你当时查过的内容（检索词、命中与读过的帖子），供你接着之前的话题回答；\
@@ -222,11 +235,13 @@ const DIGEST_NOTE: &str = "\n\n【工具记录】历史里你的部分回复开�
 
 /// 对话消息（LLM-001、CTX-011）：用户消息带发送者昵称（`<昵称> 说：<正文>`），AI 自己的回复按 assistant；
 /// 最近几条 AI 回复前附上当时的工具记录（CTX-012），追问时模型知道之前查过、读过哪些帖子。
+/// 带图的消息正文末尾加图片占位；`images`（媒体 id → 地址）里有的图片挂在那条消息上（LLM-015）。
 pub(crate) fn build_messages(
     card: &RoleCard,
     history: &[HistoryItem],
     ai_user_id: i64,
     names: &HashMap<i64, String>,
+    images: &HashMap<i64, String>,
 ) -> Vec<ChatMessage> {
     let mut digests: Vec<Option<String>> = vec![None; history.len()];
     let recent_ai = history
@@ -253,7 +268,21 @@ pub(crate) fn build_messages(
             messages.push(ChatMessage::assistant(content));
         } else {
             let name = names.get(&item.sender_id).map_or("用户", String::as_str);
-            messages.push(ChatMessage::user(format!("{name} 说：{}", item.content)));
+            let marker = crate::comment::image_marker(item.image_ids.len());
+            let text = match (item.content.trim().is_empty(), marker.is_empty()) {
+                (true, _) => marker,
+                (false, true) => item.content.clone(),
+                (false, false) => format!("{} {marker}", item.content),
+            };
+            let urls = item
+                .image_ids
+                .iter()
+                .filter_map(|id| images.get(id).cloned())
+                .collect();
+            messages.push(ChatMessage::user_with_images(
+                format!("{name} 说：{text}"),
+                urls,
+            ));
         }
     }
     messages
@@ -428,16 +457,27 @@ async fn prepare(
         .into_iter()
         .map(|(id, a)| (id, a.username))
         .collect();
-    let mut messages = build_messages(&card, &history, job.ai_user_id, &names);
+    // 图片（LLM-015）：只有识图模型才取地址；首帧超时退回不识图的默认模型时在生成阶段去掉。
+    let images = if model.vision {
+        state
+            .media
+            .vision_urls(&recent_image_ids(&history, job.ai_user_id))
+            .await?
+    } else {
+        HashMap::new()
+    };
+    let mut messages = build_messages(&card, &history, job.ai_user_id, &names, &images);
     let toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
     toolbox.annotate_system(&mut messages);
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。
-    let prompt_chars = messages
-        .iter()
-        .map(|m| i64::try_from(m.text().chars().count()).unwrap_or(i64::MAX))
-        .sum::<i64>()
-        .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds));
+    let prompt_chars = quota::prompt_estimate(&messages, model.vision)
+        .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds))
+        .saturating_add(if model.vision {
+            quota::TOOL_IMAGE_TOKENS
+        } else {
+            0
+        });
     let amount = quota::estimate(
         state.config.estimated_context_tokens,
         state.config.max_tool_rounds,
@@ -821,6 +861,7 @@ mod tests {
                 id: 1,
                 sender_id: 5,
                 content: "在吗".into(),
+                image_ids: Vec::new(),
                 created_at: at,
                 workflow: None,
             },
@@ -828,12 +869,13 @@ mod tests {
                 id: 2,
                 sender_id: 9,
                 content: "在。".into(),
+                image_ids: Vec::new(),
                 created_at: at,
                 workflow: None,
             },
         ];
         let names = HashMap::from([(5, "绳匠".to_owned())]);
-        let messages = build_messages(&card(), &history, 9, &names);
+        let messages = build_messages(&card(), &history, 9, &names, &HashMap::new());
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[1], ChatMessage::user("绳匠 说：在吗"));
         assert_eq!(messages[2], ChatMessage::assistant("在。"));
@@ -853,6 +895,7 @@ mod tests {
                 id: 1,
                 sender_id: 5,
                 content: "找找攻略".into(),
+                image_ids: Vec::new(),
                 created_at: at,
                 workflow: None,
             },
@@ -860,11 +903,12 @@ mod tests {
                 id: 2,
                 sender_id: 9,
                 content: "找到一篇。".into(),
+                image_ids: Vec::new(),
                 created_at: at,
                 workflow: Some(workflow),
             },
         ];
-        let messages = build_messages(&card(), &history, 9, &HashMap::new());
+        let messages = build_messages(&card(), &history, 9, &HashMap::new(), &HashMap::new());
         assert_eq!(
             messages[2],
             ChatMessage::assistant(
@@ -872,6 +916,55 @@ mod tests {
             )
         );
         assert!(messages[0].text().contains("系统自动记下"));
+    }
+
+    #[test]
+    fn recent_images_ride_on_their_messages() {
+        let at = Utc::now();
+        let item = |id: i64, sender_id: i64, content: &str, image_ids: Vec<i64>| HistoryItem {
+            id,
+            sender_id,
+            content: content.into(),
+            image_ids,
+            created_at: at,
+            workflow: None,
+        };
+        let history = vec![
+            item(1, 5, "", vec![11, 12, 13]),
+            item(2, 9, "看到了。", Vec::new()),
+            item(3, 5, "这张呢", vec![14, 15]),
+        ];
+        // 从最新的往前取 4 张：15、14、13、12；11 只留占位。
+        assert_eq!(recent_image_ids(&history, 9), vec![15, 14, 13, 12]);
+        let urls: HashMap<i64, String> = [12, 13, 14, 15]
+            .into_iter()
+            .map(|id| (id, format!("https://cdn.test/{id}.png")))
+            .collect();
+        let names = HashMap::from([(5, "绳匠".to_owned())]);
+        let messages = build_messages(&card(), &history, 9, &names, &urls);
+        assert_eq!(
+            messages[1],
+            ChatMessage::user_with_images(
+                "绳匠 说：[图片×3]",
+                vec![
+                    "https://cdn.test/12.png".into(),
+                    "https://cdn.test/13.png".into()
+                ],
+            )
+        );
+        assert_eq!(
+            messages[3],
+            ChatMessage::user_with_images(
+                "绳匠 说：这张呢 [图片×2]",
+                vec![
+                    "https://cdn.test/14.png".into(),
+                    "https://cdn.test/15.png".into()
+                ],
+            )
+        );
+        // 不识图（没有地址）时只有占位。
+        let plain = build_messages(&card(), &history, 9, &names, &HashMap::new());
+        assert_eq!(plain[1], ChatMessage::user("绳匠 说：[图片×3]"));
     }
 
     #[test]

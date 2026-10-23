@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT cover_ids FROM posts WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cover_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "cover_ids"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a024ab5f3115678c0b3c4f42ec8630fa7819433292b8c7336cb99fadf65b0900"
+}

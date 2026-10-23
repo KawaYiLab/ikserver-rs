@@ -131,6 +131,7 @@ pub(crate) struct ModelRow {
     pub provider: String,
     pub provider_model: String,
     pub cost_weight: f64,
+    pub vision: bool,
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
@@ -140,7 +141,7 @@ pub(crate) async fn models(conn: &mut PgConnection) -> sqlx::Result<Vec<ModelRow
     sqlx::query_as!(
         ModelRow,
         "SELECT id, key, display_name, description, badge, provider, provider_model, cost_weight,
-                enabled, is_default, sort_order
+                vision, enabled, is_default, sort_order
          FROM ai_models ORDER BY sort_order, id"
     )
     .fetch_all(conn)
@@ -156,6 +157,7 @@ pub(crate) struct NewModel<'a> {
     pub provider: &'a str,
     pub provider_model: &'a str,
     pub cost_weight: f64,
+    pub vision: bool,
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
@@ -166,11 +168,12 @@ pub(crate) struct NewModel<'a> {
 pub(crate) async fn upsert_model(conn: &mut PgConnection, m: &NewModel<'_>) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
         "INSERT INTO ai_models (id, key, display_name, description, badge, provider, provider_model,
-                                cost_weight, enabled, is_default, sort_order, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+                                cost_weight, enabled, is_default, sort_order, created_at, updated_at,
+                                vision)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
          ON CONFLICT (key) DO UPDATE SET display_name = $3, description = $4, badge = $5,
              provider = $6, provider_model = $7, cost_weight = $8, enabled = $9,
-             is_default = $10, sort_order = $11, updated_at = $12
+             is_default = $10, sort_order = $11, updated_at = $12, vision = $13
          RETURNING id",
         m.id,
         m.key,
@@ -184,6 +187,7 @@ pub(crate) async fn upsert_model(conn: &mut PgConnection, m: &NewModel<'_>) -> s
         m.is_default,
         m.sort_order,
         m.now,
+        m.vision,
     )
     .fetch_one(conn)
     .await

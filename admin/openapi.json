@@ -13582,6 +13582,7 @@
           "provider",
           "providerModel",
           "costWeight",
+          "vision",
           "enabled",
           "isDefault",
           "sortOrder",
@@ -13626,6 +13627,10 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "vision": {
+            "type": "boolean",
+            "description": "支持识图（LLM-015）。"
           }
         }
       },
@@ -17525,7 +17530,7 @@
               "string",
               "null"
             ],
-            "description": "已撤回时省略。"
+            "description": "已撤回时省略。带图的消息可以为空串。"
           },
           "conversationId": {
             "type": "string"
@@ -17543,6 +17548,13 @@
           },
           "id": {
             "type": "string"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MediaView"
+            },
+            "description": "图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。"
           },
           "kind": {
             "type": "string",
@@ -17616,6 +17628,10 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "vision": {
+            "type": "boolean",
+            "description": "支持识图（上游模型接受 `image_url` 内容块）。不支持的模型收到图片会报错，所以默认关。"
           }
         },
         "additionalProperties": false
@@ -17642,7 +17658,8 @@
           "displayName",
           "description",
           "sortOrder",
-          "isDefault"
+          "isDefault",
+          "vision"
         ],
         "properties": {
           "badge": {
@@ -17667,6 +17684,10 @@
           "sortOrder": {
             "type": "integer",
             "format": "int32"
+          },
+          "vision": {
+            "type": "boolean",
+            "description": "支持识图（私信里发的图片它能看到）。"
           }
         }
       },
@@ -18453,7 +18474,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "已撤回时省略。"
+                  "description": "已撤回时省略。带图的消息可以为空串。"
                 },
                 "conversationId": {
                   "type": "string"
@@ -18471,6 +18492,13 @@
                 },
                 "id": {
                   "type": "string"
+                },
+                "images": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MediaView"
+                  },
+                  "description": "图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。"
                 },
                 "kind": {
                   "type": "string",
@@ -22256,9 +22284,6 @@
       },
       "SendMessageRequest": {
         "type": "object",
-        "required": [
-          "content"
-        ],
         "properties": {
           "clientId": {
             "type": [
@@ -22269,7 +22294,14 @@
           },
           "content": {
             "type": "string",
-            "description": "1～4000 字（首尾空白会被去掉）。"
+            "description": "1～4000 字（首尾空白会被去掉）；带了图片时可以为空。"
+          },
+          "imageIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "图片（自己图库里的媒体 id，有序，最多 4 张）。只有 AI 会话能发（MSG-030）。"
           },
           "replyToId": {
             "type": [

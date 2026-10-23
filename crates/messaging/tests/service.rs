@@ -50,6 +50,28 @@ fn principal(id: i64, exam_passed: bool) -> Principal {
 }
 
 impl Harness {
+    async fn media(&self, id: i64, owner: i64) {
+        sqlx::query!(
+            "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+             VALUES ($1, $2, 'image/png', 100, $3, $4)",
+            id,
+            format!("m/{id}.png"),
+            "b".repeat(64),
+            format!("r{id}"),
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO media_uploaders (media_id, user_id) VALUES ($1, $2)",
+            id,
+            owner
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+    }
+
     async fn user(&self, id: i64) -> Principal {
         sqlx::query!(
             "INSERT INTO users (id, username, email, level, exam_passed_at)
@@ -122,6 +144,7 @@ impl Harness {
 
 fn text(content: &str) -> SendMessageRequest {
     SendMessageRequest {
+        image_ids: Vec::new(),
         content: content.to_owned(),
         reply_to_id: None,
         client_id: None,
@@ -253,6 +276,7 @@ async fn send_checks_membership_blocks_and_reply_target(db: PgPool) {
     assert_eq!(err.code(), "NOT_FOUND", "不是成员");
 
     let reply = |reply_to: i64| SendMessageRequest {
+        image_ids: Vec::new(),
         content: "回复".into(),
         reply_to_id: Some(Id::new(reply_to)),
         client_id: None,
@@ -298,6 +322,7 @@ async fn client_id_deduplicates_retries(db: PgPool) {
     let id = h.open(&alice, 2).await;
     let other = h.open(&alice, 3).await;
     let request = || SendMessageRequest {
+        image_ids: Vec::new(),
         content: "只发一次".into(),
         reply_to_id: None,
         client_id: Some("0b9d1c3e-retry".into()),
@@ -319,6 +344,7 @@ async fn client_id_deduplicates_retries(db: PgPool) {
 
     // 并发重试只落一条。
     let concurrent = || SendMessageRequest {
+        image_ids: Vec::new(),
         content: "并发".into(),
         reply_to_id: None,
         client_id: Some("same-key".into()),
@@ -660,4 +686,88 @@ async fn peers_carry_avatars(db: PgPool) {
             .unwrap()
             .starts_with("https://cdn.test/a/900.png")
     );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn images_only_in_ai_conversations(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1).await;
+    let peer = h.user(2).await;
+    h.media(900, 1).await;
+    h.media(901, 2).await;
+    let direct = h.open(&me, 2).await;
+    let with_images = |ids: &[i64]| SendMessageRequest {
+        content: String::new(),
+        reply_to_id: None,
+        client_id: None,
+        image_ids: ids.iter().copied().map(Id::new).collect(),
+    };
+    // 真人私聊不能发图（D-021）。
+    let err = service::send(&h.state, &me, direct, with_images(&[900]))
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "NOT_ALLOWED");
+    // 没图又没字：仍然要求正文。
+    let err = service::send(&h.state, &me, direct, with_images(&[]))
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "REQUIRED");
+
+    // AI 会话（MSG-030）。
+    sqlx::query!("UPDATE conversations SET kind = 'ai' WHERE id = $1", direct)
+        .execute(&h.db)
+        .await
+        .unwrap();
+    let err = service::send(&h.state, &me, direct, with_images(&[1, 2, 3, 4, 5]))
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "TOO_MANY");
+    let err = service::send(&h.state, &me, direct, with_images(&[901]))
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "NOT_FOUND", "别人的图片");
+    let (_, view) = service::send(&h.state, &me, direct, with_images(&[900, 900]))
+        .await
+        .unwrap();
+    assert_eq!(view.content.as_deref(), Some(""));
+    assert_eq!(view.images.len(), 1, "去重");
+    assert_eq!(view.images[0].url, "https://cdn.test/m/900.png");
+
+    // 列表与回复摘要：纯图片消息显示「[图片]」；消息列表带图片。
+    let summary = interop::page(&h.db, &h.state.media, 2, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        summary[0].last_message.as_ref().map(|m| m.preview.as_str()),
+        Some("[图片]")
+    );
+    let mut conn = h.db.acquire().await.unwrap();
+    let listed = interop::messages(&mut conn, &h.state.media, direct, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(listed[0].images.len(), 1);
+    drop(conn);
+    let (_, reply) = service::send(
+        &h.state,
+        &peer,
+        direct,
+        SendMessageRequest {
+            content: "看到了".into(),
+            reply_to_id: Some(view.id),
+            client_id: None,
+            image_ids: Vec::new(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reply.reply_to.and_then(|r| r.content).as_deref(),
+        Some("[图片]")
+    );
+
+    // 撤回后图片随正文隐藏。
+    let withdrawn = service::withdraw(&h.state, &me, view.id.get())
+        .await
+        .unwrap();
+    assert!(withdrawn.images.is_empty());
 }

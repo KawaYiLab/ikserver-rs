@@ -2,7 +2,8 @@
 
 use chrono::{DateTime, Utc};
 use ik_kernel::Id;
-use ik_kernel::id::marker::{Conversation, Message, User};
+use ik_kernel::id::marker::{Conversation, Media, Message, User};
+use ik_media::dto::MediaView;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -82,9 +83,12 @@ pub struct MessageView {
     pub sender_id: Id<User>,
     /// `text` | `system`
     pub kind: String,
-    /// 已撤回时省略。
+    /// 已撤回时省略。带图的消息可以为空串。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// 图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<MediaView>,
     /// 被回复的消息已被物理删除时省略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reply_to: Option<ReplyView>,
@@ -160,8 +164,13 @@ pub struct UpdateConversationRequest {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SendMessageRequest {
-    /// 1～4000 字（首尾空白会被去掉）。
+    /// 1～4000 字（首尾空白会被去掉）；带了图片时可以为空。
+    #[serde(default)]
     pub content: String,
+    /// 图片（自己图库里的媒体 id，有序，最多 4 张）。只有 AI 会话能发（MSG-030）。
+    #[serde(default)]
+    #[schema(value_type = Vec<String>)]
+    pub image_ids: Vec<Id<Media>>,
     #[serde(default)]
     #[schema(value_type = Option<String>)]
     pub reply_to_id: Option<Id<Message>>,

@@ -51,6 +51,8 @@ pub struct ModelView {
     pub sort_order: i32,
     /// 全站默认模型。
     pub is_default: bool,
+    /// 支持识图（私信里发的图片它能看到）。
+    pub vision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -138,6 +140,9 @@ pub struct ModelInput {
     pub provider_model: String,
     #[serde(default = "one")]
     pub cost_weight: f64,
+    /// 支持识图（上游模型接受 `image_url` 内容块）。不支持的模型收到图片会报错，所以默认关。
+    #[serde(default)]
+    pub vision: bool,
     #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default)]

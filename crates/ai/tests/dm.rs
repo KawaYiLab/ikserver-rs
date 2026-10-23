@@ -87,11 +87,13 @@ async fn harness_with(db: PgPool, config: Ai, per_user: i64) -> Harness {
             { "key": "pro", "displayName": "专业", "provider": "fake",
               "providerModel": "fake-pro", "costWeight": 2, "sortOrder": 2 },
             { "key": "lost", "displayName": "没配提供方", "provider": "nowhere",
-              "providerModel": "x", "sortOrder": 3 }
+              "providerModel": "x", "sortOrder": 3 },
+            { "key": "eye", "displayName": "识图", "provider": "fake",
+              "providerModel": "fake-eye", "vision": true, "sortOrder": 4 }
         ],
         "characters": [
             { "slug": "fairy", "displayName": "Fairy", "username": format!("user{FAIRY}"),
-              "enabled": true, "systemPrompt": "你是 Fairy。", "allowedModelKeys": ["base", "pro", "lost"] }
+              "enabled": true, "systemPrompt": "你是 Fairy。", "allowedModelKeys": ["base", "pro", "lost", "eye"] }
         ]
     }))
     .unwrap();
@@ -134,6 +136,7 @@ impl Harness {
                 content: text.into(),
                 reply_to_id: None,
                 client_id: None,
+                image_ids: Vec::new(),
             },
         )
         .await
@@ -453,6 +456,78 @@ async fn model_choice_rules(db: PgPool) {
     .await
     .unwrap_err();
     assert_eq!(problem.code(), "DM_AI_SESSION_REQUIRED");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn images_reach_vision_models_only(db: PgPool) {
+    let h = harness(db).await;
+    let conversation = h.session().await;
+    sqlx::query!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (900, 'm/900.png', 'image/png', 100, $1, 'r900')",
+        "b".repeat(64),
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO media_uploaders (media_id, user_id) VALUES (900, $1)",
+        HUMAN
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    let set = |key: &str| UpdateSessionRequest {
+        title: None,
+        model_key: Some(Some(key.to_owned())),
+    };
+
+    // 识图模型：只发图（正文为空）也触发，图片作为 image_url 发给上游（MSG-030、LLM-015）。
+    sessions::update(&h.state, &h.me, conversation, set("eye"))
+        .await
+        .unwrap();
+    let (_, view) = ik_messaging::service::send(
+        &h.state.messaging,
+        &h.me,
+        conversation,
+        SendMessageRequest {
+            content: "  ".into(),
+            reply_to_id: None,
+            client_id: None,
+            image_ids: vec![Id::new(900)],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(view.content.as_deref(), Some(""));
+    assert_eq!(view.images.len(), 1);
+    h.fake.push(vec![content("是一张图。"), usage(1000, 5)]);
+    dm::run_job(&h.state, h.job_for_trigger(view.id.get()).await, 1, false)
+        .await
+        .unwrap();
+    let request = &h.fake.requests()[0];
+    assert_eq!(request.model, "fake-eye");
+    assert_eq!(
+        request.messages[1],
+        ChatMessage::user_with_images(
+            "user100 说：[图片]",
+            vec!["https://cdn.test/m/900.png".into()]
+        )
+    );
+
+    // 换成不识图的模型：历史里的图片只剩占位。
+    sessions::update(&h.state, &h.me, conversation, set("base"))
+        .await
+        .unwrap();
+    let trigger = h.send(conversation, "再看看").await;
+    h.fake.push(vec![content("我看不到图片。"), usage(10, 5)]);
+    dm::run_job(&h.state, h.job_for_trigger(trigger).await, 1, false)
+        .await
+        .unwrap();
+    let request = &h.fake.requests()[1];
+    assert_eq!(request.model, "fake-base");
+    assert_eq!(request.messages[1], ChatMessage::user("user100 说：[图片]"));
+    assert_eq!(request.messages[3], ChatMessage::user("user100 说：再看看"));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -836,7 +911,7 @@ async fn tool_rounds_are_capped(db: PgPool) {
     assert!(requests[1].tools.is_empty());
     assert!(matches!(
         requests[1].messages.last(),
-        Some(ChatMessage::User { content }) if content.contains("工具调用次数已达上限")
+        Some(ChatMessage::User { content }) if content.text.contains("工具调用次数已达上限")
     ));
     assert!(matches!(
         &requests[1].messages[requests[1].messages.len() - 2],

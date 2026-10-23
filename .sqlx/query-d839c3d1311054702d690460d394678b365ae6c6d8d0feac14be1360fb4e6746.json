@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,\n                  (SELECT count(*) FROM messages x\n                   WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id\n                     AND x.withdrawn_at IS NULL\n                     AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS \"unread!\",\n                  l.id AS \"last_id?\", l.sender_id AS \"last_sender_id?\", l.kind AS \"last_kind?\",\n                  l.content AS \"last_content?\", l.withdrawn_at AS \"last_withdrawn_at?\",\n                  l.created_at AS \"last_created_at?\"\n           FROM conversation_members m\n           LEFT JOIN LATERAL (\n               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at\n               FROM messages x WHERE x.conversation_id = m.conversation_id\n               ORDER BY x.created_at DESC, x.id DESC LIMIT 1\n           ) l ON TRUE\n           JOIN conversations cv ON cv.id = m.conversation_id\n           WHERE m.user_id = $1 AND m.conversation_id = $2 AND m.left_at IS NULL",
+  "query": "SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,\n                  (SELECT count(*) FROM messages x\n                   WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id\n                     AND x.withdrawn_at IS NULL\n                     AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS \"unread!\",\n                  l.id AS \"last_id?\", l.sender_id AS \"last_sender_id?\", l.kind AS \"last_kind?\",\n                  CASE WHEN l.content = '' AND cardinality(l.image_ids) > 0 THEN '[图片]'\n                       ELSE l.content END AS \"last_content?\", l.withdrawn_at AS \"last_withdrawn_at?\",\n                  l.created_at AS \"last_created_at?\"\n           FROM conversation_members m\n           LEFT JOIN LATERAL (\n               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at, x.image_ids\n               FROM messages x WHERE x.conversation_id = m.conversation_id\n               ORDER BY x.created_at DESC, x.id DESC LIMIT 1\n           ) l ON TRUE\n           JOIN conversations cv ON cv.id = m.conversation_id\n           WHERE m.user_id = $1 AND m.left_at IS NULL AND m.pinned_at IS NOT NULL\n           ORDER BY m.pinned_at DESC, m.conversation_id DESC",
   "describe": {
     "columns": [
       {
@@ -134,12 +134,7 @@
         "ordinal": 12,
         "name": "last_content?",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "messages",
-            "name": "content"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 13,
@@ -166,7 +161,6 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
         "Int8"
       ]
     },
@@ -183,10 +177,10 @@
       false,
       false,
       false,
-      false,
+      null,
       true,
       false
     ]
   },
-  "hash": "123bb070f229678fd2d86ec988c55cc8064f3eddc55cdb256f7f6b1ab9134700"
+  "hash": "d839c3d1311054702d690460d394678b365ae6c6d8d0feac14be1360fb4e6746"
 }

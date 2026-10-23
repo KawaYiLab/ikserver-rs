@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\", r.content AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key, x.ai_workflow\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.sender_id = $1 AND x.client_id = $2",
+  "query": "SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,\n                  x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,\n                  r.sender_id AS \"reply_sender_id?\",\n                  CASE WHEN r.content = '' AND cardinality(r.image_ids) > 0 THEN '[图片]'\n                       ELSE r.content END AS \"reply_content?\",\n                  r.withdrawn_at AS \"reply_withdrawn_at?\", x.ai_state, x.ai_model_key, x.ai_workflow,\n                  x.image_ids\n           FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id\n           WHERE x.conversation_id = $1\n             AND ($2::timestamptz IS NULL OR x.created_at < $2\n                  OR (x.created_at = $2 AND ($4 OR x.id < $3::bigint)))\n           ORDER BY x.created_at DESC, x.id DESC\n           LIMIT $5",
   "describe": {
     "columns": [
       {
@@ -128,12 +128,7 @@
         "ordinal": 11,
         "name": "reply_content?",
         "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "messages",
-            "name": "content"
-          }
-        }
+        "origin": "Expression"
       },
       {
         "ordinal": 12,
@@ -178,12 +173,26 @@
             "name": "ai_workflow"
           }
         }
+      },
+      {
+        "ordinal": 16,
+        "name": "image_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "image_ids"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
-        "Text"
+        "Timestamptz",
+        "Int8",
+        "Bool",
+        "Int8"
       ]
     },
     "nullable": [
@@ -197,13 +206,14 @@
       true,
       false,
       true,
+      false,
+      null,
       true,
       true,
       true,
       true,
-      true,
-      true
+      false
     ]
   },
-  "hash": "8894c2c765201b3696bfb7097c10e1572723173a06cff6bffb350f7e7ad09151"
+  "hash": "83f62c9896bae66ba181a4c3b6cfe9f62d4618f47a75f2452f72b41200e44417"
 }

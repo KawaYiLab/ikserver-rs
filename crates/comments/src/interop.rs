@@ -275,6 +275,8 @@ pub struct AiComment {
     pub author_id: i64,
     /// 原文（含提及与表情 token）。
     pub body: String,
+    /// 图片（媒体 id，有序）。
+    pub image_ids: Vec<i64>,
     pub is_anonymous: bool,
     /// 自身未隐藏。
     pub visible: bool,
@@ -287,6 +289,7 @@ pub async fn ai_comment(conn: &mut PgConnection, id: i64) -> Result<Option<AiCom
         parent_id: row.parent_id,
         author_id: row.author_id,
         body: row.body,
+        image_ids: row.image_ids,
         is_anonymous: row.is_anonymous,
         visible: row.hidden_at.is_none(),
     }))

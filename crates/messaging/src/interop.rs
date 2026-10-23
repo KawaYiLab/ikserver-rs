@@ -3,6 +3,8 @@
 //! 写入类函数接收调用方的连接/事务：通知写入时推进私聊排序、收件箱已读，
 //! 与调用方的写入同一事务提交（AGENTS.md 规则 6），同时不需要直接读写本模块的表（规则 5）。
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::{Problem, Snowflake};
@@ -10,7 +12,7 @@ use sqlx::{PgConnection, PgPool};
 
 use crate::dto::{ConversationView, MessageView};
 use crate::repo;
-use crate::service::{conversation_views, message_view, publish_change};
+use crate::service::{conversation_views, message_view, message_views, publish_change};
 
 /// 双源归并时「严格早于游标」的边界。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,17 +110,13 @@ pub async fn mark_all_read(
 /// 会话里的消息，新的在前，严格早于 `before`。调用方负责成员校验（[`active_peer`]）。
 pub async fn messages(
     conn: &mut PgConnection,
+    media: &ik_media::MediaState,
     conversation_id: i64,
     before: Option<Before>,
     limit: i64,
 ) -> Result<Vec<MessageView>, Problem> {
-    Ok(
-        repo::messages(conn, conversation_id, before.map(Before::bound), limit)
-            .await?
-            .into_iter()
-            .map(message_view)
-            .collect(),
-    )
+    let rows = repo::messages(conn, conversation_id, before.map(Before::bound), limit).await?;
+    message_views(media, rows).await
 }
 
 // ---------- AI 私聊（ik-ai） ----------
@@ -212,10 +210,12 @@ pub async fn insert_ai_message(
     .await?;
     let members = repo::bump_members(conn, message.conversation_id, now).await?;
     repo::mark_read(conn, message.conversation_id, message.sender_id, now).await?;
+    // AI 写的消息没有图片。
     let view = message_view(
         repo::message(conn, id)
             .await?
             .ok_or_else(Problem::internal)?,
+        &HashMap::new(),
     );
     effects.publish(Event::new(
         "dm.message.created",
@@ -240,10 +240,12 @@ pub async fn update_ai_message(
     {
         return Ok(None);
     }
+    // AI 写的消息没有图片。
     let view = message_view(
         repo::message(conn, message_id)
             .await?
             .ok_or_else(Problem::internal)?,
+        &HashMap::new(),
     );
     effects.extend(publish_change(conn, "dm.message.edited", &view).await?);
     Ok(Some(view))
@@ -263,21 +265,25 @@ pub async fn withdraw_by_system(
         return Ok(());
     }
     repo::withdraw_message(conn, message_id, now).await?;
+    // 撤回后不带图片。
     let view = message_view(
         repo::message(conn, message_id)
             .await?
             .ok_or_else(Problem::internal)?,
+        &HashMap::new(),
     );
     effects.extend(publish_change(conn, "dm.message.withdrawn", &view).await?);
     Ok(())
 }
 
-/// 一条消息（含已撤回的）。
+/// 一条消息（含已撤回的）。不取图片（`images` 为空）：调用方只看状态与归属。
 pub async fn message(
     conn: &mut PgConnection,
     message_id: i64,
 ) -> Result<Option<MessageView>, Problem> {
-    Ok(repo::message(conn, message_id).await?.map(message_view))
+    Ok(repo::message(conn, message_id)
+        .await?
+        .map(|row| message_view(row, &HashMap::new())))
 }
 
 /// 历史里的一条消息。
@@ -285,7 +291,10 @@ pub async fn message(
 pub struct HistoryItem {
     pub id: i64,
     pub sender_id: i64,
+    /// 带图的消息可以为空串。
     pub content: String,
+    /// 图片（媒体 id，有序，MSG-030）。
+    pub image_ids: Vec<i64>,
     pub created_at: DateTime<Utc>,
     /// AI 回复落库的工作流时间线（已脱敏，WF-003）；用来把上一轮查过什么带进上下文（CTX-012）。
     pub workflow: Option<serde_json::Value>,
@@ -297,6 +306,7 @@ fn history_items(rows: Vec<repo::HistoryRow>) -> Vec<HistoryItem> {
             id: r.id,
             sender_id: r.sender_id,
             content: r.content,
+            image_ids: r.image_ids,
             created_at: r.created_at,
             workflow: r.ai_workflow,
         })

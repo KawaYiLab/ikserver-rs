@@ -113,6 +113,30 @@ impl MediaState {
             .collect())
     }
 
+    /// 发给识图大模型的图片地址（按媒体 id；不存在的 id 不出现）。上游自己去拉：JPEG、PNG、WebP 且不大于
+    /// 8 MB 的用原图，其余（GIF、AVIF、过大的图）用 CDN 转出的 WebP，各家上游都认、体积也小。
+    pub async fn vision_urls(&self, ids: &[i64]) -> Result<HashMap<i64, String>, Problem> {
+        const ORIGINAL_MAX_BYTES: i64 = 8 * 1024 * 1024;
+        if ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let mut conn = self.db.acquire().await?;
+        Ok(crate::repo::by_ids(&mut conn, ids)
+            .await?
+            .into_iter()
+            .map(|row| {
+                let plain = matches!(row.mime.as_str(), "image/jpeg" | "image/png" | "image/webp");
+                let url = if plain && row.size_bytes <= ORIGINAL_MAX_BYTES {
+                    self.urls.public_url(&row.object_key)
+                } else {
+                    self.urls
+                        .webp_url(&row.object_key, u64::try_from(row.size_bytes).unwrap_or(0))
+                };
+                (row.id, url)
+            })
+            .collect())
+    }
+
     /// 暂存前缀（`[root/]staging/`）。
     pub(crate) fn staging_prefix(backend: &Backend) -> String {
         if backend.root_prefix.is_empty() {

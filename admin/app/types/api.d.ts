@@ -3775,6 +3775,8 @@ export interface components {
             providerModel: string;
             /** Format: int32 */
             sortOrder: number;
+            /** @description 支持识图（LLM-015）。 */
+            vision: boolean;
         };
         AdminPost: {
             /** @description 匿名帖对外显示的名字。 */
@@ -5173,7 +5175,7 @@ export interface components {
             ai?: components["schemas"]["AiReplyMeta"] | null;
             /** @description 发送时带的去重键，便于客户端把乐观插入的消息替换成正式消息。只在发送者自己的视图里有意义。 */
             clientId?: string | null;
-            /** @description 已撤回时省略。 */
+            /** @description 已撤回时省略。带图的消息可以为空串。 */
             content?: string | null;
             conversationId: string;
             /** Format: date-time */
@@ -5181,6 +5183,8 @@ export interface components {
             /** Format: date-time */
             editedAt?: string | null;
             id: string;
+            /** @description 图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。 */
+            images?: components["schemas"]["MediaView"][];
             /** @description `text` | `system` */
             kind: string;
             replyTo?: components["schemas"]["ReplyView"] | null;
@@ -5203,6 +5207,8 @@ export interface components {
             providerModel: string;
             /** Format: int32 */
             sortOrder?: number;
+            /** @description 支持识图（上游模型接受 `image_url` 内容块）。不支持的模型收到图片会报错，所以默认关。 */
+            vision?: boolean;
         };
         ModelList: {
             items: components["schemas"]["ModelView"][];
@@ -5217,6 +5223,8 @@ export interface components {
             key: string;
             /** Format: int32 */
             sortOrder: number;
+            /** @description 支持识图（私信里发的图片它能看到）。 */
+            vision: boolean;
         };
         /** @description 一条审核记录（处置、自动隐藏、封禁、解封）。 */
         ModerationEntry: {
@@ -5444,7 +5452,7 @@ export interface components {
                 ai?: components["schemas"]["AiReplyMeta"] | null;
                 /** @description 发送时带的去重键，便于客户端把乐观插入的消息替换成正式消息。只在发送者自己的视图里有意义。 */
                 clientId?: string | null;
-                /** @description 已撤回时省略。 */
+                /** @description 已撤回时省略。带图的消息可以为空串。 */
                 content?: string | null;
                 conversationId: string;
                 /** Format: date-time */
@@ -5452,6 +5460,8 @@ export interface components {
                 /** Format: date-time */
                 editedAt?: string | null;
                 id: string;
+                /** @description 图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。 */
+                images?: components["schemas"]["MediaView"][];
                 /** @description `text` | `system` */
                 kind: string;
                 replyTo?: components["schemas"]["ReplyView"] | null;
@@ -6685,8 +6695,10 @@ export interface components {
         SendMessageRequest: {
             /** @description 可选的去重键（1～64 位字母、数字、`-`、`_`，例如 UUID）。同一发送者重复提交时返回第一次的消息。 */
             clientId?: string | null;
-            /** @description 1～4000 字（首尾空白会被去掉）。 */
-            content: string;
+            /** @description 1～4000 字（首尾空白会被去掉）；带了图片时可以为空。 */
+            content?: string;
+            /** @description 图片（自己图库里的媒体 id，有序，最多 4 张）。只有 AI 会话能发（MSG-030）。 */
+            imageIds?: string[];
             replyToId?: string | null;
         };
         /** @description 通知的发送者。已注销的账号 `id`、`level` 为空，名字显示为「已注销用户」。 */

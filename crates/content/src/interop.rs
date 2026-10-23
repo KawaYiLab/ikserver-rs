@@ -287,6 +287,11 @@ pub async fn public_post_meta(
         .collect())
 }
 
+/// 帖子的封面（媒体 id，有序；AI 评论回复识图用）。帖子不存在时为空。
+pub async fn cover_ids(conn: &mut PgConnection, post_id: i64) -> Result<Vec<i64>, Problem> {
+    Ok(repo::cover_ids(conn, post_id).await?)
+}
+
 // ---------- 审核（moderation） ----------
 
 /// 隐藏原因（SANCTION-010）。

@@ -269,6 +269,12 @@ async fn search_returns_public_named_unblocked_posts_as_links(db: PgPool) {
     );
 }
 
+async fn out_images(w: &World, id: i64) -> Vec<String> {
+    w.run("get_post_content", serde_json::json!({ "document_id": id }))
+        .await
+        .images
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn post_content_hides_author_and_respects_visibility(db: PgPool) {
     let w = world(db).await;
@@ -299,6 +305,21 @@ async fn post_content_hides_author_and_respects_visibility(db: PgPool) {
     assert_eq!(
         w.text("get_post_content", serde_json::json!({})).await,
         "（未提供帖子 document_id）"
+    );
+    // 正文插图随结果带回，识图模型另收一条带图的消息（LLM-015）。
+    assert!(out_images(&w, w.anonymous).await.is_empty());
+    let pictured = post(
+        &w.state,
+        ALICE,
+        "看图",
+        "配图 ![x](https://cdn.test/p.png)",
+        None,
+        false,
+    )
+    .await;
+    assert_eq!(
+        out_images(&w, pictured).await,
+        vec!["https://cdn.test/p.png".to_owned()]
     );
     let engagement = w
         .text(

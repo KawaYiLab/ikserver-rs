@@ -361,11 +361,12 @@ pub(crate) async fn summary(
                      AND x.withdrawn_at IS NULL
                      AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS "unread!",
                   l.id AS "last_id?", l.sender_id AS "last_sender_id?", l.kind AS "last_kind?",
-                  l.content AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
+                  CASE WHEN l.content = '' AND cardinality(l.image_ids) > 0 THEN '[图片]'
+                       ELSE l.content END AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
                   l.created_at AS "last_created_at?"
            FROM conversation_members m
            LEFT JOIN LATERAL (
-               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at
+               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at, x.image_ids
                FROM messages x WHERE x.conversation_id = m.conversation_id
                ORDER BY x.created_at DESC, x.id DESC LIMIT 1
            ) l ON TRUE
@@ -391,11 +392,12 @@ pub(crate) async fn pinned_summaries(
                      AND x.withdrawn_at IS NULL
                      AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS "unread!",
                   l.id AS "last_id?", l.sender_id AS "last_sender_id?", l.kind AS "last_kind?",
-                  l.content AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
+                  CASE WHEN l.content = '' AND cardinality(l.image_ids) > 0 THEN '[图片]'
+                       ELSE l.content END AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
                   l.created_at AS "last_created_at?"
            FROM conversation_members m
            LEFT JOIN LATERAL (
-               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at
+               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at, x.image_ids
                FROM messages x WHERE x.conversation_id = m.conversation_id
                ORDER BY x.created_at DESC, x.id DESC LIMIT 1
            ) l ON TRUE
@@ -427,7 +429,8 @@ pub(crate) async fn stream_summaries(
                      AND x.withdrawn_at IS NULL
                      AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS "unread!",
                   l.id AS "last_id?", l.sender_id AS "last_sender_id?", l.kind AS "last_kind?",
-                  l.content AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
+                  CASE WHEN l.content = '' AND cardinality(l.image_ids) > 0 THEN '[图片]'
+                       ELSE l.content END AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
                   l.created_at AS "last_created_at?"
            FROM (
                SELECT * FROM conversation_members c
@@ -438,7 +441,7 @@ pub(crate) async fn stream_summaries(
                LIMIT $5
            ) m
            LEFT JOIN LATERAL (
-               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at
+               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at, x.image_ids
                FROM messages x WHERE x.conversation_id = m.conversation_id
                ORDER BY x.created_at DESC, x.id DESC LIMIT 1
            ) l ON TRUE
@@ -478,6 +481,7 @@ pub(crate) struct NewMessage<'a> {
     pub content: &'a str,
     pub reply_to_id: Option<i64>,
     pub client_id: Option<&'a str>,
+    pub image_ids: &'a [i64],
     pub now: DateTime<Utc>,
 }
 
@@ -488,8 +492,8 @@ pub(crate) async fn insert_message(
 ) -> sqlx::Result<bool> {
     let result = sqlx::query!(
         "INSERT INTO messages (id, conversation_id, sender_id, kind, content, reply_to_id,
-                               client_id, created_at)
-         VALUES ($1, $2, $3, 'text', $4, $5, $6, $7)
+                               client_id, created_at, image_ids)
+         VALUES ($1, $2, $3, 'text', $4, $5, $6, $7, $8)
          ON CONFLICT (sender_id, client_id) WHERE client_id IS NOT NULL DO NOTHING",
         m.id,
         m.conversation_id,
@@ -498,6 +502,7 @@ pub(crate) async fn insert_message(
         m.reply_to_id,
         m.client_id,
         m.now,
+        m.image_ids,
     )
     .execute(conn)
     .await?;
@@ -521,6 +526,7 @@ pub(crate) struct MessageRow {
     pub ai_state: Option<String>,
     pub ai_model_key: Option<String>,
     pub ai_workflow: Option<serde_json::Value>,
+    pub image_ids: Vec<i64>,
 }
 
 pub(crate) async fn message(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<MessageRow>> {
@@ -528,8 +534,11 @@ pub(crate) async fn message(conn: &mut PgConnection, id: i64) -> sqlx::Result<Op
         MessageRow,
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
-                  r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
+                  r.sender_id AS "reply_sender_id?",
+                  CASE WHEN r.content = '' AND cardinality(r.image_ids) > 0 THEN '[图片]'
+                       ELSE r.content END AS "reply_content?",
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow,
+                  x.image_ids
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.id = $1"#,
         id,
@@ -547,8 +556,11 @@ pub(crate) async fn lock_message(
         MessageRow,
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
-                  r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
+                  r.sender_id AS "reply_sender_id?",
+                  CASE WHEN r.content = '' AND cardinality(r.image_ids) > 0 THEN '[图片]'
+                       ELSE r.content END AS "reply_content?",
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow,
+                  x.image_ids
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.id = $1
            FOR NO KEY UPDATE OF x"#,
@@ -567,8 +579,11 @@ pub(crate) async fn message_by_client_id(
         MessageRow,
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
-                  r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
+                  r.sender_id AS "reply_sender_id?",
+                  CASE WHEN r.content = '' AND cardinality(r.image_ids) > 0 THEN '[图片]'
+                       ELSE r.content END AS "reply_content?",
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow,
+                  x.image_ids
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.sender_id = $1 AND x.client_id = $2"#,
         sender_id,
@@ -593,8 +608,11 @@ pub(crate) async fn messages(
         MessageRow,
         r#"SELECT x.id, x.conversation_id, x.sender_id, x.kind, x.content, x.client_id,
                   x.edited_at, x.withdrawn_at, x.created_at, x.reply_to_id,
-                  r.sender_id AS "reply_sender_id?", r.content AS "reply_content?",
-                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow
+                  r.sender_id AS "reply_sender_id?",
+                  CASE WHEN r.content = '' AND cardinality(r.image_ids) > 0 THEN '[图片]'
+                       ELSE r.content END AS "reply_content?",
+                  r.withdrawn_at AS "reply_withdrawn_at?", x.ai_state, x.ai_model_key, x.ai_workflow,
+                  x.image_ids
            FROM messages x LEFT JOIN messages r ON r.id = x.reply_to_id
            WHERE x.conversation_id = $1
              AND ($2::timestamptz IS NULL OR x.created_at < $2
@@ -709,6 +727,7 @@ pub(crate) struct HistoryRow {
     pub content: String,
     pub created_at: DateTime<Utc>,
     pub ai_workflow: Option<serde_json::Value>,
+    pub image_ids: Vec<i64>,
 }
 
 /// AI 上下文用的历史（LLM-001），新的在前：`(from, until]` 之间未撤回的文本消息；
@@ -722,7 +741,7 @@ pub(crate) async fn history(
 ) -> sqlx::Result<Vec<HistoryRow>> {
     sqlx::query_as!(
         HistoryRow,
-        "SELECT id, sender_id, content, created_at, ai_workflow FROM messages
+        "SELECT id, sender_id, content, created_at, ai_workflow, image_ids FROM messages
          WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL
            AND (ai_state IS NULL OR ai_state IN ('done', 'stopped'))
            AND ($2::timestamptz IS NULL OR created_at > $2) AND created_at <= $3
@@ -745,7 +764,7 @@ pub(crate) async fn recent_texts(
 ) -> sqlx::Result<Vec<HistoryRow>> {
     sqlx::query_as!(
         HistoryRow,
-        "SELECT id, sender_id, content, created_at, ai_workflow FROM messages
+        "SELECT id, sender_id, content, created_at, ai_workflow, image_ids FROM messages
          WHERE conversation_id = $1 AND kind = 'text' AND withdrawn_at IS NULL
          ORDER BY created_at DESC, id DESC
          LIMIT $2",

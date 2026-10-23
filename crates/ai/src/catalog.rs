@@ -26,6 +26,8 @@ pub struct Model {
     pub provider: String,
     pub provider_model: String,
     pub cost_weight: f64,
+    /// 支持识图（LLM-015）：用户消息里的图片原样发给它；不支持的只看到「[图片]」占位。
+    pub vision: bool,
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
@@ -287,6 +289,7 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
             provider: row.provider,
             provider_model: row.provider_model,
             cost_weight: row.cost_weight,
+            vision: row.vision,
             enabled: row.enabled,
             is_default: row.is_default,
             sort_order: row.sort_order,
@@ -386,7 +389,7 @@ async fn load_mcp(conn: &mut sqlx::PgConnection) -> Result<Vec<Arc<McpServer>>, 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
@@ -401,13 +404,14 @@ mod tests {
             provider: "p".into(),
             provider_model: key.into(),
             cost_weight: weight,
+            vision: false,
             enabled,
             is_default,
             sort_order: 0,
         }
     }
 
-    fn card(default_model_id: Option<i64>, allowed: Vec<i64>) -> RoleCard {
+    pub(crate) fn card(default_model_id: Option<i64>, allowed: Vec<i64>) -> RoleCard {
         RoleCard {
             id: 1,
             slug: "fairy".into(),

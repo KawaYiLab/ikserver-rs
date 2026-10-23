@@ -30,6 +30,44 @@ const BIO_MAX_CHARS: usize = 200;
 const SEARCH_RESULTS: usize = 5;
 /// 查询扩展最多几个检索词（TOOL-020）。
 const MAX_SEARCH_TERMS: usize = 5;
+/// 一篇帖子最多附几张图给识图模型：封面在前、正文插图在后（LLM-015）。
+pub const POST_IMAGES: usize = 4;
+
+/// Markdown 正文里的图片地址（`![…](http…)`），只认 http(s)。
+static BODY_IMAGE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(\s*<?(https?://[^\s)>]+)").ok());
+
+pub(crate) fn body_image_urls(body: &str) -> Vec<String> {
+    BODY_IMAGE.as_ref().map_or_else(Vec::new, |re| {
+        re.captures_iter(body)
+            .filter_map(|c| c.get(1))
+            .map(|m| m.as_str().to_owned())
+            .collect()
+    })
+}
+
+/// 帖子发给识图模型的图片（LLM-015）：封面在前、正文插图在后，去重，最多 [`POST_IMAGES`] 张。
+pub(crate) async fn post_images(
+    state: &AiState,
+    cover_ids: &[i64],
+    body: &str,
+) -> Result<Vec<String>, Problem> {
+    let covers: Vec<i64> = cover_ids.iter().copied().take(POST_IMAGES).collect();
+    let urls = state.media.vision_urls(&covers).await?;
+    let mut images: Vec<String> = covers
+        .iter()
+        .filter_map(|id| urls.get(id).cloned())
+        .collect();
+    for url in body_image_urls(body) {
+        if images.len() >= POST_IMAGES {
+            break;
+        }
+        if !images.contains(&url) {
+            images.push(url);
+        }
+    }
+    Ok(images)
+}
 
 /// 执行上下文：查看者是触发者（TOOL-004）。
 #[derive(Debug, Clone)]
@@ -92,6 +130,8 @@ pub struct ToolOutput {
     pub text: String,
     pub is_error: bool,
     pub meta: ToolMeta,
+    /// 结果附带的图片地址（帖子封面与插图，LLM-015）：识图模型在工具结果之后另收一条带图的消息。
+    pub images: Vec<String>,
 }
 
 impl ToolOutput {
@@ -100,6 +140,7 @@ impl ToolOutput {
             text: text.into(),
             is_error: false,
             meta: ToolMeta::None,
+            images: Vec::new(),
         }
     }
 
@@ -108,6 +149,7 @@ impl ToolOutput {
             text: text.into(),
             is_error: false,
             meta,
+            images: Vec::new(),
         }
     }
 }
@@ -369,6 +411,7 @@ pub async fn execute(
             text: format!("未知工具：{name}"),
             is_error: true,
             meta: ToolMeta::None,
+            images: Vec::new(),
         };
     }
     let args = parse_args(arguments);
@@ -397,6 +440,7 @@ pub async fn execute(
                 text: format!("工具执行失败：{name}"),
                 is_error: true,
                 meta: ToolMeta::None,
+                images: Vec::new(),
             }
         }
     }
@@ -831,7 +875,8 @@ async fn post_content(
         ));
     };
     // 匿名帖照样可读，但不输出作者（TOOL 明细表）。
-    Ok(ToolOutput::with(
+    let cover_ids: Vec<i64> = post.covers.iter().map(|c| c.id.get()).collect();
+    let mut output = ToolOutput::with(
         format!(
             "帖子标题：{}\n帖子正文：{}",
             title_or_placeholder(&post.title),
@@ -840,7 +885,9 @@ async fn post_content(
         ToolMeta::Read {
             post: Some((id, post.title.clone())),
         },
-    ))
+    );
+    output.images = post_images(state, &cover_ids, &post.body).await?;
+    Ok(output)
 }
 
 async fn post_comments(
@@ -1094,6 +1141,19 @@ mod tests {
         let merged = merge_ranked(&[vec![1, 2, 3], vec![3, 4], vec![3]]);
         assert_eq!(merged[0], 3);
         assert_eq!(merged[1..], [1, 2, 4]);
+    }
+
+    #[test]
+    fn body_images_are_http_markdown_images() {
+        let body = "开头![封面](https://cdn.test/a.png)\n![本地](/x.png)\n\
+                    [链接](https://cdn.test/c.png) ![x]( http://cdn.test/d.jpg \"标题\")";
+        assert_eq!(
+            body_image_urls(body),
+            vec![
+                "https://cdn.test/a.png".to_owned(),
+                "http://cdn.test/d.jpg".to_owned(),
+            ]
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ use ik_ai::AiState;
 use ik_ai::comment;
 use ik_ai::dm::RunOutcome;
 use ik_ai::dto::ImportFile;
-use ik_ai::llm::{LlmError, Providers};
+use ik_ai::llm::{ChatMessage, LlmError, Providers};
 use ik_ai::{immersion, quota, service};
 use ik_auth::Principal;
 use ik_comments::dto::CreateCommentRequest;
@@ -493,4 +493,89 @@ async fn comment_replies_can_use_tools_but_keep_only_the_final_answer(db: PgPool
         format!("@[user{BOB}]({BOB})\n目前阅读还不多，欢迎大家来看。")
     );
     assert_eq!(h.used(BOB).await, 175);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn vision_models_see_post_and_comment_images(db: PgPool) {
+    let h = harness(db).await;
+    // 默认模型改成识图（LLM-015）。
+    let file: ImportFile = serde_json::from_value(serde_json::json!({
+        "models": [
+            { "key": "base", "displayName": "基础", "provider": "fake",
+              "providerModel": "fake-base", "isDefault": true, "sortOrder": 1, "vision": true }
+        ]
+    }))
+    .unwrap();
+    service::import(&h.state, file).await.unwrap();
+    for (id, owner) in [(900, FAIRY), (901, BOB)] {
+        sqlx::query!(
+            "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+             VALUES ($1, $2, 'image/png', 100, $3, $4)",
+            id,
+            format!("m/{id}.png"),
+            "b".repeat(64),
+            format!("r{id}"),
+        )
+        .execute(&h.db)
+        .await
+        .unwrap();
+        sqlx::query!(
+            "INSERT INTO media_uploaders (media_id, user_id) VALUES ($1, $2)",
+            id,
+            owner
+        )
+        .execute(&h.db)
+        .await
+        .unwrap();
+    }
+    let post = ik_content::service::create(
+        &h.content,
+        &principal(FAIRY, true),
+        PostInput {
+            title: "看图".into(),
+            body: "正文配图：![图](https://cdn.test/body.png)".into(),
+            category_id: None,
+            tags: Vec::new(),
+            is_anonymous: false,
+            external_videos: Vec::new(),
+            editor_state: None,
+            cover_ids: vec![Id::new(900)],
+        },
+        true,
+    )
+    .await
+    .unwrap()
+    .id
+    .get();
+    let trigger = ik_comments::service::create(
+        &h.state.comments,
+        &principal(BOB, false),
+        post,
+        CreateCommentRequest {
+            body: "这是什么".into(),
+            image_ids: vec![Id::new(901)],
+            parent_id: None,
+            is_anonymous: false,
+        },
+    )
+    .await
+    .unwrap()
+    .id
+    .get();
+    h.fake.push(vec![content("是一张图。"), usage(3000, 10)]);
+    assert_eq!(h.run(trigger).await, RunOutcome::Completed);
+    let request = h.fake.requests().pop().unwrap();
+    assert_eq!(
+        request.messages.last().unwrap(),
+        &ChatMessage::user_with_images(
+            format!(
+                "当前帖子：看图（document_id: {post}）\n帖子图片：[图片×2]\nuser102 说：这是什么 [图片]"
+            ),
+            vec![
+                "https://cdn.test/m/900.png".into(),
+                "https://cdn.test/body.png".into(),
+                "https://cdn.test/m/901.png".into(),
+            ],
+        )
+    );
 }
