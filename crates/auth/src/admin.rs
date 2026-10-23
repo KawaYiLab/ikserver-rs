@@ -556,3 +556,63 @@ pub async fn daily_signups(
         bounds.len().saturating_sub(1),
     ))
 }
+
+/// 站点设置（后台「系统设置」）：随时切换、立即生效的开关。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteSettings {
+    /// 入站考试开关。关闭后未通过考试的普通账号也能发帖、评论、私信等（REG-007），
+    /// 等级在下次获得经验时按经验计算（EXP-002）；考试本身仍可参加，首次通过照常发奖励。
+    pub exam_required: bool,
+    /// 最近一次修改时间；从未修改过时为空。
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SiteSettingsInput {
+    pub exam_required: bool,
+}
+
+fn settings_view(row: repo::SiteSettingsRow) -> SiteSettings {
+    SiteSettings {
+        exam_required: row.exam_required,
+        updated_at: row.updated_at,
+    }
+}
+
+pub async fn site_settings(conn: &mut PgConnection) -> Result<SiteSettings, Problem> {
+    Ok(settings_view(repo::site_settings(conn).await?))
+}
+
+/// 修改站点设置（只有管理员）。值没变时不写库也不记审计。
+pub async fn update_site_settings(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    op: &Operator,
+    input: SiteSettingsInput,
+) -> Result<SiteSettings, Problem> {
+    let current = repo::lock_site_settings(conn).await?;
+    if current.exam_required == input.exam_required {
+        return Ok(settings_view(current));
+    }
+    let now = Utc::now();
+    repo::update_site_settings(conn, input.exam_required, now).await?;
+    record(
+        conn,
+        ids,
+        op,
+        Audit {
+            action: "site.settings.update",
+            target_type: "site_settings",
+            target_id: None,
+            details: serde_json::json!({ "examRequired": input.exam_required }),
+        },
+        now,
+    )
+    .await?;
+    Ok(SiteSettings {
+        exam_required: input.exam_required,
+        updated_at: Some(now),
+    })
+}

@@ -324,4 +324,5 @@ GET /v1/posts?cursor=eyJ...&limit=20
   （改名、封禁）；装扮 `/v1/admin/cosmetics/avatars[/{id}]`、`/v1/admin/cosmetics/cards[/{id}]`；
   账号 `/v1/admin/users`、`…/{id}`、`…/{id}/role`、`…/{id}/ai-agent`、`…/{id}/exam-pass`、`…/{id}/denny`、
   `…/{id}/exp`、`…/{id}/block`、`…/{id}/unblock`；仪表盘 `/v1/admin/dashboard`；搜索索引 `/v1/admin/search`、
-  `POST /v1/admin/search/reindex`（后台执行，202）；审计日志 `/v1/admin/audit`。
+  `POST /v1/admin/search/reindex`（后台执行，202）；审计日志 `/v1/admin/audit`；系统设置 `/v1/admin/settings`
+  （GET / PUT，只有管理员；目前只有入站考试开关 `examRequired`）。

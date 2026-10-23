@@ -386,6 +386,13 @@
   `action`（`<域>.<对象>.<动作>`）、`target_type` / `target_id`（id、key 或 slug，批量操作为 NULL）、
   `details`（参数摘要，不含密钥类字段）、`ip`（INET）、`user_agent`。举报结案另有业务上的 `moderation_log`，两者并存。
 
+## 站点设置（`20261110000001_site_settings.sql`）
+
+- `site_settings`（ik-auth）：后台「系统设置」里随时切换、立即生效的开关，只有一行（`id = 1`，CHECK 约束）。
+  目前只有 `exam_required`（入站考试开关，默认开启）；`updated_at` 为空表示从没在后台改过。
+- 读取方（会话解析、`lock_active_user`、`/v1/me`）在各自的查询里用标量子查询顺带读出，不多一次往返，多实例之间也不用失效缓存；
+  缺行时按默认值（开启）处理，误删这一行不会放开门控。后台修改先补行再 `FOR UPDATE`，与审计同一事务。
+
 ## 管理后台调整丁尼与经验（`20261031000002_admin_economy_actions.sql`）
 
 - `denny_logs.action` 增加 `admin_deduct`（管理员扣除；发放沿用 `admin_grant`，DENNY-020 的枚举第一次有写入方）；

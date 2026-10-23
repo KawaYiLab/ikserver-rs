@@ -121,6 +121,9 @@ pub struct MeView {
     pub email: Option<String>,
     pub role: Role,
     pub exam_passed: bool,
+    /// 站点是否开启入站考试（后台「系统设置」）。为 false 时未通过考试也能发帖、评论等，
+    /// 客户端不应再引导去考试。
+    pub exam_required: bool,
     pub is_ai_agent: bool,
     /// 等级 0–7（0 = 未通过入站考试）。
     pub level: i16,

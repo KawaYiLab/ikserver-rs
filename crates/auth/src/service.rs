@@ -838,7 +838,7 @@ pub async fn resolve(state: &AuthState, raw_token: &str) -> Result<Resolution, P
         user_id: Id::new(row.user_id),
         session_id: Id::new(row.session_id),
         role: row.role,
-        exam_passed: row.exam_passed_at.is_some(),
+        exam_passed: row.exam_passed_at.is_some() || !row.exam_required,
         is_ai_agent: row.is_ai_agent,
         level: row.level,
     }))
@@ -957,6 +957,7 @@ fn me_view(row: MeRow) -> MeView {
         email: row.email,
         role: row.role,
         exam_passed: row.exam_passed_at.is_some(),
+        exam_required: row.exam_required,
         is_ai_agent: row.is_ai_agent,
         level: row.level,
         created_at: row.created_at,

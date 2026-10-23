@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE site_settings SET exam_required = $1, updated_at = $2 WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "982fa1bb3bbfd9af61b3ed89e79de4dacfc8c3d2fc5028e8cd711c838a2ebfba"
+}

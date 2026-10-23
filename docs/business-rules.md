@@ -85,6 +85,11 @@
 
 `examPassed || isAdmin || isAiAgent` 才能执行受门控的写操作，否则返回 403 `EXAM_REQUIRED`；每次请求按用户 id 重查，通过后无需重新登录。未通过考试的普通用户等级固定为 0，权益全部为 0。门控覆盖范围不完全一致，见 D-015。
 
+新系统增加了全站开关（旧系统没有）：管理员在后台「系统设置」关闭入站考试（`site_settings.exam_required = false`，
+`PUT /v1/admin/settings`）后，所有账号都按豁免处理：写操作不再返回 `EXAM_REQUIRED`，等级在下次获得经验时按经验计算；
+同样每次请求重查，切换后立即生效。考试本身仍可参加，首次通过照常记通过时间、发奖励。`GET /v1/me` 的 `examRequired`
+告诉客户端是否还要引导去考试。重新开启后，没通过考试的账号恢复门控，等级在下次获得经验时回到 0。
+
 - moderation-exam.md：`EXAM-011`～`EXAM-014`、`ADMIN-005`、`RPT-020`（举报不门控）
 - social-economy.md：`COMMON-005`、`COMMON-006`、`EXP-002`、`BENEFIT-002`
 - posts.md：`POST-040`（删帖不门控）

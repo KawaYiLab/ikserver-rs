@@ -1,49 +1,49 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, member_no, username, email, role AS \"role: Role\", exam_passed_at, is_ai_agent,\n                  level, created_at\n           FROM users WHERE id = $1",
+  "query": "SELECT s.id AS session_id, s.user_id, s.last_seen_at,\n                  u.status, u.role AS \"role: Role\", u.exam_passed_at, u.is_ai_agent, u.level,\n                  COALESCE((SELECT exam_required FROM site_settings WHERE id = 1), true)\n                      AS \"exam_required!\"\n           FROM sessions s JOIN users u ON u.id = s.user_id\n           WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
+        "name": "session_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
-            "table": "users",
+            "table": "sessions",
             "name": "id"
           }
         }
       },
       {
         "ordinal": 1,
-        "name": "member_no",
+        "name": "user_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "member_no"
+            "table": "sessions",
+            "name": "user_id"
           }
         }
       },
       {
         "ordinal": 2,
-        "name": "username",
-        "type_info": "Text",
+        "name": "last_seen_at",
+        "type_info": "Timestamptz",
         "origin": {
           "Table": {
-            "table": "users",
-            "name": "username"
+            "table": "sessions",
+            "name": "last_seen_at"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "email",
+        "name": "status",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "users",
-            "name": "email"
+            "name": "status"
           }
         }
       },
@@ -93,32 +93,28 @@
       },
       {
         "ordinal": 8,
-        "name": "created_at",
-        "type_info": "Timestamptz",
-        "origin": {
-          "Table": {
-            "table": "users",
-            "name": "created_at"
-          }
-        }
+        "name": "exam_required!",
+        "type_info": "Bool",
+        "origin": "Expression"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Bytea",
+        "Timestamptz"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
+      false,
       true,
       false,
-      true,
       false,
-      false,
-      false
+      null
     ]
   },
-  "hash": "aba5e2126953cb372b9ff3bf1e59e5cbf1f980031c615bcb3cc2f2c8d30aeec8"
+  "hash": "29a4455d77a4afc7eda3b82e1102937ca154968479d9be934c27acfd4edac85d"
 }

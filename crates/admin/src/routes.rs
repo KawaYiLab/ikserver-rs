@@ -1,8 +1,11 @@
-//! HTTP 接口：`/v1/admin/users*`（含流水、登录设备、强制下线、强制改名、清理资料）、`/v1/admin/dashboard`、`/v1/admin/search*`、`/v1/admin/audit`。
+//! HTTP 接口：`/v1/admin/users*`（含流水、登录设备、强制下线、强制改名、清理资料）、`/v1/admin/dashboard`、`/v1/admin/search*`、`/v1/admin/audit`、
+//! `/v1/admin/settings`。
 
 use axum::extract::{FromRef, State};
 use http::StatusCode;
-use ik_auth::admin::{AdminUser, AuditEntry, AuditQuery, UserQuery};
+use ik_auth::admin::{
+    AdminUser, AuditEntry, AuditQuery, SiteSettings, SiteSettingsInput, UserQuery,
+};
 use ik_auth::{AdminOperator, AuthState, StaffOperator};
 use ik_kernel::cursor::Paged;
 use ik_kernel::error::ProblemBody;
@@ -46,6 +49,7 @@ where
         .routes(routes!(get_search))
         .routes(routes!(reindex))
         .routes(routes!(list_audit))
+        .routes(routes!(get_site_settings, put_site_settings))
 }
 
 /// 账号列表
@@ -440,4 +444,48 @@ async fn list_audit(
 ) -> Result<Json<Paged<AuditEntry>>, Problem> {
     let mut conn = state.db.acquire().await?;
     Ok(Json(ik_auth::admin::list(&mut conn, query).await?))
+}
+
+/// 系统设置（只有管理员）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/settings",
+    tag = "admin",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = SiteSettings),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn get_site_settings(
+    State(state): State<AdminState>,
+    AdminOperator(_): AdminOperator,
+) -> Result<Json<SiteSettings>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(Json(ik_auth::admin::site_settings(&mut conn).await?))
+}
+
+/// 修改系统设置（只有管理员）
+///
+/// 立即生效，不需要重启或重新登录。关闭入站考试后，未通过考试的账号也能执行写操作。
+#[utoipa::path(
+    put,
+    path = "/v1/admin/settings",
+    tag = "admin",
+    request_body = SiteSettingsInput,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = SiteSettings),
+        (status = 403, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn put_site_settings(
+    State(state): State<AdminState>,
+    AdminOperator(op): AdminOperator,
+    Json(input): Json<SiteSettingsInput>,
+) -> Result<Json<SiteSettings>, Problem> {
+    let mut tx = state.db.begin().await?;
+    let settings = ik_auth::admin::update_site_settings(&mut tx, &state.ids, &op, input).await?;
+    tx.commit().await?;
+    Ok(Json(settings))
 }

@@ -16,13 +16,19 @@ pub struct LockedUser {
     pub role: Role,
     pub is_ai_agent: bool,
     pub exam_passed_at: Option<DateTime<Utc>>,
+    /// 站点是否开启入站考试（后台「系统设置」）。
+    pub exam_required: bool,
     pub level: i16,
 }
 
 impl LockedUser {
-    /// 免考试门控、等级不锁 0 的账号：通过考试、管理员（含版主）、AI 账号（EXP-002）。
+    /// 免考试门控、等级不锁 0 的账号：通过考试、管理员（含版主）、AI 账号（EXP-002）；
+    /// 站点关闭入站考试时所有账号都免。
     pub fn exam_exempt(&self) -> bool {
-        self.exam_passed_at.is_some() || self.role.is_staff() || self.is_ai_agent
+        !self.exam_required
+            || self.exam_passed_at.is_some()
+            || self.role.is_staff()
+            || self.is_ai_agent
     }
 }
 
@@ -40,6 +46,7 @@ pub async fn lock_active_user(
             role: row.role,
             is_ai_agent: row.is_ai_agent,
             exam_passed_at: row.exam_passed_at,
+            exam_required: row.exam_required,
             level: row.level,
         }))
 }

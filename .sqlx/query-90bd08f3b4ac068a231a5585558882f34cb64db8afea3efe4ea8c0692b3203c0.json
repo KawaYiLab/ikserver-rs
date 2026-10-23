@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT exam_required, updated_at FROM site_settings WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exam_required",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "site_settings",
+            "name": "exam_required"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "site_settings",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "90bd08f3b4ac068a231a5585558882f34cb64db8afea3efe4ea8c0692b3203c0"
+}

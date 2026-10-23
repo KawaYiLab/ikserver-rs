@@ -25,6 +25,7 @@ pub struct Principal {
     pub user_id: Id<User>,
     pub session_id: Id<Session>,
     pub role: Role,
+    /// 不受入站考试门控：已通过考试，或站点关闭了入站考试（后台「系统设置」）。
     pub exam_passed: bool,
     pub is_ai_agent: bool,
     /// 用户等级 0–7（0 = 未通过考试）。
@@ -32,7 +33,7 @@ pub struct Principal {
 }
 
 impl Principal {
-    /// 是否可以执行写操作：通过入站考试，或为工作人员 / AI 账号（REG-007）。
+    /// 是否可以执行写操作：通过入站考试（或站点关闭了入站考试），或为工作人员 / AI 账号（REG-007）。
     pub fn can_write(&self) -> bool {
         self.exam_passed || self.role.is_staff() || self.is_ai_agent
     }
