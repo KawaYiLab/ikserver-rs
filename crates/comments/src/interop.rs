@@ -388,7 +388,7 @@ pub async fn insert_ai_reply(
         effects,
     )
     .await?;
-    effects.publish(crate::service::bumped_event(post.id)?);
+    effects.publish(crate::service::bumped_event(post.id, reply.ai_user_id)?);
     Ok(Some(id))
 }
 

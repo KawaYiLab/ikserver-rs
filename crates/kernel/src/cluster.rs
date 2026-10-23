@@ -110,6 +110,7 @@ enum WireAudience {
     Session(i64),
     Channel(String),
     Broadcast,
+    BroadcastExcept(i64),
 }
 
 /// 通知载荷：`bus_outbox` 里的行，或完整事件。
@@ -133,6 +134,7 @@ impl Wire {
             Audience::Session(id) => WireAudience::Session(*id),
             Audience::Channel(name) => WireAudience::Channel(name.to_string()),
             Audience::Broadcast => WireAudience::Broadcast,
+            Audience::BroadcastExcept(id) => WireAudience::BroadcastExcept(*id),
             Audience::Internal => return None,
         };
         Some(Self {
@@ -151,6 +153,7 @@ impl Wire {
             WireAudience::Session(id) => Audience::Session(id),
             WireAudience::Channel(name) => Audience::Channel(name.into()),
             WireAudience::Broadcast => Audience::Broadcast,
+            WireAudience::BroadcastExcept(id) => Audience::BroadcastExcept(id),
         };
         Some(Event {
             kind: intern(&self.kind)?,

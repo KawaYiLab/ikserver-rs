@@ -314,6 +314,12 @@ impl Hub {
                 .iter()
                 .map(|(id, c)| (*id, c.tx.clone()))
                 .collect(),
+            Audience::BroadcastExcept(user_id) => registry
+                .conns
+                .iter()
+                .filter(|(_, c)| c.user_id != Some(*user_id))
+                .map(|(id, c)| (*id, c.tx.clone()))
+                .collect(),
             Audience::Internal => Vec::new(),
         }
     }
@@ -351,6 +357,7 @@ mod tests {
         hub.dispatch(&event("c", Audience::Session(21)));
         hub.dispatch(&event("d", Audience::Channel(Arc::from("post:9"))));
         hub.dispatch(&event("e", Audience::Broadcast));
+        hub.dispatch(&event("f", Audience::BroadcastExcept(1)));
 
         let kinds = |reg: &mut Registration| -> Vec<String> {
             frames(reg)
@@ -362,8 +369,8 @@ mod tests {
                 .collect()
         };
         assert_eq!(kinds(&mut alice), vec!["a", "b", "e"]);
-        assert_eq!(kinds(&mut bob), vec!["b", "c", "e"]);
-        assert_eq!(kinds(&mut guest), vec!["d", "e"]);
+        assert_eq!(kinds(&mut bob), vec!["b", "c", "e", "f"]);
+        assert_eq!(kinds(&mut guest), vec!["d", "e", "f"]);
     }
 
     #[test]
