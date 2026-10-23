@@ -323,6 +323,7 @@ pub(crate) struct UserStateRow {
     pub role: Role,
     pub is_ai_agent: bool,
     pub exam_passed_at: Option<DateTime<Utc>>,
+    pub exam_required: bool,
     pub level: i16,
 }
 
@@ -338,8 +339,10 @@ pub(crate) async fn lock_active_user_state(
 ) -> sqlx::Result<Option<UserStateRow>> {
     sqlx::query_as!(
         UserStateRow,
-        r#"SELECT id, role AS "role: Role", is_ai_agent, exam_passed_at, level
-           FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE"#,
+        r#"SELECT id, role AS "role: Role", is_ai_agent, exam_passed_at, level,
+                  COALESCE((SELECT exam_required FROM site_settings WHERE id = 1), true)
+                      AS "exam_required!"
+           FROM users WHERE id = $1 AND status = 'active' FOR NO KEY UPDATE OF users"#,
         id,
     )
     .fetch_optional(conn)
@@ -506,6 +509,7 @@ pub(crate) struct MeRow {
     pub email: Option<String>,
     pub role: Role,
     pub exam_passed_at: Option<DateTime<Utc>>,
+    pub exam_required: bool,
     pub is_ai_agent: bool,
     pub level: i16,
     pub created_at: DateTime<Utc>,
@@ -515,7 +519,9 @@ pub(crate) async fn me(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<
     sqlx::query_as!(
         MeRow,
         r#"SELECT id, member_no, username, email, role AS "role: Role", exam_passed_at, is_ai_agent,
-                  level, created_at
+                  level, created_at,
+                  COALESCE((SELECT exam_required FROM site_settings WHERE id = 1), true)
+                      AS "exam_required!"
            FROM users WHERE id = $1"#,
         id,
     )
@@ -589,6 +595,7 @@ pub(crate) struct ResolvedSession {
     pub status: String,
     pub role: Role,
     pub exam_passed_at: Option<DateTime<Utc>>,
+    pub exam_required: bool,
     pub is_ai_agent: bool,
     pub level: i16,
 }
@@ -601,7 +608,9 @@ pub(crate) async fn resolve_session(
     sqlx::query_as!(
         ResolvedSession,
         r#"SELECT s.id AS session_id, s.user_id, s.last_seen_at,
-                  u.status, u.role AS "role: Role", u.exam_passed_at, u.is_ai_agent, u.level
+                  u.status, u.role AS "role: Role", u.exam_passed_at, u.is_ai_agent, u.level,
+                  COALESCE((SELECT exam_required FROM site_settings WHERE id = 1), true)
+                      AS "exam_required!"
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > $2"#,
         token_hash,
@@ -1413,4 +1422,54 @@ pub(crate) async fn daily_signups(
     .fetch_all(conn)
     .await?;
     Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
+}
+
+// ---------- 站点设置 ----------
+//
+// 只有一行（id = 1）。读取方缺行时按默认值处理（入站考试开启），不放开门控。
+
+pub(crate) struct SiteSettingsRow {
+    pub exam_required: bool,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+pub(crate) async fn site_settings(conn: &mut PgConnection) -> sqlx::Result<SiteSettingsRow> {
+    let row = sqlx::query_as!(
+        SiteSettingsRow,
+        "SELECT exam_required, updated_at FROM site_settings WHERE id = 1",
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.unwrap_or(SiteSettingsRow {
+        exam_required: true,
+        updated_at: None,
+    }))
+}
+
+/// 补上缺失的设置行并锁住，串行化并发修改（审计里的「改前」才准确）。
+pub(crate) async fn lock_site_settings(conn: &mut PgConnection) -> sqlx::Result<SiteSettingsRow> {
+    sqlx::query!("INSERT INTO site_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query_as!(
+        SiteSettingsRow,
+        "SELECT exam_required, updated_at FROM site_settings WHERE id = 1 FOR UPDATE",
+    )
+    .fetch_one(conn)
+    .await
+}
+
+pub(crate) async fn update_site_settings(
+    conn: &mut PgConnection,
+    exam_required: bool,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE site_settings SET exam_required = $1, updated_at = $2 WHERE id = 1",
+        exam_required,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
 }

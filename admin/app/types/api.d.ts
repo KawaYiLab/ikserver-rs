@@ -848,6 +848,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统设置（只有管理员） */
+        get: operations["get_site_settings"];
+        /**
+         * 修改系统设置（只有管理员）
+         * @description 立即生效，不需要重启或重新登录。关闭入站考试后，未通过考试的账号也能执行写操作。
+         */
+        put: operations["put_site_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/story/corpora": {
         parameters: {
             query?: never;
@@ -5095,6 +5116,11 @@ export interface components {
             createdAt: string;
             email?: string | null;
             examPassed: boolean;
+            /**
+             * @description 站点是否开启入站考试（后台「系统设置」）。为 false 时未通过考试也能发帖、评论等，
+             *     客户端不应再引导去考试。
+             */
+            examRequired: boolean;
             /** @example 7385159247626227712 */
             id: string;
             isAiAgent: boolean;
@@ -6760,6 +6786,22 @@ export interface components {
             /** @description 完成接口路径里的 `uploadId`（不透明，含签名）。 */
             uploadId?: string | null;
             uploadUrl?: string | null;
+        };
+        /** @description 站点设置（后台「系统设置」）：随时切换、立即生效的开关。 */
+        SiteSettings: {
+            /**
+             * @description 入站考试开关。关闭后未通过考试的普通账号也能发帖、评论、私信等（REG-007），
+             *     等级在下次获得经验时按经验计算（EXP-002）；考试本身仍可参加，首次通过照常发奖励。
+             */
+            examRequired: boolean;
+            /**
+             * Format: date-time
+             * @description 最近一次修改时间；从未修改过时为空。
+             */
+            updatedAt?: string | null;
+        };
+        SiteSettingsInput: {
+            examRequired: boolean;
         };
         StartView: {
             attemptId: string;
@@ -9059,6 +9101,64 @@ export interface operations {
             };
             /** @description REINDEX_RUNNING / SEARCH_ENGINE_NOT_CONFIGURED */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    get_site_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSettings"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    put_site_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteSettingsInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteSettings"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

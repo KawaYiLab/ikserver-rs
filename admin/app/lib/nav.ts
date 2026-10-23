@@ -1,6 +1,7 @@
 import type { Component } from 'vue'
 import {
-  Bot, ClipboardList, FileText, Flag, LayoutDashboard, MessagesSquare, Newspaper, Palette, Search, Smile, Tags, Users,
+  Bot, ClipboardList, FileText, Flag, LayoutDashboard, MessagesSquare, Newspaper, Palette, Search, Settings, Smile, Tags,
+  Users,
 } from '@lucide/vue'
 
 /** 菜单上的待办提示：`count` 显示数字，`alert` 只显示一个警示点。 */
@@ -54,6 +55,7 @@ export const navGroups: NavGroup[] = [
       { to: '/ai', label: 'AI 助手', icon: Bot, adminOnly: true, badge: 'aiFailed', keywords: 'ai 模型 角色' },
       { to: '/search', label: '搜索索引', icon: Search, adminOnly: true, keywords: 'search meilisearch 索引' },
       { to: '/audit', label: '审计日志', icon: FileText, adminOnly: true, keywords: 'audit log 日志' },
+      { to: '/settings', label: '系统设置', icon: Settings, adminOnly: true, keywords: 'settings 设置 开关 入站考试 exam' },
     ],
   },
 ]

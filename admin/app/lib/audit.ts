@@ -45,6 +45,7 @@ export const auditActionLabel: Record<string, string> = {
   'ai.mcp_server.delete': '删除 MCP 服务',
   'ai.mcp_tool.save': '修改 MCP 工具',
   'search.reindex': '重建索引',
+  'site.settings.update': '修改系统设置',
 }
 
 export const auditTargetLabel: Record<string, string> = {
@@ -63,4 +64,5 @@ export const auditTargetLabel: Record<string, string> = {
   ai_mcp_server: 'MCP 服务',
   ai_mcp_tool: 'MCP 工具',
   search: '搜索',
+  site_settings: '系统设置',
 }

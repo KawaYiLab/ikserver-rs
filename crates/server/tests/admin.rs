@@ -1,4 +1,4 @@
-//! 管理后台接口：权限分级（普通用户 / 版主 / 管理员）、题库、AI 配置、审计日志。
+//! 管理后台接口：权限分级（普通用户 / 版主 / 管理员）、题库、AI 配置、系统设置、审计日志。
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -1833,6 +1833,88 @@ async fn member_numbers_are_shown_and_searchable(db: PgPool) {
     assert_eq!(found["total"], 1, "{found}");
     assert_eq!(found["items"][0]["username"], "newbie");
     assert_eq!(found["items"][0]["memberNo"], 5);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn exam_switch_in_site_settings(db: PgPool) {
+    const NEWBIE: &str = "iks_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD";
+    let app = setup(&db).await;
+    // 还没通过入站考试的新用户。
+    sqlx::query!(
+        "INSERT INTO users (id, username, email, level) VALUES (5, 'newbie', 'newbie@example.com', 0)"
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO sessions (id, user_id, token_hash, login_method, expires_at, max_expires_at)
+         VALUES (5, 5, sha256(convert_to($1, 'UTF8')), 'password',
+                 now() + interval '1 day', now() + interval '1 day')",
+        NEWBIE
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let base = "/v1/admin/settings";
+
+    // 只有管理员能看、能改。
+    assert_eq!(
+        call(&app, MODERATOR, "GET", base, Value::Null).await.0,
+        StatusCode::FORBIDDEN
+    );
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "PUT",
+        base,
+        json!({ "examRequired": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, settings) = call(&app, ADMIN, "GET", base, Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings, json!({ "examRequired": true, "updatedAt": null }));
+
+    // 默认开启：未通过考试不能写。
+    let (_, me) = call(&app, NEWBIE, "GET", "/v1/me", Value::Null).await;
+    assert_eq!(me["examRequired"], true);
+    assert_eq!(me["examPassed"], false);
+    let (status, body) = call(&app, NEWBIE, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "EXAM_REQUIRED");
+
+    // 关闭后立即生效（不用重新登录）：能写，等级按经验算而不是锁 0。
+    let (status, settings) = call(&app, ADMIN, "PUT", base, json!({ "examRequired": false })).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["examRequired"], false);
+    assert!(settings["updatedAt"].is_string());
+    let (_, me) = call(&app, NEWBIE, "GET", "/v1/me", Value::Null).await;
+    assert_eq!(me["examRequired"], false);
+    assert_eq!(me["examPassed"], false);
+    let (status, body) = call(&app, NEWBIE, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["level"], 1);
+
+    // 值没变不记审计；重新开启后又拦住。
+    call(&app, ADMIN, "PUT", base, json!({ "examRequired": false })).await;
+    call(&app, ADMIN, "PUT", base, json!({ "examRequired": true })).await;
+    let audits = sqlx::query_scalar!(
+        "SELECT details FROM admin_audit_log WHERE action = 'site.settings.update'
+         ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        audits,
+        vec![
+            json!({ "examRequired": false }),
+            json!({ "examRequired": true })
+        ]
+    );
+    let (status, body) = call(&app, NEWBIE, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["code"], "EXAM_REQUIRED");
 }
 
 /// 原始字节请求（剧情库语料包上传）。
