@@ -62,12 +62,13 @@ async fn members(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Re
     Ok(result.rows_affected())
 }
 
-/// 发送者必须是会话双方之一；正文为空的不导入。撤回（deletedAt）保留行、正文不可见（MSG-003）。
+/// 发送者必须是会话双方之一；正文为空又没有图片的不导入。撤回（deletedAt）保留行、正文不可见（MSG-003）。
+/// 附件转成的图片只留真正导入了的媒体文件（同一对象重复的文件导入时被跳过）。
 /// AI 发的消息记为已定稿（`done`）；旧的工作流时间线格式不同，不导入。
 async fn messages(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Result<u64> {
     let result = sqlx::query!(
         r#"INSERT INTO messages (id, conversation_id, sender_id, kind, content, edited_at,
-                                 withdrawn_at, created_at, ai_state, ai_model_key)
+                                 withdrawn_at, created_at, ai_state, ai_model_key, image_ids)
            SELECT m.id, nc.id, m.sender_id,
                   CASE WHEN m.kind = 'system' THEN 'system' ELSE 'text' END,
                   m.new_content,
@@ -76,12 +77,19 @@ async fn messages(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::R
                   coalesce(m.created_at AT TIME ZONE $1, $2),
                   CASE WHEN nc.kind = 'ai' AND m.sender_id = ai.id THEN 'done' END,
                   CASE WHEN nc.kind = 'ai' AND m.sender_id = ai.id
-                       THEN nullif(left(btrim(m.ai_model_key), 64), '') END
+                       THEN nullif(left(btrim(m.ai_model_key), 64), '') END,
+                  CASE WHEN m.kind = 'system' THEN '{}' ELSE img.ids END
            FROM legacy.ik_messages m
            JOIN conversations nc ON nc.id = m.conversation_id
            LEFT JOIN users ai ON nc.kind = 'ai' AND ai.id IN (nc.user_low, nc.user_high) AND ai.is_ai_agent
+           CROSS JOIN LATERAL (
+               SELECT coalesce(array_agg(f.id ORDER BY u.ord), '{}') AS ids
+               FROM unnest(m.image_ids) WITH ORDINALITY u(id, ord)
+               JOIN media_files f ON f.id = u.id
+           ) img
            WHERE m.sender_id IN (nc.user_low, nc.user_high)
-             AND char_length(coalesce(m.new_content, '')) >= 1"#,
+             AND (char_length(m.new_content) >= 1
+                  OR (m.kind <> 'system' AND cardinality(img.ids) > 0))"#,
         options.legacy_timezone,
         options.now,
     )

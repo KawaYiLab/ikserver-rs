@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO messages (id, conversation_id, sender_id, kind, content, edited_at,\n                                 withdrawn_at, created_at, ai_state, ai_model_key, image_ids)\n           SELECT m.id, nc.id, m.sender_id,\n                  CASE WHEN m.kind = 'system' THEN 'system' ELSE 'text' END,\n                  m.new_content,\n                  m.edited_at AT TIME ZONE $1,\n                  m.deleted_at AT TIME ZONE $1,\n                  coalesce(m.created_at AT TIME ZONE $1, $2),\n                  CASE WHEN nc.kind = 'ai' AND m.sender_id = ai.id THEN 'done' END,\n                  CASE WHEN nc.kind = 'ai' AND m.sender_id = ai.id\n                       THEN nullif(left(btrim(m.ai_model_key), 64), '') END,\n                  CASE WHEN m.kind = 'system' THEN '{}' ELSE img.ids END\n           FROM legacy.ik_messages m\n           JOIN conversations nc ON nc.id = m.conversation_id\n           LEFT JOIN users ai ON nc.kind = 'ai' AND ai.id IN (nc.user_low, nc.user_high) AND ai.is_ai_agent\n           CROSS JOIN LATERAL (\n               SELECT coalesce(array_agg(f.id ORDER BY u.ord), '{}') AS ids\n               FROM unnest(m.image_ids) WITH ORDINALITY u(id, ord)\n               JOIN media_files f ON f.id = u.id\n           ) img\n           WHERE m.sender_id IN (nc.user_low, nc.user_high)\n             AND (char_length(m.new_content) >= 1\n                  OR (m.kind <> 'system' AND cardinality(img.ids) > 0))",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "657061911c4a863dd38e290fc0b89d1d9e31ce2fd01abbcbf6d6b8e6b4517169"
+}

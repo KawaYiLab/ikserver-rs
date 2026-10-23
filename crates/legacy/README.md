@@ -123,7 +123,7 @@ psql -d "$DATABASE_URL" -c 'DROP SCHEMA legacy CASCADE'
 | 两个成员的一对一会话 | `conversations` | 一方是 AI 账号 → `ai`，否则 `direct`；群聊与残缺会话不导入（D-073） |
 | 同一对用户的多个私聊 | 一条 `direct` | 取最小的会话 id，其余会话的消息并进去；成员视角合并（已读取最晚、免打扰 / 置顶任一为真） |
 | 成员 | `conversation_members` | 每个会话两行（各自视角），排序时间取最后一条消息 |
-| 消息 | `messages` | 图片消息改为正文里的图片地址（D-021）；空消息不导入；`deletedAt` → 撤回；AI 发的记为 `done`；工作流时间线格式不同，不导入 |
+| 消息 | `messages` | 附件转成消息图片 `image_ids`（摘要读取成功的前 4 张，MSG-030），读不到的、超出的改为正文里的图片地址；没字没图的空消息不导入；`deletedAt` → 撤回；AI 发的记为 `done`；工作流时间线格式不同，不导入 |
 | `contextEpoch` / 会话模型 | `ai_sessions` | 重置过的会话上下文从重置后的第一条消息开始，绝不读到重置前的私密历史（CTX-023） |
 
 ### 通知与举报

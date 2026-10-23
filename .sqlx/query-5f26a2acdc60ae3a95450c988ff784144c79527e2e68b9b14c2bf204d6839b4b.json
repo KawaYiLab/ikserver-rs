@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, conversation_id, sender_id, kind, content, reply_to_id, withdrawn_at, ai_state, ai_model_key\n         FROM messages ORDER BY id",
+  "query": "SELECT id, conversation_id, sender_id, kind, content, reply_to_id, withdrawn_at, ai_state, ai_model_key,\n                image_ids\n         FROM messages ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -101,6 +101,17 @@
             "name": "ai_model_key"
           }
         }
+      },
+      {
+        "ordinal": 9,
+        "name": "image_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "image_ids"
+          }
+        }
       }
     ],
     "parameters": {
@@ -115,8 +126,9 @@
       true,
       true,
       true,
-      true
+      true,
+      false
     ]
   },
-  "hash": "0dff3bc96b5a3839df97b30518a72616ae463dcabd3ef88a0c11d3fc5a6e5069"
+  "hash": "5f26a2acdc60ae3a95450c988ff784144c79527e2e68b9b14c2bf204d6839b4b"
 }
