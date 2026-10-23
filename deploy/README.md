@@ -1,13 +1,24 @@
 # 部署
 
-线上只有两样东西：
+## 线上拓扑
 
-| 部署物 | 内容 | 位置 |
+```
+浏览器（interk.net 页面）──┐
+管理后台（ik.tiwat.cn/admin）─┼─▶ EdgeOne（ik.tiwat.cn）──▶ 服务器:8080  ik-server
+安卓 App ──────────────────┘          │
+                                      └─ /app/* ──▶ 对象存储（安卓更新渠道）
+```
+
+| 域名 | 由谁提供 | 内容 |
 | --- | --- | --- |
-| 主站前端 | InterKnot-web（Nuxt） | `interk.net`，`/v1` 由 nginx 转给 ik-server |
-| `ik-server` | 一个可执行文件：接口 `/v1`、实时通道 `/v1/realtime`、管理后台 `/admin`、后台任务 | `ik.tiwat.cn` 与本机 `127.0.0.1:8080` |
+| `ik.tiwat.cn` | 腾讯云 EdgeOne，回源到服务器上 ik-server 的端口（**没有 nginx**） | 接口 `/v1`、实时通道 `/v1/realtime`、管理后台 `/admin`；`/app/*` 回源到对象存储 |
+| `interk.net` | Cloudflare Pages 静态站点（InterKnot-Web 仓库） | 主站；构建时 `NUXT_PUBLIC_API_BASE_URL=https://ik.tiwat.cn`，跨站调用接口 |
+| `im.tiwat.cn` | 对象存储的 CDN | 上传的文件（`IK_STORAGE__PUBLIC_BASE_URL`） |
 
-管理后台（`admin/`）在编译时嵌进 `ik-server`，不需要单独发布。依赖的服务：PostgreSQL、Meilisearch、对象存储。
+为什么是这样、有什么代价见 [ADR 0005](../docs/adr/0005-edgeone-direct-origin.md)。
+
+`ik-server` 是一个可执行文件，管理后台（`admin/`）在编译时嵌进去，不需要单独发布。
+依赖的服务：PostgreSQL、Meilisearch、对象存储。
 
 | 文件 | 作用 |
 | --- | --- |
@@ -16,7 +27,6 @@
 | [`systemd/ik-server.service`](systemd/ik-server.service) | 服务定义（发布时自动安装） |
 | [`systemd/ik`](systemd/ik) | 在服务器上跑运维命令的包装（发布时装到 `/usr/local/bin/ik`） |
 | [`ik-server.env.example`](ik-server.env.example) | 生产配置模板 |
-| [`nginx/`](nginx/) | 两个域名的 nginx 配置 |
 | [`legacy-prepare.sh`](legacy-prepare.sh) | 旧数据导入的准备：导出旧库、恢复到新库的 legacy schema、迁移、预检（见 crates/legacy/README.md） |
 
 ## 服务器一次性准备
@@ -29,7 +39,40 @@ sudo install -d -m 0750 -g interknot /etc/interknot
 sudo install -m 0640 -o root -g interknot ik-server.env.example /etc/interknot/ik-server.env
 ```
 
-nginx 按 [`nginx/README.md`](nginx/README.md) 配好。数据库要先建好空库和账号，表结构由发布脚本迁移。
+数据库要先建好空库和账号，表结构由发布脚本迁移。
+
+与拓扑有关的配置（模板里已写好）：
+
+```
+IK_HTTP__ADDR=0.0.0.0:8080                        # EdgeOne 回源到这个端口；release.sh 用 127.0.0.1:8080/readyz 检查就绪
+IK_HTTP__TRUSTED_PROXY_HOPS=1                     # 只有 EdgeOne 一层
+IK_HTTP__ALLOWED_ORIGINS=["https://interk.net"]   # 主站跨站调用（CORS、CSRF、WebSocket 握手都看它）
+IK_SESSION__COOKIE_CROSS_SITE=true                # 主站的会话 Cookie 用 SameSite=None; Partitioned
+```
+
+**防火墙 / 安全组：8080 只放行 EdgeOne 的回源 IP 段**（EdgeOne 控制台 → 站点 → 安全防护 → 源站防护，
+那里有当前 IP 列表，变动时会通知）。不这样做，谁都能绕过 EdgeOne 直连 8080 并伪造 `X-Forwarded-For`，
+限流按 IP 计的部分就失效了，审计日志里的 IP 也不可信。PostgreSQL、Meilisearch 只监听本机。
+
+层数是否配对：登录后在「登录设备」或审计日志里看到的 IP 应是自己的公网 IP。看到的是腾讯云的地址说明层数少了，
+看到的是自己在请求头里随便写的 `X-Forwarded-For` 说明源站没有只放行 EdgeOne。
+
+## EdgeOne
+
+站点 `ik.tiwat.cn` 的设置（控制台里的名字可能随版本略有不同）：
+
+| 项 | 设置 | 原因 |
+| --- | --- | --- |
+| 源站 | 服务器 IP，HTTP 回源，端口 8080 | ik-server 不终止 TLS |
+| 回源 Host | 保持加速域名 `ik.tiwat.cn` | 同源判断（管理后台的 CSRF 回退校验、WebSocket 握手）比较 `Origin` 与 `Host` |
+| WebSocket | 开启，超时 ≥ 120 秒 | 实时通道心跳 30 秒、60 秒没有往来就断开；超时小于心跳间隔会被 EdgeOne 先掐断 |
+| 缓存（`/v1/*`、`/admin/*`、`/healthz`、`/readyz`） | 遵循源站 `Cache-Control` | 公开 GET 由后端给 `public, max-age=…`，带凭据的请求一律 `private`/`no-store`；不要配「全部缓存」，会把一个人的数据发给另一个人 |
+| 缓存键 | 保留全部查询参数，**并加上请求头 `Origin`** | 分页游标、筛选都在查询参数里。EdgeOne 不认 `Vary: Origin`（实测 `/v1/emotes`：先被不带 `Origin` 的 App 请求填进缓存，主站再请求就命中一份没有 `Access-Control-Allow-Origin` 的响应，浏览器按跨域错误拦下） |
+| 回源超时 | 默认即可；`/v1/admin/story/corpus` 调到 120 秒 | 剧情库语料包上传后要建索引 |
+| 上传大小 | ≥ 64 MB | 剧情库语料包（约 6 MB，后端上限 64 MB）；其余接口正文上限 2 MB，图片直传对象存储不经过这里 |
+| 规则：URL 路径 `/app/*` | 回源到安卓更新渠道的对象存储（回源 Host 填存储域名），缓存遵循源站 | 安卓 App 的 `version.json` 与安装包，由 InterKnot-Android 的发版工作流上传，见该仓库 `docs/release.md` |
+
+`https://ik.tiwat.cn/app/android/version.json` 返回 404 而且是 `application/problem+json`，说明 `/app/*` 规则没生效、请求落到了 ik-server。
 
 ## 发布
 
@@ -97,7 +140,7 @@ journalctl -u ik-server -f                        # 日志
 3. 版本与回滚（管理员）：`GET /v1/admin/story/corpora` 查看最近 5 个版本，
    `POST /v1/admin/story/corpora/{id}/activate` 回滚到其中一个。上传与回滚都记在审计日志里。
 
-nginx 的 `ik-api.inc` 给上传接口单独放宽了正文上限（64 MB），更新 nginx 配置后 `nginx -t && systemctl reload nginx`。
+EdgeOne 的上传大小与这个接口的回源超时要放宽，见上文「EdgeOne」。
 
 本地调试工具（不连数据库；将 `--source` 替换为实际的提取输出目录或 `.json.gz` 语料包）：
 

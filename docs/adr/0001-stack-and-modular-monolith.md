@@ -23,7 +23,7 @@
    旧 App 由旧后端返回 426 引导升级（上线窗口内）。
 7. **管理后台**：独立 Nuxt 4 SPA + shadcn-vue + Tailwind v4，不复用主站 UI。
 8. **Windows 开发用 gnu 工具链 + MinGW-w64**（不装 6GB 的 VS Build Tools）。优先选纯 Rust
-   依赖；TLS 终端在 nginx，内网到 PG 不加密（同机/内网）。
+   依赖；TLS 终端在 CDN（EdgeOne，见 ADR 0005），内网到 PG 不加密（同机/内网）。
 
 ## 后果
 

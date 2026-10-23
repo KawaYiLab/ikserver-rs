@@ -224,7 +224,7 @@
 ### 7.3 客户端 IP
 
 - `RL-020` `getClientIp`：`TRUSTED_PROXY_HOPS`（≥0 整数，默认 1）；为 0 时直接用 socket 对端地址；否则取 `X-Forwarded-For` 拆分后**从右往左第 hops 个**（`parts[len - hops]`，越界取 `parts[0]`），无 XFF 时用 socket 地址，再无则 `0.0.0.0`。不使用最左值（可伪造）。来源 `server/src/utils/common.ts:486-518`。
-- `RL-021` 部署规则：nginx 一层填 1，CDN + nginx 填 2；层数变化不同步会导致匿名桶塌成全站一个。来源 `server/docs/search-sections-deployment.md`「四、安全红线」。
+- `RL-021` 部署规则：按代理层数填（现网只有 EdgeOne 一层，填 1，见 `deploy/README.md`）；层数变化不同步会导致匿名桶塌成全站一个。来源 `server/docs/search-sections-deployment.md`「四、安全红线」。
 - `RL-022` Koa 代理需配置为 `server.proxy.koa = true`（写成 `proxy: true` 无效，导致 `ctx.secure` 恒 false、安全 cookie 抛错、`ctx.ip` 恒 127.0.0.1）。「Strapi 特有」，但重写时同样要正确处理 TLS 终止于反代的情况。来源 `server/config/server.ts:8-16`。
 
 ### 7.4 Redis 工具
