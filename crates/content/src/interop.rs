@@ -354,6 +354,7 @@ pub async fn unhide_post(
     if published {
         effects.publish(crate::service::published_event(
             post_id,
+            None,
             category_id,
             false,
         )?);

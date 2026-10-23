@@ -493,14 +493,16 @@ fn seed_for(is_anonymous: bool, existing: Option<&str>) -> Result<Option<String>
     }
 }
 
+/// `by`：发布者。广播不推给他本人，自己的帖子不算信息流里的「新内容」。
 pub(crate) fn published_event(
     post_id: i64,
+    by: Option<i64>,
     category_id: Option<i64>,
     first: bool,
 ) -> Result<Event, Problem> {
     Event::new(
         "post.published",
-        Audience::Broadcast,
+        by.map_or(Audience::Broadcast, Audience::BroadcastExcept),
         &serde_json::json!({
             "postId": post_id.to_string(),
             "categoryId": category_id.map(|id| id.to_string()),
@@ -580,7 +582,12 @@ pub async fn create(
         if !content.is_anonymous {
             fanout_first_publish(state, &mut tx, author_id, post_id).await?;
         }
-        effects.publish(published_event(post_id, content.category_id, true)?);
+        effects.publish(published_event(
+            post_id,
+            Some(author_id),
+            content.category_id,
+            true,
+        )?);
     }
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());
@@ -718,10 +725,20 @@ pub async fn publish(
                 fanout_first_publish(state, &mut tx, author_id, post_id).await?;
             }
         }
-        effects.publish(published_event(post_id, category_id, first)?);
+        effects.publish(published_event(
+            post_id,
+            Some(author_id),
+            category_id,
+            first,
+        )?);
     } else if changed {
         repo::mark_edited(&mut tx, post_id, now).await?;
-        effects.publish(published_event(post_id, category_id, false)?);
+        effects.publish(published_event(
+            post_id,
+            Some(author_id),
+            category_id,
+            false,
+        )?);
     }
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());

@@ -673,6 +673,7 @@ pub async fn move_post(
     if public {
         effects.publish(crate::service::published_event(
             post_id,
+            None,
             Some(category_id),
             false,
         )?);

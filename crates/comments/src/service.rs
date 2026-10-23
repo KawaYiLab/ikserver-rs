@@ -65,10 +65,11 @@ fn ensure_moderator_of(principal: &Principal, post: &PostRef) -> Result<(), Prob
     }
 }
 
-pub(crate) fn bumped_event(post_id: i64) -> Result<Event, Problem> {
+/// 顶帖广播不推给顶帖人自己：自己的评论不算信息流里的「新内容」。
+pub(crate) fn bumped_event(post_id: i64, by: i64) -> Result<Event, Problem> {
     Event::new(
         "post.bumped",
-        Audience::Broadcast,
+        Audience::BroadcastExcept(by),
         &serde_json::json!({ "postId": post_id.to_string() }),
     )
 }
@@ -311,7 +312,7 @@ pub async fn create(
         &mut effects,
     )
     .await?;
-    effects.publish(bumped_event(post.id)?);
+    effects.publish(bumped_event(post.id, author_id)?);
     if let Some(hooks) = state.hooks() {
         let created = crate::CreatedComment {
             id,
