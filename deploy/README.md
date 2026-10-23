@@ -64,6 +64,8 @@ IK_SESSION__COOKIE_CROSS_SITE=true                # 主站的会话 Cookie 用 S
 | 项 | 设置 | 原因 |
 | --- | --- | --- |
 | 源站 | 服务器 IP，HTTP 回源，端口 8080 | ik-server 不终止 TLS |
+| HTTPS | 强制 HTTPS（现网已开，HTTP 请求 302 到 HTTPS） | 会话 Cookie 带 `Secure`，明文请求拿不到 |
+| 规则：URL 路径等于 `/` | 可选：重定向到 `https://interk.net/` | ik-server 在根路径返回 404 |
 | 回源 Host | 保持加速域名 `ik.tiwat.cn` | 同源判断（管理后台的 CSRF 回退校验、WebSocket 握手）比较 `Origin` 与 `Host` |
 | WebSocket | 开启，超时 ≥ 120 秒 | 实时通道心跳 30 秒、60 秒没有往来就断开；超时小于心跳间隔会被 EdgeOne 先掐断 |
 | 缓存（`/v1/*`、`/admin/*`、`/healthz`、`/readyz`） | 遵循源站 `Cache-Control` | 公开 GET 由后端给 `public, max-age=…`，带凭据的请求一律 `private`/`no-store`；不要配「全部缓存」，会把一个人的数据发给另一个人 |
