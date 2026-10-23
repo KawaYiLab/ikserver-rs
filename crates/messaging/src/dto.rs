@@ -86,7 +86,7 @@ pub struct MessageView {
     /// 已撤回时省略。带图的消息可以为空串。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
-    /// 图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。
+    /// 图片（有序，MSG-030）。没有图片、已撤回时省略。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<MediaView>,
     /// 被回复的消息已被物理删除时省略。
@@ -167,7 +167,7 @@ pub struct SendMessageRequest {
     /// 1～4000 字（首尾空白会被去掉）；带了图片时可以为空。
     #[serde(default)]
     pub content: String,
-    /// 图片（自己图库里的媒体 id，有序，最多 4 张）。只有 AI 会话能发（MSG-030）。
+    /// 图片（自己图库里的媒体 id，有序，最多 4 张，MSG-030）。
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
     pub image_ids: Vec<Id<Media>>,

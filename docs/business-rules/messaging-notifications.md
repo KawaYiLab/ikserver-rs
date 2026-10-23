@@ -101,7 +101,7 @@
 - MSG-015 `edit`：仅 sender 本人（403 `not your message`）、未撤回、仅 text、`Date.now() - createdAt <= DM_EDIT_WINDOW_MS`（5 分钟，`DM_EDIT_WINDOW_MS = 300000`）；新内容 trim 后非空且 ≤4000；无变化直接 ok（不产生 editedAt）。推 `message.edited {content, editedAt}`。**刻意不失效列表缓存**：lastMessage 预览最多滞后 30s。`controllers/message.ts:327`、`utils/dm-helpers.ts:75`
 - MSG-016 `withdraw`：仅 sender、5 分钟窗（`DM_WITHDRAW_WINDOW_MS = 300000`）、**幂等**（已撤回再撤回返回 ok）；行锁 + 条件更新（`deletedAt IS NULL`）防并发；撤回后停止以该消息为 trigger 的未完成 AI 生成；失效成员列表缓存并推 `message.deleted {deletedAt}`。`controllers/message.ts:385`
 - MSG-017 replyTo 序列化：`{documentId, content: 已撤回?null:截80, senderUserId}`。`message/utils/serialize.ts:72`
-- MSG-030（新设计，D-021 改为方案 B 的子集）AI 会话可以发图：`imageIds` 是自己图库里的媒体 id（D-012），有序、去重，最多 4 张；带图时正文可以为空。真人私聊发图返回 400（`imageIds` / `NOT_ALLOWED`）。消息视图带 `images`（媒体视图，撤回后不下发）；会话列表预览与被回复摘要里，只有图片的消息显示 `[图片]`。图片给 AI 识图用（ai-assistant.md LLM-015）。
+- MSG-030（新设计，D-021 方案 B）私信可以发图，真人私聊与 AI 会话一样：`imageIds` 是自己图库里的媒体 id（D-012），有序、去重，最多 4 张（超出 400 `imageIds` / `TOO_MANY`，不是自己的 `NOT_FOUND`）；带图时正文可以为空。拉黑、限流、考试等发送限制照旧（MSG-013、MSG-020）。消息视图带 `images`（媒体视图，撤回后不下发）；会话列表预览与被回复摘要里，只有图片的消息显示 `[图片]`。编辑只改正文，图片不变。AI 会话里的图片会发给识图模型（ai-assistant.md LLM-015）。
 
 ### 限流
 

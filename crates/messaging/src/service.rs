@@ -483,19 +483,8 @@ pub async fn send(
         .await?
         .ok_or_else(Problem::not_found)?;
     ik_social::interop::ensure_no_block(&mut tx, me, peer).await?;
-    let conversation_kind = repo::conversation_kind(&mut tx, conversation_id)
-        .await?
-        .ok_or_else(Problem::internal)?;
+    // 图片必须是自己图库里的（MSG-030、D-012 方案 A）。
     if !image_ids.is_empty() {
-        // 图片只给 AI 看（MSG-030）；真人私信仍不支持图片（D-021）。
-        if conversation_kind != "ai" {
-            return Err(Problem::field(
-                "imageIds",
-                "NOT_ALLOWED",
-                "只有和 AI 的会话能发图片",
-            ));
-        }
-        // 图片必须是自己图库里的（D-012 方案 A）。
         let owned = ik_media::interop::owned_media(&mut tx, me, &image_ids).await?;
         if !image_ids.iter().all(|id| owned.contains(id)) {
             return Err(Problem::field(
@@ -559,6 +548,9 @@ pub async fn send(
         &serde_json::json!({ "conversationId": view.conversation_id, "message": view }),
     )?);
     if let Some(hooks) = state.hooks() {
+        let conversation_kind = repo::conversation_kind(&mut tx, conversation_id)
+            .await?
+            .ok_or_else(Problem::internal)?;
         let sent = crate::SentMessage {
             id,
             conversation_id,

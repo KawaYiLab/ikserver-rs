@@ -689,7 +689,7 @@ async fn peers_carry_avatars(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn images_only_in_ai_conversations(db: PgPool) {
+async fn messages_carry_images(db: PgPool) {
     let h = harness(db);
     let me = h.user(1).await;
     let peer = h.user(2).await;
@@ -702,22 +702,13 @@ async fn images_only_in_ai_conversations(db: PgPool) {
         client_id: None,
         image_ids: ids.iter().copied().map(Id::new).collect(),
     };
-    // 真人私聊不能发图（D-021）。
-    let err = service::send(&h.state, &me, direct, with_images(&[900]))
-        .await
-        .unwrap_err();
-    assert_eq!(err.field_errors()[0].code, "NOT_ALLOWED");
     // 没图又没字：仍然要求正文。
     let err = service::send(&h.state, &me, direct, with_images(&[]))
         .await
         .unwrap_err();
     assert_eq!(err.field_errors()[0].code, "REQUIRED");
 
-    // AI 会话（MSG-030）。
-    sqlx::query!("UPDATE conversations SET kind = 'ai' WHERE id = $1", direct)
-        .execute(&h.db)
-        .await
-        .unwrap();
+    // 真人私聊也能发图（MSG-030）。
     let err = service::send(&h.state, &me, direct, with_images(&[1, 2, 3, 4, 5]))
         .await
         .unwrap_err();

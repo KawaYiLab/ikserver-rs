@@ -5183,7 +5183,7 @@ export interface components {
             /** Format: date-time */
             editedAt?: string | null;
             id: string;
-            /** @description 图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。 */
+            /** @description 图片（有序，MSG-030）。没有图片、已撤回时省略。 */
             images?: components["schemas"]["MediaView"][];
             /** @description `text` | `system` */
             kind: string;
@@ -5460,7 +5460,7 @@ export interface components {
                 /** Format: date-time */
                 editedAt?: string | null;
                 id: string;
-                /** @description 图片（有序，只有 AI 会话里有，MSG-030）。没有图片、已撤回时省略。 */
+                /** @description 图片（有序，MSG-030）。没有图片、已撤回时省略。 */
                 images?: components["schemas"]["MediaView"][];
                 /** @description `text` | `system` */
                 kind: string;
@@ -6697,7 +6697,7 @@ export interface components {
             clientId?: string | null;
             /** @description 1～4000 字（首尾空白会被去掉）；带了图片时可以为空。 */
             content?: string;
-            /** @description 图片（自己图库里的媒体 id，有序，最多 4 张）。只有 AI 会话能发（MSG-030）。 */
+            /** @description 图片（自己图库里的媒体 id，有序，最多 4 张，MSG-030）。 */
             imageIds?: string[];
             replyToId?: string | null;
         };
