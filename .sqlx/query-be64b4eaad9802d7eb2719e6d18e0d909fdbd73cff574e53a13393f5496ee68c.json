@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.post_id, c.parent_id, c.floor, c.author_id, c.body, c.image_ids, c.is_anonymous,\n                  c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.hidden_by,\n                  c.hidden_reason, c.created_at\n           FROM comments c\n           WHERE ($1::text IS NULL OR c.body ILIKE $1 OR c.id = $2)\n             AND ($3::bigint IS NULL OR c.post_id = $3)\n             AND ($4::bigint IS NULL OR (c.author_id = $4 AND NOT c.is_anonymous))\n             AND ($5::bool IS NULL OR (c.hidden_at IS NOT NULL) = $5)\n           ORDER BY c.created_at DESC, c.id DESC\n           LIMIT $6 OFFSET $7",
+  "query": "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,\n                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments\n         WHERE post_id = $1 AND floor < $2 AND hidden_at IS NULL\n           AND (is_anonymous OR NOT (author_id = ANY($4)))\n         ORDER BY floor DESC\n         LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -27,23 +27,23 @@
       },
       {
         "ordinal": 2,
-        "name": "parent_id",
+        "name": "reply_to_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "parent_id"
+            "name": "reply_to_id"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "floor",
+        "name": "reply_to_floor",
         "type_info": "Int4",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "floor"
+            "name": "reply_to_floor"
           }
         }
       },
@@ -60,23 +60,23 @@
       },
       {
         "ordinal": 5,
+        "name": "floor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "floor"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
         "name": "body",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "comments",
             "name": "body"
-          }
-        }
-      },
-      {
-        "ordinal": 6,
-        "name": "image_ids",
-        "type_info": "Int8Array",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "image_ids"
           }
         }
       },
@@ -148,28 +148,6 @@
       },
       {
         "ordinal": 13,
-        "name": "hidden_by",
-        "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "hidden_by"
-          }
-        }
-      },
-      {
-        "ordinal": 14,
-        "name": "hidden_reason",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "hidden_reason"
-          }
-        }
-      },
-      {
-        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -178,17 +156,25 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 14,
+        "name": "image_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "image_ids"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Int8",
+        "Int4",
         "Int8",
-        "Int8",
-        "Bool",
-        "Int8",
-        "Int8"
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -205,10 +191,9 @@
       true,
       true,
       true,
-      true,
-      true,
+      false,
       false
     ]
   },
-  "hash": "7958dbe68f8177c9c53e97038e34356314db9172325448be6bd014c452a8f51c"
+  "hash": "be64b4eaad9802d7eb2719e6d18e0d909fdbd73cff574e53a13393f5496ee68c"
 }

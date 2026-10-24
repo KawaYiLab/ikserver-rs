@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT c.id, c.parent_id, c.body, c.author_id, c.is_anonymous FROM ai_jobs j\n             JOIN comments c ON c.id = j.reply_comment_id WHERE j.execution_key = $1",
+  "query": "SELECT c.id, c.reply_to_id, c.body, c.author_id, c.is_anonymous FROM ai_jobs j\n             JOIN comments c ON c.id = j.reply_comment_id WHERE j.execution_key = $1",
   "describe": {
     "columns": [
       {
@@ -16,12 +16,12 @@
       },
       {
         "ordinal": 1,
-        "name": "parent_id",
+        "name": "reply_to_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "parent_id"
+            "name": "reply_to_id"
           }
         }
       },
@@ -72,5 +72,5 @@
       false
     ]
   },
-  "hash": "3dadd340cfd3133247b8ec814f04bfd41e462ed2b256dac65875370133024a9e"
+  "hash": "717cb61e20a0ce27162927ca749ced3861275c32c20c03b29528d20111cfe52e"
 }

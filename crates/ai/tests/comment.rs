@@ -145,7 +145,7 @@ impl Harness {
             CreateCommentRequest {
                 body: body.into(),
                 image_ids: Vec::new(),
-                parent_id: parent.map(Id::new),
+                reply_to_id: parent.map(Id::new),
                 is_anonymous: anonymous,
             },
         )
@@ -181,10 +181,10 @@ impl Harness {
         comment::run_job(&self.state, job, 1, false).await.unwrap()
     }
 
-    /// (回复 id, 父评论 id, 正文)
+    /// (回复 id, 回复了哪条, 正文)
     async fn reply(&self, trigger: i64) -> Option<(i64, Option<i64>, String)> {
         sqlx::query!(
-            "SELECT c.id, c.parent_id, c.body, c.author_id, c.is_anonymous FROM ai_jobs j
+            "SELECT c.id, c.reply_to_id, c.body, c.author_id, c.is_anonymous FROM ai_jobs j
              JOIN comments c ON c.id = j.reply_comment_id WHERE j.execution_key = $1",
             format!("comment:{trigger}")
         )
@@ -194,7 +194,7 @@ impl Harness {
         .map(|r| {
             assert_eq!(r.author_id, FAIRY);
             assert!(!r.is_anonymous);
-            (r.id, r.parent_id, r.body)
+            (r.id, r.reply_to_id, r.body)
         })
     }
 
@@ -289,28 +289,30 @@ async fn mention_triggers_a_reply_under_the_comment(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn replies_in_a_thread_hang_under_the_top_level_comment(db: PgPool) {
+async fn replies_answer_the_trigger_with_its_target_as_context(db: PgPool) {
     let h = harness(db).await;
     let post = h.post(ALICE, false).await;
     let top = h.comment(ALICE, post, None, "我觉得是假的").await;
     assert!(h.job_for(top).await.is_none());
-    // 楼中楼里 @AI（D-004 方案 A）：回复挂在一级评论下，父评论进上下文。
+    // 回复里 @AI（D-004 方案 A）：AI 回复触发评论本身，被回复的评论作为父评论进上下文。
     let trigger = h.comment(BOB, post, Some(top), "@user200 你怎么看").await;
     h.answer("我也倾向于不信。");
     assert_eq!(h.run(trigger).await, RunOutcome::Completed);
     let (ai_reply, parent, _) = h.reply(trigger).await.unwrap();
-    assert_eq!(parent, Some(top));
+    assert_eq!(parent, Some(trigger));
     let last = h.fake.requests().pop().unwrap();
     let last = last.messages.last().unwrap().text().to_owned();
     assert!(last.contains("\n父评论：我觉得是假的\n"));
 
     // AI 自己的回复不再触发（TRIG-012）。
     assert!(h.job_for(ai_reply).await.is_none());
-    // 父评论作者是 AI：AI 发的一级评论下的回复触发（TRIG-013 ②）。
+    // 被回复的是 AI：回复 AI 的评论触发（TRIG-013 ②），包括 AI 刚发的那条回复。
     let ai_top = h.comment(FAIRY, post, None, "大家好").await;
     assert!(h.job_for(ai_top).await.is_none());
     let under_ai = h.comment(BOB, post, Some(ai_top), "你好呀").await;
     assert!(h.job_for(under_ai).await.is_some());
+    let follow_up = h.comment(BOB, post, Some(ai_reply), "为什么？").await;
+    assert!(h.job_for(follow_up).await.is_some());
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -554,7 +556,7 @@ async fn vision_models_see_post_and_comment_images(db: PgPool) {
         CreateCommentRequest {
             body: "这是什么".into(),
             image_ids: vec![Id::new(901)],
-            parent_id: None,
+            reply_to_id: None,
             is_anonymous: false,
         },
     )

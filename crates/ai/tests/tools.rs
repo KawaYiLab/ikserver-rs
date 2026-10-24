@@ -88,7 +88,7 @@ async fn comment(
         CreateCommentRequest {
             body: body.into(),
             image_ids: Vec::new(),
-            parent_id: parent.map(Id::new),
+            reply_to_id: parent.map(Id::new),
             is_anonymous: anonymous,
         },
     )
@@ -366,16 +366,16 @@ async fn comments_are_hot_first_with_pseudonyms_and_block_filter(db: PgPool) {
     let lines: Vec<&str> = out.text.lines().collect();
     assert_eq!(
         lines[0],
-        "帖子《零号空洞攻略》共有 3 条顶层评论，按热度展示前 3 条（含部分楼中楼回复）："
+        "帖子《零号空洞攻略》共有 4 条评论，按热度展示前 4 条："
     );
-    assert_eq!(lines[1], "1. dave：收藏了（赞5）");
+    assert_eq!(lines[1], "#3 dave：收藏了（赞5）");
+    assert_eq!(lines[2], "#1 alice：@bob 写得好（赞0）");
+    assert_eq!(lines[3], "#2 dave：回复 #1 alice，同意（赞0）");
     assert!(
-        lines[2].starts_with("2. 绳网用户") && lines[2].ends_with("：卡罗尔匿名（赞0）"),
+        lines[4].starts_with("#5 绳网用户") && lines[4].ends_with("：卡罗尔匿名（赞0）"),
         "{}",
-        lines[2]
+        lines[4]
     );
-    assert_eq!(lines[3], "3. alice：@bob 写得好（赞0）");
-    assert_eq!(lines[4], "   └ dave：同意");
     assert!(!out.text.contains("卡罗尔实名") && !out.text.contains("被隐藏"));
     assert_eq!(
         out.meta,

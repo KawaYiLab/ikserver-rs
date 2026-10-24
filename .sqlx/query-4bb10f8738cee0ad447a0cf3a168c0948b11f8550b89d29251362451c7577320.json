@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT comment_id FROM comment_likes",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "comment_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comment_likes",
+            "name": "comment_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4bb10f8738cee0ad447a0cf3a168c0948b11f8550b89d29251362451c7577320"
+}

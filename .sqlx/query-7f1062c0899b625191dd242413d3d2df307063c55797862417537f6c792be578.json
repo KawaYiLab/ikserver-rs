@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts SET comment_count = comment_count + 1, last_comment_floor = last_comment_floor + 1,\n                          bumped_at = $3, last_bumped_by = $2\n         WHERE id = $1\n         RETURNING last_comment_floor",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_comment_floor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "last_comment_floor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7f1062c0899b625191dd242413d3d2df307063c55797862417537f6c792be578"
+}

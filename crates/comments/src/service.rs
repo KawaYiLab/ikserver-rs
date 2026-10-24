@@ -21,12 +21,13 @@ use sqlx::PgConnection;
 use crate::CommentsState;
 use crate::dto::{
     AuthorCommentView, CommentLikeResult, CommentSearchView, CommentView, CommentsPage,
-    CreateCommentRequest, PageQuery, ThreadView,
+    CommentsQuery, CreateCommentRequest, PageQuery, QuotedComment, ReplyToView,
 };
 use crate::repo::{self, CommentRow, NewComment};
 use crate::text;
 
-const INLINE_REPLIES: i64 = 3;
+/// 被回复评论的摘要最多多少字。
+const QUOTE_CHARS: usize = 80;
 const DEFAULT_PAGE: u32 = 20;
 const MAX_PAGE: u32 = 50;
 
@@ -38,14 +39,6 @@ fn comment_not_found() -> Problem {
 
 fn post_not_found() -> Problem {
     Problem::new(StatusCode::NOT_FOUND, "NOT_FOUND", "帖子不存在或已被删除")
-}
-
-fn not_top_level() -> Problem {
-    Problem::new(
-        StatusCode::BAD_REQUEST,
-        "COMMENT_NOT_TOP_LEVEL",
-        "只有一级评论可以置顶或采纳",
-    )
 }
 
 fn accept_disabled() -> Problem {
@@ -137,14 +130,14 @@ fn check_rate(state: &CommentsState, principal: &Principal) -> Result<(), Proble
 
 pub(crate) struct NewCommentNotice<'a> {
     pub post: &'a PostRef,
-    pub parent: Option<&'a CommentRow>,
+    pub reply_to: Option<&'a CommentRow>,
     pub comment_id: i64,
     pub author_id: i64,
     pub body: &'a str,
     pub is_anonymous: bool,
 }
 
-/// 新评论的通知：一级评论通知帖主（`comment`），回复通知被回复的一级评论作者（`reply`），
+/// 新评论的通知：直接评论帖子通知帖主（`comment`），回复某条评论通知它的作者（`reply`），
 /// 正文里 @ 到的人各一条（`mention`，最多 10 人，已经收到前两种通知的人不重复）。
 /// 评论、帖子、被回复的评论任一匿名就都不发（CMT-129）。自己、拉黑、收件人不可用由 notify 抑制。
 pub(crate) async fn notify_new_comment(
@@ -154,7 +147,7 @@ pub(crate) async fn notify_new_comment(
     now: DateTime<Utc>,
     effects: &mut Effects,
 ) -> Result<(), Problem> {
-    if c.is_anonymous || c.post.is_anonymous || c.parent.is_some_and(|p| p.is_anonymous) {
+    if c.is_anonymous || c.post.is_anonymous || c.reply_to.is_some_and(|r| r.is_anonymous) {
         return Ok(());
     }
     // 纯图片评论的预览统一为「[图片]」（Q-08）。
@@ -163,9 +156,9 @@ pub(crate) async fn notify_new_comment(
     } else {
         text::plain_text(c.body)
     };
-    let (primary, kind) = match c.parent {
+    let (primary, kind) = match c.reply_to {
         None => (c.post.author_id, Kind::Comment),
-        Some(parent) => (parent.author_id, Kind::Reply),
+        Some(target) => (target.author_id, Kind::Reply),
     };
     let notice = |recipient_id, kind| Notice {
         recipient_id,
@@ -243,36 +236,32 @@ pub async fn create(
     if !post.is_anonymous {
         ik_social::interop::ensure_no_block(&mut tx, author_id, post.author_id).await?;
     }
-    let parent_id = request.parent_id.map(Id::get);
-    let parent = match parent_id {
+    let reply_to = match request.reply_to_id.map(Id::get) {
         None => None,
-        Some(parent_id) => {
-            let parent = repo::get(&mut tx, parent_id)
+        Some(target_id) => {
+            let target = repo::get(&mut tx, target_id)
                 .await?
-                .filter(|p| p.post_id == post.id && p.parent_id.is_none() && p.hidden_at.is_none());
-            let Some(parent) = parent else {
+                .filter(|t| t.post_id == post.id && t.hidden_at.is_none());
+            let Some(target) = target else {
                 return Err(Problem::field(
-                    "parentId",
+                    "replyToId",
                     "INVALID",
-                    "只能回复本帖下未隐藏的一级评论",
+                    "只能回复本帖下未隐藏的评论",
                 ));
             };
-            if !parent.is_anonymous {
-                ik_social::interop::ensure_no_block(&mut tx, author_id, parent.author_id).await?;
+            if !target.is_anonymous {
+                ik_social::interop::ensure_no_block(&mut tx, author_id, target.author_id).await?;
             }
-            Some(parent)
+            Some(target)
         }
     };
-    let floor = match parent_id {
-        None => Some(repo::next_floor(&mut tx, post.id).await?),
-        Some(_) => None,
-    };
+    let floor = interop::comment_added(&mut tx, post.id, author_id, now).await?;
     repo::insert(
         &mut tx,
         &NewComment {
             id,
             post_id: post.id,
-            parent_id,
+            reply_to: reply_to.as_ref().map(|t| (t.id, t.floor)),
             author_id,
             floor,
             body: &body,
@@ -283,7 +272,6 @@ pub async fn create(
         },
     )
     .await?;
-    interop::comment_added(&mut tx, post.id, author_id, now).await?;
     // 在别人的帖子下评论：每个业务日第一条 +3 经验；匿名评论同样给（CMT-101）。
     if post.author_id != author_id {
         grant_exp(
@@ -302,7 +290,7 @@ pub async fn create(
         &mut tx,
         &NewCommentNotice {
             post: &post,
-            parent: parent.as_ref(),
+            reply_to: reply_to.as_ref(),
             comment_id: id,
             author_id,
             body: &body,
@@ -319,10 +307,10 @@ pub async fn create(
             post_id: post.id,
             post_author_id: post.author_id,
             post_is_anonymous: post.is_anonymous,
-            parent: parent.as_ref().map(|p| crate::ParentRef {
-                id: p.id,
-                author_id: p.author_id,
-                is_anonymous: p.is_anonymous,
+            reply_to: reply_to.as_ref().map(|t| crate::ReplyToRef {
+                id: t.id,
+                author_id: t.author_id,
+                is_anonymous: t.is_anonymous,
             }),
             author_id,
             author_is_ai: principal.is_ai_agent,
@@ -338,7 +326,8 @@ pub async fn create(
     let row = CommentRow {
         id,
         post_id: post.id,
-        parent_id,
+        reply_to_id: reply_to.as_ref().map(|t| t.id),
+        reply_to_floor: reply_to.as_ref().map(|t| t.floor),
         author_id,
         floor,
         body,
@@ -351,14 +340,15 @@ pub async fn create(
         created_at: now,
         image_ids,
     };
-    let lookup = lookup_with(state, &[&row], HashSet::new()).await?;
+    let quoted: Vec<CommentRow> = reply_to.into_iter().collect();
+    let lookup = lookup_with(state, &[&row], &quoted, HashSet::new()).await?;
     Ok(view(&row, &lookup, Some(author_id)))
 }
 
 // ---------- 删除 ----------
 
-/// 只有作者本人能删（D-035 方案 A）；不需要通过考试（CMT-036）。一级评论连同回复一起删除。
-/// 删除被采纳的评论时同时清除帖子的「已解决」（D-027 方案 A）。
+/// 只有作者本人能删（D-035 方案 A）；不需要通过考试（CMT-036）。回复它的评论保留，
+/// 显示「原评论已删除」。删除被采纳的评论时同时清除帖子的「已解决」（D-027 方案 A）。
 pub async fn delete(
     state: &CommentsState,
     principal: &Principal,
@@ -378,7 +368,7 @@ pub async fn delete(
     }
     remove_locked(&mut tx, post_id, &comment).await?;
     tx.commit().await?;
-    // 内部事件：搜索索引删除这条评论及其回复。
+    // 内部事件：搜索索引删除这条评论。
     let mut effects = Effects::new();
     effects.publish(removed_event(comment.id, post_id)?);
     effects.dispatch(state.bus.as_ref());
@@ -393,21 +383,19 @@ pub(crate) fn removed_event(comment_id: i64, post_id: i64) -> Result<Event, Prob
     )
 }
 
-/// 删除已锁住的评论及其回复，并维护帖子的评论数与采纳。调用方已锁住帖子与评论。
+/// 删除已锁住的评论，并维护帖子的评论数与采纳。调用方已锁住帖子与评论。
 pub(crate) async fn remove_locked(
     conn: &mut PgConnection,
     post_id: i64,
     comment: &CommentRow,
 ) -> Result<(), Problem> {
-    let replies = repo::count_all_replies(conn, comment.id).await?;
     // 必须在删除之前：外键 ON DELETE SET NULL 会先把帖子的 accepted_comment_id 置空，
     // 之后就匹配不到这条评论了。
     if comment.accepted_at.is_some() {
         interop::clear_solved(conn, post_id, comment.id).await?;
     }
     repo::delete(conn, comment.id).await?;
-    let removed = i32::try_from(replies.saturating_add(1)).unwrap_or(i32::MAX);
-    interop::comments_removed(conn, post_id, removed).await?;
+    interop::comments_removed(conn, post_id, 1).await?;
     Ok(())
 }
 
@@ -443,9 +431,6 @@ pub async fn pin(
     ensure_moderator_of(principal, &post)?;
     if comment.hidden_at.is_some() {
         return Err(comment_not_found());
-    }
-    if comment.parent_id.is_some() {
-        return Err(not_top_level());
     }
     if comment.pinned_at.is_none() {
         repo::clear_pins(&mut tx, post.id).await?;
@@ -489,9 +474,6 @@ pub async fn accept(
     ensure_moderator_of(principal, &post)?;
     if comment.hidden_at.is_some() {
         return Err(comment_not_found());
-    }
-    if comment.parent_id.is_some() {
-        return Err(not_top_level());
     }
     if comment.accepted_at.is_none() {
         let now = Utc::now();
@@ -557,8 +539,8 @@ pub async fn unaccept(
 
 // ---------- 点赞 ----------
 
-/// 点赞（幂等）。需要通过入站考试。评论必须可见：未隐藏、帖子公开、回复的一级评论也未隐藏
-/// （COMMON-007）；非匿名评论还要求双方没有拉黑（LIKE-007）。
+/// 点赞（幂等）。需要通过入站考试。评论必须可见：未隐藏、帖子公开（COMMON-007）；
+/// 非匿名评论还要求双方没有拉黑（LIKE-007）。
 /// 每个业务日第一次点赞（帖子与评论合计）+1 经验，赞自己的评论不给（LIKE-015）。
 /// 通知评论作者；匿名评论不发（LIKE-013）。
 pub async fn like(
@@ -575,12 +557,6 @@ pub async fn like(
         .await?
         .filter(|c| c.hidden_at.is_none())
         .ok_or_else(comment_not_found)?;
-    if let Some(parent_id) = comment.parent_id {
-        repo::get(&mut tx, parent_id)
-            .await?
-            .filter(|p| p.hidden_at.is_none())
-            .ok_or_else(comment_not_found)?;
-    }
     let post = interop::post(&mut tx, comment.post_id)
         .await?
         .filter(|p| p.is_public)
@@ -663,11 +639,14 @@ pub async fn unlike(
 }
 
 // ---------- 读取 ----------
-/// 渲染评论需要的批量数据：作者（含头像）、图片、读者点过的赞。
+/// 渲染评论需要的批量数据：作者（含头像）、图片、读者点过的赞、被回复的评论、收到的回复数。
 struct Lookup {
     authors: ik_content::service::Authors,
     media: HashMap<i64, ik_media::dto::MediaView>,
     liked: HashSet<i64>,
+    /// 被回复的评论中对读者可见的。
+    quoted: HashMap<i64, CommentRow>,
+    reply_counts: HashMap<i64, i64>,
 }
 
 impl Lookup {
@@ -677,25 +656,96 @@ impl Lookup {
             .filter_map(|id| self.media.get(id).cloned())
             .collect()
     }
+
+    fn author(&self, row: &CommentRow) -> ik_content::dto::AuthorView {
+        ik_content::service::author_view(
+            row.author_id,
+            row.is_anonymous,
+            row.anonymous_seed.as_deref(),
+            &self.authors,
+        )
+    }
+
+    fn reply_to(&self, row: &CommentRow) -> Option<ReplyToView> {
+        let floor = row.reply_to_floor?;
+        Some(ReplyToView {
+            floor,
+            deleted: row.reply_to_id.is_none(),
+            comment: row
+                .reply_to_id
+                .and_then(|id| self.quoted.get(&id))
+                .map(|target| QuotedComment {
+                    id: Id::new(target.id),
+                    author: self.author(target),
+                    excerpt: excerpt(&target.body),
+                }),
+        })
+    }
 }
 
+/// 被回复评论的摘要：纯文本，最多 [`QUOTE_CHARS`] 字；纯图片评论为「[图片]」。
+fn excerpt(body: &str) -> String {
+    let text = text::plain_text(body);
+    let text = text.trim();
+    if text.is_empty() {
+        return "[图片]".to_owned();
+    }
+    let mut chars = text.chars();
+    let mut out: String = chars.by_ref().take(QUOTE_CHARS).collect();
+    if chars.next().is_some() {
+        out.push('…');
+    }
+    out
+}
+
+/// 读者能看到的被回复评论：未隐藏，作者与读者没有拉黑关系（匿名评论不按拉黑过滤）。
+async fn quoted_rows(
+    conn: &mut PgConnection,
+    rows: &[&CommentRow],
+    excluded: &[i64],
+) -> Result<Vec<CommentRow>, Problem> {
+    let mut ids: Vec<i64> = rows.iter().filter_map(|r| r.reply_to_id).collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut quoted = repo::by_ids(conn, &ids).await?;
+    quoted
+        .retain(|q| q.hidden_at.is_none() && (q.is_anonymous || !excluded.contains(&q.author_id)));
+    Ok(quoted)
+}
+
+/// 一页评论的完整渲染数据。
 async fn lookup(
     state: &CommentsState,
     conn: &mut PgConnection,
     viewer_id: Option<i64>,
+    excluded: &[i64],
     rows: &[&CommentRow],
 ) -> Result<Lookup, Problem> {
     let liked = liked_set(conn, viewer_id, rows).await?;
-    lookup_with(state, rows, liked).await
+    let quoted = quoted_rows(conn, rows, excluded).await?;
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    let reply_counts = repo::visible_reply_counts(conn, &ids, excluded)
+        .await?
+        .into_iter()
+        .map(|c| (c.reply_to_id, c.n))
+        .collect();
+    let mut lookup = lookup_with(state, rows, &quoted, liked).await?;
+    lookup.reply_counts = reply_counts;
+    Ok(lookup)
 }
 
-/// 不需要查点赞时（刚发表的评论）用这个，不占额外的连接。
+/// 不需要查点赞与回复数时（刚发表的评论、搜索结果）用这个，不占额外的连接。
 async fn lookup_with(
     state: &CommentsState,
     rows: &[&CommentRow],
+    quoted: &[CommentRow],
     liked: HashSet<i64>,
 ) -> Result<Lookup, Problem> {
-    let authors = author_map(state, rows).await?;
+    let everyone: Vec<&CommentRow> = rows.iter().copied().chain(quoted.iter()).collect();
+    let authors = author_map(state, &everyone).await?;
     let mut media_ids: Vec<i64> = rows
         .iter()
         .flat_map(|r| r.image_ids.iter().copied())
@@ -707,6 +757,8 @@ async fn lookup_with(
         authors,
         media,
         liked,
+        quoted: quoted.iter().map(|q| (q.id, q.clone())).collect(),
+        reply_counts: HashMap::new(),
     })
 }
 
@@ -714,16 +766,12 @@ fn view(row: &CommentRow, lookup: &Lookup, viewer_id: Option<i64>) -> CommentVie
     CommentView {
         id: Id::new(row.id),
         post_id: Id::new(row.post_id),
-        parent_id: row.parent_id.map(Id::new),
         floor: row.floor,
+        reply_to: lookup.reply_to(row),
+        reply_count: lookup.reply_counts.get(&row.id).copied().unwrap_or(0),
         body: row.body.clone(),
         images: lookup.images(row),
-        author: ik_content::service::author_view(
-            row.author_id,
-            row.is_anonymous,
-            row.anonymous_seed.as_deref(),
-            &lookup.authors,
-        ),
+        author: lookup.author(row),
         is_anonymous: row.is_anonymous,
         like_count: row.like_count,
         is_pinned: row.pinned_at.is_some(),
@@ -765,10 +813,19 @@ async fn author_map(
     ik_content::service::load_authors(&state.db, &state.media, &ids).await
 }
 
+/// 作者主页的游标（按时间）。
 #[derive(Serialize, Deserialize)]
 struct CommentCursor {
     c: DateTime<Utc>,
     i: i64,
+}
+
+/// 评论列表与回复列表的游标（按楼层）。`b` 为 true 时往前翻（楼层更小的）。
+#[derive(Serialize, Deserialize)]
+struct FloorCursor {
+    f: i32,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    b: bool,
 }
 
 fn page_limit(limit: Option<u32>) -> i64 {
@@ -780,6 +837,10 @@ fn decode_cursor(raw: Option<&str>) -> Result<Option<(DateTime<Utc>, i64)>, Prob
         .map(cursor::decode::<CommentCursor>)
         .transpose()?
         .map(|c| (c.c, c.i)))
+}
+
+fn floor_cursor(f: i32, b: bool) -> Result<String, Problem> {
+    cursor::encode(&FloorCursor { f, b })
 }
 
 async fn readable_post(
@@ -795,22 +856,21 @@ async fn readable_post(
 
 /// 按热度的评论区摘要（AI 工具 `get_post_comments`，TOOL-008/009）。
 #[derive(Debug)]
-pub struct HotThreads {
-    /// 可见的一级评论总数。
+pub struct HotComments {
+    /// 可见的评论总数。
     pub total: i64,
-    /// 一级评论（赞数降序、时间降序）与各自最早的几条回复（时间升序）。
-    pub threads: Vec<(CommentView, Vec<CommentView>)>,
+    /// 赞数降序、楼层升序。
+    pub comments: Vec<CommentView>,
 }
 
-/// 公开帖子的热门评论：只看公开内容（帖子公开；评论与父评论未隐藏），与 `viewer_id` 有拉黑关系的人的
+/// 公开帖子的热门评论：只看公开内容（帖子公开；评论未隐藏），与 `viewer_id` 有拉黑关系的人的
 /// 实名评论不出现（匿名评论不做拉黑过滤，防止反推）。匿名评论的作者是假名。帖子不公开时返回 None。
-pub async fn hot_threads(
+pub async fn hot_comments(
     state: &CommentsState,
     viewer_id: Option<i64>,
     post_id: i64,
     limit: i64,
-    replies_per_thread: i64,
-) -> Result<Option<HotThreads>, Problem> {
+) -> Result<Option<HotComments>, Problem> {
     let mut conn = state.db.acquire().await?;
     if !interop::post(&mut conn, post_id)
         .await?
@@ -819,42 +879,90 @@ pub async fn hot_threads(
         return Ok(None);
     }
     let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
-    let total = repo::visible_top_level_count(&mut conn, post_id, &excluded).await?;
-    let tops = repo::hot_top_level(&mut conn, post_id, &excluded, limit).await?;
-    let top_ids: Vec<i64> = tops.iter().map(|r| r.id).collect();
-    let replies = repo::inline_replies(&mut conn, &top_ids, &excluded, replies_per_thread).await?;
+    let total = repo::visible_count(&mut conn, post_id, &excluded).await?;
+    let rows = repo::hot(&mut conn, post_id, &excluded, limit).await?;
+    let refs: Vec<&CommentRow> = rows.iter().collect();
+    let quoted = quoted_rows(&mut conn, &refs, &excluded).await?;
     drop(conn);
-    let rows: Vec<&CommentRow> = tops.iter().chain(replies.iter()).collect();
-    let lookup = lookup_with(state, &rows, HashSet::new()).await?;
-    let threads = tops
-        .iter()
-        .map(|top| {
-            let children = replies
-                .iter()
-                .filter(|r| r.parent_id == Some(top.id))
-                .map(|r| view(r, &lookup, None))
-                .collect();
-            (view(top, &lookup, None), children)
-        })
-        .collect();
-    Ok(Some(HotThreads { total, threads }))
+    let lookup = lookup_with(state, &refs, &quoted, HashSet::new()).await?;
+    let comments = rows.iter().map(|r| view(r, &lookup, None)).collect();
+    Ok(Some(HotComments { total, comments }))
 }
 
-/// 帖子的一级评论。第一页额外返回采纳与置顶（各最多一条），它们不再出现在 `items` 里。
+/// 帖子的评论，按楼层从旧到新。第一页额外返回采纳与置顶（各最多一条，它们在 `items` 里照常出现）。
+///
+/// 三种起点：游标（`b` 决定往后还是往前翻）、`anchor`（从那条评论所在楼层开始，带 `prevCursor`）、
+/// 都没有时从第一层开始。
 pub async fn list(
     state: &CommentsState,
     viewer: Option<&Principal>,
     post_id: i64,
-    query: PageQuery,
+    query: CommentsQuery,
 ) -> Result<CommentsPage, Problem> {
     let viewer_id = viewer.map(|p| p.user_id.get());
     let limit = page_limit(query.limit);
-    let after = decode_cursor(query.cursor.as_deref())?;
+    let take = usize::try_from(limit).unwrap_or(usize::MAX);
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(cursor::decode::<FloorCursor>)
+        .transpose()?;
     let mut conn = state.db.acquire().await?;
     readable_post(&mut conn, post_id, viewer_id).await?;
     let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
 
-    let (accepted, pinned) = if after.is_none() {
+    let anchor_floor = match (&cursor, query.anchor) {
+        (None, Some(anchor)) => repo::get(&mut conn, anchor.get())
+            .await?
+            .filter(|c| c.post_id == post_id && c.hidden_at.is_none())
+            .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
+            .map(|c| c.floor),
+        _ => None,
+    };
+
+    let (rows, next_cursor, prev_cursor) = match cursor {
+        Some(FloorCursor { f, b: true }) => {
+            let mut rows = repo::page_before(&mut conn, post_id, &excluded, f, limit + 1).await?;
+            let has_more = rows.len() > take;
+            rows.truncate(take);
+            rows.reverse();
+            let prev = match (has_more, rows.first()) {
+                (true, Some(first)) => Some(floor_cursor(first.floor, true)?),
+                _ => None,
+            };
+            (rows, None, prev)
+        }
+        forward => {
+            let after = match (forward, anchor_floor) {
+                (Some(c), _) => c.f,
+                (None, Some(floor)) => floor - 1,
+                (None, None) => 0,
+            };
+            let mut rows =
+                repo::page_after(&mut conn, post_id, &excluded, after, limit + 1).await?;
+            let has_more = rows.len() > take;
+            rows.truncate(take);
+            let next = match (has_more, rows.last()) {
+                (true, Some(last)) => Some(floor_cursor(last.floor, false)?),
+                _ => None,
+            };
+            // 从中间开始时，前面还有没有可见的评论。
+            let prev = match (anchor_floor, rows.first()) {
+                (Some(_), Some(first))
+                    if !repo::page_before(&mut conn, post_id, &excluded, first.floor, 1)
+                        .await?
+                        .is_empty() =>
+                {
+                    Some(floor_cursor(first.floor, true)?)
+                }
+                _ => None,
+            };
+            (rows, next, prev)
+        }
+    };
+
+    let first_page = query.cursor.is_none() && anchor_floor.is_none();
+    let (accepted, pinned) = if first_page {
         (
             repo::accepted(&mut conn, post_id, &excluded).await?,
             repo::pinned(&mut conn, post_id, &excluded).await?,
@@ -862,56 +970,23 @@ pub async fn list(
     } else {
         (None, None)
     };
-    let mut rows = repo::top_level_page(&mut conn, post_id, &excluded, after, limit + 1).await?;
-    let has_more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
-    rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
-
-    let tops: Vec<&CommentRow> = accepted
+    let everyone: Vec<&CommentRow> = accepted
         .iter()
         .chain(pinned.iter())
         .chain(rows.iter())
         .collect();
-    let top_ids: Vec<i64> = tops.iter().map(|r| r.id).collect();
-    let replies = repo::inline_replies(&mut conn, &top_ids, &excluded, INLINE_REPLIES).await?;
-    let counts: HashMap<i64, i64> = repo::visible_reply_counts(&mut conn, &top_ids, &excluded)
-        .await?
-        .into_iter()
-        .map(|c| (c.parent_id, c.n))
-        .collect();
-    let everyone: Vec<&CommentRow> = tops.iter().copied().chain(replies.iter()).collect();
-    let lookup = lookup(state, &mut conn, viewer_id, &everyone).await?;
-
-    let thread = |row: &CommentRow| {
-        let replies: Vec<CommentView> = replies
-            .iter()
-            .filter(|r| r.parent_id == Some(row.id))
-            .map(|r| view(r, &lookup, viewer_id))
-            .collect();
-        let reply_count = counts.get(&row.id).copied().unwrap_or(0);
-        ThreadView {
-            comment: view(row, &lookup, viewer_id),
-            replies_has_more: reply_count > i64::try_from(replies.len()).unwrap_or(i64::MAX),
-            replies,
-            reply_count,
-        }
-    };
-
-    let next_cursor = match (has_more, rows.last()) {
-        (true, Some(last)) => Some(cursor::encode(&CommentCursor {
-            c: last.created_at,
-            i: last.id,
-        })?),
-        _ => None,
-    };
+    let lookup = lookup(state, &mut conn, viewer_id, &excluded, &everyone).await?;
+    let render = |row: &CommentRow| view(row, &lookup, viewer_id);
     Ok(CommentsPage {
-        accepted: accepted.as_ref().map(thread),
-        pinned: pinned.as_ref().map(thread),
-        items: rows.iter().map(thread).collect(),
+        accepted: accepted.as_ref().map(render),
+        pinned: pinned.as_ref().map(render),
+        items: rows.iter().map(render).collect(),
         next_cursor,
+        prev_cursor,
     })
 }
 
-/// 一级评论的回复，旧的在前。目标不存在、被隐藏、本身是回复、或帖子不可见时 404（CMT-074）；
+/// 回复某条评论的评论，旧的在前。目标不存在、被隐藏、或帖子不可见时 404（CMT-074）；
 /// 目标是与读者有拉黑关系的人的非匿名评论时同样 404。
 pub async fn replies(
     state: &CommentsState,
@@ -921,26 +996,31 @@ pub async fn replies(
 ) -> Result<Page<CommentView>, Problem> {
     let viewer_id = viewer.map(|p| p.user_id.get());
     let limit = page_limit(query.limit);
-    let after = decode_cursor(query.cursor.as_deref())?;
+    let after = query
+        .cursor
+        .as_deref()
+        .map(cursor::decode::<FloorCursor>)
+        .transpose()?
+        .map_or(0, |c| c.f);
     let mut conn = state.db.acquire().await?;
     let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
-    let parent = repo::get(&mut conn, comment_id)
+    let target = repo::get(&mut conn, comment_id)
         .await?
-        .filter(|c| c.parent_id.is_none() && c.hidden_at.is_none())
+        .filter(|c| c.hidden_at.is_none())
         .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
         .ok_or_else(comment_not_found)?;
-    readable_post(&mut conn, parent.post_id, viewer_id).await?;
+    readable_post(&mut conn, target.post_id, viewer_id).await?;
 
-    let rows = repo::replies_page(&mut conn, parent.id, &excluded, after, limit + 1).await?;
+    let rows = repo::replies_page(&mut conn, target.id, &excluded, after, limit + 1).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
-    let lookup = lookup(state, &mut conn, viewer_id, &refs).await?;
+    let lookup = lookup(state, &mut conn, viewer_id, &excluded, &refs).await?;
     let items: Vec<CommentView> = rows.iter().map(|r| view(r, &lookup, viewer_id)).collect();
     Page::from_rows(
         items,
         usize::try_from(limit).unwrap_or(20),
-        |item: &CommentView| CommentCursor {
-            c: item.created_at,
-            i: item.id.get(),
+        |item: &CommentView| FloorCursor {
+            f: item.floor,
+            b: false,
         },
     )
 }
@@ -983,7 +1063,8 @@ pub async fn author_comments(
         .iter()
         .filter(|r| titles.contains_key(&r.post_id))
         .collect();
-    let lookup = lookup(state, &mut conn, viewer_id, &visible).await?;
+    let liked = liked_set(&mut conn, viewer_id, &visible).await?;
+    let lookup = lookup_with(state, &visible, &[], liked).await?;
     let items = visible
         .into_iter()
         .filter_map(|row| {
@@ -1007,7 +1088,7 @@ pub async fn author_comments(
 /// 数据库兜底搜索的窗口上限（SRCH-033、EDGE-008）。
 pub const SEARCH_FALLBACK_CAP: i64 = 1000;
 
-/// 对读者可见的评论（保持输入顺序，SRCH-032）：自身与父评论未隐藏、所属帖子公开；
+/// 对读者可见的评论（保持输入顺序，SRCH-032）：未隐藏、所属帖子公开；
 /// 评论作者、帖子作者与读者有拉黑关系时过滤（匿名评论 / 匿名帖不按拉黑过滤）。
 async fn visible_rows(
     conn: &mut PgConnection,
@@ -1057,8 +1138,9 @@ pub async fn search_views(
     let mut conn = state.db.acquire().await?;
     let (rows, posts) = visible_rows(&mut conn, viewer_id, ids).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
-    let lookup = lookup(state, &mut conn, viewer_id, &refs).await?;
+    let liked = liked_set(&mut conn, viewer_id, &refs).await?;
     drop(conn);
+    let lookup = lookup_with(state, &refs, &[], liked).await?;
     let cover_ids: Vec<i64> = posts.values().filter_map(|p| p.cover_id).collect();
     let covers = state.media.views(&cover_ids).await?;
     Ok(rows
@@ -1071,12 +1153,7 @@ pub async fn search_views(
                 post_cover: post.cover_id.and_then(|id| covers.get(&id).cloned()),
                 body: row.body.clone(),
                 images: lookup.images(row),
-                author: ik_content::service::author_view(
-                    row.author_id,
-                    row.is_anonymous,
-                    row.anonymous_seed.as_deref(),
-                    &lookup.authors,
-                ),
+                author: lookup.author(row),
                 is_anonymous: row.is_anonymous,
                 like_count: row.like_count,
                 liked: lookup.liked.contains(&row.id),

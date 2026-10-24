@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH numbered AS (\n               SELECT c.*, coalesce(c.created_at AT TIME ZONE $1, $2) AS at,\n                      row_number() OVER (\n                          PARTITION BY c.post_id\n                          ORDER BY coalesce(c.created_at AT TIME ZONE $1, $2), c.id\n                      )::int AS new_floor\n               FROM legacy.ik_comments c\n               JOIN posts p ON p.id = c.post_id\n           )\n           INSERT INTO comments (id, post_id, reply_to_id, reply_to_floor, author_id, floor, body,\n                                 is_anonymous, anonymous_seed, pinned_at, pinned_by, accepted_at,\n                                 accepted_by, hidden_at, hidden_reason, legacy_id, created_at, image_ids)\n           SELECT c.id, c.post_id, parent.id, parent.new_floor, c.author_id, c.new_floor,\n                  left(legacy.ik_fix_hosts(c.content), 2000),\n                  c.is_anonymous,\n                  CASE WHEN c.is_anonymous\n                       THEN coalesce(c.anonymous_seed, md5('legacy-comment:' || coalesce(c.document_id, c.id::text)))\n                       ELSE c.anonymous_seed END,\n                  c.pinned_at AT TIME ZONE $1,\n                  CASE WHEN c.pinned_at IS NOT NULL THEN pinner.id END,\n                  c.accepted_at AT TIME ZONE $1,\n                  CASE WHEN c.accepted_at IS NOT NULL THEN acceptor.id END,\n                  CASE WHEN c.is_hidden\n                       THEN coalesce(c.updated_at, c.created_at) AT TIME ZONE $1 END,\n                  CASE WHEN c.is_hidden THEN c.hidden_reason END,\n                  c.document_id,\n                  c.at,\n                  coalesce((SELECT array_agg(i.file_id ORDER BY i.\"order\", i.file_id)\n                            FROM (SELECT r.file_id, r.\"order\" FROM legacy.ik_file_refs r\n                                  WHERE r.related_type = 'api::comment.comment' AND r.field = 'images'\n                                    AND r.related_id = c.id\n                                  ORDER BY r.\"order\", r.file_id LIMIT 18) i), '{}')\n           FROM numbered c\n           LEFT JOIN numbered parent ON parent.id = c.parent_id AND parent.post_id = c.post_id\n           LEFT JOIN users pinner ON pinner.id = c.pinned_by\n           LEFT JOIN users acceptor ON acceptor.id = c.accepted_by",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6a58e83863478c9bcec2e3d861574307fa3631d76c19ee00dd10f211c8c3cc11"
+}

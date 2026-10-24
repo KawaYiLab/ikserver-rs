@@ -196,8 +196,8 @@ FROM docs d
 JOIN legacy.articles m ON m.id = coalesce(d.pub_row, d.draft_row)
 LEFT JOIN legacy.articles dr ON dr.id = d.draft_row;
 
--- 评论：帖子按文档换成帖子 id；楼中楼只有一层（CMT-025），旧数据里回复的回复挂到它的顶层评论下；
--- 顶层评论按时间编楼层号。帖子或作者已不存在的评论不导入。
+-- 评论：帖子按文档换成帖子 id；`parent_id` 是直接回复的那条（扁平楼层，ADR 0006，楼层号导入时再编）。
+-- 帖子或作者已不存在的评论不导入。
 CREATE VIEW legacy.ik_comments AS
 WITH RECURSIVE base AS (
     SELECT
@@ -230,11 +230,7 @@ SELECT
     u.document_id,
     u.post_id,
     u.author_id,
-    CASE WHEN u.depth = 0 THEN NULL ELSE u.root_id END AS parent_id,
-    u.depth > 1 AS reparented,
-    CASE WHEN u.depth = 0 THEN
-        row_number() OVER (PARTITION BY u.post_id, (u.depth = 0) ORDER BY u.created_at, u.id)
-    END AS floor,
+    CASE WHEN u.depth = 0 THEN NULL ELSE u.raw_parent_id END AS parent_id,
     u.content,
     coalesce(u.is_anonymous, false) AS is_anonymous,
     u.anonymous_seed,

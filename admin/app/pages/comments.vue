@@ -127,8 +127,7 @@ function rowActions(comment: Comment): RowAction[] {
               </div>
               <div class="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                 <span class="font-mono">{{ comment.id }}</span>
-                <span v-if="comment.floor">· {{ comment.floor }} 楼</span>
-                <span v-else>· 楼中楼</span>
+                <span>· #{{ comment.floor }}</span>
                 <Badge v-if="comment.pinned" variant="default">置顶</Badge>
                 <Badge v-if="comment.accepted" variant="default">已采纳</Badge>
                 <Badge v-if="comment.hiddenAt" variant="destructive" :title="comment.hiddenBy ? `由 @${comment.hiddenBy.username} 隐藏` : ''">

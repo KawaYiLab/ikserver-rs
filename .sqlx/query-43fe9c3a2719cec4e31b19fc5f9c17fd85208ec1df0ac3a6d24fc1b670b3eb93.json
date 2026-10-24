@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts np SET accepted_comment_id = c.id\n           FROM legacy.ik_posts p\n           JOIN comments c ON c.legacy_id = p.accepted_comment_document_id\n           WHERE np.id = p.post_id AND c.post_id = np.id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "43fe9c3a2719cec4e31b19fc5f9c17fd85208ec1df0ac3a6d24fc1b670b3eb93"
+}

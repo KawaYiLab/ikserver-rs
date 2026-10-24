@@ -29,12 +29,11 @@ pub async fn comment_activity(
 
 // ---------- 搜索（search 域用）----------
 
-/// 建索引用的评论：自身与父评论未隐藏、所属帖子公开。匿名评论的 `author_id` 为 None（PRIV-005）。
+/// 建索引用的评论：未隐藏、所属帖子公开。匿名评论的 `author_id` 为 None（PRIV-005）。
 #[derive(Debug, Clone)]
 pub struct CommentSearchDoc {
     pub id: i64,
     pub post_id: i64,
-    pub parent_id: Option<i64>,
     pub post_title: String,
     pub author_id: Option<i64>,
     /// 纯文本（提及与表情 token 已转成可读文本）。
@@ -57,7 +56,6 @@ async fn to_docs(
             titles.get(&row.post_id).map(|title| CommentSearchDoc {
                 id: row.id,
                 post_id: row.post_id,
-                parent_id: row.parent_id,
                 post_title: title.clone(),
                 author_id: (!row.is_anonymous).then_some(row.author_id),
                 text: crate::text::plain_text(&row.body),
@@ -122,7 +120,7 @@ pub struct ReportableComment {
     pub text: String,
     pub image_ids: Vec<i64>,
     pub is_anonymous: bool,
-    /// 评论与父评论（若有）未隐藏、所属帖子公开。只有公开的评论能被举报。
+    /// 评论未隐藏、所属帖子公开。只有公开的评论能被举报。
     pub is_public: bool,
 }
 
@@ -136,12 +134,6 @@ pub async fn reportable_comment(
     let Some(post) = ik_content::interop::post(conn, comment.post_id).await? else {
         return Ok(None);
     };
-    let parent_public = match comment.parent_id {
-        Some(parent_id) => repo::get(conn, parent_id)
-            .await?
-            .is_some_and(|p| p.hidden_at.is_none() && p.parent_id.is_none()),
-        None => true,
-    };
     Ok(Some(ReportableComment {
         author_id: comment.author_id,
         post_id: comment.post_id,
@@ -149,7 +141,7 @@ pub async fn reportable_comment(
         text: crate::text::plain_text(&comment.body),
         image_ids: comment.image_ids,
         is_anonymous: comment.is_anonymous,
-        is_public: comment.hidden_at.is_none() && post.is_public && parent_public,
+        is_public: comment.hidden_at.is_none() && post.is_public,
     }))
 }
 
@@ -193,7 +185,7 @@ pub async fn unhide_comment(
     Ok(true)
 }
 
-/// 审核删除评论（连同回复），维护帖子评论数与采纳。返回是否删除了。
+/// 审核删除评论（回复它的评论保留），维护帖子评论数与采纳。返回是否删除了。
 pub async fn delete_comment(
     conn: &mut PgConnection,
     comment_id: i64,
@@ -271,7 +263,8 @@ pub async fn hidden_states(
 pub struct AiComment {
     pub id: i64,
     pub post_id: i64,
-    pub parent_id: Option<i64>,
+    /// 回复了哪条评论（已删除的为 None）。
+    pub reply_to_id: Option<i64>,
     pub author_id: i64,
     /// 原文（含提及与表情 token）。
     pub body: String,
@@ -286,7 +279,7 @@ pub async fn ai_comment(conn: &mut PgConnection, id: i64) -> Result<Option<AiCom
     Ok(repo::get(conn, id).await?.map(|row| AiComment {
         id: row.id,
         post_id: row.post_id,
-        parent_id: row.parent_id,
+        reply_to_id: row.reply_to_id,
         author_id: row.author_id,
         body: row.body,
         image_ids: row.image_ids,
@@ -295,7 +288,7 @@ pub async fn ai_comment(conn: &mut PgConnection, id: i64) -> Result<Option<AiCom
     }))
 }
 
-/// 可见评论（自身与父评论都未隐藏）的原文，按 id。不可见、已删除的不出现。
+/// 可见评论（未隐藏）的原文，按 id。不可见、已删除的不出现。
 pub async fn visible_bodies(
     conn: &mut PgConnection,
     ids: &[i64],
@@ -320,10 +313,9 @@ pub struct AiReply<'a> {
     pub body: &'a str,
 }
 
-/// 以 AI 的名义回复触发评论（TRIG-017、D-004 方案 A）：实名，挂在触发评论所在的一级评论下
-/// （触发评论本身是一级评论时就挂在它下面），不占楼层。锁住帖子后复核：帖子公开且不匿名、
-/// 触发评论与所在一级评论都可见且不匿名，不满足返回 None。评论数、顶帖、通知与普通回复一致；
-/// 不给经验、不限流（AI 账号）。
+/// 以 AI 的名义回复触发评论（TRIG-017、D-004 方案 A）：实名，回复触发评论本身，和普通评论一样占一层。
+/// 锁住帖子后复核：帖子公开且不匿名、触发评论可见且不匿名，不满足返回 None。评论数、顶帖、通知与
+/// 普通回复一致；不给经验、不限流（AI 账号）。
 pub async fn insert_ai_reply(
     conn: &mut PgConnection,
     ids: &ik_kernel::Snowflake,
@@ -345,13 +337,6 @@ pub async fn insert_ai_reply(
     let Some(trigger) = repo::get(conn, reply.trigger_id).await?.filter(usable) else {
         return Ok(None);
     };
-    let thread_id = trigger.parent_id.unwrap_or(trigger.id);
-    let Some(thread) = repo::get(conn, thread_id)
-        .await?
-        .filter(|c| usable(c) && c.parent_id.is_none())
-    else {
-        return Ok(None);
-    };
     let body: String = reply
         .body
         .trim()
@@ -359,14 +344,15 @@ pub async fn insert_ai_reply(
         .take(crate::text::MAX_BODY_CHARS)
         .collect();
     let id = ids.next_raw();
+    let floor = ik_content::interop::comment_added(conn, post.id, reply.ai_user_id, now).await?;
     repo::insert(
         conn,
         &repo::NewComment {
             id,
             post_id: post.id,
-            parent_id: Some(thread.id),
+            reply_to: Some((trigger.id, trigger.floor)),
             author_id: reply.ai_user_id,
-            floor: None,
+            floor,
             body: &body,
             is_anonymous: false,
             anonymous_seed: None,
@@ -375,13 +361,12 @@ pub async fn insert_ai_reply(
         },
     )
     .await?;
-    ik_content::interop::comment_added(conn, post.id, reply.ai_user_id, now).await?;
     crate::service::notify_new_comment(
         ids,
         conn,
         &crate::service::NewCommentNotice {
             post: &post,
-            parent: Some(&thread),
+            reply_to: Some(&trigger),
             comment_id: id,
             author_id: reply.ai_user_id,
             body: &body,

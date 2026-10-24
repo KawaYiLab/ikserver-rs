@@ -92,7 +92,7 @@ impl Harness {
             post,
             CreateCommentRequest {
                 body: "评论".into(),
-                parent_id: None,
+                reply_to_id: None,
                 is_anonymous: anonymous,
                 image_ids: Vec::new(),
             },

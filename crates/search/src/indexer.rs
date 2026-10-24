@@ -172,7 +172,6 @@ impl Indexer {
             .map(|d| CommentDocument {
                 id: d.id.to_string(),
                 post_id: d.post_id.to_string(),
-                parent_id: d.parent_id.map(|id| id.to_string()),
                 content: crate::text::normalize_query(
                     Some(&d.text),
                     crate::text::INDEX_TEXT_MAX_CHARS,
@@ -245,13 +244,9 @@ impl Indexer {
         Ok(())
     }
 
-    /// 评论被删除：删它和它的回复（回复已随一级评论级联删除）。
+    /// 评论被删除（回复它的评论保留）。
     pub(crate) async fn remove_comments(&self, ids: &[i64]) -> anyhow::Result<()> {
-        self.engine.delete_comments(ids).await?;
-        for id in ids {
-            self.engine.delete_replies_of(*id).await?;
-        }
-        Ok(())
+        self.engine.delete_comments(ids).await
     }
 
     /// 改名或注销后更新作者名。

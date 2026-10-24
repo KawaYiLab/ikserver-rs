@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use ik_auth::Principal;
 use ik_comments::CommentsState;
-use ik_comments::dto::{CreateCommentRequest, PageQuery};
+use ik_comments::dto::{CommentsQuery, CreateCommentRequest, PageQuery};
 use ik_comments::service;
 use ik_content::ContentState;
 use ik_content::dto::PostInput;
@@ -123,7 +123,7 @@ impl Harness {
             post,
             CreateCommentRequest {
                 body: body.into(),
-                parent_id: parent.map(Id::new),
+                reply_to_id: parent.map(Id::new),
                 is_anonymous: false,
                 image_ids: Vec::new(),
             },
@@ -152,6 +152,14 @@ fn first_page() -> PageQuery {
     }
 }
 
+fn comments_page() -> CommentsQuery {
+    CommentsQuery {
+        cursor: None,
+        limit: None,
+        anchor: None,
+    }
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn floors_counts_and_bump(db: PgPool) {
     let h = harness(db);
@@ -167,24 +175,23 @@ async fn floors_counts_and_bump(db: PgPool) {
     let b = h.comment(&me, post, None, "二楼").await;
     let reply = h.comment(&op, post, Some(a), "回复").await;
 
-    let page = service::list(&h.comments, Some(&me), post, first_page())
+    let page = service::list(&h.comments, Some(&me), post, comments_page())
         .await
         .unwrap();
-    let floors: Vec<_> = page
-        .items
-        .iter()
-        .map(|t| (t.comment.id.get(), t.comment.floor))
-        .collect();
+    let floors: Vec<_> = page.items.iter().map(|c| (c.id.get(), c.floor)).collect();
     assert_eq!(
         floors,
-        vec![(b, Some(2)), (a, Some(1))],
-        "新的在前，楼层号固定"
+        vec![(a, 1), (b, 2), (reply, 3)],
+        "回复也是普通的一层，按楼层从旧到新"
     );
-    let thread_a = &page.items[1];
-    assert_eq!(thread_a.reply_count, 1);
-    assert_eq!(thread_a.replies[0].id.get(), reply);
-    assert_eq!(thread_a.replies[0].floor, None);
-    assert!(page.items[0].comment.is_mine);
+    assert_eq!(page.items[0].reply_count, 1);
+    let reply_to = page.items[2].reply_to.as_ref().unwrap();
+    assert_eq!(reply_to.floor, 1);
+    assert!(!reply_to.deleted);
+    let quoted = reply_to.comment.as_ref().unwrap();
+    assert_eq!((quoted.id.get(), quoted.excerpt.as_str()), (a, "一楼"));
+    assert!(page.items[0].is_mine && !page.items[2].is_mine);
+    assert!(page.items[1].reply_to.is_none());
 
     assert_eq!(h.post_counts(post).await.0, 3);
     let after = ik_content::service::detail(&h.content, None, post)
@@ -192,15 +199,31 @@ async fn floors_counts_and_bump(db: PgPool) {
         .unwrap();
     assert!(after.bumped_at > before, "新评论顶帖");
 
-    // 删除不会让后面的楼层号移动。
+    // 删除被回复的评论：回复保留，显示原评论已删除；楼层号不移动、也不回收。
     service::delete(&h.comments, &me, a).await.unwrap();
-    let c = h.comment(&me, post, None, "三楼").await;
-    let page = service::list(&h.comments, None, post, first_page())
+    let c = h.comment(&me, post, None, "四楼").await;
+    let page = service::list(&h.comments, None, post, comments_page())
         .await
         .unwrap();
-    assert_eq!(page.items[0].comment.id.get(), c);
-    assert_eq!(page.items[0].comment.floor, Some(3));
-    assert_eq!(h.post_counts(post).await.0, 2, "删一级评论连带扣掉它的回复");
+    let floors: Vec<_> = page.items.iter().map(|c| (c.id.get(), c.floor)).collect();
+    assert_eq!(floors, vec![(b, 2), (reply, 3), (c, 4)]);
+    let reply_to = page.items[1].reply_to.as_ref().unwrap();
+    assert_eq!(
+        (reply_to.floor, reply_to.deleted, reply_to.comment.is_none()),
+        (1, true, true)
+    );
+    assert_eq!(h.post_counts(post).await.0, 3, "只扣掉被删的那一条");
+
+    // 删掉最后一层再发，楼层号也不回收。
+    service::delete(&h.comments, &me, c).await.unwrap();
+    let d = h.comment(&me, post, None, "五楼").await;
+    let page = service::list(&h.comments, None, post, comments_page())
+        .await
+        .unwrap();
+    assert_eq!(
+        page.items.last().map(|c| (c.id.get(), c.floor)),
+        Some((d, 5))
+    );
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -219,7 +242,7 @@ async fn concurrent_comments_get_unique_floors(db: PgPool) {
                 post,
                 CreateCommentRequest {
                     body: format!("#{i}"),
-                    parent_id: None,
+                    reply_to_id: None,
                     is_anonymous: false,
                     image_ids: Vec::new(),
                 },
@@ -230,33 +253,46 @@ async fn concurrent_comments_get_unique_floors(db: PgPool) {
     for task in tasks {
         task.await.unwrap().unwrap();
     }
-    let floors: Vec<Option<i32>> = sqlx::query_scalar!(
+    let floors: Vec<i32> = sqlx::query_scalar!(
         "SELECT floor FROM comments WHERE post_id = $1 ORDER BY floor",
         post
     )
     .fetch_all(&db)
     .await
     .unwrap();
-    assert_eq!(floors, (1..=10).map(Some).collect::<Vec<_>>());
+    assert_eq!(floors, (1..=10).collect::<Vec<_>>());
     assert_eq!(h.post_counts(post).await.0, 10);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn reply_structure_is_one_level_within_the_post(db: PgPool) {
+async fn replies_can_target_any_visible_comment_in_the_post(db: PgPool) {
     let h = harness(db.clone());
     let op = h.user(1).await;
     let me = h.user(2).await;
     let post = h.post(&op, false).await;
     let other_post = h.post(&op, false).await;
     let top = h.comment(&me, post, None, "楼").await;
-    let reply = h.comment(&me, post, Some(top), "回复").await;
+    let reply = h.comment(&op, post, Some(top), "回复").await;
+    // 回复「回复」：直接指向那一条，不再挂到一级评论下。
+    let nested = h.comment(&me, post, Some(reply), "再回复").await;
+    let row = sqlx::query!(
+        "SELECT reply_to_id, reply_to_floor, floor FROM comments WHERE id = $1",
+        nested
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        (row.reply_to_id, row.reply_to_floor, row.floor),
+        (Some(reply), Some(2), 3)
+    );
 
-    for (target_post, parent) in [(post, reply), (other_post, top), (post, 424242)] {
+    for (target_post, target) in [(other_post, top), (post, 424242)] {
         let err = h
-            .try_comment(&me, target_post, Some(parent), "x")
+            .try_comment(&me, target_post, Some(target), "x")
             .await
             .unwrap_err();
-        assert_eq!(err.field_errors()[0].field, "parentId");
+        assert_eq!(err.field_errors()[0].field, "replyToId");
     }
     sqlx::query!("UPDATE comments SET hidden_at = now() WHERE id = $1", top)
         .execute(&db)
@@ -265,6 +301,17 @@ async fn reply_structure_is_one_level_within_the_post(db: PgPool) {
     assert!(
         h.try_comment(&me, post, Some(top), "x").await.is_err(),
         "不能回复被隐藏的评论"
+    );
+    // 被回复的评论隐藏后，回复照常显示，引用里没有原文。
+    let page = service::list(&h.comments, None, post, comments_page())
+        .await
+        .unwrap();
+    let ids: Vec<i64> = page.items.iter().map(|c| c.id.get()).collect();
+    assert_eq!(ids, vec![reply, nested]);
+    let reply_to = page.items[0].reply_to.as_ref().unwrap();
+    assert_eq!(
+        (reply_to.deleted, reply_to.comment.is_none()),
+        (false, true)
     );
 }
 
@@ -286,12 +333,12 @@ async fn only_public_posts_accept_comments(db: PgPool) {
     );
     // 作者能看到自己被隐藏的帖子的评论区，其他人不能。
     assert!(
-        service::list(&h.comments, Some(&op), post, first_page())
+        service::list(&h.comments, Some(&op), post, comments_page())
             .await
             .is_ok()
     );
     assert!(
-        service::list(&h.comments, None, post, first_page())
+        service::list(&h.comments, None, post, comments_page())
             .await
             .is_err()
     );
@@ -406,7 +453,7 @@ async fn anonymous_comments_hide_author(db: PgPool) {
             post,
             CreateCommentRequest {
                 body: "匿名".into(),
-                parent_id: None,
+                reply_to_id: None,
                 is_anonymous: true,
                 image_ids: Vec::new(),
             },
@@ -417,14 +464,10 @@ async fn anonymous_comments_hide_author(db: PgPool) {
         names.push(view.author.name);
     }
     assert_ne!(names[0], names[1], "每条匿名评论各自独立的匿名名");
-    let page = service::list(&h.comments, Some(&op), post, first_page())
+    let page = service::list(&h.comments, Some(&op), post, comments_page())
         .await
         .unwrap();
-    assert!(
-        page.items
-            .iter()
-            .all(|t| t.comment.author.anonymous && !t.comment.is_mine)
-    );
+    assert!(page.items.iter().all(|c| c.author.anonymous && !c.is_mine));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -442,37 +485,36 @@ async fn pin_rules(db: PgPool) {
         service::pin(&h.comments, &me, a).await.unwrap_err().code(),
         "FORBIDDEN"
     );
-    assert_eq!(
-        service::pin(&h.comments, &op, reply)
-            .await
-            .unwrap_err()
-            .code(),
-        "COMMENT_NOT_TOP_LEVEL"
-    );
     service::pin(&h.comments, &op, a).await.unwrap();
     service::pin(&h.comments, &op, a).await.unwrap();
     service::pin(&h.comments, &admin, b).await.unwrap();
 
-    let page = service::list(&h.comments, None, post, first_page())
+    let page = service::list(&h.comments, None, post, comments_page())
         .await
         .unwrap();
     assert_eq!(
-        page.pinned.as_ref().map(|t| t.comment.id.get()),
+        page.pinned.as_ref().map(|c| c.id.get()),
         Some(b),
         "新置顶替换旧置顶"
     );
     assert_eq!(
-        page.items
-            .iter()
-            .map(|t| t.comment.id.get())
-            .collect::<Vec<_>>(),
-        vec![a]
+        page.items.iter().map(|c| c.id.get()).collect::<Vec<_>>(),
+        vec![a, b, reply],
+        "置顶的评论在时间线里照常出现在自己的楼层"
     );
+    assert!(page.items[1].is_pinned);
 
-    service::unpin(&h.comments, &op, b).await.unwrap();
-    service::unpin(&h.comments, &op, b).await.unwrap();
+    // 回复也能置顶（所有评论平等）。
+    service::pin(&h.comments, &op, reply).await.unwrap();
+    let page = service::list(&h.comments, None, post, comments_page())
+        .await
+        .unwrap();
+    assert_eq!(page.pinned.as_ref().map(|c| c.id.get()), Some(reply));
+
+    service::unpin(&h.comments, &op, reply).await.unwrap();
+    service::unpin(&h.comments, &op, reply).await.unwrap();
     assert!(
-        service::list(&h.comments, None, post, first_page())
+        service::list(&h.comments, None, post, comments_page())
             .await
             .unwrap()
             .pinned
@@ -522,18 +564,24 @@ async fn accept_rules(db: PgPool) {
 
     service::accept(&h.comments, &op, b).await.unwrap();
     assert_eq!(h.post_counts(qa).await.1, Some(b), "采纳新的替换旧的");
-    let page = service::list(&h.comments, None, qa, first_page())
+    let page = service::list(&h.comments, None, qa, comments_page())
         .await
         .unwrap();
-    assert_eq!(page.accepted.as_ref().map(|t| t.comment.id.get()), Some(b));
-    assert!(page.accepted.as_ref().unwrap().comment.is_accepted);
-    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.accepted.as_ref().map(|c| c.id.get()), Some(b));
+    assert!(page.accepted.as_ref().unwrap().is_accepted);
+    assert_eq!(page.items.len(), 2);
+
+    // 采纳一条回复。
+    let reply = h.comment(&me, qa, Some(a), "补充").await;
+    service::accept(&h.comments, &op, reply).await.unwrap();
+    assert_eq!(h.post_counts(qa).await.1, Some(reply));
+    service::accept(&h.comments, &op, b).await.unwrap();
 
     // 取消旧的（已不是采纳）不影响帖子当前的采纳。
     service::unaccept(&h.comments, &op, a).await.unwrap();
     assert_eq!(h.post_counts(qa).await.1, Some(b));
     service::unaccept(&h.comments, &op, b).await.unwrap();
-    assert_eq!(h.post_counts(qa).await, (2, None, false));
+    assert_eq!(h.post_counts(qa).await, (3, None, false));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -553,11 +601,15 @@ async fn deleting_accepted_comment_clears_solved(db: PgPool) {
         "FORBIDDEN"
     );
     service::delete(&h.comments, &me, a).await.unwrap();
-    assert_eq!(h.post_counts(qa).await, (0, None, false));
+    assert_eq!(
+        h.post_counts(qa).await,
+        (1, None, false),
+        "回复它的评论保留"
+    );
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn inline_replies_are_per_thread_and_exclude_hidden(db: PgPool) {
+async fn replies_and_reply_counts_exclude_hidden(db: PgPool) {
     let h = harness(db.clone());
     let op = h.user(1).await;
     let me = h.user(2).await;
@@ -568,7 +620,7 @@ async fn inline_replies_are_per_thread_and_exclude_hidden(db: PgPool) {
     for i in 0..5 {
         a_replies.push(h.comment(&op, post, Some(a), &format!("a{i}")).await);
     }
-    h.comment(&me, post, Some(b), "b0").await;
+    let nested = h.comment(&me, post, Some(a_replies[0]), "a0 的回复").await;
     sqlx::query!(
         "UPDATE comments SET hidden_at = now() WHERE id = $1",
         a_replies[1]
@@ -577,27 +629,19 @@ async fn inline_replies_are_per_thread_and_exclude_hidden(db: PgPool) {
     .await
     .unwrap();
 
-    let page = service::list(&h.comments, None, post, first_page())
+    let page = service::list(&h.comments, None, post, comments_page())
         .await
         .unwrap();
-    let thread_a = page.items.iter().find(|t| t.comment.id.get() == a).unwrap();
-    let thread_b = page.items.iter().find(|t| t.comment.id.get() == b).unwrap();
-    assert_eq!(
-        thread_a
-            .replies
+    let count_of = |id: i64| {
+        page.items
             .iter()
-            .map(|r| r.id.get())
-            .collect::<Vec<_>>(),
-        vec![a_replies[0], a_replies[2], a_replies[3]]
-    );
-    assert_eq!((thread_a.reply_count, thread_a.replies_has_more), (4, true));
+            .find(|c| c.id.get() == id)
+            .unwrap()
+            .reply_count
+    };
     assert_eq!(
-        (
-            thread_b.replies.len(),
-            thread_b.reply_count,
-            thread_b.replies_has_more
-        ),
-        (1, 1, false)
+        (count_of(a), count_of(b), count_of(a_replies[0])),
+        (4, 0, 1)
     );
 
     let mut seen = Vec::new();
@@ -624,18 +668,38 @@ async fn inline_replies_are_per_thread_and_exclude_hidden(db: PgPool) {
         seen,
         vec![a_replies[0], a_replies[2], a_replies[3], a_replies[4]]
     );
+    let nested_page = service::replies(&h.comments, None, a_replies[0], first_page())
+        .await
+        .unwrap();
     assert_eq!(
-        service::replies(&h.comments, None, a_replies[0], first_page())
+        nested_page
+            .items
+            .iter()
+            .map(|c| c.id.get())
+            .collect::<Vec<_>>(),
+        vec![nested],
+        "回复也能有自己的回复"
+    );
+    assert_eq!(
+        service::replies(&h.comments, None, a_replies[1], first_page())
             .await
             .unwrap_err()
             .code(),
         "NOT_FOUND",
-        "回复没有下一层"
+        "被隐藏的评论"
     );
 }
 
+fn page_query(cursor: Option<String>, limit: u32, anchor: Option<i64>) -> CommentsQuery {
+    CommentsQuery {
+        cursor,
+        limit: Some(limit),
+        anchor: anchor.map(Id::new),
+    }
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn top_level_pagination_is_stable(db: PgPool) {
+async fn pagination_runs_both_ways_from_an_anchor(db: PgPool) {
     let h = harness(db.clone());
     let op = h.user(1).await;
     let post = h.post(&op, false).await;
@@ -644,6 +708,7 @@ async fn top_level_pagination_is_stable(db: PgPool) {
         let who = h.user(10 + i).await;
         all.push(h.comment(&who, post, None, "x").await);
     }
+    // 楼层号决定顺序，时间相同也稳定。
     sqlx::query!("UPDATE comments SET created_at = '2026-01-01T00:00:00Z'")
         .execute(&db)
         .await
@@ -651,25 +716,64 @@ async fn top_level_pagination_is_stable(db: PgPool) {
     let mut seen = Vec::new();
     let mut cursor = None;
     loop {
-        let page = service::list(
-            &h.comments,
-            None,
-            post,
-            PageQuery {
-                cursor,
-                limit: Some(3),
-            },
-        )
-        .await
-        .unwrap();
-        seen.extend(page.items.iter().map(|t| t.comment.id.get()));
+        let page = service::list(&h.comments, None, post, page_query(cursor, 3, None))
+            .await
+            .unwrap();
+        assert!(page.prev_cursor.is_none());
+        seen.extend(page.items.iter().map(|c| c.id.get()));
         match page.next_cursor {
             Some(c) => cursor = Some(c),
             None => break,
         }
     }
-    all.sort_unstable_by(|a, b| b.cmp(a));
     assert_eq!(seen, all);
+
+    // 从第 5 层开始：往后到底，往前一页页翻回第 1 层。
+    let page = service::list(&h.comments, None, post, page_query(None, 2, Some(all[4])))
+        .await
+        .unwrap();
+    assert_eq!(
+        page.items.iter().map(|c| c.floor).collect::<Vec<_>>(),
+        vec![5, 6]
+    );
+    assert!(page.accepted.is_none() && page.pinned.is_none());
+    let next = service::list(
+        &h.comments,
+        None,
+        post,
+        page_query(page.next_cursor, 2, None),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        next.items.iter().map(|c| c.floor).collect::<Vec<_>>(),
+        vec![7]
+    );
+    assert!(next.next_cursor.is_none());
+
+    let mut floors = Vec::new();
+    let mut cursor = page.prev_cursor;
+    while let Some(c) = cursor {
+        let back = service::list(&h.comments, None, post, page_query(Some(c), 3, None))
+            .await
+            .unwrap();
+        assert!(back.next_cursor.is_none());
+        floors.splice(0..0, back.items.iter().map(|c| c.floor));
+        cursor = back.prev_cursor;
+    }
+    assert_eq!(floors, vec![1, 2, 3, 4]);
+
+    // 锚点在第 1 层时前面没有了；不在本帖的锚点按第一页处理。
+    let first = service::list(&h.comments, None, post, page_query(None, 2, Some(all[0])))
+        .await
+        .unwrap();
+    assert!(first.prev_cursor.is_none());
+    let other = h.post(&op, false).await;
+    let stray = h.comment(&op, other, None, "别处").await;
+    let fallback = service::list(&h.comments, None, post, page_query(None, 2, Some(stray)))
+        .await
+        .unwrap();
+    assert_eq!(fallback.items[0].floor, 1);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -811,7 +915,7 @@ async fn lists_hide_blocked_authors_but_not_anonymous_comments(db: PgPool) {
         post,
         CreateCommentRequest {
             body: "匿名".into(),
-            parent_id: None,
+            reply_to_id: None,
             is_anonymous: false,
             image_ids: Vec::new(),
         },
@@ -829,16 +933,22 @@ async fn lists_hide_blocked_authors_but_not_anonymous_comments(db: PgPool) {
     .unwrap();
     let mine = h.comment(&carol, post, None, "我的").await;
     h.comment(&alice, post, Some(mine), "回复 carol").await;
-    h.comment(&op, post, Some(mine), "帖主回复").await;
+    let op_reply = h.comment(&op, post, Some(mine), "帖主回复").await;
+    let to_alice = h.comment(&op, post, Some(named), "回复 alice").await;
     block(&h.db, 3, 2).await;
 
-    let page = service::list(&h.comments, Some(&carol), post, first_page())
+    let page = service::list(&h.comments, Some(&carol), post, comments_page())
         .await
         .unwrap();
-    let ids: Vec<i64> = page.items.iter().map(|t| t.comment.id.get()).collect();
-    assert_eq!(ids, vec![mine, anonymous]);
-    assert_eq!(page.items[0].reply_count, 1);
-    assert_eq!(page.items[0].replies.len(), 1);
+    let ids: Vec<i64> = page.items.iter().map(|c| c.id.get()).collect();
+    assert_eq!(ids, vec![anonymous, mine, op_reply, to_alice]);
+    assert_eq!(page.items[1].reply_count, 1);
+    // 被回复的是拉黑的人：引用里不带原文，也不说已删除。
+    let reply_to = page.items[3].reply_to.as_ref().unwrap();
+    assert_eq!(
+        (reply_to.deleted, reply_to.comment.is_none()),
+        (false, true)
+    );
 
     let replies = service::replies(&h.comments, Some(&carol), mine, first_page())
         .await
@@ -850,11 +960,12 @@ async fn lists_hide_blocked_authors_but_not_anonymous_comments(db: PgPool) {
     assert_eq!(err.code(), "NOT_FOUND");
 
     // 游客看到全部。
-    let page = service::list(&h.comments, None, post, first_page())
+    let page = service::list(&h.comments, None, post, comments_page())
         .await
         .unwrap();
-    assert_eq!(page.items.len(), 3);
-    assert_eq!(page.items[0].reply_count, 2);
+    assert_eq!(page.items.len(), 6);
+    assert_eq!(page.items[2].reply_count, 2);
+    assert!(page.items[5].reply_to.as_ref().unwrap().comment.is_some());
 }
 
 // ---------- 评论点赞 ----------
@@ -885,16 +996,16 @@ async fn comment_likes_count_once_and_show_in_lists(db: PgPool) {
         .unwrap();
     assert_eq!(exp_of(&h.db, 2).await, 1);
 
-    let page = service::list(&h.comments, Some(&fan), post, first_page())
+    let page = service::list(&h.comments, Some(&fan), post, comments_page())
         .await
         .unwrap();
-    assert!(page.items[0].comment.liked);
-    assert_eq!(page.items[0].comment.like_count, 1);
-    assert!(page.items[0].replies[0].liked);
-    let page = service::list(&h.comments, Some(&op), post, first_page())
+    assert!(page.items[0].liked);
+    assert_eq!(page.items[0].like_count, 1);
+    assert!(page.items[1].liked);
+    let page = service::list(&h.comments, Some(&op), post, comments_page())
         .await
         .unwrap();
-    assert!(!page.items[0].comment.liked);
+    assert!(!page.items[0].liked);
 
     let off = service::unlike(&h.comments, &fan, top).await.unwrap();
     assert_eq!((off.liked, off.like_count), (false, 0));
@@ -924,28 +1035,22 @@ async fn comment_like_rules(db: PgPool) {
             .code(),
         "EXAM_REQUIRED"
     );
-    service::like(&h.comments, &fan, reply).await.unwrap();
-    // 一级评论被隐藏后，它的回复也不能再赞，但可以取消。
+    service::like(&h.comments, &fan, top).await.unwrap();
+    // 被隐藏的评论不能再赞，但可以取消；回复它的评论照常能赞。
     sqlx::query!("UPDATE comments SET hidden_at = now() WHERE id = $1", top)
         .execute(&h.db)
         .await
         .unwrap();
     assert_eq!(
-        service::like(&h.comments, &fan, top)
+        service::like(&h.comments, &h.user(4).await, top)
             .await
             .unwrap_err()
             .code(),
         "NOT_FOUND"
     );
+    service::like(&h.comments, &fan, reply).await.unwrap();
     assert_eq!(
-        service::like(&h.comments, &op, reply)
-            .await
-            .unwrap_err()
-            .code(),
-        "NOT_FOUND"
-    );
-    assert_eq!(
-        service::unlike(&h.comments, &fan, reply)
+        service::unlike(&h.comments, &fan, top)
             .await
             .unwrap()
             .like_count,
@@ -974,11 +1079,15 @@ async fn deleting_a_comment_removes_its_likes(db: PgPool) {
     service::like(&h.comments, &fan, top).await.unwrap();
     service::like(&h.comments, &fan, reply).await.unwrap();
     service::delete(&h.comments, &op, top).await.unwrap();
-    let left = sqlx::query_scalar!(r#"SELECT count(*) AS "n!" FROM comment_likes"#)
-        .fetch_one(&h.db)
+    let left: Vec<i64> = sqlx::query_scalar!("SELECT comment_id FROM comment_likes")
+        .fetch_all(&h.db)
         .await
         .unwrap();
-    assert_eq!(left, 0, "D-029：不留孤儿点赞行");
+    assert_eq!(
+        left,
+        vec![reply],
+        "D-029：不留孤儿点赞行；回复保留，它的赞也在"
+    );
 }
 
 // ---------- 通知 ----------
@@ -1011,8 +1120,8 @@ async fn comments_replies_and_mentions_notify(db: PgPool) {
     );
     assert_eq!(notifications(&h.db, 3).await[0].0, "mention");
 
-    // 回复：通知被回复的一级评论作者；@ 到同一个人不重复通知。
-    h.comment(&bob, post, Some(top), "@alice 同意").await;
+    // 回复：通知被回复的评论作者；@ 到同一个人不重复通知。
+    let bobs = h.comment(&bob, post, Some(top), "@alice 同意").await;
     let to_alice: Vec<String> = notifications(&h.db, 2)
         .await
         .into_iter()
@@ -1020,6 +1129,15 @@ async fn comments_replies_and_mentions_notify(db: PgPool) {
         .collect();
     assert_eq!(to_alice, vec!["reply"]);
     assert_eq!(notifications(&h.db, 1).await.len(), 1, "回复不通知帖主");
+    // 回复「回复」：通知的是那条回复的作者。
+    h.comment(&op, post, Some(bobs), "谢谢").await;
+    let to_bob: Vec<String> = notifications(&h.db, 3)
+        .await
+        .into_iter()
+        .map(|(k, _)| k)
+        .collect();
+    assert_eq!(to_bob, vec!["mention", "reply"]);
+    assert_eq!(notifications(&h.db, 2).await.len(), 1);
 
     // 采纳、评论点赞；取消点赞撤回。
     service::accept(&h.comments, &op, top).await.unwrap();
@@ -1051,7 +1169,7 @@ async fn anonymous_comments_send_no_notifications(db: PgPool) {
         post,
         CreateCommentRequest {
             body: "匿名 @bob".into(),
-            parent_id: None,
+            reply_to_id: None,
             is_anonymous: true,
             image_ids: Vec::new(),
         },
@@ -1106,7 +1224,7 @@ impl Harness {
             post,
             CreateCommentRequest {
                 body: body.into(),
-                parent_id: None,
+                reply_to_id: None,
                 is_anonymous: false,
                 image_ids: images.iter().map(|id| Id::new(*id)).collect(),
             },
@@ -1145,18 +1263,10 @@ async fn comment_images_are_owned_capped_and_allow_empty_body(db: PgPool) {
     assert_eq!(only.body, "");
     let ids: Vec<i64> = only.images.iter().map(|m| m.id.get()).collect();
     assert_eq!(ids, [502, 501]);
-    let page = service::list(
-        &h.comments,
-        None,
-        post,
-        PageQuery {
-            cursor: None,
-            limit: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(page.items[0].comment.images.len(), 2);
+    let page = service::list(&h.comments, None, post, comments_page())
+        .await
+        .unwrap();
+    assert_eq!(page.items[0].images.len(), 2);
     // 通知预览统一为「[图片]」。
     let excerpt = sqlx::query_scalar!(
         "SELECT excerpt FROM notifications WHERE recipient_id = 1 AND kind = 'comment'"
@@ -1192,7 +1302,7 @@ async fn comment_authors_carry_avatars(db: PgPool) {
         post,
         CreateCommentRequest {
             body: "匿名".into(),
-            parent_id: None,
+            reply_to_id: None,
             is_anonymous: true,
             image_ids: Vec::new(),
         },

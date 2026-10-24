@@ -3,12 +3,14 @@
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 
+#[derive(Clone)]
 pub(crate) struct CommentRow {
     pub id: i64,
     pub post_id: i64,
-    pub parent_id: Option<i64>,
+    pub reply_to_id: Option<i64>,
+    pub reply_to_floor: Option<i32>,
     pub author_id: i64,
-    pub floor: Option<i32>,
+    pub floor: i32,
     pub body: String,
     pub is_anonymous: bool,
     pub anonymous_seed: Option<String>,
@@ -23,8 +25,8 @@ pub(crate) struct CommentRow {
 pub(crate) async fn get(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments WHERE id = $1",
         id,
     )
@@ -35,8 +37,8 @@ pub(crate) async fn get(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option
 pub(crate) async fn lock(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments WHERE id = $1 FOR UPDATE",
         id,
     )
@@ -44,22 +46,26 @@ pub(crate) async fn lock(conn: &mut PgConnection, id: i64) -> sqlx::Result<Optio
     .await
 }
 
-/// 下一个楼层号。调用方必须已锁住帖子行，否则并发评论会抢到同一个号。
-pub(crate) async fn next_floor(conn: &mut PgConnection, post_id: i64) -> sqlx::Result<i32> {
-    sqlx::query_scalar!(
-        r#"SELECT COALESCE(MAX(floor), 0) + 1 AS "floor!" FROM comments WHERE post_id = $1"#,
-        post_id,
+/// 按 id 取（不论是否可见），被回复评论的引用用。
+pub(crate) async fn by_ids(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<Vec<CommentRow>> {
+    sqlx::query_as!(
+        CommentRow,
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+         FROM comments WHERE id = ANY($1)",
+        ids,
     )
-    .fetch_one(conn)
+    .fetch_all(conn)
     .await
 }
 
 pub(crate) struct NewComment<'a> {
     pub id: i64,
     pub post_id: i64,
-    pub parent_id: Option<i64>,
+    /// 被回复的评论与它的楼层号。
+    pub reply_to: Option<(i64, i32)>,
     pub author_id: i64,
-    pub floor: Option<i32>,
+    pub floor: i32,
     pub body: &'a str,
     pub is_anonymous: bool,
     pub anonymous_seed: Option<&'a str>,
@@ -68,13 +74,15 @@ pub(crate) struct NewComment<'a> {
 }
 
 pub(crate) async fn insert(conn: &mut PgConnection, c: &NewComment<'_>) -> sqlx::Result<()> {
+    let (reply_to_id, reply_to_floor) = c.reply_to.unzip();
     sqlx::query!(
-        "INSERT INTO comments (id, post_id, parent_id, author_id, floor, body, is_anonymous,
-                               anonymous_seed, created_at, image_ids)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+        "INSERT INTO comments (id, post_id, reply_to_id, reply_to_floor, author_id, floor, body,
+                               is_anonymous, anonymous_seed, created_at, image_ids)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         c.id,
         c.post_id,
-        c.parent_id,
+        reply_to_id,
+        reply_to_floor,
         c.author_id,
         c.floor,
         c.body,
@@ -88,19 +96,7 @@ pub(crate) async fn insert(conn: &mut PgConnection, c: &NewComment<'_>) -> sqlx:
     Ok(())
 }
 
-/// 一条评论的全部回复数（含隐藏的），用于删除时扣减帖子评论数。
-pub(crate) async fn count_all_replies(
-    conn: &mut PgConnection,
-    parent_id: i64,
-) -> sqlx::Result<i64> {
-    sqlx::query_scalar!(
-        r#"SELECT count(*) AS "n!" FROM comments WHERE parent_id = $1"#,
-        parent_id,
-    )
-    .fetch_one(conn)
-    .await
-}
-
+/// 硬删除。回复它的评论保留（`reply_to_id` 由外键置空，`reply_to_floor` 留着显示「原评论已删除」）。
 pub(crate) async fn delete(conn: &mut PgConnection, id: i64) -> sqlx::Result<()> {
     sqlx::query!("DELETE FROM comments WHERE id = $1", id)
         .execute(conn)
@@ -187,32 +183,54 @@ pub(crate) async fn unaccept(conn: &mut PgConnection, id: i64) -> sqlx::Result<(
 }
 
 // ---------- 读取 ----------
+//
+// 本节所有读取都带 `excluded_authors`：与读者有拉黑关系的人的非匿名评论不出现（BLOCK-014）。
 
-/// 普通一级评论：可见、未置顶、未采纳，新的在前。
-///
-/// 本节所有读取都带 `excluded_authors`：与读者有拉黑关系的人的非匿名评论不出现（BLOCK-014）。
-pub(crate) async fn top_level_page(
+/// 帖子的可见评论，楼层号严格大于 `after`，旧的在前。
+pub(crate) async fn page_after(
     conn: &mut PgConnection,
     post_id: i64,
     excluded_authors: &[i64],
-    after: Option<(DateTime<Utc>, i64)>,
+    after: i32,
     limit: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
-    let (after_at, after_id) = after.unzip();
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
-         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
-           AND pinned_at IS NULL AND accepted_at IS NULL
-           AND (is_anonymous OR NOT (author_id = ANY($5)))
-           AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::bigint))
-         ORDER BY created_at DESC, id DESC
-         LIMIT $4",
+         WHERE post_id = $1 AND floor > $2 AND hidden_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($4)))
+         ORDER BY floor
+         LIMIT $3",
         post_id,
-        after_at,
-        after_id,
+        after,
+        limit,
+        excluded_authors,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 帖子的可见评论，楼层号严格小于 `before`，新的在前（往回翻；调用方再倒过来）。
+pub(crate) async fn page_before(
+    conn: &mut PgConnection,
+    post_id: i64,
+    excluded_authors: &[i64],
+    before: i32,
+    limit: i64,
+) -> sqlx::Result<Vec<CommentRow>> {
+    sqlx::query_as!(
+        CommentRow,
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+         FROM comments
+         WHERE post_id = $1 AND floor < $2 AND hidden_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($4)))
+         ORDER BY floor DESC
+         LIMIT $3",
+        post_id,
+        before,
         limit,
         excluded_authors,
     )
@@ -227,10 +245,10 @@ pub(crate) async fn accepted(
 ) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
-         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL
+         WHERE post_id = $1 AND hidden_at IS NULL AND accepted_at IS NOT NULL
            AND (is_anonymous OR NOT (author_id = ANY($2)))",
         post_id,
         excluded_authors,
@@ -246,10 +264,10 @@ pub(crate) async fn pinned(
 ) -> sqlx::Result<Option<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
-         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
+         WHERE post_id = $1 AND hidden_at IS NULL
            AND pinned_at IS NOT NULL AND accepted_at IS NULL
            AND (is_anonymous OR NOT (author_id = ANY($2)))",
         post_id,
@@ -259,8 +277,8 @@ pub(crate) async fn pinned(
     .await
 }
 
-/// 按热度的一级评论（AI 工具 `get_post_comments`）：可见，赞数多的在前，同赞新的在前。
-pub(crate) async fn hot_top_level(
+/// 按热度的评论（AI 工具 `get_post_comments`）：可见，赞数多的在前，同赞旧的在前。
+pub(crate) async fn hot(
     conn: &mut PgConnection,
     post_id: i64,
     excluded_authors: &[i64],
@@ -268,12 +286,12 @@ pub(crate) async fn hot_top_level(
 ) -> sqlx::Result<Vec<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
-         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
+         WHERE post_id = $1 AND hidden_at IS NULL
            AND (is_anonymous OR NOT (author_id = ANY($2)))
-         ORDER BY like_count DESC, created_at DESC, id DESC
+         ORDER BY like_count DESC, floor
          LIMIT $3",
         post_id,
         excluded_authors,
@@ -283,14 +301,14 @@ pub(crate) async fn hot_top_level(
     .await
 }
 
-pub(crate) async fn visible_top_level_count(
+pub(crate) async fn visible_count(
     conn: &mut PgConnection,
     post_id: i64,
     excluded_authors: &[i64],
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
         r#"SELECT count(*) AS "n!" FROM comments
-           WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL
+           WHERE post_id = $1 AND hidden_at IS NULL
              AND (is_anonymous OR NOT (author_id = ANY($2)))"#,
         post_id,
         excluded_authors,
@@ -299,82 +317,50 @@ pub(crate) async fn visible_top_level_count(
     .await
 }
 
-/// 每个一级评论各自的前 `per_parent` 条可见回复（不是整页共享名额，CMT-069/146）。
-pub(crate) async fn inline_replies(
-    conn: &mut PgConnection,
-    parent_ids: &[i64],
-    excluded_authors: &[i64],
-    per_parent: i64,
-) -> sqlx::Result<Vec<CommentRow>> {
-    sqlx::query_as!(
-        CommentRow,
-        r#"SELECT r.id AS "id!", r.post_id AS "post_id!", r.parent_id, r.author_id AS "author_id!",
-                  r.floor, r.body AS "body!", r.is_anonymous AS "is_anonymous!", r.anonymous_seed,
-                  r.like_count AS "like_count!", r.pinned_at, r.accepted_at, r.hidden_at,
-                  r.created_at AS "created_at!", r.image_ids AS "image_ids!"
-           FROM unnest($1::bigint[]) AS p(id)
-           CROSS JOIN LATERAL (
-               SELECT * FROM comments c
-               WHERE c.parent_id = p.id AND c.hidden_at IS NULL
-                 AND (c.is_anonymous OR NOT (c.author_id = ANY($3)))
-               ORDER BY c.created_at, c.id
-               LIMIT $2
-           ) r
-           ORDER BY r.parent_id, r.created_at, r.id"#,
-        parent_ids,
-        per_parent,
-        excluded_authors,
-    )
-    .fetch_all(conn)
-    .await
-}
-
 pub(crate) struct ReplyCount {
-    pub parent_id: i64,
+    pub reply_to_id: i64,
     pub n: i64,
 }
 
+/// 每条评论收到的可见回复数。
 pub(crate) async fn visible_reply_counts(
     conn: &mut PgConnection,
-    parent_ids: &[i64],
+    ids: &[i64],
     excluded_authors: &[i64],
 ) -> sqlx::Result<Vec<ReplyCount>> {
     sqlx::query_as!(
         ReplyCount,
-        r#"SELECT parent_id AS "parent_id!", count(*) AS "n!"
+        r#"SELECT reply_to_id AS "reply_to_id!", count(*) AS "n!"
            FROM comments
-           WHERE parent_id = ANY($1) AND hidden_at IS NULL
+           WHERE reply_to_id = ANY($1) AND hidden_at IS NULL
              AND (is_anonymous OR NOT (author_id = ANY($2)))
-           GROUP BY parent_id"#,
-        parent_ids,
+           GROUP BY reply_to_id"#,
+        ids,
         excluded_authors,
     )
     .fetch_all(conn)
     .await
 }
 
-/// 某条一级评论的可见回复，旧的在前，严格晚于游标（CMT-072）。
+/// 回复某条评论的可见评论，旧的在前，楼层号严格大于 `after`。
 pub(crate) async fn replies_page(
     conn: &mut PgConnection,
-    parent_id: i64,
+    reply_to_id: i64,
     excluded_authors: &[i64],
-    after: Option<(DateTime<Utc>, i64)>,
+    after: i32,
     limit: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
-    let (after_at, after_id) = after.unzip();
     sqlx::query_as!(
         CommentRow,
-        "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,
-                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
-         WHERE parent_id = $1 AND hidden_at IS NULL
-           AND (is_anonymous OR NOT (author_id = ANY($5)))
-           AND ($2::timestamptz IS NULL OR (created_at, id) > ($2, $3::bigint))
-         ORDER BY created_at, id
-         LIMIT $4",
-        parent_id,
-        after_at,
-        after_id,
+         WHERE reply_to_id = $1 AND floor > $2 AND hidden_at IS NULL
+           AND (is_anonymous OR NOT (author_id = ANY($4)))
+         ORDER BY floor
+         LIMIT $3",
+        reply_to_id,
+        after,
         limit,
         excluded_authors,
     )
@@ -455,7 +441,7 @@ pub(crate) async fn liked_among(
 
 // ---------- 作者主页 ----------
 
-/// 作者主页展示的评论：非匿名、未隐藏、回复的一级评论也未隐藏。所属帖子是否公开由调用方再过滤。
+/// 作者主页展示的评论：非匿名、未隐藏。所属帖子是否公开由调用方再过滤。
 pub(crate) async fn author_comments(
     conn: &mut PgConnection,
     author_id: i64,
@@ -465,15 +451,12 @@ pub(crate) async fn author_comments(
     let (after_at, after_id) = after.unzip();
     sqlx::query_as!(
         CommentRow,
-        "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
-                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at,
-                c.image_ids
-         FROM comments c
-         LEFT JOIN comments parent ON parent.id = c.parent_id
-         WHERE c.author_id = $1 AND NOT c.is_anonymous AND c.hidden_at IS NULL
-           AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)
-           AND ($2::timestamptz IS NULL OR (c.created_at, c.id) < ($2, $3::bigint))
-         ORDER BY c.created_at DESC, c.id DESC
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+         FROM comments
+         WHERE author_id = $1 AND NOT is_anonymous AND hidden_at IS NULL
+           AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::bigint))
+         ORDER BY created_at DESC, id DESC
          LIMIT $4",
         author_id,
         after_at,
@@ -506,7 +489,7 @@ pub(crate) struct ActivityRow {
     pub first_at: DateTime<Utc>,
 }
 
-/// 窗口内的有效评论：评论未隐藏，回复的一级评论也未隐藏（只有一层楼中楼，HOT-005）。
+/// 窗口内的有效评论：评论未隐藏（HOT-005）。
 /// 每个 (帖子, 评论者) 一行，取最早时间。
 pub(crate) async fn comment_activity(
     conn: &mut PgConnection,
@@ -517,9 +500,7 @@ pub(crate) async fn comment_activity(
         ActivityRow,
         r#"SELECT c.post_id, c.author_id AS user_id, min(c.created_at) AS "first_at!"
            FROM comments c
-           LEFT JOIN comments parent ON parent.id = c.parent_id
            WHERE c.created_at >= $1 AND c.created_at <= $2 AND c.hidden_at IS NULL
-             AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)
            GROUP BY c.post_id, c.author_id"#,
         since,
         until,
@@ -530,20 +511,17 @@ pub(crate) async fn comment_activity(
 
 // ---------- 搜索（search 域建索引与数据库兜底用）----------
 
-/// 自身未隐藏、回复的一级评论也未隐藏的评论（所属帖子是否公开由调用方经 content 判断）。
+/// 未隐藏的评论（所属帖子是否公开由调用方经 content 判断）。
 pub(crate) async fn listed_by_ids(
     conn: &mut PgConnection,
     ids: &[i64],
 ) -> sqlx::Result<Vec<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
-                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at,
-                c.image_ids
-         FROM comments c
-         LEFT JOIN comments parent ON parent.id = c.parent_id
-         WHERE c.id = ANY($1) AND c.hidden_at IS NULL
-           AND (c.parent_id IS NULL OR (parent.hidden_at IS NULL AND parent.post_id = c.post_id))",
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+         FROM comments
+         WHERE id = ANY($1) AND hidden_at IS NULL",
         ids,
     )
     .fetch_all(conn)
@@ -558,14 +536,11 @@ pub(crate) async fn listed_after(
 ) -> sqlx::Result<Vec<CommentRow>> {
     sqlx::query_as!(
         CommentRow,
-        "SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor, c.body, c.is_anonymous,
-                c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.created_at,
-                c.image_ids
-         FROM comments c
-         LEFT JOIN comments parent ON parent.id = c.parent_id
-         WHERE c.id > $1 AND c.hidden_at IS NULL
-           AND (c.parent_id IS NULL OR (parent.hidden_at IS NULL AND parent.post_id = c.post_id))
-         ORDER BY c.id
+        "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,
+                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
+         FROM comments
+         WHERE id > $1 AND hidden_at IS NULL
+         ORDER BY id
          LIMIT $2",
         after_id,
         limit,
@@ -604,7 +579,7 @@ pub(crate) async fn created_since(
     .await
 }
 
-/// 数据库兜底搜索的候选（SRCH-033）：正文包含 `q`（忽略大小写），自身与父评论未隐藏，
+/// 数据库兜底搜索的候选（SRCH-033）：正文包含 `q`（忽略大小写），未隐藏，
 /// 可选限定帖子，新的在前，最多 `cap` 条。所属帖子是否公开与拉黑由调用方再过滤。
 pub(crate) async fn search_candidates(
     conn: &mut PgConnection,
@@ -613,13 +588,11 @@ pub(crate) async fn search_candidates(
     cap: i64,
 ) -> sqlx::Result<Vec<i64>> {
     sqlx::query_scalar!(
-        "SELECT c.id FROM comments c
-         LEFT JOIN comments parent ON parent.id = c.parent_id
-         WHERE c.hidden_at IS NULL
-           AND (c.parent_id IS NULL OR parent.hidden_at IS NULL)
-           AND ($2::bigint IS NULL OR c.post_id = $2)
-           AND strpos(lower(c.body), lower($1)) > 0
-         ORDER BY c.created_at DESC, c.id DESC
+        "SELECT id FROM comments
+         WHERE hidden_at IS NULL
+           AND ($2::bigint IS NULL OR post_id = $2)
+           AND strpos(lower(body), lower($1)) > 0
+         ORDER BY created_at DESC, id DESC
          LIMIT $3",
         q,
         post_id,
@@ -720,8 +693,8 @@ pub(crate) struct AdminCommentFilter<'a> {
 pub(crate) struct AdminCommentRow {
     pub id: i64,
     pub post_id: i64,
-    pub parent_id: Option<i64>,
-    pub floor: Option<i32>,
+    pub reply_to_id: Option<i64>,
+    pub floor: i32,
     pub author_id: i64,
     pub body: String,
     pub image_ids: Vec<i64>,
@@ -765,7 +738,7 @@ pub(crate) async fn admin_comments(
 ) -> sqlx::Result<Vec<AdminCommentRow>> {
     sqlx::query_as!(
         AdminCommentRow,
-        r#"SELECT c.id, c.post_id, c.parent_id, c.floor, c.author_id, c.body, c.image_ids, c.is_anonymous,
+        r#"SELECT c.id, c.post_id, c.reply_to_id, c.floor, c.author_id, c.body, c.image_ids, c.is_anonymous,
                   c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.hidden_by,
                   c.hidden_reason, c.created_at
            FROM comments c

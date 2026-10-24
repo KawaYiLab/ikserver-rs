@@ -26,9 +26,9 @@ pub struct CommentsState {
     hooks: Arc<OnceLock<Arc<dyn CommentHooks>>>,
 }
 
-/// 被回复的一级评论。
+/// 被回复的评论。
 #[derive(Debug, Clone)]
-pub struct ParentRef {
+pub struct ReplyToRef {
     pub id: i64,
     pub author_id: i64,
     pub is_anonymous: bool,
@@ -41,8 +41,8 @@ pub struct CreatedComment {
     pub post_id: i64,
     pub post_author_id: i64,
     pub post_is_anonymous: bool,
-    /// 回复时是所在楼层的一级评论。
-    pub parent: Option<ParentRef>,
+    /// 回复了哪条评论。
+    pub reply_to: Option<ReplyToRef>,
     pub author_id: i64,
     pub author_is_ai: bool,
     /// 展开裸 @ 之后的正文（纯图片评论为空）。

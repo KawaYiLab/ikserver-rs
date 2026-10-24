@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments WHERE id = $1",
+  "query": "SELECT c.id, c.post_id, c.reply_to_id, c.floor, c.author_id, c.body, c.image_ids, c.is_anonymous,\n                  c.anonymous_seed, c.like_count, c.pinned_at, c.accepted_at, c.hidden_at, c.hidden_by,\n                  c.hidden_reason, c.created_at\n           FROM comments c\n           WHERE ($1::text IS NULL OR c.body ILIKE $1 OR c.id = $2)\n             AND ($3::bigint IS NULL OR c.post_id = $3)\n             AND ($4::bigint IS NULL OR (c.author_id = $4 AND NOT c.is_anonymous))\n             AND ($5::bool IS NULL OR (c.hidden_at IS NOT NULL) = $5)\n           ORDER BY c.created_at DESC, c.id DESC\n           LIMIT $6 OFFSET $7",
   "describe": {
     "columns": [
       {
@@ -27,34 +27,34 @@
       },
       {
         "ordinal": 2,
-        "name": "parent_id",
+        "name": "reply_to_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "parent_id"
+            "name": "reply_to_id"
           }
         }
       },
       {
         "ordinal": 3,
-        "name": "author_id",
-        "type_info": "Int8",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "author_id"
-          }
-        }
-      },
-      {
-        "ordinal": 4,
         "name": "floor",
         "type_info": "Int4",
         "origin": {
           "Table": {
             "table": "comments",
             "name": "floor"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "author_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "author_id"
           }
         }
       },
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "image_ids",
+        "type_info": "Int8Array",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "image_ids"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "is_anonymous",
         "type_info": "Bool",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "anonymous_seed",
         "type_info": "Text",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "like_count",
         "type_info": "Int4",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "pinned_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "accepted_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "hidden_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +147,29 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
+        "name": "hidden_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "hidden_by"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "hidden_reason",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "hidden_reason"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -145,21 +178,16 @@
             "name": "created_at"
           }
         }
-      },
-      {
-        "ordinal": 13,
-        "name": "image_ids",
-        "type_info": "Int8Array",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "image_ids"
-          }
-        }
       }
     ],
     "parameters": {
       "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Int8",
         "Int8"
       ]
     },
@@ -168,7 +196,8 @@
       false,
       true,
       false,
-      true,
+      false,
+      false,
       false,
       false,
       true,
@@ -176,9 +205,10 @@
       true,
       true,
       true,
-      false,
+      true,
+      true,
       false
     ]
   },
-  "hash": "9cda593c1972f0999c911bedb500b3d0687af3935a74b9a6260f8397addfff81"
+  "hash": "0180c9ed4baec7f12dea55b8e2e966f073c65b99625503c991509af4562a98ab"
 }

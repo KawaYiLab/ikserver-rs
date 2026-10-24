@@ -189,8 +189,9 @@ impl Harness {
         anonymous: bool,
     ) {
         sqlx::query!(
-            "INSERT INTO comments (id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed)
-             VALUES ($1, $2, $3, $4, CASE WHEN $3::bigint IS NULL THEN $7::int END, $5, $6,
+            "INSERT INTO comments (id, post_id, reply_to_id, reply_to_floor, author_id, floor, body,
+                                   is_anonymous, anonymous_seed)
+             VALUES ($1, $2, $3, (SELECT floor FROM comments WHERE id = $3), $4, $7, $5, $6,
                      CASE WHEN $6 THEN 'seed' END)",
             id,
             post,
@@ -424,8 +425,9 @@ async fn fallback_comment_search_applies_visibility(db: PgPool) {
     h.comment(2, 10, Some(1), 4, "绳网回复", false).await;
     h.comment(3, 13, None, 2, "草稿下的绳网", false).await; // 帖子未发布
     h.comment(4, 11, None, 3, "匿名的绳网评论", true).await;
-    h.comment(5, 11, None, 4, "被隐藏的绳网父评论", false).await;
-    h.comment(6, 11, Some(5), 1, "隐藏父评论下的绳网回复", false)
+    h.comment(5, 11, None, 4, "被隐藏的绳网评论", false).await;
+    // 回复被隐藏的评论：回复本身照常可见（扁平楼层，ADR 0006）。
+    h.comment(6, 11, Some(5), 1, "回复隐藏评论的绳网回复", false)
         .await;
     sqlx::query!("UPDATE comments SET hidden_at = now() WHERE id = 5")
         .execute(&h.db)
@@ -434,7 +436,15 @@ async fn fallback_comment_search_applies_visibility(db: PgPool) {
 
     let mut all = h.comment_bodies(None, comments("绳网")).await;
     all.sort();
-    assert_eq!(all, ["匿名的绳网评论", "绳网回复", "绳网好评"]);
+    assert_eq!(
+        all,
+        [
+            "匿名的绳网评论",
+            "回复隐藏评论的绳网回复",
+            "绳网回复",
+            "绳网好评"
+        ]
+    );
 
     // alice 拉黑 dave：dave 的评论消失；carol 的匿名评论不受影响。
     h.block(1, 4).await;
@@ -443,12 +453,18 @@ async fn fallback_comment_search_applies_visibility(db: PgPool) {
         .comment_bodies(Some(&principal(1)), comments("绳网"))
         .await;
     alice.sort();
-    assert_eq!(alice, ["匿名的绳网评论", "绳网好评"]);
+    assert_eq!(
+        alice,
+        ["匿名的绳网评论", "回复隐藏评论的绳网回复", "绳网好评"]
+    );
 
     // 限定帖子。
     let mut in_post = comments("绳网");
     in_post.post_id = Some(Id::new(11));
-    assert_eq!(h.comment_bodies(None, in_post).await, ["匿名的绳网评论"]);
+    assert_eq!(
+        h.comment_bodies(None, in_post).await,
+        ["回复隐藏评论的绳网回复", "匿名的绳网评论"]
+    );
 
     // 匿名评论对所有人都显示匿名名。
     let page = service::search_comments(&h.search, Some(&principal(3)), comments("匿名的绳网"))
