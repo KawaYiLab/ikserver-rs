@@ -35,6 +35,7 @@ fn corpus() -> Corpus {
         manifest: Some(json!({"source_version":"3.3.0"})),
         story,
         supplement: None,
+        extra: None,
         lore: [(
             "agents/test.md".into(),
             "# 档案\n\n## 角色\n设定正文".into(),
@@ -133,6 +134,7 @@ fn speaker_preview_is_bounded_and_full_keeps_all_attributed_names() {
         manifest: None,
         story: rows,
         supplement: None,
+        extra: None,
         lore: Default::default(),
     })
     .unwrap();

@@ -6,7 +6,7 @@ use utoipa::ToSchema;
 
 use super::coverage::{CoverageResult, Manifest, MissingRange, PendingDocument, RangeScope};
 use super::{ToolError, err};
-use crate::corpus::{Corpus, DocKind, LineKind};
+use crate::corpus::{Corpus, LineKind};
 pub use crate::corpus::{DocumentOrder, EvidenceSummary, OrderCount, SpeakerCoverage};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -154,12 +154,7 @@ impl Document {
             title: doc.title.clone(),
             path: doc.path.clone(),
             group_id: c.groups[doc.group as usize].id.clone(),
-            content_type: match doc.kind {
-                DocKind::Story => "story",
-                DocKind::Supplement => "supplement",
-                DocKind::Lore => "lore",
-            }
-            .into(),
+            content_type: doc.kind.scope_name().into(),
             line_count: doc.line_count as usize,
             evidence_hints: hints,
             next_read: NextCall::new("ik_read", json!({"docId":c.doc_id(d)})),

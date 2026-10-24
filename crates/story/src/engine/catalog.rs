@@ -181,6 +181,18 @@ fn root(corpus: &Corpus) -> String {
             out.push('\n');
         }
     }
+    let events = corpus.docs.iter().filter(|d| d.kind == DocKind::Event);
+    let (event_docs, event_lines) =
+        events.fold((0, 0), |(n, l), d| (n + 1, l + d.line_count as usize));
+    if event_docs > 0 {
+        out.push('\n');
+        let groups = corpus
+            .groups
+            .iter()
+            .filter(|g| g.kind == GroupKind::Event)
+            .count();
+        push_event_summary(&mut out, (groups, event_docs, event_lines));
+    }
     let lore: Vec<_> = corpus
         .groups
         .iter()
@@ -209,6 +221,20 @@ fn root(corpus: &Corpus) -> String {
          ik_search(keyword=…) 为全文检索。",
     );
     out
+}
+
+/// 活动、支线、代理人故事、空洞事件的汇总行：`(分组数, 篇数, 行数)`。
+fn push_event_summary(out: &mut String, (groups, docs, lines): (usize, usize, usize)) {
+    if docs == 0 {
+        return;
+    }
+    let _ = writeln!(
+        out,
+        "活动与支线（活动剧情/支线委托/代理人故事/空洞事件）| {} 组 · {} 篇 · {} 行 → ik_catalog(scope=\"event\")",
+        thousands(groups),
+        thousands(docs),
+        thousands(lines)
+    );
 }
 
 fn titles_everywhere(
@@ -303,7 +329,7 @@ fn group_listing(
     );
 
     super::push_version(&mut out, corpus);
-    if g.kind == GroupKind::Chapter {
+    if g.kind != GroupKind::Lore {
         out.push_str("以下为目录顺序；场景剧情先后未核验。\n");
         let scenes: Vec<_> = members
             .iter()
@@ -472,9 +498,18 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     let total_lines = docs.iter().map(|&d| c.docs[d].line_count as usize).sum();
     let offset = args.offset.unwrap_or(0);
     let max = clamp(args.max_results, 100, 500);
+    let scope_kind = super::parse_scope(args.scope.as_deref())?;
+    // 活动/支线有数百个来源分组；全库根目录只给一行汇总，scope=event 时再逐组列出。
+    let collapse_events = root && scope_kind.is_none();
+    let mut collapsed = (0usize, 0usize, 0usize);
     let groups = if root {
         let mut counts = std::collections::BTreeMap::new();
         for &d in &docs {
+            if collapse_events && c.docs[d].kind == DocKind::Event {
+                collapsed.1 += 1;
+                collapsed.2 += c.docs[d].line_count as usize;
+                continue;
+            }
             let n = counts.entry(c.docs[d].group).or_insert((0, 0));
             n.0 += 1;
             n.1 += c.docs[d].line_count as usize;
@@ -525,7 +560,14 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     } else {
         None
     };
-    let root_main = root && super::parse_scope(args.scope.as_deref())?.is_none();
+    if collapse_events {
+        collapsed.0 = c
+            .groups
+            .iter()
+            .filter(|g| g.kind == GroupKind::Event)
+            .count();
+    }
+    let root_main = root && scope_kind.is_none();
     let coverage_docs = docs
         .iter()
         .copied()
@@ -657,6 +699,7 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
                 g.next_catalog.text()
             );
         }
+        push_event_summary(&mut out, collapsed);
         for d in &result.documents {
             let _ = writeln!(
                 out,

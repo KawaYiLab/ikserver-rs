@@ -85,7 +85,8 @@ flowchart LR
   表情包（`emote_groups`、`emotes`）也归 cosmetics：公开清单进程内缓存，后台修改后立即失效；评论域只按文本存 `:ik-xxx:`，不依赖它。
 - `story → auth`：绝区零剧情库，给剧情总结 AI 用的 MCP 服务（`POST /v1/story/mcp`，Streamable HTTP 无状态模式：
   直接回 JSON、不开 SSE、不发会话 id；GET/DELETE 405）。语料是 zzz-story-extractor 的产出，打成一个语料包
-  （gzip 压缩的 JSON：story.jsonl、supplement.jsonl、lore/*.md、manifest.json 原文）由管理员上传
+  （gzip 压缩的 JSON：story.jsonl、supplement.jsonl、可选的 extra.jsonl（活动、支线、代理人故事，
+  以 `ev:` 分组、`scope=event` 检索）、lore/*.md、manifest.json 原文）由管理员上传
   （`PUT /v1/admin/story/corpus`，提取器的 `python -m zzz_story upload` 一键完成），原样存在 `story_corpora`，
   至多一个生效版本，保留最近 5 个供回滚（`POST /v1/admin/story/corpora/{id}/activate`）。索引不入库：
   各实例在阻塞线程池里从语料包构建内存索引（整块文本 + CSR 存储的字符二元组倒排），`serve`

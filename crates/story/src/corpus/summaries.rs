@@ -414,14 +414,7 @@ pub(super) fn build(c: &Corpus) -> Vec<DocumentSummary> {
             let mut coverage = SpeakerCoverage {
                 applicable,
                 total_lines: doc.line_count as usize,
-                content_types: vec![
-                    match doc.kind {
-                        DocKind::Story => "story",
-                        DocKind::Supplement => "supplement",
-                        DocKind::Lore => "lore",
-                    }
-                    .into(),
-                ],
+                content_types: vec![doc.kind.scope_name().into()],
                 ..SpeakerCoverage::default()
             };
             for line in doc.lines() {

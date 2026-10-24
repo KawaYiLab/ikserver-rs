@@ -248,13 +248,19 @@ fn initialize(corpus: &Corpus, params: Option<&RawValue>) -> Result<Box<RawValue
 pub fn instructions(c: &Corpus) -> String {
     let story_docs = c.docs.iter().filter(|d| d.kind == DocKind::Story).count();
     let lore_docs = c.docs.iter().filter(|d| d.kind == DocKind::Lore).count();
+    let event_docs = c.docs.iter().filter(|d| d.kind == DocKind::Event).count();
+    let events = if event_docs > 0 {
+        format!("、活动与支线 {} 篇（scope=event）", thousands(event_docs))
+    } else {
+        String::new()
+    };
     let version = if c.meta.source_version.is_empty() {
         "未知"
     } else {
         &c.meta.source_version
     };
     format!(
-        "绳网档案（绝区零 Zenless Zone Zero 剧情与世界观知识库），数据版本 {version}（{}），主线 {} 场景、设定 {} 篇。\
+        "绳网档案（绝区零 Zenless Zone Zero 剧情与世界观知识库），数据版本 {version}（{}），主线 {} 场景、设定 {} 篇{events}。\
              提供 ik_catalog 目录、ik_search 检索、ik_read 原文、ik_character 角色资料、ik_guide 契约参考与 ik_coverage 返回行覆盖核对。\
              结果包含文本、structuredContent、快照标识及来源状态。提取模式：{}。",
         c.meta.language,

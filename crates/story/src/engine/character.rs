@@ -309,7 +309,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
     groups.sort_by_key(|(g, _)| **g);
     let chapter_rows = groups
         .iter()
-        .filter(|(g, _)| corpus.groups[**g as usize].kind == GroupKind::Chapter);
+        .filter(|(g, _)| corpus.groups[**g as usize].kind != GroupKind::Lore);
     for (g, stat) in chapter_rows.clone().take(max) {
         let group = &corpus.groups[**g as usize];
         let _ = write!(
@@ -367,7 +367,7 @@ pub fn execute(corpus: &Corpus, args: &CharacterArgs) -> OutputResult {
     );
     let chapters = groups
         .iter()
-        .filter(|(g, _)| corpus.groups[**g as usize].kind == GroupKind::Chapter)
+        .filter(|(g, _)| corpus.groups[**g as usize].kind != GroupKind::Lore)
         .take(max)
         .map(|(g, s)| CharacterChapter {
             group_id: corpus.groups[**g as usize].id.clone(),

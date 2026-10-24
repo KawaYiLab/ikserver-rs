@@ -37,6 +37,7 @@ fn sample() -> Bundle {
         manifest: Some(json!({"source_version":"3.3.0","language":"CHS","accuracy_first":false})),
         story,
         supplement: None,
+        extra: None,
         lore: Default::default(),
     }
 }

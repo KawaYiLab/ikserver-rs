@@ -2,7 +2,8 @@
 //!
 //! ```json
 //! {"format": 1, "manifest": {…}, "story": "<story.jsonl 原文>",
-//!  "supplement": "<supplement.jsonl 原文>", "lore": {"agents/01_狡兔屋.md": "…"}}
+//!  "supplement": "<supplement.jsonl 原文>", "extra": "<extra.jsonl 原文>",
+//!  "lore": {"agents/01_狡兔屋.md": "…"}}
 //! ```
 //!
 //! zzz-story-extractor 的 `python -m zzz_story upload` 生成它并上传到 `PUT /v1/admin/story/corpus`；
@@ -29,6 +30,9 @@ pub struct Bundle {
     /// supplement.jsonl 原文，可缺省。
     #[serde(default)]
     pub supplement: Option<String>,
+    /// extra.jsonl 原文（活动、支线、代理人故事、空洞事件），可缺省；旧提取器不产出。
+    #[serde(default)]
+    pub extra: Option<String>,
     /// lore 目录下的 Markdown：相对路径（`/` 分隔）→ 内容。
     #[serde(default)]
     pub lore: BTreeMap<String, String>,
@@ -58,6 +62,12 @@ impl Bundle {
         } else {
             None
         };
+        let extra_path = dir.join("extra.jsonl");
+        let extra = if extra_path.is_file() {
+            Some(read(&extra_path)?)
+        } else {
+            None
+        };
         let mut lore = BTreeMap::new();
         let lore_dir = dir.join("lore");
         if lore_dir.is_dir() {
@@ -68,6 +78,7 @@ impl Bundle {
             manifest,
             story: read(&story_path)?,
             supplement,
+            extra,
             lore,
         })
     }
