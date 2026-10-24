@@ -1,6 +1,8 @@
 # ADR 0002：网页同源访问接口（反向代理 `/v1`）
 
-- 状态：已接受（2026-10-16）
+- 状态：已被 [ADR 0005](0005-edgeone-direct-origin.md) 取代（2026-10-23）。线上没有按本文的 nginx 同源方案部署，
+  主站跨站调用 `ik.tiwat.cn`；本文保留作为将来改回同源时的依据（同源的好处见下文）。
+- 原状态：已接受（2026-10-16）
 - 背景：主站在 `interk.net`，后端在 `ik.tiwat.cn`，二者不是同一个站点（registrable domain
   不同）。网页登录用 `HttpOnly; Secure; SameSite=Lax` 会话 Cookie，且不设 `Domain`，
   只属于签发它的主机。主站直接用 fetch 跨站调用 `ik.tiwat.cn` 时，浏览器不会带这个 Cookie，
@@ -16,7 +18,7 @@ ik-server。浏览器只和自己的域名通信。
 | `interk.net` | 主站（Nuxt） | `interk.net/v1` → ik-server |
 | `ik.tiwat.cn` | 管理后台 `/admin`（SPA，编进 ik-server）；安卓 App 的接口地址 | `ik.tiwat.cn/v1` → ik-server |
 
-配置示例在 `deploy/nginx/`。
+当时的 nginx 配置示例在 git 历史的 `deploy/nginx/`。
 
 ### 为什么不用 `api.interk.net` 子域
 

@@ -5,13 +5,15 @@
 模块化单体：一个 `ik-server` 进程承担 HTTP API、WebSocket 网关、后台任务与定时任务、
 AI 编排，并提供编进可执行文件的管理后台页面（`/admin`）。外部依赖只有 PostgreSQL、Meilisearch、S3 兼容对象存储、SMTP/Brevo、米游社 API、
 B 站视频信息接口、大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
+线上部署拓扑（EdgeOne 直接回源，没有 nginx）见 `deploy/README.md` 与 ADR 0005。
 
 ```mermaid
 flowchart LR
-  web[网页 Nuxt] --> ng[nginx]
-  adm[管理后台 /admin] --> ng
-  app[安卓 App] --> ng
-  ng -->|/v1、/v1/realtime、/admin| srv[ik-server]
+  web[网页 interk.net] --> eo[EdgeOne ik.tiwat.cn]
+  adm[管理后台 /admin] --> eo
+  app[安卓 App] --> eo
+  eo -->|/v1、/v1/realtime、/admin| srv[ik-server]
+  eo -->|/app/*| upd[更新渠道对象存储]
   srv --> pg[(PostgreSQL)]
   srv --> ms[Meilisearch]
   srv --> s3[R2/S3 + CDN]

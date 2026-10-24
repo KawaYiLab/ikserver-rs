@@ -5,8 +5,7 @@ CI 比对生成结果与 `admin/openapi.json`（管理后台的类型由它生�
 
 ## 基础约定
 
-- 基础地址：网页用**页面所在域名**的 `/v1`（nginx 同源反代，例如 `https://interk.net/v1`；
-  管理后台是 `https://ik.tiwat.cn/v1`），App 用 `https://ik.tiwat.cn/v1`。见 ADR 0002。
+- 基础地址：`https://ik.tiwat.cn/v1`，主站（`interk.net`，跨站调用）、管理后台、App 都用它。见 ADR 0005。
 - 全部 JSON；请求 `Content-Type: application/json`；响应 UTF-8。
 - ID：字符串形式的 64 位雪花 ID（按时间有序），JSON 里永远是 string。
 - 时间：RFC 3339（UTC，`Z` 结尾）。

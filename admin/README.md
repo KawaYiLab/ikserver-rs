@@ -53,7 +53,7 @@ pnpm build            # nuxt generate → .output/public
 ## 部署
 
 后台挂在后端域名下：`https://ik.tiwat.cn/admin/`，与 `/v1` 同源（见
-[ADR 0002](../docs/adr/0002-same-origin-web-api.md)）。不需要单独发布：`pnpm build` 的产物
+[ADR 0005](../docs/adr/0005-edgeone-direct-origin.md)）。不需要单独发布：`pnpm build` 的产物
 （`.output/public`）在编译 release 版 `ik-server` 时整个嵌进可执行文件，由
 [`crates/server/src/admin_ui.rs`](../crates/server/src/admin_ui.rs) 提供。所以发布顺序固定是
 **先 `pnpm build`，再编译 ik-server**，[`deploy/release.sh`](../deploy/release.sh) 已经按这个顺序做好，见
