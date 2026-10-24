@@ -18,6 +18,7 @@ fn corpus() -> Corpus {
         manifest: Some(json!({"source_version":"3.3.0","accuracy_first":false})),
         story,
         supplement: None,
+        extra: None,
         lore: Default::default(),
     })
     .unwrap()
@@ -341,6 +342,7 @@ fn generated_schemas_are_self_contained_and_match_results() {
             manifest: Some(json!({"source_version":"3.3.0"})),
             story: detail_story,
             supplement: None,
+            extra: None,
             lore: Default::default(),
         })
         .unwrap();
@@ -409,6 +411,7 @@ fn window_fallback_keeps_documents_that_have_only_one_term() {
         manifest: None,
         story: String::new(),
         supplement: None,
+        extra: None,
         lore: Default::default(),
     };
     bundle.story = [
@@ -441,6 +444,7 @@ fn windows_are_minimal_and_show_local_order_evidence() {
         manifest: None,
         story: String::new(),
         supplement: None,
+        extra: None,
         lore: Default::default(),
     };
     bundle.story=["甲","乙","乙"].iter().enumerate().map(|(i,t)|json!({"chapter":"Chapter240","family":"GalGame","scene":"0","order":i,"text":t,"line_order_source":"archive_table","line_order_status":"unknown"}).to_string()).collect::<Vec<_>>().join("\n");
@@ -519,6 +523,7 @@ fn long_search_excerpts_are_truncated_and_read_is_complete() {
         manifest: None,
         story: String::new(),
         supplement: None,
+        extra: None,
         lore: Default::default(),
     };
     b.story=json!({"chapter":"Chapter240","family":"GalGame","scene":"0","order":0,"text":format!("天空{}","甲".repeat(1000))}).to_string();
@@ -655,7 +660,7 @@ async fn http_cursor_and_coverage_contracts_use_the_same_snapshot() {
 
 #[test]
 fn window_body_matches_do_not_become_attribution_matches() {
-    let b=Bundle {format:1,manifest:None,story:json!({"chapter":"Chapter240","family":"GalGame","scene":"0","order":0,"text":"天空","speaker":"角色甲","line_type":"dialogue","speaker_status":"inferred"}).to_string(),supplement:None,lore:Default::default()};
+    let b=Bundle {format:1,manifest:None,story:json!({"chapter":"Chapter240","family":"GalGame","scene":"0","order":0,"text":"天空","speaker":"角色甲","line_type":"dialogue","speaker_status":"inferred"}).to_string(),supplement:None, extra: None,lore:Default::default()};
     let c = build_from_bundle(&b).unwrap();
     for args in [
         json!({"keyword":"天空","matchUnit":"window"}),
@@ -683,6 +688,7 @@ fn fully_shown_window_does_not_offer_an_empty_more_matches_call() {
             .collect::<Vec<_>>()
             .join("\n"),
         supplement: None,
+        extra: None,
         lore: Default::default(),
     };
     let c = build_from_bundle(&b).unwrap();

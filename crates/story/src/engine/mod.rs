@@ -211,8 +211,11 @@ pub(crate) fn parse_scope(scope: Option<&str>) -> Result<Option<DocKind>, ToolEr
         "story" | "main" | "主线" | "剧情" => Ok(Some(DocKind::Story)),
         "supplement" | "补充" | "过场" | "漫画" => Ok(Some(DocKind::Supplement)),
         "lore" | "设定" | "世界观" => Ok(Some(DocKind::Lore)),
+        "event" | "extra" | "activity" | "side" | "活动" | "支线" | "代理人故事" | "活动与支线" => {
+            Ok(Some(DocKind::Event))
+        }
         other => err(format!(
-            "scope 只能是 all / story / supplement / lore，收到「{other}」"
+            "scope 只能是 all / story / supplement / lore / event，收到「{other}」"
         )),
     }
 }

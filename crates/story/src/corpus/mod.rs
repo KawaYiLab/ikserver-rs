@@ -79,6 +79,8 @@ pub enum DocKind {
     Supplement,
     /// 世界观设定（lore/**/*.md）。
     Lore,
+    /// 活动、支线、代理人故事、空洞事件（extra.jsonl）。
+    Event,
 }
 
 impl DocKind {
@@ -87,6 +89,17 @@ impl DocKind {
             DocKind::Story => "主线",
             DocKind::Supplement => "补充",
             DocKind::Lore => "设定",
+            DocKind::Event => "活动与支线",
+        }
+    }
+
+    /// 对外的 content type / scope 名。
+    pub fn scope_name(self) -> &'static str {
+        match self {
+            DocKind::Story => "story",
+            DocKind::Supplement => "supplement",
+            DocKind::Lore => "lore",
+            DocKind::Event => "event",
         }
     }
 }
@@ -131,6 +144,8 @@ impl Doc {
 pub enum GroupKind {
     Chapter,
     Lore,
+    /// 一个活动 / 支线表 / 代理人故事：`ev:activity.SayItWithFlowers`。
+    Event,
 }
 
 #[derive(Debug, Clone)]
@@ -262,7 +277,10 @@ impl Corpus {
             return Some(i);
         }
         let folded = crate::text::fold(q);
-        let token = folded.trim_start_matches("ch:").trim_start_matches("lore:");
+        let token = folded
+            .trim_start_matches("ch:")
+            .trim_start_matches("lore:")
+            .trim_start_matches("ev:");
         let by_token = self.groups.iter().position(|g| {
             let gid = g.id.to_ascii_lowercase();
             let tail = gid.split(':').nth(1).unwrap_or("");

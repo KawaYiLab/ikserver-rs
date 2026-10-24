@@ -10,7 +10,7 @@ fn corpus() -> Corpus {
         format: 1,
         manifest: Some(json!({"source_version":"3.3.0","accuracy_first":false})),
         story: (0..2).map(|scene| json!({"chapter":"Chapter240","chapter_label":"天空章","family":"GalGame","scene":scene.to_string(),"order":scene,"text":"天空核心","speaker":"哲","speaker_status":"resolved","line_type":"dialogue","order_source":"archive_table","line_order_source":"source_key"}).to_string()).collect::<Vec<_>>().join("\n"),
-        supplement: None, lore: Default::default(),
+        supplement: None, extra: None, lore: Default::default(),
     }).unwrap()
 }
 fn rpc(c: &Corpus, tool: &str, args: Value) -> Value {

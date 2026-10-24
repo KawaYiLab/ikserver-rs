@@ -526,11 +526,7 @@ pub(super) fn typed_result(
         query: keyword.into(),
         resolved_range: SearchRange {
             scope: match f.kind {
-                Some(k) => match k {
-                    crate::corpus::DocKind::Story => "story",
-                    crate::corpus::DocKind::Supplement => "supplement",
-                    crate::corpus::DocKind::Lore => "lore",
-                },
+                Some(k) => k.scope_name(),
                 None => "all",
             }
             .into(),

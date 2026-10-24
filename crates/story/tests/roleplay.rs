@@ -166,6 +166,7 @@ fn corpus() -> Corpus {
         manifest: Some(json!({"source_version":"3.3.0","accuracy_first":false})),
         story: rows.join("\n"),
         supplement: None,
+        extra: None,
         lore,
     })
     .unwrap()

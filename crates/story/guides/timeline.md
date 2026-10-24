@@ -16,3 +16,4 @@
 - `document.nextRead` 为文档原文入口；`nextCall` / `nextDirectoryCall` 为保留原查询条件的分页入口。
 - `includeSources=true` 返回可用资源标识，`includeEvidence=true` 返回行序与资源关联的来源证据。
 - 设定资料中可能包含事件历程与背景时间信息，其文档类型为 `lore`，与主线演出分开记录。
+- 活动剧情、支线委托、代理人故事与空洞事件的文档类型为 `event`（分组 `ev:…`，`scope=event`），按来源表分组，与主线章节没有已核验的先后关系。

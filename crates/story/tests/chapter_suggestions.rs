@@ -28,6 +28,7 @@ fn corpus() -> Corpus {
         manifest: Some(json!({"source_version":"3.3.0"})),
         story,
         supplement: None,
+        extra: None,
         lore: Default::default(),
     })
     .unwrap()

@@ -3,6 +3,7 @@
 //! 读取：
 //! - `story.jsonl`：主线台词（一行一句，按章节 → 场景 → 行排序）
 //! - `supplement.jsonl`：过场字幕 / 漫画（可选）
+//! - `extra.jsonl`：活动、支线、代理人故事、空洞事件（可选），字段与 story.jsonl 相同，另有 `domain`
 //! - `lore/**/*.md`：世界观设定（可选），按标题切成独立文档
 //! - `manifest.json`：数据版本（可选）
 
@@ -210,6 +211,15 @@ pub fn build_from_bundle(bundle: &Bundle) -> Result<Corpus> {
             legacy_orders,
         )?;
     }
+    if let Some(extra) = &bundle.extra {
+        ingest_jsonl(
+            &mut builder,
+            "extra.jsonl",
+            extra,
+            DocKind::Event,
+            legacy_orders,
+        )?;
+    }
     ingest_lore(&mut builder, &bundle.lore);
     if builder.docs.is_empty() {
         bail!("语料包里没有任何可用的文本");
@@ -260,6 +270,7 @@ pub fn family_label(family: &str) -> &str {
         "OngoingAntique" => "古董店对话",
         "CS" => "过场字幕",
         "Comic" => "漫画",
+        "AutoEvent" => "空洞事件",
         other => other,
     }
 }
@@ -373,17 +384,22 @@ fn ingest_jsonl(
             .as_deref()
             .unwrap_or(&row.chapter)
             .to_owned();
+        let (group_prefix, group_kind) = if kind == DocKind::Event {
+            ("ev", GroupKind::Event)
+        } else {
+            ("ch", GroupKind::Chapter)
+        };
         let group = builder.group(
-            format!("ch:{}", row.chapter),
-            GroupKind::Chapter,
+            format!("{group_prefix}:{}", row.chapter),
+            group_kind,
             &chapter_label,
             chapter_order(&row.chapter_order, legacy)
                 .with_context(|| format!("{name} chapter_order 无效"))?,
         );
-        let prefix = if kind == DocKind::Story {
-            "story"
-        } else {
-            "sup"
+        let prefix = match kind {
+            DocKind::Story => "story",
+            DocKind::Event => "ev",
+            _ => "sup",
         };
         let key = format!("{prefix}|{}|{}|{}", row.chapter, row.family, row.scene);
         let doc = match doc_by_key.get(&key) {

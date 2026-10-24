@@ -9,7 +9,7 @@ fn read_only() -> Value {
 pub fn definitions() -> Result<Value, serde_json::Error> {
     let cursor = json!({"type":"string","maxLength":16384,"description":"快照绑定的分页游标，包含原查询条件；与其他查询参数互斥。"});
     let detail = json!({"type":"string","enum":["compact","full"],"default":"compact","description":"compact 简明结果；full 展开说明。逐行证据由 includeEvidence 控制。"});
-    let scope = json!({"type":"string","enum":["all","story","supplement","lore"]});
+    let scope = json!({"type":"string","enum":["all","story","supplement","lore","event"]});
     let evidence = json!({"type":"boolean","default":false,"description":"展开逐行来源证据，未知状态保持未知。"});
     let integer =
         |min, max, default| json!({"type":"integer","minimum":min,"maximum":max,"default":default});
@@ -17,7 +17,7 @@ pub fn definitions() -> Result<Value, serde_json::Error> {
         (
             "ik_catalog",
             "剧情目录",
-            "返回章节与设定目录。path 支持分组ID、章节名、已核验版本别名或docId。manifest=true 返回固定范围清单；nextRead 为原文入口。目录相邻不表示剧情先后。",
+            "返回章节、活动与支线、设定目录。path 支持分组ID、章节名、已核验版本别名或docId。manifest=true 返回固定范围清单；nextRead 为原文入口。目录相邻不表示剧情先后。",
             json!({"path":{"type":"string"},"keyword":{"type":"string","description":"标题/路径筛选；标题筛选与manifest=true互斥，path未指定时支持已核验版本别名。"},"offset":integer(0,usize::MAX,0),"maxResults":integer(1,500,100),"cursor":cursor,"detail":detail,"includeEvidence":evidence,"manifest":{"type":"boolean","default":false},"scope":scope,"excludePlaceholders":{"type":"boolean","default":false,"description":"仅排除整篇全部为占位的文档，混合文档保留。"},"excludeUnlinked":{"type":"boolean","default":false,"description":"仅排除整篇全部为未关联候选的文档，混合文档保留。"}}),
         ),
         (
