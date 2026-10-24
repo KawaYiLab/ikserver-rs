@@ -605,16 +605,16 @@ async fn engine_comment_search_and_removal(db: PgPool) {
         "匿名评论的作者名不进索引"
     );
 
-    // 删除一级评论：回复随之从索引删除。
+    // 删除被回复的评论：只从索引删它自己，回复它的评论保留（扁平楼层，ADR 0006）。
     sqlx::query!("DELETE FROM comments WHERE id = 1")
         .execute(&h.db)
         .await
         .unwrap();
     h.search.remove_comments_now(&[1]).await.unwrap();
-    let page = service::search_comments(&h.search, None, comments("绳网"))
-        .await
-        .unwrap();
-    assert_eq!(page.total, 0);
+    assert_eq!(
+        h.comment_bodies(None, comments("绳网")).await,
+        ["匿名回复绳网"]
+    );
     h.search.drop_indexes().await.unwrap();
 }
 
