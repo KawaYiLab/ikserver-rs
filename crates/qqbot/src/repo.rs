@@ -298,6 +298,8 @@ pub(crate) async fn terminal(
     )
     .execute(c)
     .await?;
+    // 「机器人没反应」时按这一行排查：跳过 / 失败的原因。
+    tracing::info!(turn_id = id, status, reason, "QQ 回复结束");
     Ok(())
 }
 pub(crate) async fn notify_once(

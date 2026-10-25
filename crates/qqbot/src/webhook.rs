@@ -28,45 +28,72 @@ async fn webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, Problem> {
+    // 生产日志级别下 HTTP 请求本身不打印，这里的每个出口都要留一条，否则「机器人不回复」无从排查。
+    // 不记 openid、正文、签名与密钥。
     if !state.config.enabled {
+        tracing::warn!("收到 QQ 回调，但 IK_QQBOT__ENABLED=false，已拒绝");
         return Err(Problem::unauthorized());
     }
-    let app_id = header(&headers, "x-bot-appid").ok_or_else(Problem::unauthorized)?;
-    let app = state
-        .config
-        .apps
-        .values()
-        .find(|a| a.app_id == app_id)
-        .ok_or_else(Problem::unauthorized)?;
+    let Some(app_id) = header(&headers, "x-bot-appid") else {
+        tracing::warn!("QQ 回调缺少 X-Bot-Appid，已拒绝");
+        return Err(Problem::unauthorized());
+    };
+    let Some(app) = state.config.apps.values().find(|a| a.app_id == app_id) else {
+        tracing::warn!(app_id, "QQ 回调的 AppID 不在部署配置里，已拒绝");
+        return Err(Problem::unauthorized());
+    };
     let payload = authenticate(
         app.secret.expose(),
         state.config.allow_validation,
         &headers,
         &body,
-    )?;
+    )
+    .inspect_err(|problem| {
+        tracing::warn!(
+            app_id,
+            status = problem.status().as_u16(),
+            signed = headers.contains_key("x-signature-ed25519"),
+            "QQ 回调验签或校验失败（AppSecret 与平台不一致、或未签名的校验请求但开关关着）"
+        );
+    })?;
     if !state.allow_webhook(app_id) {
+        tracing::warn!(app_id, "QQ 回调超过每秒限流");
         return Err(Problem::rate_limited().with_retry_after(1));
     }
     if let Authenticated::Validation(result) = payload {
+        tracing::info!(app_id, "已应答 QQ 回调地址校验（op=13）");
         return Ok(Json(result));
     }
     // Only authenticated event bytes are ever parsed as a normal event.
-    let envelope: Envelope = serde_json::from_slice(&body).map_err(|_| invalid("JSON 无效"))?;
+    let envelope: Envelope = serde_json::from_slice(&body).map_err(|error| {
+        tracing::warn!(app_id, %error, "QQ 回调不是合法的 JSON");
+        invalid("JSON 无效")
+    })?;
     if envelope.op == 0 {
         match envelope.t.as_str() {
             "GROUP_AT_MESSAGE_CREATE" | "GROUP_MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
-                let message: Incoming =
-                    serde_json::from_value(envelope.d).map_err(|_| invalid("消息字段无效"))?;
+                let message: Incoming = serde_json::from_value(envelope.d).map_err(|error| {
+                    tracing::warn!(app_id, event = %envelope.t, %error, "QQ 消息事件字段无法解析");
+                    invalid("消息字段无效")
+                })?;
+                tracing::info!(app_id, event = %envelope.t, msg_id = %message.id, bot = message.author.bot, "收到 QQ 消息事件");
                 if !message.author.bot {
-                    repo::ingest(&state, app_id, &envelope.t, message).await?;
+                    repo::ingest(&state, app_id, &envelope.t, message)
+                        .await
+                        .inspect_err(|problem| {
+                            tracing::error!(app_id, event = %envelope.t, ?problem, "QQ 消息入库失败");
+                        })?;
                 }
             }
             "GROUP_ADD_ROBOT" | "GROUP_DEL_ROBOT" | "FRIEND_ADD" | "FRIEND_DEL" => {
+                tracing::info!(app_id, event = %envelope.t, "收到 QQ 群 / 好友事件");
                 let receipt = hex(ring::digest::digest(&ring::digest::SHA256, &body).as_ref());
                 repo::lifecycle(&state, app_id, &envelope.t, &envelope.d, &receipt).await?;
             }
-            _ => {}
+            other => tracing::info!(app_id, event = other, "忽略未处理的 QQ 事件"),
         }
+    } else {
+        tracing::info!(app_id, op = envelope.op, "忽略非事件的 QQ 回调");
     }
     Ok(Json(json!({"op":12,"d":0})))
 }

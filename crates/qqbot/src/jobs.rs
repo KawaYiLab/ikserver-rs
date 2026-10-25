@@ -581,7 +581,11 @@ async fn deliver(s: &QqState, mut t: Turn) -> Result<(), Problem> {
                     accepted = rendered;
                     None
                 }
-                Ok(Err(e)) => Some((e.reason(), e.retryable())),
+                Ok(Err(e)) => {
+                    // SendError 的 Display 只含 HTTP 状态与平台错误码，不含 token、openid、正文。
+                    tracing::warn!(turn_id = t.id, error = %e, "QQ 发送失败");
+                    Some((e.reason(), e.retryable()))
+                }
                 Err(_) => Some(("window_expired", false)),
             }
         };
@@ -619,6 +623,7 @@ async fn deliver(s: &QqState, mut t: Turn) -> Result<(), Problem> {
         tx.commit().await?;
         t.segments_sent = index as i32 + 1;
     }
+    tracing::info!(turn_id = t.id, segments = output.len(), "QQ 回复已发送");
     let mut tx = s.db.begin().await?;
     sqlx::query!(
         "UPDATE qq_turns SET status='completed',finished_at=$2 WHERE id=$1",
