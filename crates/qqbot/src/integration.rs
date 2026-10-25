@@ -893,3 +893,51 @@ async fn signed_group_event_goes_through_the_webhook(db: PgPool) {
     assert_eq!(count(&s, "SELECT count(*) FROM qq_messages").await, 1);
     server.abort();
 }
+
+/// 全量模式先推了这条消息（没认出 @），随后群 @ 事件又推了同一条：补上 @ 并回复一次；再推不重复。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn an_at_event_after_the_full_mode_copy_still_gets_a_reply(db: PgPool) {
+    let (s, llm, qq, server) = setup(db).await;
+    let plain = message(
+        "same",
+        "alice",
+        Some("group"),
+        "机器人在吗",
+        Duration::zero(),
+    );
+    repo::ingest(&s, "123", "GROUP_MESSAGE_CREATE", plain)
+        .await
+        .unwrap();
+    assert_eq!(count(&s, "SELECT count(*) FROM qq_turns").await, 0);
+    for _ in 0..2 {
+        let at = message(
+            "same",
+            "alice",
+            Some("group"),
+            "机器人在吗",
+            Duration::zero(),
+        );
+        repo::ingest(&s, "123", "GROUP_AT_MESSAGE_CREATE", at)
+            .await
+            .unwrap();
+    }
+    assert_eq!(count(&s, "SELECT count(*) FROM qq_turns").await, 1);
+    let turn: i64 = sqlx::query_scalar("SELECT id FROM qq_turns")
+        .fetch_one(&s.db)
+        .await
+        .unwrap();
+    jobs::run_reply(&s, turn).await.unwrap();
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(qq.sent.lock().unwrap().len(), 1);
+    // 全量模式里 @ 机器人：mentions 带 bot=true（没有 is_you）也算。
+    let full: crate::webhook::Incoming = serde_json::from_value(json!({
+        "id": "full-at", "content": "<@BOTMEMBER> 你好", "timestamp": Utc::now(), "group_openid": "group",
+        "author": {"member_openid": "bob"}, "mentions": [{"member_openid": "BOTMEMBER", "bot": true}]
+    }))
+    .unwrap();
+    repo::ingest(&s, "123", "GROUP_MESSAGE_CREATE", full)
+        .await
+        .unwrap();
+    assert_eq!(count(&s, "SELECT count(*) FROM qq_turns").await, 2);
+    server.abort();
+}

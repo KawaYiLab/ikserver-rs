@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_messages SET mentioned=TRUE WHERE app_id=$1 AND qq_msg_id=$2 AND direction='in' AND NOT mentioned RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_messages",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "39791d235a95d336f9824479c0e4f5ce8eab122f280e50ff025320a184bcc66c"
+}

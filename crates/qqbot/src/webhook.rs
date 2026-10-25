@@ -256,6 +256,8 @@ pub(crate) struct Author {
 pub(crate) struct Mention {
     #[serde(default, deserialize_with = "flag")]
     pub is_you: bool,
+    #[serde(default, deserialize_with = "flag")]
+    pub bot: bool,
 }
 
 fn text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
@@ -301,9 +303,12 @@ fn timestamp<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<DateTime<U
     })
 }
 
+/// 这条群消息是不是在 @ 本机器人。群 @ 事件一定是；全量模式（GROUP_MESSAGE_CREATE）里 @ 写成
+/// `<@机器人在这个群的 member_openid>`，我们不知道这个 openid，`mentions` 也没有 `is_you`（官方文档 2026-09），
+/// 所以把被 @ 的机器人（`mentions[].bot`）都当成在 @ 我们：群里有多个机器人时，@ 别的机器人也会触发，代价可接受。
 pub(crate) fn mentioned(message: &Incoming, app_id: &str, event: &str) -> bool {
     event == "GROUP_AT_MESSAGE_CREATE"
-        || message.mentions.iter().any(|m| m.is_you)
+        || message.mentions.iter().any(|m| m.is_you || m.bot)
         || message.content.contains(&format!("<@!{app_id}>"))
         || message.content.contains(&format!("<@{app_id}>"))
 }
@@ -490,6 +495,22 @@ mod tests {
         assert!(authenticate("abc", false, &headers, body).is_err());
     }
     #[test]
+    fn official_validation_example() {
+        // 官方「事件订阅与通知 → Webhook 方式」页面的回调验证示例（appid 11111111）。
+        let body =
+            br#"{"d":{"plain_token":"Arq0D5A61EgUu4OxUvOp","event_ts":"1725442341"},"op":13}"#;
+        let Ok(Authenticated::Validation(reply)) =
+            authenticate("DG5g3B4j9X2KOErG", true, &HeaderMap::new(), body)
+        else {
+            panic!("官方示例应当应答");
+        };
+        assert_eq!(
+            reply["signature"],
+            "87befc99c42c651b3aac0278e71ada338433ae26fcb24307bdc5ad38c1adc2d01bcfcadc0842edac85e85205028a1132afe09280305f13aa6909ffc2d652c706"
+        );
+    }
+
+    #[test]
     fn signed_validation_is_answered_without_the_switch() {
         // 平台的校验请求若带签名头：验签通过就直接应答（不再回 op=12），开关关着也行。
         let secret = "naOC0ocQE3shWLAfffVLB1rhYPG7";
@@ -566,6 +587,26 @@ mod tests {
         );
     }
     #[test]
+    fn official_group_at_example_parses() {
+        // 官方「群@机器人消息」页面的示例 1（2026-09 版）：content 已去掉 @ 前缀，带 member_role、message_type。
+        let message: Incoming = serde_json::from_value(json!({
+            "id": "ROBOT1.0_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "author": {"id": "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4", "member_openid": "A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4",
+                       "member_role": "member", "username": "小明", "bot": false},
+            "content": " /今日天气 ", "group_openid": "B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4E5",
+            "message_type": 0, "timestamp": "2026-07-21T10:00:00+08:00",
+            "message_scene": {"source": "default", "ext": ["msg_idx=REFIDX_xxxxxxxxxxxxxxx==", "auth_token=x"]}
+        }))
+        .unwrap();
+        assert_eq!(
+            message.author.member_openid.as_deref(),
+            Some("A1B2C3D4E5F6A1B2C3D4E5F6A1B2C3D4")
+        );
+        assert!(mentioned(&message, "1", "GROUP_AT_MESSAGE_CREATE"));
+        assert_eq!(crate::text::incoming(&message.content), "/今日天气");
+    }
+
+    #[test]
     fn real_world_event_shapes_parse() {
         // 群 @：RFC3339 带 +08:00、mentions 带 is_you、多余字段（message_scene 等）忽略。
         let group: Incoming = serde_json::from_value(json!({
@@ -604,7 +645,10 @@ mod tests {
     fn all_message_mode_only_replies_to_mentions() {
         let mut msg: Incoming = serde_json::from_value(json!({"id":"1","timestamp":"2026-10-25T00:00:00Z","content":"hello","author":{"member_openid":"a"},"mentions":[]})).unwrap();
         assert!(!mentioned(&msg, "123", "GROUP_MESSAGE_CREATE"));
-        msg.mentions.push(Mention { is_you: true });
+        msg.mentions.push(Mention {
+            is_you: true,
+            bot: false,
+        });
         assert!(mentioned(&msg, "123", "GROUP_MESSAGE_CREATE"));
         msg.mentions.clear();
         msg.content = "<@123> hello".to_owned();

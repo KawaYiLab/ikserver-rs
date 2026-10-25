@@ -101,7 +101,23 @@ pub(crate) async fn ingest(
     let content = text::incoming(&m.content);
     let message_id = s.ids.next_raw();
     let inserted=sqlx::query!("INSERT INTO qq_messages(id,app_id,identity_id,group_id,direction,mentioned,content,qq_msg_id,created_at) VALUES($1,$2,$3,$4,'in',$5,$6,$7,$8) ON CONFLICT(app_id,qq_msg_id) WHERE direction='in' DO NOTHING",message_id,app_id,identity_id,group_id,trigger,content,m.id,sent_at).execute(&mut *tx).await?.rows_affected()>0;
-    if inserted && trigger {
+    // 同一条消息可能先以全量事件（没认出 @）到达、再以群 @ 事件到达（消息 id 相同）：补上 @ 标记并建回复任务。
+    let message_id = if inserted {
+        Some(message_id)
+    } else if trigger {
+        sqlx::query_scalar!(
+            "UPDATE qq_messages SET mentioned=TRUE WHERE app_id=$1 AND qq_msg_id=$2 AND direction='in' AND NOT mentioned RETURNING id",
+            app_id,
+            m.id
+        )
+        .fetch_optional(&mut *tx)
+        .await?
+    } else {
+        None
+    };
+    if let Some(message_id) = message_id
+        && trigger
+    {
         let turn_id = s.ids.next_raw();
         let execution_key = format!("qq:{app_id}:{}", m.id);
         sqlx::query!("INSERT INTO qq_turns(id,execution_key,message_id,identity_id,group_id) VALUES($1,$2,$3,$4,$5)",turn_id,execution_key,message_id,identity_id,group_id).execute(&mut *tx).await?;
