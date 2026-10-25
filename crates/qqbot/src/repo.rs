@@ -77,14 +77,13 @@ pub(crate) async fn ingest(
     } else {
         m.author.user_openid.as_deref()
     }
+    .or(m.author.id.as_deref())
     .filter(|v| !v.is_empty() && v.len() <= 256)
     .ok_or_else(|| Problem::field("author", "INVALID", "缺少身份"))?;
     let trigger = !group || mentioned(&m, app_id, event);
     let now = Utc::now();
-    // A future timestamp must not extend the passive reply window.
-    if m.timestamp > now + chrono::Duration::minutes(1) {
-        return Err(Problem::field("timestamp", "INVALID", "消息时间无效"));
-    }
+    // 被动回复窗口从消息时间算：没有时间或时间在未来（时钟偏差）时按收到的时刻，不能借此延长窗口。
+    let sent_at = m.timestamp.filter(|t| *t <= now).unwrap_or(now);
     let mut tx = s.db.begin().await?;
     let group_id = if group {
         let group_openid = m
@@ -101,7 +100,7 @@ pub(crate) async fn ingest(
     let identity_id=sqlx::query_scalar!("INSERT INTO qq_identities(id,app_id,scene,openid,group_id,nickname,last_active_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(app_id,scene,openid,group_id) DO UPDATE SET nickname=EXCLUDED.nickname,last_active_at=EXCLUDED.last_active_at RETURNING id",s.ids.next_raw(),app_id,scene,openid,group_id,nickname,now).fetch_one(&mut *tx).await?;
     let content = text::incoming(&m.content);
     let message_id = s.ids.next_raw();
-    let inserted=sqlx::query!("INSERT INTO qq_messages(id,app_id,identity_id,group_id,direction,mentioned,content,qq_msg_id,created_at) VALUES($1,$2,$3,$4,'in',$5,$6,$7,$8) ON CONFLICT(app_id,qq_msg_id) WHERE direction='in' DO NOTHING",message_id,app_id,identity_id,group_id,trigger,content,m.id,m.timestamp).execute(&mut *tx).await?.rows_affected()>0;
+    let inserted=sqlx::query!("INSERT INTO qq_messages(id,app_id,identity_id,group_id,direction,mentioned,content,qq_msg_id,created_at) VALUES($1,$2,$3,$4,'in',$5,$6,$7,$8) ON CONFLICT(app_id,qq_msg_id) WHERE direction='in' DO NOTHING",message_id,app_id,identity_id,group_id,trigger,content,m.id,sent_at).execute(&mut *tx).await?.rows_affected()>0;
     if inserted && trigger {
         let turn_id = s.ids.next_raw();
         let execution_key = format!("qq:{app_id}:{}", m.id);

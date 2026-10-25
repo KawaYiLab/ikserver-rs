@@ -849,3 +849,47 @@ async fn role_and_reset_commands_work_in_private_chat_only(db: PgPool) {
     assert!(last_sent(&qq).contains("管理员"));
     server.abort();
 }
+
+/// 带签名的真实格式群事件走完整的 webhook：验签、宽松解析、入库、建回复任务；解析不了的事件也 ACK。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn signed_group_event_goes_through_the_webhook(db: PgPool) {
+    use crate::webhook::tests_support::{call, sign};
+    let (s, llm, qq, server) = setup(db).await;
+    let body = serde_json::to_vec(&json!({
+        "op": 0, "id": "GROUP_AT_MESSAGE_CREATE:abc", "t": "GROUP_AT_MESSAGE_CREATE",
+        "d": {
+            "id": "ROBOT1.0_real", "content": " 你好呀", "timestamp": "2026-10-26T05:18:29+08:00",
+            "group_openid": "REALGROUP", "group_id": "REALGROUP",
+            "author": {"id": "REALMEMBER", "member_openid": "REALMEMBER", "union_openid": "U"},
+            "mentions": [{"scope": "single", "is_you": true, "bot": true}], "attachments": null
+        }
+    }))
+    .unwrap();
+    let (status, reply) = call(
+        &s,
+        "123",
+        "abc",
+        &sign("abc", "1761427109", &body),
+        "1761427109",
+        body,
+    )
+    .await;
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(reply, json!({"op": 12, "d": 0}));
+    let turn: i64 = sqlx::query_scalar("SELECT id FROM qq_turns")
+        .fetch_one(&s.db)
+        .await
+        .unwrap();
+    // 消息时间在过去（测试数据是固定时刻），被动窗口已过：不调用模型，也不发送。
+    jobs::run_reply(&s, turn).await.unwrap();
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
+    assert!(qq.sent.lock().unwrap().is_empty());
+    // 字段对不上的事件：ACK，不入库，也不报 4xx（否则平台反复重推）。
+    let broken =
+        serde_json::to_vec(&json!({"op": 0, "t": "C2C_MESSAGE_CREATE", "d": {"content": "x"}}))
+            .unwrap();
+    let (status, _) = call(&s, "123", "abc", &sign("abc", "1", &broken), "1", broken).await;
+    assert_eq!(status, http::StatusCode::OK);
+    assert_eq!(count(&s, "SELECT count(*) FROM qq_messages").await, 1);
+    server.abort();
+}

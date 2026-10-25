@@ -72,17 +72,28 @@ async fn webhook(
     if envelope.op == 0 {
         match envelope.t.as_str() {
             "GROUP_AT_MESSAGE_CREATE" | "GROUP_MESSAGE_CREATE" | "C2C_MESSAGE_CREATE" => {
-                let message: Incoming = serde_json::from_value(envelope.d).map_err(|error| {
-                    tracing::warn!(app_id, event = %envelope.t, %error, "QQ 消息事件字段无法解析");
-                    invalid("消息字段无效")
-                })?;
+                // 解析不了的事件记下原因后照样 ACK：回 4xx 平台会反复重推同一条。
+                let message: Incoming = match serde_json::from_value(envelope.d) {
+                    Ok(message) => message,
+                    Err(error) => {
+                        tracing::warn!(app_id, event = %envelope.t, %error, "QQ 消息事件字段无法解析，已忽略");
+                        return Ok(Json(json!({"op":12,"d":0})));
+                    }
+                };
                 tracing::info!(app_id, event = %envelope.t, msg_id = %message.id, bot = message.author.bot, "收到 QQ 消息事件");
                 if !message.author.bot {
-                    repo::ingest(&state, app_id, &envelope.t, message)
-                        .await
-                        .inspect_err(|problem| {
+                    match repo::ingest(&state, app_id, &envelope.t, message).await {
+                        Ok(()) => {}
+                        // 消息本身不合规（缺 id、缺身份）：记下后 ACK，重推也不会变好。
+                        Err(problem) if problem.status() == StatusCode::BAD_REQUEST => {
+                            tracing::warn!(app_id, event = %envelope.t, ?problem, "QQ 消息事件缺少必要字段，已忽略");
+                        }
+                        // 数据库等临时故障：返回 5xx 让平台重推。
+                        Err(problem) => {
                             tracing::error!(app_id, event = %envelope.t, ?problem, "QQ 消息入库失败");
-                        })?;
+                            return Err(problem);
+                        }
+                    }
                 }
             }
             "GROUP_ADD_ROBOT" | "GROUP_DEL_ROBOT" | "FRIEND_ADD" | "FRIEND_DEL" => {
@@ -211,36 +222,128 @@ struct Envelope {
     d: Value,
 }
 
+/// QQ 的消息事件。按宽松的方式解析：可选字段为 `null` 当作没有，时间戳接受 RFC3339、秒或毫秒（数字或字符串）。
+/// 平台文档与实际推送常有出入，任何一处对不上都不应让整条消息被拒（被拒的事件平台会反复重推）。
 #[derive(Debug, Deserialize)]
 pub(crate) struct Incoming {
+    #[serde(deserialize_with = "text")]
     pub id: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "text")]
     pub content: String,
-    pub timestamp: DateTime<Utc>,
+    #[serde(default, deserialize_with = "timestamp")]
+    pub timestamp: Option<DateTime<Utc>>,
+    #[serde(default, deserialize_with = "optional_text")]
     pub group_openid: Option<String>,
     pub author: Author,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "list")]
     pub mentions: Vec<Mention>,
 }
 #[derive(Debug, Deserialize)]
 pub(crate) struct Author {
+    #[serde(default, deserialize_with = "optional_text")]
     pub member_openid: Option<String>,
+    #[serde(default, deserialize_with = "optional_text")]
     pub user_openid: Option<String>,
-    #[serde(default)]
+    /// 部分事件只给 `id`（与场景对应的 openid）。
+    #[serde(default, deserialize_with = "optional_text")]
+    pub id: Option<String>,
+    #[serde(default, deserialize_with = "text")]
     pub username: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flag")]
     pub bot: bool,
 }
 #[derive(Debug, Deserialize)]
 pub(crate) struct Mention {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "flag")]
     pub is_you: bool,
 }
+
+fn text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(optional_text(d)?.unwrap_or_default())
+}
+fn optional_text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::String(text) => Some(text),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    })
+}
+fn flag<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    Ok(matches!(Value::deserialize(d)?, Value::Bool(true)))
+}
+fn list<'de, D: serde::Deserializer<'de>, T: serde::de::DeserializeOwned>(
+    d: D,
+) -> Result<Vec<T>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Array(items) => items
+            .into_iter()
+            .filter_map(|item| serde_json::from_value(item).ok())
+            .collect(),
+        _ => Vec::new(),
+    })
+}
+fn timestamp<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<DateTime<Utc>>, D::Error> {
+    let from_number = |n: i64| {
+        // 13 位是毫秒，10 位是秒。
+        if n > 100_000_000_000 {
+            DateTime::from_timestamp_millis(n)
+        } else {
+            DateTime::from_timestamp(n, 0)
+        }
+    };
+    Ok(match Value::deserialize(d)? {
+        Value::String(text) => DateTime::parse_from_rfc3339(text.trim())
+            .map(|t| t.with_timezone(&Utc))
+            .ok()
+            .or_else(|| text.trim().parse::<i64>().ok().and_then(from_number)),
+        Value::Number(number) => number.as_i64().and_then(from_number),
+        _ => None,
+    })
+}
+
 pub(crate) fn mentioned(message: &Incoming, app_id: &str, event: &str) -> bool {
     event == "GROUP_AT_MESSAGE_CREATE"
         || message.mentions.iter().any(|m| m.is_you)
         || message.content.contains(&format!("<@!{app_id}>"))
         || message.content.contains(&format!("<@{app_id}>"))
+}
+
+/// 集成测试用：签名与直接调用处理函数。
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use super::*;
+
+    pub(crate) fn sign(secret: &str, timestamp: &str, body: &[u8]) -> String {
+        let mut message = timestamp.as_bytes().to_vec();
+        message.extend_from_slice(body);
+        signing_key(secret)
+            .map(|key| hex(key.sign(&message).as_ref()))
+            .unwrap_or_default()
+    }
+
+    pub(crate) async fn call(
+        state: &QqState,
+        app_id: &str,
+        _secret: &str,
+        signature: &str,
+        timestamp: &str,
+        body: Vec<u8>,
+    ) -> (StatusCode, Value) {
+        let mut headers = HeaderMap::new();
+        for (name, value) in [
+            ("x-bot-appid", app_id),
+            ("x-signature-ed25519", signature),
+            ("x-signature-timestamp", timestamp),
+        ] {
+            if let Ok(value) = value.parse() {
+                headers.insert(name, value);
+            }
+        }
+        match webhook(State(state.clone()), headers, Bytes::from(body)).await {
+            Ok(Json(value)) => (StatusCode::OK, value),
+            Err(problem) => (problem.status(), Value::Null),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -462,6 +565,41 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
     }
+    #[test]
+    fn real_world_event_shapes_parse() {
+        // 群 @：RFC3339 带 +08:00、mentions 带 is_you、多余字段（message_scene 等）忽略。
+        let group: Incoming = serde_json::from_value(json!({
+            "id": "ROBOT1.0_abc", "content": " 你好", "timestamp": "2026-10-26T05:18:29+08:00",
+            "group_id": "G", "group_openid": "GROUPOPENID", "message_scene": {"source": "default"},
+            "author": {"id": "MEMBER", "member_openid": "MEMBER", "union_openid": "U"},
+            "mentions": [{"scope": "single", "id": "BOT", "is_you": true, "bot": true}],
+            "attachments": null
+        }))
+        .unwrap();
+        assert_eq!(
+            group.timestamp.unwrap().to_rfc3339(),
+            "2026-10-25T21:18:29+00:00"
+        );
+        assert!(group.mentions[0].is_you);
+        // 单聊：时间戳是秒数字符串；各种 null。
+        let c2c: Incoming = serde_json::from_value(json!({
+            "id": "1", "content": null, "timestamp": "1761427109",
+            "author": {"user_openid": "USER", "username": null, "bot": null}, "mentions": null
+        }))
+        .unwrap();
+        assert_eq!(c2c.timestamp.unwrap().timestamp(), 1_761_427_109);
+        assert!(c2c.content.is_empty() && c2c.mentions.is_empty() && !c2c.author.bot);
+        // 毫秒数字、无法识别的时间：分别解析成毫秒时刻与「没有时间」，都不报错。
+        let ms: Incoming = serde_json::from_value(
+            json!({"id": "2", "timestamp": 1_761_427_109_123_i64, "author": {"id": "X"}}),
+        )
+        .unwrap();
+        assert_eq!(ms.timestamp.unwrap().timestamp_millis(), 1_761_427_109_123);
+        let odd: Incoming =
+            serde_json::from_value(json!({"id": "3", "timestamp": "昨天", "author": {}})).unwrap();
+        assert!(odd.timestamp.is_none());
+    }
+
     #[test]
     fn all_message_mode_only_replies_to_mentions() {
         let mut msg: Incoming = serde_json::from_value(json!({"id":"1","timestamp":"2026-10-25T00:00:00Z","content":"hello","author":{"member_openid":"a"},"mentions":[]})).unwrap();
