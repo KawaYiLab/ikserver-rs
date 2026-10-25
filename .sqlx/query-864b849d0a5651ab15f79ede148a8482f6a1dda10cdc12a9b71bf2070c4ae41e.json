@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key\n         FROM ai_sessions WHERE conversation_id = $1",
+  "query": "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key,\n                summary, summary_until, summary_epoch\n         FROM ai_sessions WHERE conversation_id = $1",
   "describe": {
     "columns": [
       {
@@ -68,6 +68,39 @@
             "name": "model_key"
           }
         }
+      },
+      {
+        "ordinal": 6,
+        "name": "summary",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_sessions",
+            "name": "summary"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "summary_until",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_sessions",
+            "name": "summary_until"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "summary_epoch",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_sessions",
+            "name": "summary_epoch"
+          }
+        }
       }
     ],
     "parameters": {
@@ -81,8 +114,11 @@
       false,
       false,
       true,
+      true,
+      true,
+      true,
       true
     ]
   },
-  "hash": "da54f46449de995def2b9902d3906ca12d542dede99ee155f47e6a1849906ad2"
+  "hash": "864b849d0a5651ab15f79ede148a8482f6a1dda10cdc12a9b71bf2070c4ae41e"
 }

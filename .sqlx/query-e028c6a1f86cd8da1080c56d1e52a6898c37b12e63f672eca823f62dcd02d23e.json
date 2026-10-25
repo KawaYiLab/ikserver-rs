@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_memory_settings (id, enabled, model_key, extract_delay_secs, bridge_hours,\n                                         embedding_provider, embedding_model, updated_at)\n         VALUES (1, $1, $2, $3, $4, $5, $6, $7)\n         ON CONFLICT (id) DO UPDATE SET\n             enabled = EXCLUDED.enabled, model_key = EXCLUDED.model_key,\n             extract_delay_secs = EXCLUDED.extract_delay_secs, bridge_hours = EXCLUDED.bridge_hours,\n             embedding_provider = EXCLUDED.embedding_provider,\n             embedding_model = EXCLUDED.embedding_model, updated_at = EXCLUDED.updated_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e028c6a1f86cd8da1080c56d1e52a6898c37b12e63f672eca823f62dcd02d23e"
+}

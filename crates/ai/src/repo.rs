@@ -1,4 +1,4 @@
-//! SQL。表都归 ik-ai：`ai_settings`、`ai_providers`、`ai_models`、`ai_role_cards`、`ai_quota_*`。
+//! SQL。表都归 ik-ai：`ai_settings`、`ai_providers`、`ai_models`、`ai_role_cards`、`ai_quota_*`、`ai_memories`、`ai_memory_settings`、`ai_memory_pairs`。
 
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgConnection;
@@ -446,6 +446,20 @@ pub(crate) struct SessionRow {
     pub context_epoch: i32,
     pub context_from: Option<DateTime<Utc>>,
     pub model_key: Option<String>,
+    /// 会话滚动摘要（MEM-001）：`summary_epoch` 与当前代际一致时才有效。
+    pub summary: Option<String>,
+    pub summary_until: Option<DateTime<Utc>>,
+    pub summary_epoch: Option<i32>,
+}
+
+impl SessionRow {
+    /// 当前代际的摘要与它覆盖到的时刻（MEM-001：重置之后旧摘要作废）。
+    pub fn current_summary(&self) -> Option<(&str, DateTime<Utc>)> {
+        if self.summary_epoch != Some(self.context_epoch) {
+            return None;
+        }
+        Some((self.summary.as_deref()?, self.summary_until?))
+    }
 }
 
 pub(crate) async fn insert_session(
@@ -474,7 +488,8 @@ pub(crate) async fn session(
 ) -> sqlx::Result<Option<SessionRow>> {
     sqlx::query_as!(
         SessionRow,
-        "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key
+        "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key,
+                summary, summary_until, summary_epoch
          FROM ai_sessions WHERE conversation_id = $1",
         conversation_id,
     )
@@ -489,7 +504,8 @@ pub(crate) async fn lock_session(
 ) -> sqlx::Result<Option<SessionRow>> {
     sqlx::query_as!(
         SessionRow,
-        "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key
+        "SELECT conversation_id, user_id, ai_user_id, context_epoch, context_from, model_key,
+                summary, summary_until, summary_epoch
          FROM ai_sessions WHERE conversation_id = $1 FOR UPDATE",
         conversation_id,
     )
@@ -1185,4 +1201,724 @@ pub(crate) async fn mcp_tool_for_update(
     )
     .fetch_optional(conn)
     .await
+}
+
+// ---------- 记忆（ADR 0007） ----------
+
+/// 写会话摘要（MEM-002）。代际已经变了（期间被重置）就不写，返回 false。
+pub(crate) async fn set_summary(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    epoch: i32,
+    summary: &str,
+    until: DateTime<Utc>,
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query!(
+        "UPDATE ai_sessions SET summary = $3, summary_until = $4, summary_epoch = $2
+         WHERE conversation_id = $1 AND context_epoch = $2",
+        conversation_id,
+        epoch,
+        summary,
+        until,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected()
+        > 0)
+}
+
+/// 长期记忆的提炼进度（MEM-020）。
+pub(crate) async fn memory_until(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    Ok(sqlx::query_scalar!(
+        "SELECT memory_until FROM ai_sessions WHERE conversation_id = $1",
+        conversation_id,
+    )
+    .fetch_optional(conn)
+    .await?
+    .flatten())
+}
+
+/// 推进提炼进度（只前进）。
+pub(crate) async fn advance_memory_until(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    until: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_sessions SET memory_until = GREATEST(COALESCE(memory_until, $2), $2)
+         WHERE conversation_id = $1",
+        conversation_id,
+        until,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 同一用户与同一 AI 的其他会话（跨会话衔接，MEM-005）：会话 id 与各自的上下文起点。
+pub(crate) async fn other_sessions(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    exclude: i64,
+) -> sqlx::Result<Vec<(i64, Option<DateTime<Utc>>)>> {
+    Ok(sqlx::query!(
+        "SELECT conversation_id, context_from FROM ai_sessions
+         WHERE user_id = $1 AND ai_user_id = $2 AND conversation_id <> $3",
+        user_id,
+        ai_user_id,
+        exclude,
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.conversation_id, r.context_from))
+    .collect())
+}
+
+/// 全站的记忆设置（MEM-030）。
+pub(crate) struct MemorySettingsRow {
+    pub enabled: bool,
+    pub model_key: Option<String>,
+    pub extract_delay_secs: i32,
+    pub bridge_hours: i32,
+    pub embedding_provider: Option<String>,
+    pub embedding_model: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+pub(crate) async fn memory_settings(
+    conn: &mut PgConnection,
+) -> sqlx::Result<Option<MemorySettingsRow>> {
+    sqlx::query_as!(
+        MemorySettingsRow,
+        "SELECT enabled, model_key, extract_delay_secs, bridge_hours, embedding_provider,
+                embedding_model, updated_at
+         FROM ai_memory_settings WHERE id = 1"
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) struct NewMemorySettings<'a> {
+    pub enabled: bool,
+    pub model_key: Option<&'a str>,
+    pub extract_delay_secs: i32,
+    pub bridge_hours: i32,
+    pub embedding_provider: Option<&'a str>,
+    pub embedding_model: Option<&'a str>,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn upsert_memory_settings(
+    conn: &mut PgConnection,
+    settings: &NewMemorySettings<'_>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_memory_settings (id, enabled, model_key, extract_delay_secs, bridge_hours,
+                                         embedding_provider, embedding_model, updated_at)
+         VALUES (1, $1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (id) DO UPDATE SET
+             enabled = EXCLUDED.enabled, model_key = EXCLUDED.model_key,
+             extract_delay_secs = EXCLUDED.extract_delay_secs, bridge_hours = EXCLUDED.bridge_hours,
+             embedding_provider = EXCLUDED.embedding_provider,
+             embedding_model = EXCLUDED.embedding_model, updated_at = EXCLUDED.updated_at",
+        settings.enabled,
+        settings.model_key,
+        settings.extract_delay_secs,
+        settings.bridge_hours,
+        settings.embedding_provider,
+        settings.embedding_model,
+        settings.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 记忆的全站统计（管理后台）。
+pub(crate) struct MemoryStatsRow {
+    pub users: i64,
+    pub profile: i64,
+    pub relation: i64,
+    pub event: i64,
+    pub pending_follow_ups: i64,
+    pub with_embedding: i64,
+}
+
+pub(crate) async fn memory_stats(conn: &mut PgConnection) -> sqlx::Result<MemoryStatsRow> {
+    sqlx::query_as!(
+        MemoryStatsRow,
+        r#"SELECT count(DISTINCT user_id) AS "users!",
+                  count(*) FILTER (WHERE kind = 'profile') AS "profile!",
+                  count(*) FILTER (WHERE kind = 'relation') AS "relation!",
+                  count(*) FILTER (WHERE kind = 'event') AS "event!",
+                  count(*) FILTER (WHERE follow_up_on IS NOT NULL AND followed_up_at IS NULL)
+                      AS "pending_follow_ups!",
+                  count(*) FILTER (WHERE embedding IS NOT NULL) AS "with_embedding!"
+           FROM ai_memories"#
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 同一用户的记忆写入串行（去重、条数上限在事务里判断）。
+pub(crate) async fn lock_memories(conn: &mut PgConnection, user_id: i64) -> sqlx::Result<()> {
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtextextended('ik:ai_memories:' || $1::bigint, 0))",
+        user_id,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct MemoryRow {
+    pub id: i64,
+    pub user_id: i64,
+    pub ai_user_id: Option<i64>,
+    pub kind: String,
+    pub content: String,
+    pub pinned: bool,
+    pub origin: String,
+    pub sensitivity: String,
+    pub importance: i16,
+    pub happened_on: Option<NaiveDate>,
+    pub follow_up_on: Option<NaiveDate>,
+    pub followed_up_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 事件记忆的检索候选（MEM-052）：带向量。
+#[derive(Debug, Clone)]
+pub(crate) struct EventRow {
+    pub id: i64,
+    pub content: String,
+    pub pinned: bool,
+    pub importance: i16,
+    pub happened_on: Option<NaiveDate>,
+    pub updated_at: DateTime<Utc>,
+    pub embedding: Option<Vec<f32>>,
+    pub embedding_model: Option<String>,
+}
+
+/// 一次对话总会带上的记忆：用户档案 + 与这个 AI 的关系记忆（不含事件）。置顶的在前，其余新的在前。
+pub(crate) async fn memories_for(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories
+         WHERE user_id = $1 AND kind <> 'event' AND (ai_user_id IS NULL OR ai_user_id = $2)
+         ORDER BY pinned DESC, updated_at DESC, id DESC",
+        user_id,
+        ai_user_id,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 同一范围、同一种类的记忆（判重用）。
+pub(crate) async fn scope_memories(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: Option<i64>,
+    kind: &str,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id IS NOT DISTINCT FROM $2 AND kind = $3",
+        user_id,
+        ai_user_id,
+        kind,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 事件检索的候选：与这个 AI 的事件，最近更新的 `limit` 条。
+pub(crate) async fn events_for(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    limit: i64,
+) -> sqlx::Result<Vec<EventRow>> {
+    sqlx::query_as!(
+        EventRow,
+        "SELECT id, content, pinned, importance, happened_on, updated_at, embedding, embedding_model
+         FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $3",
+        user_id,
+        ai_user_id,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 提炼时给模型看的事件（MEM-021）：`since` 之后更新过的，或还有没问起的待跟进的。新的在前。
+pub(crate) async fn recent_events(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    since: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
+           AND (updated_at >= $3 OR (follow_up_on IS NOT NULL AND followed_up_at IS NULL))
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $4",
+        user_id,
+        ai_user_id,
+        since,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 到期、还没问起的待跟进（MEM-055）：`follow_up_on` 在 `[oldest, today]` 之间，重要的、早到期的在前。
+pub(crate) async fn due_follow_ups(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    today: NaiveDate,
+    oldest: NaiveDate,
+    limit: i64,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
+           AND follow_up_on BETWEEN $4 AND $3 AND followed_up_at IS NULL
+         ORDER BY importance DESC, follow_up_on, id
+         LIMIT $5",
+        user_id,
+        ai_user_id,
+        today,
+        oldest,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 记下这些待跟进已经问起过（MEM-056）。
+pub(crate) async fn mark_followed_up(
+    conn: &mut PgConnection,
+    ids: &[i64],
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_memories SET followed_up_at = $2
+         WHERE id = ANY($1) AND followed_up_at IS NULL",
+        ids,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 用户的全部记忆（管理后台）。
+pub(crate) async fn all_memories(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories WHERE user_id = $1
+         ORDER BY pinned DESC, updated_at DESC, id DESC",
+        user_id,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn lock_memory(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories WHERE id = $1 FOR UPDATE",
+        id,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NewMemory<'a> {
+    pub id: i64,
+    pub user_id: i64,
+    pub ai_user_id: Option<i64>,
+    pub kind: &'a str,
+    pub content: &'a str,
+    pub origin: &'a str,
+    pub sensitivity: &'a str,
+    pub importance: i16,
+    pub happened_on: Option<NaiveDate>,
+    pub follow_up_on: Option<NaiveDate>,
+    pub source_conversation_id: Option<i64>,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn insert_memory(
+    conn: &mut PgConnection,
+    memory: &NewMemory<'_>,
+) -> sqlx::Result<MemoryRow> {
+    sqlx::query_as!(
+        MemoryRow,
+        "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin, sensitivity,
+                                  importance, happened_on, follow_up_on, source_conversation_id,
+                                  created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+        memory.id,
+        memory.user_id,
+        memory.ai_user_id,
+        memory.kind,
+        memory.content,
+        memory.origin,
+        memory.sensitivity,
+        memory.importance,
+        memory.happened_on,
+        memory.follow_up_on,
+        memory.source_conversation_id,
+        memory.now,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 改一条记忆。字段为 None 的不改；日期是 `Some(None)` 时清除。改了正文时向量作废（重算），
+/// 改了待跟进日期时「已问起」清除。
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MemoryPatch<'a> {
+    pub content: Option<&'a str>,
+    pub origin: Option<&'a str>,
+    pub pinned: Option<bool>,
+    pub sensitivity: Option<&'a str>,
+    pub importance: Option<i16>,
+    pub happened_on: Option<Option<NaiveDate>>,
+    pub follow_up_on: Option<Option<NaiveDate>>,
+}
+
+pub(crate) async fn update_memory(
+    conn: &mut PgConnection,
+    id: i64,
+    patch: &MemoryPatch<'_>,
+    now: DateTime<Utc>,
+) -> sqlx::Result<MemoryRow> {
+    sqlx::query_as!(
+        MemoryRow,
+        "UPDATE ai_memories SET
+             content = COALESCE($2, content),
+             origin = COALESCE($3, origin),
+             pinned = COALESCE($4, pinned),
+             sensitivity = COALESCE($5, sensitivity),
+             importance = COALESCE($6, importance),
+             happened_on = CASE WHEN $7 THEN $8 ELSE happened_on END,
+             follow_up_on = CASE WHEN $9 THEN $10 ELSE follow_up_on END,
+             followed_up_at = CASE WHEN $9 THEN NULL ELSE followed_up_at END,
+             embedding = CASE WHEN $2::text IS NULL THEN embedding END,
+             embedding_model = CASE WHEN $2::text IS NULL THEN embedding_model END,
+             updated_at = $11
+         WHERE id = $1
+         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+        id,
+        patch.content,
+        patch.origin,
+        patch.pinned,
+        patch.sensitivity,
+        patch.importance,
+        patch.happened_on.is_some(),
+        patch.happened_on.flatten(),
+        patch.follow_up_on.is_some(),
+        patch.follow_up_on.flatten(),
+        now,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 删掉用户自己的几条记忆，返回实际删掉的。
+pub(crate) async fn delete_memories(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ids: &[i64],
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "DELETE FROM ai_memories WHERE user_id = $1 AND id = ANY($2)
+         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+        user_id,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 清空记忆（MEM-032）：给了 AI 只清与它的关系与事件记忆，否则清空全部。返回删掉的条数。
+pub(crate) async fn clear_memories(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: Option<i64>,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "DELETE FROM ai_memories WHERE user_id = $1 AND ($2::bigint IS NULL OR ai_user_id = $2)",
+        user_id,
+        ai_user_id,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 超出条数上限时淘汰（MEM-013、MEM-053）：不动置顶的；先淘汰后台提炼的，再按重要度从低到高、
+/// 最久没更新的。返回淘汰的条数。
+pub(crate) async fn trim_memories(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: Option<i64>,
+    kind: &str,
+    limit: i64,
+) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "DELETE FROM ai_memories WHERE id IN (
+             SELECT id FROM ai_memories
+             WHERE user_id = $1 AND ai_user_id IS NOT DISTINCT FROM $2 AND kind = $3 AND NOT pinned
+             ORDER BY (origin = 'extracted') DESC, importance, updated_at, id
+             LIMIT GREATEST((SELECT count(*) FROM ai_memories
+                             WHERE user_id = $1 AND ai_user_id IS NOT DISTINCT FROM $2
+                               AND kind = $3) - $4, 0))",
+        user_id,
+        ai_user_id,
+        kind,
+        limit,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 还没有（或模型不同的）向量的事件（MEM-054），最多 `limit` 条。
+pub(crate) async fn missing_embeddings(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    model: &str,
+    limit: i64,
+) -> sqlx::Result<Vec<(i64, String)>> {
+    Ok(sqlx::query!(
+        "SELECT id, content FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
+           AND embedding_model IS DISTINCT FROM $3
+         ORDER BY updated_at DESC, id DESC
+         LIMIT $4",
+        user_id,
+        ai_user_id,
+        model,
+        limit,
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.id, r.content))
+    .collect())
+}
+
+/// 写向量。正文在算向量期间被改过（`content` 不一致）就不写。
+pub(crate) async fn set_embedding(
+    conn: &mut PgConnection,
+    id: i64,
+    content: &str,
+    embedding: &[f32],
+    model: &str,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_memories SET embedding = $3, embedding_model = $4
+         WHERE id = $1 AND content = $2",
+        id,
+        content,
+        embedding,
+        model,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+// ---------- 记忆第三期：整理、遗忘、翻聊天记录（ADR 0007） ----------
+
+/// 同一用户与同一 AI 的全部会话（久别重逢算上次聊天的时刻，MEM-100）。
+pub(crate) async fn pair_sessions(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT conversation_id FROM ai_sessions WHERE user_id = $1 AND ai_user_id = $2",
+        user_id,
+        ai_user_id,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 翻聊天记录能看的会话（MEM-095）：同一用户与同一 AI 的会话与各自的上下文起点。
+pub(crate) async fn recall_sessions(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+) -> sqlx::Result<Vec<(i64, Option<DateTime<Utc>>)>> {
+    Ok(sqlx::query!(
+        "SELECT conversation_id, context_from FROM ai_sessions WHERE user_id = $1 AND ai_user_id = $2",
+        user_id,
+        ai_user_id,
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.conversation_id, r.context_from))
+    .collect())
+}
+
+/// 记下这些事件刚被想起（MEM-090）。
+pub(crate) async fn touch_recalled(
+    conn: &mut PgConnection,
+    ids: &[i64],
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_memories SET recalled_at = $2 WHERE id = ANY($1)",
+        ids,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 遗忘（MEM-090）：后台提炼、没置顶、没有待跟进的事件，重要度 ≤2 的半年没更新且 90 天没被想起、
+/// 重要度 3 的一年没更新且半年没被想起，就删掉。返回删掉的条数。
+pub(crate) async fn forget_stale(conn: &mut PgConnection, now: DateTime<Utc>) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "DELETE FROM ai_memories m
+         WHERE m.kind = 'event' AND m.origin = 'extracted' AND NOT m.pinned
+           AND (m.follow_up_on IS NULL OR m.followed_up_at IS NOT NULL)
+           AND ((m.importance <= 2 AND m.updated_at < $1::timestamptz - interval '180 days'
+                 AND (m.recalled_at IS NULL OR m.recalled_at < $1::timestamptz - interval '90 days'))
+             OR (m.importance = 3 AND m.updated_at < $1::timestamptz - interval '365 days'
+                 AND (m.recalled_at IS NULL OR m.recalled_at < $1::timestamptz - interval '180 days')))",
+        now,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 该整理的（用户, AI）（MEM-080）：`old_before` 之前的、可以整理的事件不少于 `min_events` 条，且上次整理在
+/// `stale_before` 之前（或从没整理过）。可以整理的多的在前。
+pub(crate) async fn consolidation_candidates(
+    conn: &mut PgConnection,
+    min_events: i64,
+    old_before: DateTime<Utc>,
+    stale_before: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<(i64, i64)>> {
+    Ok(sqlx::query!(
+        r#"SELECT m.user_id, m.ai_user_id AS "ai_user_id!" FROM ai_memories m
+           LEFT JOIN ai_memory_pairs p ON p.user_id = m.user_id AND p.ai_user_id = m.ai_user_id
+           WHERE m.kind = 'event' AND m.origin = 'extracted' AND NOT m.pinned AND m.updated_at < $2
+             AND (m.follow_up_on IS NULL OR m.followed_up_at IS NOT NULL)
+             AND (p.consolidated_at IS NULL OR p.consolidated_at < $3)
+           GROUP BY m.user_id, m.ai_user_id
+           HAVING count(*) >= $1
+           ORDER BY count(*) DESC, m.user_id, m.ai_user_id
+           LIMIT $4"#,
+        min_events,
+        old_before,
+        stale_before,
+        limit,
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.user_id, r.ai_user_id))
+    .collect())
+}
+
+/// 可以整理的事件（MEM-081）：后台提炼、没置顶、没有待跟进、`before` 之前更新的，按时间从早到晚。
+pub(crate) async fn consolidatable_events(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    before: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event' AND origin = 'extracted'
+           AND NOT pinned AND updated_at < $3
+           AND (follow_up_on IS NULL OR followed_up_at IS NOT NULL)
+         ORDER BY happened_on NULLS LAST, updated_at, id
+         LIMIT $4",
+        user_id,
+        ai_user_id,
+        before,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn mark_consolidated(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_memory_pairs (user_id, ai_user_id, consolidated_at) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, ai_user_id) DO UPDATE SET consolidated_at = EXCLUDED.consolidated_at",
+        user_id,
+        ai_user_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
 }

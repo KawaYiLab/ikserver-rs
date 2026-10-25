@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_memories SET followed_up_at = $2\n         WHERE id = ANY($1) AND followed_up_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e1f8cfd215c4c35d4706c6e2ebbc4f7e7fc0668c53648ae778dd6c3deca25341"
+}

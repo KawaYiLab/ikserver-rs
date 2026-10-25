@@ -514,6 +514,234 @@
         ]
       }
     },
+    "/v1/admin/ai/memories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "某个用户的 AI 记忆",
+        "description": "置顶的在前，其余最近更新的在前。",
+        "operationId": "list_user_memories",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "description": "用户 id 或用户名（不区分大小写、完全匹配，可带 @）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserMemories"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有这个用户",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/ai/memories/clear": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "清空某个用户的 AI 记忆",
+        "description": "指定角色只清这个用户与它的关系与事件记忆；不指定清空这个用户的全部记忆（含档案）。不可恢复。",
+        "operationId": "clear_user_memories",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminClearMemoriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "已清空"
+          },
+          "404": {
+            "description": "AI_CHARACTER_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/ai/memories/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "删除一条 AI 记忆",
+        "operationId": "delete_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "记忆 id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "已删除"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/ai/memory": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "AI 记忆设置与统计",
+        "operationId": "get_memory_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMemorySettings"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "修改 AI 记忆设置",
+        "description": "总开关、摘要与提炼用的模型、提炼延迟、跨会话衔接时长、事件向量的提供方与模型。\n本实例立即生效，其他实例最长 60 秒后生效。",
+        "operationId": "put_memory_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminMemorySettingsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMemorySettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/ai/models": {
       "get": {
         "tags": [
@@ -13129,6 +13357,26 @@
           }
         }
       },
+      "AdminClearMemoriesRequest": {
+        "type": "object",
+        "description": "管理后台：清空某个用户的记忆。",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "指定角色：只清这个用户与它的关系与事件记忆；不指定：清空这个用户的全部记忆（含档案）。"
+          },
+          "userId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "AdminComment": {
         "type": "object",
         "required": [
@@ -13557,6 +13805,146 @@
               "null"
             ],
             "description": "远端最近一次的定义（`approved` 与它不同时，启用前请先看清楚）。"
+          }
+        }
+      },
+      "AdminMemorySettings": {
+        "type": "object",
+        "description": "管理后台：AI 记忆的全站设置与统计。",
+        "required": [
+          "enabled",
+          "extractDelaySecs",
+          "bridgeHours",
+          "stats"
+        ],
+        "properties": {
+          "bridgeHours": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "embeddingModel": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "embeddingProvider": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "extractDelaySecs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "modelKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stats": {
+            "$ref": "#/components/schemas/AdminMemoryStats"
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "从没在后台改过（用的是默认值）时为 null。"
+          }
+        }
+      },
+      "AdminMemorySettingsInput": {
+        "type": "object",
+        "description": "管理后台：AI 记忆的全站设置（MEM-030）。",
+        "required": [
+          "enabled",
+          "extractDelaySecs",
+          "bridgeHours"
+        ],
+        "properties": {
+          "bridgeHours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "新会话带上同一角色其他会话里多久以内的最近几轮，0–720 小时，0 关闭。"
+          },
+          "embeddingModel": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "上游的向量模型名，如 `BAAI/bge-m3`。"
+          },
+          "embeddingProvider": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "事件向量的提供方名字（需支持 OpenAI 兼容的 `/embeddings`）；与 `embeddingModel` 同时为 null 时只按关键词检索。"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "总开关：关掉后不读、不写、不整理，行为与没有记忆时一样；已有记忆保留。"
+          },
+          "extractDelaySecs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "对话停下来多久后提炼长期记忆，0–86400 秒。"
+          },
+          "modelKey": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "摘要、提炼、整理用的模型 key；null 用默认模型。"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminMemoryStats": {
+        "type": "object",
+        "description": "记忆的全站统计。",
+        "required": [
+          "users",
+          "profile",
+          "relation",
+          "event",
+          "pendingFollowUps",
+          "withEmbedding"
+        ],
+        "properties": {
+          "event": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "pendingFollowUps": {
+            "type": "integer",
+            "format": "int64",
+            "description": "还没问起的待跟进。"
+          },
+          "profile": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "relation": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "users": {
+            "type": "integer",
+            "format": "int64",
+            "description": "有记忆的用户数。"
+          },
+          "withEmbedding": {
+            "type": "integer",
+            "format": "int64",
+            "description": "已经算了向量的记忆。"
           }
         }
       },
@@ -14091,6 +14479,29 @@
           }
         }
       },
+      "AdminUserMemories": {
+        "type": "object",
+        "description": "管理后台：某个用户的全部记忆（置顶的在前，其余最近更新的在前）。",
+        "required": [
+          "userId",
+          "username",
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiMemoryView"
+            }
+          },
+          "userId": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
       "AiAgentUpdate": {
         "type": "object",
         "required": [
@@ -14102,6 +14513,93 @@
           }
         },
         "additionalProperties": false
+      },
+      "AiMemoryView": {
+        "type": "object",
+        "description": "一条记忆。",
+        "required": [
+          "id",
+          "kind",
+          "content",
+          "pinned",
+          "origin",
+          "sensitivity",
+          "importance",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "aiUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "关系记忆所属角色的 AI 账号；档案时省略。"
+          },
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "关系记忆所属的角色（slug）；档案、或角色卡已删除时省略。"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "followUpOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "待跟进：到了这天，AI 会在下次聊天开场时问起。只有事件有。"
+          },
+          "followedUpAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "已经问起过的时刻。"
+          },
+          "happenedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "事件发生的日期（北京时间）。只有事件有。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "importance": {
+            "type": "integer",
+            "format": "int32",
+            "description": "重要度 1–5（检索与淘汰用）。"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKind"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/MemoryOrigin"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "置顶的不会被自动整理改写或淘汰。"
+          },
+          "sensitivity": {
+            "$ref": "#/components/schemas/MemorySensitivity"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "AiOverview": {
         "type": "object",
@@ -17472,6 +17970,32 @@
             "format": "int32"
           }
         }
+      },
+      "MemoryKind": {
+        "type": "string",
+        "description": "记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆，\n`event` 是与某个角色聊过的具体经历（带日期，按话题检索，可以有待跟进日期）。",
+        "enum": [
+          "profile",
+          "relation",
+          "event"
+        ]
+      },
+      "MemoryOrigin": {
+        "type": "string",
+        "description": "记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 人工写入（目前没有入口，保留）。",
+        "enum": [
+          "extracted",
+          "told",
+          "manual"
+        ]
+      },
+      "MemorySensitivity": {
+        "type": "string",
+        "description": "敏感度：`public` 的可以在公开的评论区里用，`private` 的只在私信里用。",
+        "enum": [
+          "private",
+          "public"
+        ]
       },
       "MentionCandidate": {
         "type": "object",

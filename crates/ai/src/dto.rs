@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use ik_kernel::Id;
 use ik_kernel::id::marker::User;
 use serde::{Deserialize, Serialize};
@@ -270,4 +270,145 @@ pub struct RegenerateRequest {
 pub struct RegenerateAccepted {
     #[schema(value_type = String)]
     pub replaced_message_id: Id<ik_kernel::id::marker::Message>,
+}
+
+// ---------- 记忆（ADR 0007） ----------
+
+/// 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆，
+/// `event` 是与某个角色聊过的具体经历（带日期，按话题检索，可以有待跟进日期）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryKind {
+    Profile,
+    Relation,
+    Event,
+}
+
+/// 敏感度：`public` 的可以在公开的评论区里用，`private` 的只在私信里用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MemorySensitivity {
+    Private,
+    Public,
+}
+
+/// 记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 人工写入（目前没有入口，保留）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryOrigin {
+    Extracted,
+    Told,
+    Manual,
+}
+
+/// 一条记忆。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AiMemoryView)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryView {
+    #[schema(value_type = String)]
+    pub id: Id<ik_kernel::id::marker::AiMemory>,
+    pub kind: MemoryKind,
+    /// 关系记忆所属的角色（slug）；档案、或角色卡已删除时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub character: Option<String>,
+    /// 关系记忆所属角色的 AI 账号；档案时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub ai_user_id: Option<Id<User>>,
+    pub content: String,
+    /// 置顶的不会被自动整理改写或淘汰。
+    pub pinned: bool,
+    pub origin: MemoryOrigin,
+    pub sensitivity: MemorySensitivity,
+    /// 重要度 1–5（检索与淘汰用）。
+    pub importance: i16,
+    /// 事件发生的日期（北京时间）。只有事件有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub happened_on: Option<NaiveDate>,
+    /// 待跟进：到了这天，AI 会在下次聊天开场时问起。只有事件有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_up_on: Option<NaiveDate>,
+    /// 已经问起过的时刻。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followed_up_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 管理后台：某个用户的全部记忆（置顶的在前，其余最近更新的在前）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AdminUserMemories)]
+#[serde(rename_all = "camelCase")]
+pub struct UserMemories {
+    #[schema(value_type = String)]
+    pub user_id: Id<User>,
+    pub username: String,
+    pub items: Vec<MemoryView>,
+}
+
+/// 管理后台：清空某个用户的记忆。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(as = AdminClearMemoriesRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClearMemoriesRequest {
+    #[schema(value_type = String)]
+    pub user_id: Id<User>,
+    /// 指定角色：只清这个用户与它的关系与事件记忆；不指定：清空这个用户的全部记忆（含档案）。
+    #[serde(default)]
+    pub character: Option<String>,
+}
+
+/// 管理后台：AI 记忆的全站设置（MEM-030）。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(as = AdminMemorySettingsInput)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemorySettingsInput {
+    /// 总开关：关掉后不读、不写、不整理，行为与没有记忆时一样；已有记忆保留。
+    pub enabled: bool,
+    /// 摘要、提炼、整理用的模型 key；null 用默认模型。
+    #[serde(default)]
+    pub model_key: Option<String>,
+    /// 对话停下来多久后提炼长期记忆，0–86400 秒。
+    pub extract_delay_secs: i32,
+    /// 新会话带上同一角色其他会话里多久以内的最近几轮，0–720 小时，0 关闭。
+    pub bridge_hours: i32,
+    /// 事件向量的提供方名字（需支持 OpenAI 兼容的 `/embeddings`）；与 `embeddingModel` 同时为 null 时只按关键词检索。
+    #[serde(default)]
+    pub embedding_provider: Option<String>,
+    /// 上游的向量模型名，如 `BAAI/bge-m3`。
+    #[serde(default)]
+    pub embedding_model: Option<String>,
+}
+
+/// 管理后台：AI 记忆的全站设置与统计。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AdminMemorySettings)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySettingsView {
+    pub enabled: bool,
+    pub model_key: Option<String>,
+    pub extract_delay_secs: i32,
+    pub bridge_hours: i32,
+    pub embedding_provider: Option<String>,
+    pub embedding_model: Option<String>,
+    /// 从没在后台改过（用的是默认值）时为 null。
+    pub updated_at: Option<DateTime<Utc>>,
+    pub stats: MemoryStats,
+}
+
+/// 记忆的全站统计。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AdminMemoryStats)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryStats {
+    /// 有记忆的用户数。
+    pub users: i64,
+    pub profile: i64,
+    pub relation: i64,
+    pub event: i64,
+    /// 还没问起的待跟进。
+    pub pending_follow_ups: i64,
+    /// 已经算了向量的记忆。
+    pub with_embedding: i64,
 }

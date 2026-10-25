@@ -327,6 +327,87 @@ pub async fn history(
     Ok(items)
 }
 
+/// AI 跨会话衔接（ai-assistant.md MEM-005）：`sessions` 是（会话 id, 上下文起点）；取 `since` 之后、
+/// `user_id` 仍在场的那些会话里最近的 `limit` 条文本消息，按时间正序。
+pub async fn recent_across(
+    conn: &mut PgConnection,
+    user_id: i64,
+    sessions: &[(i64, Option<DateTime<Utc>>)],
+    since: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<HistoryItem>, Problem> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (ids, from): (Vec<i64>, Vec<Option<DateTime<Utc>>>) = sessions.iter().copied().unzip();
+    let mut items =
+        history_items(repo::recent_across(conn, user_id, &ids, &from, since, limit).await?);
+    items.reverse();
+    Ok(items)
+}
+
+/// 翻聊天记录的一条命中（AI 记忆 MEM-095）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchHit {
+    pub conversation_id: i64,
+    pub message_id: i64,
+    pub sender_id: i64,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// 按关键词在几个会话里翻聊天记录（AI 记忆 MEM-095）：`sessions` 是（会话 id, 上下文起点），只看起点之后的、
+/// `user_id` 仍在场的；`[from, to)` 限定时间。命中关键词多的在前，同样多的按 `oldest_first` 排。
+#[allow(clippy::too_many_arguments)]
+pub async fn search_across(
+    conn: &mut PgConnection,
+    user_id: i64,
+    sessions: &[(i64, Option<DateTime<Utc>>)],
+    terms: &[String],
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+    oldest_first: bool,
+    limit: i64,
+) -> Result<Vec<SearchHit>, Problem> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (ids, starts): (Vec<i64>, Vec<Option<DateTime<Utc>>>) = sessions.iter().copied().unzip();
+    Ok(repo::search_across(
+        conn,
+        user_id,
+        &ids,
+        &starts,
+        terms,
+        from,
+        to,
+        oldest_first,
+        limit,
+    )
+    .await?
+    .into_iter()
+    .map(|r| SearchHit {
+        conversation_id: r.conversation_id,
+        message_id: r.id,
+        sender_id: r.sender_id,
+        content: r.content,
+        created_at: r.created_at,
+    })
+    .collect())
+}
+
+/// 几个会话里 `before` 之前最后一条文本消息的时刻（AI 久别重逢，MEM-100）。
+pub async fn last_text_before(
+    conn: &mut PgConnection,
+    conversation_ids: &[i64],
+    before: DateTime<Utc>,
+) -> Result<Option<DateTime<Utc>>, Problem> {
+    if conversation_ids.is_empty() {
+        return Ok(None);
+    }
+    Ok(repo::last_text_before(conn, conversation_ids, before).await?)
+}
+
 /// 最近的未撤回文本消息（新的在前）。
 pub async fn recent_texts(
     conn: &mut PgConnection,

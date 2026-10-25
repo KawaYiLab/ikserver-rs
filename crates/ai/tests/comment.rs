@@ -581,3 +581,35 @@ async fn vision_models_see_post_and_comment_images(db: PgPool) {
         )
     );
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn comments_only_use_public_memories(db: PgPool) {
+    let h = harness(db).await;
+    for (id, content, sensitivity) in [
+        (1, "对方最喜欢的角色是艾莲", "public"),
+        (2, "对方最近在准备考研", "private"),
+    ] {
+        sqlx::query!(
+            "INSERT INTO ai_memories (id, user_id, kind, content, origin, sensitivity)
+             VALUES ($1, $2, 'profile', $3, 'extracted', $4)",
+            id,
+            BOB,
+            content,
+            sensitivity,
+        )
+        .execute(&h.db)
+        .await
+        .unwrap();
+    }
+    let post = h.post(ALICE, false).await;
+    let trigger = h.comment(BOB, post, None, "@user200 你觉得呢").await;
+    h.answer("我觉得挺好。");
+    assert_eq!(h.run(trigger).await, RunOutcome::Completed);
+    // 评论区是公开的：只带公开的记忆（MEM-061），也不提供记忆工具。
+    let request = h.fake.requests().pop().unwrap();
+    let system = request.messages.first().unwrap().text().to_owned();
+    assert!(system.contains("这里是公开的评论区"), "{system}");
+    assert!(system.contains("- 对方最喜欢的角色是艾莲"), "{system}");
+    assert!(!system.contains("考研"), "{system}");
+    assert_eq!(request.tools.len(), 12);
+}

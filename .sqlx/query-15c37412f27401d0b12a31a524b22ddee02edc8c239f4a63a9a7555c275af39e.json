@@ -1,0 +1,90 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.id, m.conversation_id, m.sender_id, m.content, m.created_at,\n                  (SELECT count(*) FROM unnest($4::text[]) AS t(term)\n                   WHERE strpos(lower(m.content), lower(t.term)) > 0) AS \"hits!\"\n           FROM unnest($2::bigint[], $3::timestamptz[]) AS s(conversation_id, context_from)\n           JOIN conversation_members cm\n             ON cm.conversation_id = s.conversation_id AND cm.user_id = $1 AND cm.left_at IS NULL\n           JOIN messages m ON m.conversation_id = s.conversation_id\n           WHERE m.kind = 'text' AND m.withdrawn_at IS NULL\n             AND (m.ai_state IS NULL OR m.ai_state IN ('done', 'stopped'))\n             AND (s.context_from IS NULL OR m.created_at > s.context_from)\n             AND ($5::timestamptz IS NULL OR m.created_at >= $5)\n             AND ($6::timestamptz IS NULL OR m.created_at < $6)\n             AND (cardinality($4::text[]) = 0 OR EXISTS (\n                  SELECT 1 FROM unnest($4::text[]) AS t(term)\n                  WHERE strpos(lower(m.content), lower(t.term)) > 0))\n           ORDER BY 6 DESC, (CASE WHEN $7 THEN m.created_at END) NULLS LAST, m.created_at DESC, m.id\n           LIMIT $8",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "conversation_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "conversation_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "sender_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "sender_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "messages",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "hits!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array",
+        "TimestamptzArray",
+        "TextArray",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "15c37412f27401d0b12a31a524b22ddee02edc8c239f4a63a9a7555c275af39e"
+}

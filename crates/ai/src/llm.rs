@@ -292,6 +292,33 @@ impl From<OpenAIError> for LlmError {
 #[async_trait::async_trait]
 pub trait ChatProvider: Send + Sync {
     async fn stream(&self, request: &ChatRequest) -> Result<EventStream, LlmError>;
+
+    /// 语义向量（OpenAI 兼容的 `/embeddings`，记忆检索用，MEM-052），与 `inputs` 一一对应。
+    /// 默认不支持。
+    async fn embed(&self, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        let _ = (model, inputs);
+        Err(LlmError::Upstream("该提供方不支持向量".to_owned()))
+    }
+}
+
+#[derive(Serialize)]
+struct WireEmbeddingRequest<'a> {
+    model: &'a str,
+    input: &'a [String],
+    encoding_format: &'static str,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireEmbeddings {
+    #[serde(default)]
+    data: Vec<WireEmbedding>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WireEmbedding {
+    #[serde(default)]
+    index: usize,
+    embedding: Vec<f32>,
 }
 
 /// OpenAI 兼容协议的上游（DeepSeek、Qwen、GLM、Kimi……）。
@@ -522,6 +549,24 @@ impl ChatProvider for OpenAiCompatible {
             futures_util::stream::iter(events)
         });
         Ok(Box::pin(events))
+    }
+
+    async fn embed(&self, model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        let body = WireEmbeddingRequest {
+            model,
+            input: inputs,
+            encoding_format: "float",
+        };
+        let mut response: WireEmbeddings = self.client.embeddings().create_byot(body).await?;
+        response.data.sort_by_key(|e| e.index);
+        if response.data.len() != inputs.len() {
+            return Err(LlmError::Upstream(format!(
+                "向量条数不对：要 {}，回了 {}",
+                inputs.len(),
+                response.data.len()
+            )));
+        }
+        Ok(response.data.into_iter().map(|e| e.embedding).collect())
     }
 }
 

@@ -779,6 +779,7 @@ where
         .routes(routes!(put_mcp_server, remove_mcp_server))
         .routes(routes!(post_mcp_refresh))
         .routes(routes!(put_mcp_tool))
+        .merge(crate::memory_admin::router())
 }
 
 /// AI 全局设置

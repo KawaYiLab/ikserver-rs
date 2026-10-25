@@ -590,7 +590,8 @@ async fn approved_mcp_tools_reach_the_model_and_changes_need_review(db: PgPool) 
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    assert_eq!(names.len(), 13);
+    // 论坛 12 + 记忆 3（ADR 0007）+ 站外 1。
+    assert_eq!(names.len(), 16);
     assert_eq!(names.last().map(String::as_str), Some("kb__search"));
     let ChatMessage::System { content: system } = &requests[0].messages[0] else {
         panic!()
@@ -680,7 +681,8 @@ async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    assert_eq!(names.len(), 18);
+    // 论坛 12 + 记忆 3（ADR 0007）+ 剧情库 6。
+    assert_eq!(names.len(), 21);
     assert!(names.contains(&"ik_search".to_owned()));
     // 结果回灌：正常结果与参数错误（工具自己的错误文本，让模型改参数）。
     let ChatMessage::Tool { content: ok, .. } = requests[1].messages.last().unwrap() else {

@@ -34,6 +34,12 @@ pub fn crontabs() -> anyhow::Result<Vec<Crontab>> {
             .payload(ik_ai::mcp::RefreshMcpTools::default())?
             .max_attempts(1)
             .build(),
+        // 北京时间 04:37（UTC 20:37）：用户最少的时候整理 AI 记忆（MEM-080）。
+        Cron::daily_at::<ik_ai::memory_jobs::NightlyMemory>(20, 37)
+            .map_err(invalid)?
+            .payload(ik_ai::memory_jobs::NightlyMemory::default())?
+            .max_attempts(1)
+            .build(),
     ])
 }
 
@@ -53,6 +59,10 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_ai::mcp::RefreshMcpTools>()
         .define_job::<ik_ai::dm::DmReply>()
         .define_job::<ik_ai::comment::CommentReply>()
+        .define_job::<ik_ai::memory_jobs::SummarizeSession>()
+        .define_job::<ik_ai::memory_jobs::ExtractMemories>()
+        .define_job::<ik_ai::memory_jobs::NightlyMemory>()
+        .define_job::<ik_ai::memory_jobs::ConsolidateMemories>()
         .add_extension(state.mihoyo.clone())
         .add_extension(state.ai.clone())
         .add_extension(state.db.clone())
@@ -81,14 +91,15 @@ mod tests {
     #[test]
     fn cron_payloads_decode_into_their_tasks() {
         let crontabs = crontabs().unwrap();
-        assert_eq!(crontabs.len(), 5);
+        assert_eq!(crontabs.len(), 6);
         for crontab in &crontabs {
             assert!(
                 decodes::<ik_media::jobs::SweepStaging>(crontab)
                     && decodes::<crate::idempotency::PruneIdempotencyKeys>(crontab)
                     && decodes::<ik_mihoyo::jobs::PruneQrLogins>(crontab)
                     && decodes::<ik_ai::jobs::ReclaimQuotaHolds>(crontab)
-                    && decodes::<ik_ai::mcp::RefreshMcpTools>(crontab),
+                    && decodes::<ik_ai::mcp::RefreshMcpTools>(crontab)
+                    && decodes::<ik_ai::memory_jobs::NightlyMemory>(crontab),
                 "{} 的 payload 解不出任务结构体",
                 crontab.task_identifier
             );

@@ -139,6 +139,35 @@ pub struct Catalog {
     pub cards: Vec<RoleCard>,
     /// 启用的站外 MCP 服务（含生效的工具）。
     pub mcp_servers: Vec<Arc<McpServer>>,
+    /// AI 记忆的全站设置（ADR 0007，管理后台「AI 记忆」页）。
+    pub memory: MemoryConfig,
+}
+
+/// AI 记忆的全站设置（MEM-030）。没有配置行时按默认值。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryConfig {
+    /// 总开关：关掉后不读、不写、不整理。
+    pub enabled: bool,
+    /// 摘要、提炼、整理用的模型 key；None 或不可用时用默认模型。
+    pub model_key: Option<String>,
+    /// 对话停下来多久后提炼（秒，MEM-020）。
+    pub extract_delay_secs: i64,
+    /// 跨会话衔接的时长（小时，0 关闭，MEM-005）。
+    pub bridge_hours: i64,
+    /// 事件向量：（提供方名字, 上游的向量模型名），None 时只按关键词检索（MEM-052）。
+    pub embedding: Option<(String, String)>,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            model_key: None,
+            extract_delay_secs: 180,
+            bridge_hours: 48,
+            embedding: None,
+        }
+    }
 }
 
 impl Catalog {
@@ -326,12 +355,23 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
         })
         .collect();
     let mcp_servers = load_mcp(&mut conn).await?;
+    let memory =
+        repo::memory_settings(&mut conn)
+            .await?
+            .map_or_else(MemoryConfig::default, |row| MemoryConfig {
+                enabled: row.enabled,
+                model_key: row.model_key,
+                extract_delay_secs: i64::from(row.extract_delay_secs),
+                bridge_hours: i64::from(row.bridge_hours),
+                embedding: row.embedding_provider.zip(row.embedding_model),
+            });
     Ok(Catalog {
         limits,
         providers,
         models,
         cards,
         mcp_servers,
+        memory,
     })
 }
 
@@ -446,6 +486,7 @@ pub(crate) mod tests {
             models,
             cards: Vec::new(),
             mcp_servers: Vec::new(),
+            memory: MemoryConfig::default(),
         }
     }
 

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_sessions SET summary = $3, summary_until = $4, summary_epoch = $2\n         WHERE conversation_id = $1 AND context_epoch = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8b838fb57535fd72a09537620715cf012f3cb875da5d4e792d3cccaecfa520e2"
+}
