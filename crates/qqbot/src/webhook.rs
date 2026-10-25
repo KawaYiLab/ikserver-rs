@@ -104,6 +104,12 @@ fn authenticate(
         signature::UnparsedPublicKey::new(&signature::ED25519, key.public_key().as_ref())
             .verify(&message, &sig)
             .map_err(|_| Problem::unauthorized())?;
+        // 带了有效签名的回调校验（op=13）：签名证明请求来自平台，直接应答，不需要临时开关。
+        // 否则会回 op=12 ACK，平台拿不到 plain_token / signature，保存回调地址失败。
+        let value: Value = serde_json::from_slice(body).map_err(|_| invalid("JSON 无效"))?;
+        if value.get("op").and_then(Value::as_u64) == Some(13) {
+            return validation(&key, value);
+        }
         return Ok(Authenticated::Event);
     }
     if !allow_validation {
@@ -113,17 +119,29 @@ fn authenticate(
     if value.get("op").and_then(Value::as_u64) != Some(13) {
         return Err(Problem::unauthorized());
     }
+    validation(&key, value)
+}
+
+/// 应答回调校验：签 `event_ts + plain_token`。不带签名的校验请求谁都能发，所以只签数字时间戳与字母数字 token，
+/// 签出来的内容不可能是 JSON，不能拿去伪造事件推送。
+fn validation(key: &Ed25519KeyPair, value: Value) -> Result<Authenticated, Problem> {
     let v: Validation = serde_json::from_value(value).map_err(|_| invalid("回调校验字段无效"))?;
-    if v.d.event_ts.is_empty()
-        || v.d.event_ts.len() > 20
-        || !v.d.event_ts.bytes().all(|c| c.is_ascii_digit())
+    // event_ts 文档里是字符串；也接受数字，免得平台换了类型就校验失败。
+    let event_ts = match &v.d.event_ts {
+        Value::String(text) => text.clone(),
+        Value::Number(number) if number.is_u64() => number.to_string(),
+        _ => String::new(),
+    };
+    if event_ts.is_empty()
+        || event_ts.len() > 20
+        || !event_ts.bytes().all(|c| c.is_ascii_digit())
         || v.d.plain_token.is_empty()
         || v.d.plain_token.len() > 64
         || !v.d.plain_token.bytes().all(|c| c.is_ascii_alphanumeric())
     {
         return Err(invalid("回调校验 token 或时间戳格式无效"));
     }
-    let sig = key.sign(format!("{}{}", v.d.event_ts, v.d.plain_token).as_bytes());
+    let sig = key.sign(format!("{event_ts}{}", v.d.plain_token).as_bytes());
     Ok(Authenticated::Validation(
         json!({"plain_token":v.d.plain_token,"signature":hex(sig.as_ref())}),
     ))
@@ -155,7 +173,7 @@ struct Validation {
 #[derive(Deserialize)]
 struct Challenge {
     plain_token: String,
-    event_ts: String,
+    event_ts: Value,
 }
 #[derive(Deserialize)]
 struct Envelope {
@@ -341,6 +359,49 @@ mod tests {
         headers.insert("x-signature-ed25519", "aabb".parse().unwrap());
         assert!(authenticate("abc", false, &headers, body).is_err());
     }
+    #[test]
+    fn signed_validation_is_answered_without_the_switch() {
+        // 平台的校验请求若带签名头：验签通过就直接应答（不再回 op=12），开关关着也行。
+        let secret = "naOC0ocQE3shWLAfffVLB1rhYPG7";
+        let body =
+            br#"{"op":13,"d":{"plain_token":"Arq0D5A61EgUu4OxUvOp","event_ts":"1725439208"}}"#;
+        let key = signing_key(secret).unwrap();
+        let mut signed = b"1725439300".to_vec();
+        signed.extend_from_slice(body);
+        let mut headers = HeaderMap::new();
+        headers.insert("x-signature-timestamp", "1725439300".parse().unwrap());
+        headers.insert(
+            "x-signature-ed25519",
+            hex(key.sign(&signed).as_ref()).parse().unwrap(),
+        );
+        let Ok(Authenticated::Validation(reply)) = authenticate(secret, false, &headers, body)
+        else {
+            panic!("带签名的 op=13 应当返回校验签名");
+        };
+        assert_eq!(
+            reply["signature"],
+            "82e076c9ca890e60b38d5f91e2d78eca2772e935bf24424700d834a569af03e26ffc2ae939b5824649d950899013e8a1a4cb7c39cb532955743be1b016681c0c"
+        );
+        // 签名不对仍然 401。
+        headers.insert("x-signature-timestamp", "1725439301".parse().unwrap());
+        assert_eq!(
+            authenticate(secret, false, &headers, body)
+                .err()
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        // event_ts 是数字也能应答。
+        let numeric =
+            br#"{"op":13,"d":{"plain_token":"Arq0D5A61EgUu4OxUvOp","event_ts":1725439208}}"#;
+        let Ok(Authenticated::Validation(reply)) =
+            authenticate(secret, true, &HeaderMap::new(), numeric)
+        else {
+            panic!("数字 event_ts 应当可以应答");
+        };
+        assert_eq!(reply["plain_token"], "Arq0D5A61EgUu4OxUvOp");
+    }
+
     #[test]
     fn validation_cannot_be_a_signing_oracle() {
         let h = HeaderMap::new();
