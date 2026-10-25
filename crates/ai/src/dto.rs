@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use ik_kernel::Id;
 use ik_kernel::id::marker::User;
 use serde::{Deserialize, Serialize};
@@ -233,6 +233,8 @@ pub struct SessionView {
     pub title: Option<String>,
     /// 会话级模型选择；null 表示跟随角色卡默认。
     pub model_key: Option<String>,
+    /// 无痕：这个会话不进长期记忆，也不给别的会话做衔接。
+    pub incognito: bool,
 }
 
 fn present<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
@@ -253,6 +255,9 @@ pub struct UpdateSessionRequest {
     #[serde(default, deserialize_with = "present")]
     #[schema(value_type = Option<String>)]
     pub model_key: Option<Option<String>>,
+    /// 无痕（MEM-070）。关掉时无痕期间的对话不会再补提炼。
+    #[serde(default)]
+    pub incognito: Option<bool>,
 }
 
 /// 重新生成（GEN-013～015）。
@@ -274,12 +279,22 @@ pub struct RegenerateAccepted {
 
 // ---------- 记忆（ADR 0007） ----------
 
-/// 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆。
+/// 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆，
+/// `event` 是与某个角色聊过的具体经历（带日期，按话题检索，可以有待跟进日期）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MemoryKind {
     Profile,
     Relation,
+    Event,
+}
+
+/// 敏感度：`public` 的可以在公开的评论区里用，`private` 的只在私信里用。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MemorySensitivity {
+    Private,
+    Public,
 }
 
 /// 记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 自己在记忆面板里写或改过。
@@ -310,6 +325,18 @@ pub struct MemoryView {
     /// 置顶的不会被自动整理改写或淘汰。
     pub pinned: bool,
     pub origin: MemoryOrigin,
+    pub sensitivity: MemorySensitivity,
+    /// 重要度 1–5（检索与淘汰用）。
+    pub importance: i16,
+    /// 事件发生的日期（北京时间）。只有事件有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub happened_on: Option<NaiveDate>,
+    /// 待跟进：到了这天，AI 会在下次聊天开场时问起。只有事件有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_up_on: Option<NaiveDate>,
+    /// 已经问起过的时刻。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followed_up_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -329,11 +356,20 @@ pub struct MemoryList {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateMemoryRequest {
     pub kind: MemoryKind,
-    /// `relation` 必填（角色 slug）；`profile` 不能填。
+    /// `relation`、`event` 必填（角色 slug）；`profile` 不能填。
     #[serde(default)]
     pub character: Option<String>,
     /// 1–200 字。
     pub content: String,
+    /// 缺省 `private`。
+    #[serde(default)]
+    pub sensitivity: Option<MemorySensitivity>,
+    /// 只有 `event` 能填。
+    #[serde(default)]
+    pub happened_on: Option<NaiveDate>,
+    /// 只有 `event` 能填。
+    #[serde(default)]
+    pub follow_up_on: Option<NaiveDate>,
 }
 
 /// 改一条记忆。字段缺省不改。
@@ -346,6 +382,16 @@ pub struct UpdateMemoryRequest {
     pub content: Option<String>,
     #[serde(default)]
     pub pinned: Option<bool>,
+    #[serde(default)]
+    pub sensitivity: Option<MemorySensitivity>,
+    /// 只有事件能改；null 清除。
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<NaiveDate>)]
+    pub happened_on: Option<Option<NaiveDate>>,
+    /// 只有事件能改；null 清除（不再问起）。改了之后「已问起」清除。
+    #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<NaiveDate>)]
+    pub follow_up_on: Option<Option<NaiveDate>>,
 }
 
 /// 清空记忆。
@@ -353,7 +399,7 @@ pub struct UpdateMemoryRequest {
 #[schema(as = ClearAiMemoriesRequest)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClearMemoriesRequest {
-    /// 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部（含档案）。
+    /// 指定角色：只清与它的关系与事件记忆（「让它忘了我」）；不指定：清空全部（含档案）。
     #[serde(default)]
     pub character: Option<String>,
 }

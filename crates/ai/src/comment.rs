@@ -502,6 +502,12 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
     );
     let toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
     toolbox.annotate_system(&mut messages);
+    // 评论区是公开的：只用标为公开的档案与关系记忆（MEM-061）。
+    if let Some(note) =
+        crate::memory::public_note(&mut tx, state, job.quota_user_id, job.ai_user_id).await?
+    {
+        crate::memory::append_system(&mut messages, &note);
+    }
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。不足时静默跳过。
     let prompt_chars = quota::prompt_estimate(&messages, model.vision)

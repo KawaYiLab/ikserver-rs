@@ -110,6 +110,10 @@ pub struct Ai {
     pub memory_extract_delay_secs: u64,
     /// 新会话带上同一角色其他会话里多久以内的最近几轮（MEM-005，0–720 小时，0 关闭）。
     pub memory_bridge_hours: u64,
+    /// 事件记忆的语义向量（MEM-052）：提供方名字（部署配置或后台里的，需支持 OpenAI 兼容的
+    /// `/embeddings`）与上游的向量模型名。两项都配了才算语义相似度，否则只按关键词检索。
+    pub memory_embedding_provider: Option<String>,
+    pub memory_embedding_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -136,6 +140,8 @@ impl Default for Ai {
             memory_model: None,
             memory_extract_delay_secs: 180,
             memory_bridge_hours: 48,
+            memory_embedding_provider: None,
+            memory_embedding_model: None,
         }
     }
 }

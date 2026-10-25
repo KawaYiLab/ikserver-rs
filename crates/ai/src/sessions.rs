@@ -167,6 +167,7 @@ fn session_view(catalog: &Catalog, session: &SessionRow, title: Option<String>) 
             .map(|c| c.slug.clone()),
         title,
         model_key: session.model_key.clone(),
+        incognito: session.incognito,
     }
 }
 
@@ -185,7 +186,7 @@ pub async fn get(
     Ok(session_view(&catalog, &session, view.title))
 }
 
-/// 改标题、会话级模型（CTX-032、TRIG-025）。变更推 `dm.conversation.updated` 给自己。
+/// 改标题、会话级模型（CTX-032、TRIG-025）、无痕（MEM-070）。变更推 `dm.conversation.updated` 给自己。
 pub async fn update(
     state: &AiState,
     principal: &Principal,
@@ -205,6 +206,13 @@ pub async fn update(
         let key = checked_model(&catalog, card, key.as_deref())?;
         repo::set_session_model(&mut tx, conversation_id, key).await?;
     }
+    // 无痕（MEM-070）：关掉时把提炼进度推到现在，无痕期间的对话不会再被补提炼。
+    if let Some(incognito) = request.incognito.filter(|i| *i != session.incognito) {
+        repo::set_incognito(&mut tx, conversation_id, incognito).await?;
+        if !incognito {
+            repo::advance_memory_until(&mut tx, conversation_id, Utc::now()).await?;
+        }
+    }
     tx.commit().await?;
     let view = get(state, principal, conversation_id).await?;
     let mut effects = Effects::new();
@@ -215,6 +223,7 @@ pub async fn update(
             "conversationId": view.conversation_id,
             "title": view.title,
             "aiModelKey": view.model_key,
+            "incognito": view.incognito,
         }),
     )?);
     effects.dispatch(state.bus.as_ref());

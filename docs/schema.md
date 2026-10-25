@@ -402,6 +402,18 @@
   各有部分索引。
 - `ai_memory_prefs`（ik-ai）：用户的记忆开关（MEM-030），没有行 = 开启。
 
+## AI 记忆第二期（`20261114000001_ai_memory_events.sql`，ADR 0007）
+
+- `ai_sessions.incognito`：无痕会话（MEM-070）；跨会话衔接的候选会话排除无痕的。
+- `ai_memories.kind` 增加 `event`（事件，`ai_user_id` 非空）。新列：`sensitivity`（`private` / `public`，默认 `private`，
+  公开的才用在评论区）、`importance`（1–5，默认 3）、`happened_on` / `follow_up_on`（DATE，北京时间）与 `followed_up_at`
+  ——这三列只有事件能有（CHECK）。
+- `embedding REAL[]` 与 `embedding_model`：事件的语义向量与算它的模型，同时为空或同时非空，维度 1–4096（CHECK）。
+  每个用户与每个 AI 的事件不超过 300 条，检索时在进程内算余弦，不用 pgvector、不建向量索引；模型换了的当作没有、后台补算。
+  改正文时同一条 UPDATE 把向量清空。
+- 部分索引 `ai_memories_follow_up_idx (user_id, ai_user_id, follow_up_on) WHERE follow_up_on IS NOT NULL AND followed_up_at IS NULL`：
+  会话开场查到期的待跟进。
+
 ## 管理后台审计（`20261031000001_admin_audit.sql`）
 
 - `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、

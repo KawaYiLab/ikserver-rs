@@ -205,7 +205,7 @@ impl Harness {
                 (
                     match m.kind {
                         MemoryKind::Profile => "profile".to_owned(),
-                        MemoryKind::Relation => m.character.unwrap_or_default(),
+                        MemoryKind::Relation | MemoryKind::Event => m.character.unwrap_or_default(),
                     },
                     m.content,
                 )
@@ -322,6 +322,7 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
         UpdateMemoryRequest {
             content: None,
             pinned: Some(true),
+            ..UpdateMemoryRequest::default()
         },
     )
     .await
@@ -498,6 +499,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
             kind: MemoryKind::Profile,
             character: None,
             content: "  喜欢\n猫  ".into(),
+            sensitivity: None,
+            happened_on: None,
+            follow_up_on: None,
         },
     )
     .await
@@ -512,6 +516,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
             kind: MemoryKind::Profile,
             character: None,
             content: "喜欢猫".into(),
+            sensitivity: None,
+            happened_on: None,
+            follow_up_on: None,
         },
     )
     .await
@@ -524,6 +531,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
             kind: MemoryKind::Relation,
             character: Some("fairy".into()),
             content: "你叫我阿哲".into(),
+            sensitivity: None,
+            happened_on: None,
+            follow_up_on: None,
         },
     )
     .await
@@ -541,6 +551,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
                     kind: MemoryKind::Relation,
                     character: None,
                     content: "x".into(),
+                    sensitivity: None,
+                    happened_on: None,
+                    follow_up_on: None,
                 },
             )
             .await
@@ -556,6 +569,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
                     kind: MemoryKind::Profile,
                     character: None,
                     content: "字".repeat(201),
+                    sensitivity: None,
+                    happened_on: None,
+                    follow_up_on: None,
                 },
             )
             .await
@@ -571,6 +587,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
                     kind: MemoryKind::Relation,
                     character: Some("nobody".into()),
                     content: "x".into(),
+                    sensitivity: None,
+                    happened_on: None,
+                    follow_up_on: None,
                 },
             )
             .await
@@ -591,6 +610,7 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
         UpdateMemoryRequest {
             content: Some("喜欢橘猫".into()),
             pinned: Some(true),
+            ..UpdateMemoryRequest::default()
         },
     )
     .await
@@ -607,6 +627,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
                 kind: MemoryKind::Profile,
                 character: None,
                 content: format!("第 {i} 件事"),
+                sensitivity: None,
+                happened_on: None,
+                follow_up_on: None,
             },
         )
         .await
@@ -621,6 +644,9 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
                     kind: MemoryKind::Profile,
                     character: None,
                     content: "再来一条".into(),
+                    sensitivity: None,
+                    happened_on: None,
+                    follow_up_on: None,
                 },
             )
             .await
@@ -676,4 +702,206 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
             .items
             .is_empty()
     );
+}
+
+fn embedding_config() -> Ai {
+    Ai {
+        memory_embedding_provider: Some("fake".into()),
+        memory_embedding_model: Some("fake-embed".into()),
+        ..Ai::default()
+    }
+}
+
+fn beijing_today() -> chrono::NaiveDate {
+    (chrono::Utc::now() + chrono::Duration::hours(8)).date_naive()
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgPool) {
+    let h = harness_with(db, embedding_config()).await;
+    let today = beijing_today();
+    let first = h.session("fairy").await;
+    h.turn(
+        first,
+        "我明天考驾照科目二，好紧张；我家猫团子最近也生病了",
+        "别紧张，你可以的！",
+    )
+    .await;
+    h.fake.push(vec![content(&format!(
+        r#"{{"ops":[
+            {{"op":"add","kind":"event","content":"对方考驾照科目二","date":"{today}","followUp":"{today}","importance":4}},
+            {{"op":"add","kind":"event","content":"对方的猫团子生病了","date":"{early}","importance":3}}
+        ]}}"#,
+        early = today - chrono::Duration::days(20),
+    ))]);
+    let extracted = memory_jobs::extract(&h.state, first).await.unwrap();
+    assert_eq!(extracted.added, 2);
+    // 新事件立即补算向量（MEM-054）。
+    let embedded = h.fake.embedded();
+    assert!(
+        embedded.contains(&"对方考驾照科目二".to_owned()),
+        "{embedded:?}"
+    );
+    assert!(
+        embedded.contains(&"对方的猫团子生病了".to_owned()),
+        "{embedded:?}"
+    );
+    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let exam = items
+        .iter()
+        .find(|m| m.content == "对方考驾照科目二")
+        .unwrap();
+    assert_eq!(exam.kind, MemoryKind::Event);
+    assert_eq!(exam.follow_up_on, Some(today));
+    assert_eq!(exam.character.as_deref(), Some("fairy"));
+
+    // 新会话开场：到期的待跟进让角色主动问起（MEM-055）。
+    let second = h.session("fairy").await;
+    let request = h.turn(second, "在吗", "在呀，科目二考得怎么样？").await;
+    let system = system_of(&request);
+    assert!(
+        system.contains("【待跟进】") && system.contains(&format!("- {today} 对方考驾照科目二")),
+        "{system}"
+    );
+    // 回复完成后记为已问起（MEM-056），之后不再提。
+    let exam = memory::list(&h.state, &h.me)
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .find(|m| m.content == "对方考驾照科目二")
+        .unwrap();
+    assert!(exam.followed_up_at.is_some());
+
+    // 聊到猫：相关往事按话题取回（MEM-052），查询算了一次向量。
+    let request = h
+        .turn(second, "团子又生病了，不吃饭", "带它去看看医生吧")
+        .await;
+    let system = system_of(&request);
+    assert!(!system.contains("【待跟进】"), "{system}");
+    assert!(
+        system.contains("【相关往事】") && system.contains("对方的猫团子生病了"),
+        "{system}"
+    );
+    assert_eq!(
+        h.fake.embedded().last().map(String::as_str),
+        Some("在吗 团子又生病了，不吃饭")
+    );
+
+    // 另一个角色看不到与 Fairy 的事件。
+    let other = h.session("other").await;
+    let request = h.turn(other, "团子生病了", "抱抱").await;
+    assert!(!system_of(&request).contains("【相关往事】"));
+    assert!(!system_of(&request).contains("【待跟进】"));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn remember_can_record_an_event_with_a_follow_up(db: PgPool) {
+    let h = harness(db).await;
+    let conversation = h.session("fairy").await;
+    let trigger = h
+        .send(conversation, "记住，我 11 月 3 日面试，到时候问问我")
+        .await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        tool_call(
+            "call_1",
+            "remember",
+            r#"{"content":"对方 11 月 3 日面试","about":"event","date":"2026-11-03","follow_up":"2026-11-04"}"#,
+        ),
+        Step::Emit(StreamEvent::Finish("tool_calls".into())),
+        usage(10, 5),
+    ]);
+    h.fake
+        .push(vec![content("记下啦，到时候问你！"), usage(10, 5)]);
+    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].kind, MemoryKind::Event);
+    assert_eq!(
+        items[0].happened_on.map(|d| d.to_string()).as_deref(),
+        Some("2026-11-03")
+    );
+    assert_eq!(
+        items[0].follow_up_on.map(|d| d.to_string()).as_deref(),
+        Some("2026-11-04")
+    );
+    assert_eq!(items[0].character.as_deref(), Some("fairy"));
+    let events = h.workflow(job).await;
+    let saved = events.iter().find(|e| e["type"] == "memory.saved").unwrap();
+    assert_eq!(saved["data"]["kind"], "event");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn incognito_sessions_stay_out_of_long_term_memory(db: PgPool) {
+    let h = harness(db).await;
+    memory::create(
+        &h.state,
+        &h.me,
+        CreateMemoryRequest {
+            kind: MemoryKind::Profile,
+            character: None,
+            content: "对方叫阿哲".into(),
+            sensitivity: None,
+            happened_on: None,
+            follow_up_on: None,
+        },
+    )
+    .await
+    .unwrap();
+    let secret = h.session("fairy").await;
+    let view = sessions::update(
+        &h.state,
+        &h.me,
+        secret,
+        ik_ai::dto::UpdateSessionRequest {
+            incognito: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(view.incognito);
+
+    // 无痕：仍然认识对方，但只能忘不能记，也不排提炼任务（MEM-070）。
+    let request = h.turn(secret, "说个秘密", "你说").await;
+    assert!(system_of(&request).contains("对方叫阿哲"));
+    let names: Vec<&str> = request.tools.iter().map(|t| t.name.as_ref()).collect();
+    assert!(
+        names.contains(&"forget") && !names.contains(&"remember"),
+        "{names:?}"
+    );
+    assert_eq!(h.queued(format!("ai-memory:{secret}")).await, 0);
+    let calls = h.fake.requests().len();
+    assert_eq!(
+        memory_jobs::extract(&h.state, secret).await.unwrap(),
+        Extracted::default()
+    );
+    assert_eq!(h.fake.requests().len(), calls);
+
+    // 别的会话不带无痕会话的衔接。
+    let open = h.session("fairy").await;
+    let request = h.turn(open, "你好", "你好").await;
+    assert!(!system_of(&request).contains("说个秘密"));
+
+    // 关掉无痕：之前的无痕对话不补提炼，之后的照常。
+    sessions::update(
+        &h.state,
+        &h.me,
+        secret,
+        ik_ai::dto::UpdateSessionRequest {
+            incognito: Some(false),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    h.turn(secret, "我养了一只狗", "好可爱").await;
+    h.fake.push(vec![content(r#"{"ops":[]}"#)]);
+    memory_jobs::extract(&h.state, secret).await.unwrap();
+    let input = h.fake.requests().last().unwrap().messages[1]
+        .text()
+        .to_owned();
+    assert!(input.contains("我养了一只狗"), "{input}");
+    assert!(!input.contains("说个秘密"), "{input}");
 }

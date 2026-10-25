@@ -392,6 +392,7 @@ async fn first_delta_timeout_falls_back_to_default_model(db: PgPool) {
         UpdateSessionRequest {
             title: None,
             model_key: Some(Some("pro".into())),
+            incognito: None,
         },
     )
     .await
@@ -419,6 +420,7 @@ async fn model_choice_rules(db: PgPool) {
     let set = |key: Option<&str>| UpdateSessionRequest {
         title: Some(Some("新标题".into())),
         model_key: Some(key.map(str::to_owned)),
+        incognito: None,
     };
     let problem = sessions::update(&h.state, &h.me, conversation, set(Some("nope")))
         .await
@@ -480,6 +482,7 @@ async fn images_reach_vision_models_only(db: PgPool) {
     let set = |key: &str| UpdateSessionRequest {
         title: None,
         model_key: Some(Some(key.to_owned())),
+        incognito: None,
     };
 
     // 识图模型：只发图（正文为空）也触发，图片作为 image_url 发给上游（MSG-030、LLM-015）。

@@ -303,6 +303,10 @@ struct Prepared {
     messages: Vec<ChatMessage>,
     /// 本次可用的工具（按角色卡组装，ADR 0004）。
     toolbox: Toolbox,
+    /// 检索相关往事用的查询（用户开着记忆时，MEM-052）；在事务之外、生成之前检索。
+    event_query: Option<String>,
+    /// 这次提了的待跟进（回复完成后记为已问起，MEM-056）。
+    follow_ups: Vec<i64>,
 }
 
 enum Prepare {
@@ -472,22 +476,33 @@ async fn prepare(
     // 记忆（ADR 0007）：会话摘要只看部署开关；长期记忆、跨会话衔接与记忆工具还要看用户的开关。
     let long_term = state.config.memory_enabled && repo::memory_enabled(&mut tx, sender).await?;
     if long_term {
-        toolbox = toolbox.with_memory(job.ai_user_id, conversation_id);
+        toolbox = toolbox.with_memory(job.ai_user_id, conversation_id, session.incognito);
     }
     toolbox.annotate_system(&mut messages);
+    let mut follow_ups = Vec::new();
     if state.config.memory_enabled {
         let recall = memory::recall(&mut tx, state, &session, &history, long_term, now).await?;
         memory::annotate(&mut messages, &recall);
+        follow_ups = recall.follow_ups.iter().map(|(id, _)| *id).collect();
         if memory::needs_summary(&session, &history, state.config.max_history_messages) {
             memory_jobs::enqueue_summary(&state.jobs, &mut tx, conversation_id).await?;
         }
     }
+    let event_query = long_term
+        .then(|| memory::event_query(&history, job.ai_user_id))
+        .flatten();
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。
     let prompt_chars = quota::prompt_estimate(&messages, model.vision)
         .saturating_add(toolbox.extra_estimate_tokens(state.config.max_tool_rounds))
         .saturating_add(if model.vision {
             quota::TOOL_IMAGE_TOKENS
+        } else {
+            0
+        })
+        // 相关往事在预占之后才取（MEM-052），先按上限估进去。
+        .saturating_add(if event_query.is_some() {
+            memory::EVENTS_ESTIMATE_TOKENS
         } else {
             0
         });
@@ -576,6 +591,8 @@ async fn prepare(
         hold,
         messages,
         toolbox,
+        event_query,
+        follow_ups,
     })))
 }
 
@@ -589,10 +606,22 @@ pub async fn run_job(
     let mut effects = Effects::new();
     let prepared = prepare(state, job_id, attempt, &mut effects).await?;
     effects.dispatch(state.bus.as_ref());
-    let prepared = match prepared {
+    let mut prepared = match prepared {
         Prepare::Done(outcome) => return Ok(outcome),
         Prepare::Ready(prepared) => *prepared,
     };
+    // 相关往事（MEM-052）：事务之外检索，可能要算一次查询向量；出错或超时就不带。
+    if let Some(query) = prepared.event_query.as_deref()
+        && let Some(note) = memory::recall_events(
+            state,
+            prepared.job.quota_user_id,
+            prepared.job.ai_user_id,
+            query,
+        )
+        .await
+    {
+        memory::append_system(&mut prepared.messages, &note);
+    }
 
     let conversation_id = prepared.session.conversation_id;
     let audience: Vec<i64> = {
@@ -794,8 +823,14 @@ async fn finalize(
         },
     )
     .await?;
-    // 对话停下来之后提炼长期记忆（MEM-020）：每次回复都把同一个任务往后推。
-    if state.config.memory_enabled && matches!(outcome, RunOutcome::Completed | RunOutcome::Stopped)
+    // 这次提了的待跟进记为已问起（MEM-056），之后不再反复问。
+    if matches!(outcome, RunOutcome::Completed) && !prepared.follow_ups.is_empty() {
+        repo::mark_followed_up(&mut tx, &prepared.follow_ups, now).await?;
+    }
+    // 对话停下来之后提炼长期记忆（MEM-020）：每次回复都把同一个任务往后推。无痕会话不提炼（MEM-070）。
+    if state.config.memory_enabled
+        && !prepared.session.incognito
+        && matches!(outcome, RunOutcome::Completed | RunOutcome::Stopped)
     {
         let delay = i64::try_from(state.config.memory_extract_delay_secs).unwrap_or(0);
         memory_jobs::enqueue_extract(

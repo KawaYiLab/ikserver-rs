@@ -1280,13 +1280,14 @@ export interface paths {
         /**
          * 我的 AI 记忆
          * @description 记忆面板：开关与全部记忆。`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的
-         *     关系记忆（带 `character`）。置顶的在前，其余最近更新的在前；每类最多 40 条。
+         *     关系记忆、`event` 是与某个角色聊过的具体经历（都带 `character`）。置顶的在前，其余最近更新的在前；
+         *     档案、每个角色的关系记忆各最多 40 条，事件最多 300 条。`sensitivity = public` 的才会用在公开的评论区。
          */
         get: operations["memories"];
         put?: never;
         /**
          * 添加记忆
-         * @description 手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。
+         * @description 手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。事件可以带发生日期与待跟进日期。
          */
         post: operations["create_memory"];
         delete?: never;
@@ -1306,7 +1307,7 @@ export interface paths {
         put?: never;
         /**
          * 清空记忆
-         * @description 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。
+         * @description 指定角色：只清与它的关系与事件记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。
          */
         post: operations["clear_memories"];
         delete?: never;
@@ -1331,7 +1332,8 @@ export interface paths {
         head?: never;
         /**
          * 修改记忆
-         * @description 改正文（来源变为 `manual`）或置顶 / 取消置顶。置顶的不会被自动整理改写或淘汰。
+         * @description 改正文（来源变为 `manual`）、置顶、敏感度；事件还能改日期与待跟进（null 清除）。
+         *     置顶的不会被自动整理改写或淘汰。
          */
         patch: operations["update_memory"];
         trace?: never;
@@ -1474,7 +1476,8 @@ export interface paths {
         head?: never;
         /**
          * 修改 AI 会话
-         * @description 改标题、会话级模型。字段缺省不改；null 或空串清除（模型清除后跟随角色卡默认）。
+         * @description 改标题、会话级模型、无痕。字段缺省不改；null 或空串清除（模型清除后跟随角色卡默认）。
+         *     无痕会话不进长期记忆、不给别的会话做衔接；关掉无痕后，无痕期间的对话也不会补提炼。
          *     模型须启用且在角色的白名单内。变更推 `dm.conversation.updated`。
          */
         patch: operations["update_session"];
@@ -4049,11 +4052,32 @@ export interface components {
             content: string;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: date
+             * @description 待跟进：到了这天，AI 会在下次聊天开场时问起。只有事件有。
+             */
+            followUpOn?: string | null;
+            /**
+             * Format: date-time
+             * @description 已经问起过的时刻。
+             */
+            followedUpAt?: string | null;
+            /**
+             * Format: date
+             * @description 事件发生的日期（北京时间）。只有事件有。
+             */
+            happenedOn?: string | null;
             id: string;
+            /**
+             * Format: int32
+             * @description 重要度 1–5（检索与淘汰用）。
+             */
+            importance: number;
             kind: components["schemas"]["MemoryKind"];
             origin: components["schemas"]["MemoryOrigin"];
             /** @description 置顶的不会被自动整理改写或淘汰。 */
             pinned: boolean;
+            sensitivity: components["schemas"]["MemorySensitivity"];
             /** Format: date-time */
             updatedAt: string;
         };
@@ -4090,6 +4114,8 @@ export interface components {
             /** @description 角色已下线时为 null。 */
             character?: string | null;
             conversationId: string;
+            /** @description 无痕：这个会话不进长期记忆，也不给别的会话做衔接。 */
+            incognito: boolean;
             /** @description 会话级模型选择；null 表示跟随角色卡默认。 */
             modelKey?: string | null;
             title?: string | null;
@@ -4452,7 +4478,7 @@ export interface components {
         };
         /** @description 清空记忆。 */
         ClearAiMemoriesRequest: {
-            /** @description 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部（含档案）。 */
+            /** @description 指定角色：只清与它的关系与事件记忆（「让它忘了我」）；不指定：清空全部（含档案）。 */
             character?: string | null;
         };
         /** @description 客户端 → 服务端。 */
@@ -4653,11 +4679,22 @@ export interface components {
         };
         /** @description 手动添加一条记忆。 */
         CreateAiMemoryRequest: {
-            /** @description `relation` 必填（角色 slug）；`profile` 不能填。 */
+            /** @description `relation`、`event` 必填（角色 slug）；`profile` 不能填。 */
             character?: string | null;
             /** @description 1–200 字。 */
             content: string;
+            /**
+             * Format: date
+             * @description 只有 `event` 能填。
+             */
+            followUpOn?: string | null;
+            /**
+             * Format: date
+             * @description 只有 `event` 能填。
+             */
+            happenedOn?: string | null;
             kind: components["schemas"]["MemoryKind"];
+            sensitivity?: components["schemas"]["MemorySensitivity"] | null;
         };
         CreateCommentRequest: {
             /**
@@ -5297,15 +5334,21 @@ export interface components {
             width?: number | null;
         };
         /**
-         * @description 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆。
+         * @description 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆，
+         *     `event` 是与某个角色聊过的具体经历（带日期，按话题检索，可以有待跟进日期）。
          * @enum {string}
          */
-        MemoryKind: "profile" | "relation";
+        MemoryKind: "profile" | "relation" | "event";
         /**
          * @description 记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 自己在记忆面板里写或改过。
          * @enum {string}
          */
         MemoryOrigin: "extracted" | "told" | "manual";
+        /**
+         * @description 敏感度：`public` 的可以在公开的评论区里用，`private` 的只在私信里用。
+         * @enum {string}
+         */
+        MemorySensitivity: "private" | "public";
         /** @description @ 提及候选。 */
         MentionCandidate: {
             /** @description 头像（360 宽缩略图），没有设置时省略。 */
@@ -7111,7 +7154,18 @@ export interface components {
         UpdateAiMemoryRequest: {
             /** @description 1–200 字；改了之后来源变为 `manual`。 */
             content?: string | null;
+            /**
+             * Format: date
+             * @description 只有事件能改；null 清除（不再问起）。改了之后「已问起」清除。
+             */
+            followUpOn?: string | null;
+            /**
+             * Format: date
+             * @description 只有事件能改；null 清除。
+             */
+            happenedOn?: string | null;
             pinned?: boolean | null;
+            sensitivity?: components["schemas"]["MemorySensitivity"] | null;
         };
         UpdateConversationRequest: {
             muted?: boolean | null;
@@ -7126,6 +7180,8 @@ export interface components {
         };
         /** @description 改 AI 会话（CTX-032、TRIG-025）。字段缺省表示不改；null 或空串表示清除。 */
         UpdateSessionRequest: {
+            /** @description 无痕（MEM-070）。关掉时无痕期间的对话不会再补提炼。 */
+            incognito?: boolean | null;
             modelKey?: string | null;
             title?: string | null;
         };

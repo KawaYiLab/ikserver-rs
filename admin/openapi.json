@@ -4731,7 +4731,7 @@
           "ai"
         ],
         "summary": "我的 AI 记忆",
-        "description": "记忆面板：开关与全部记忆。`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的\n关系记忆（带 `character`）。置顶的在前，其余最近更新的在前；每类最多 40 条。",
+        "description": "记忆面板：开关与全部记忆。`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的\n关系记忆、`event` 是与某个角色聊过的具体经历（都带 `character`）。置顶的在前，其余最近更新的在前；\n档案、每个角色的关系记忆各最多 40 条，事件最多 300 条。`sensitivity = public` 的才会用在公开的评论区。",
         "operationId": "memories",
         "responses": {
           "200": {
@@ -4767,7 +4767,7 @@
           "ai"
         ],
         "summary": "添加记忆",
-        "description": "手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。",
+        "description": "手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。事件可以带发生日期与待跟进日期。",
         "operationId": "create_memory",
         "requestBody": {
           "content": {
@@ -4836,7 +4836,7 @@
           "ai"
         ],
         "summary": "清空记忆",
-        "description": "指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。",
+        "description": "指定角色：只清与它的关系与事件记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。",
         "operationId": "clear_memories",
         "requestBody": {
           "content": {
@@ -4919,7 +4919,7 @@
           "ai"
         ],
         "summary": "修改记忆",
-        "description": "改正文（来源变为 `manual`）或置顶 / 取消置顶。置顶的不会被自动整理改写或淘汰。",
+        "description": "改正文（来源变为 `manual`）、置顶、敏感度；事件还能改日期与待跟进（null 清除）。\n置顶的不会被自动整理改写或淘汰。",
         "operationId": "update_memory",
         "parameters": [
           {
@@ -5363,7 +5363,7 @@
           "ai"
         ],
         "summary": "修改 AI 会话",
-        "description": "改标题、会话级模型。字段缺省不改；null 或空串清除（模型清除后跟随角色卡默认）。\n模型须启用且在角色的白名单内。变更推 `dm.conversation.updated`。",
+        "description": "改标题、会话级模型、无痕。字段缺省不改；null 或空串清除（模型清除后跟随角色卡默认）。\n无痕会话不进长期记忆、不给别的会话做衔接；关掉无痕后，无痕期间的对话也不会补提炼。\n模型须启用且在角色的白名单内。变更推 `dm.conversation.updated`。",
         "operationId": "update_session",
         "parameters": [
           {
@@ -14449,6 +14449,8 @@
           "content",
           "pinned",
           "origin",
+          "sensitivity",
+          "importance",
           "createdAt",
           "updatedAt"
         ],
@@ -14474,8 +14476,37 @@
             "type": "string",
             "format": "date-time"
           },
+          "followUpOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "待跟进：到了这天，AI 会在下次聊天开场时问起。只有事件有。"
+          },
+          "followedUpAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "已经问起过的时刻。"
+          },
+          "happenedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "事件发生的日期（北京时间）。只有事件有。"
+          },
           "id": {
             "type": "string"
+          },
+          "importance": {
+            "type": "integer",
+            "format": "int32",
+            "description": "重要度 1–5（检索与淘汰用）。"
           },
           "kind": {
             "$ref": "#/components/schemas/MemoryKind"
@@ -14486,6 +14517,9 @@
           "pinned": {
             "type": "boolean",
             "description": "置顶的不会被自动整理改写或淘汰。"
+          },
+          "sensitivity": {
+            "$ref": "#/components/schemas/MemorySensitivity"
           },
           "updatedAt": {
             "type": "string",
@@ -14557,7 +14591,8 @@
         "type": "object",
         "description": "AI 会话的设置。OpenAPI 里叫 `AiSessionView`，与登录会话的 `SessionView` 区分。",
         "required": [
-          "conversationId"
+          "conversationId",
+          "incognito"
         ],
         "properties": {
           "character": {
@@ -14569,6 +14604,10 @@
           },
           "conversationId": {
             "type": "string"
+          },
+          "incognito": {
+            "type": "boolean",
+            "description": "无痕：这个会话不进长期记忆，也不给别的会话做衔接。"
           },
           "modelKey": {
             "type": [
@@ -15660,7 +15699,7 @@
               "string",
               "null"
             ],
-            "description": "指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部（含档案）。"
+            "description": "指定角色：只清与它的关系与事件记忆（「让它忘了我」）；不指定：清空全部（含档案）。"
           }
         },
         "additionalProperties": false
@@ -16246,14 +16285,41 @@
               "string",
               "null"
             ],
-            "description": "`relation` 必填（角色 slug）；`profile` 不能填。"
+            "description": "`relation`、`event` 必填（角色 slug）；`profile` 不能填。"
           },
           "content": {
             "type": "string",
             "description": "1–200 字。"
           },
+          "followUpOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "只有 `event` 能填。"
+          },
+          "happenedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "只有 `event` 能填。"
+          },
           "kind": {
             "$ref": "#/components/schemas/MemoryKind"
+          },
+          "sensitivity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemorySensitivity",
+                "description": "缺省 `private`。"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -17904,10 +17970,11 @@
       },
       "MemoryKind": {
         "type": "string",
-        "description": "记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆。",
+        "description": "记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆，\n`event` 是与某个角色聊过的具体经历（带日期，按话题检索，可以有待跟进日期）。",
         "enum": [
           "profile",
-          "relation"
+          "relation",
+          "event"
         ]
       },
       "MemoryOrigin": {
@@ -17917,6 +17984,14 @@
           "extracted",
           "told",
           "manual"
+        ]
+      },
+      "MemorySensitivity": {
+        "type": "string",
+        "description": "敏感度：`public` 的可以在公开的评论区里用，`private` 的只在私信里用。",
+        "enum": [
+          "private",
+          "public"
         ]
       },
       "MentionCandidate": {
@@ -23584,10 +23659,36 @@
             ],
             "description": "1–200 字；改了之后来源变为 `manual`。"
           },
+          "followUpOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "只有事件能改；null 清除（不再问起）。改了之后「已问起」清除。"
+          },
+          "happenedOn": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date",
+            "description": "只有事件能改；null 清除。"
+          },
           "pinned": {
             "type": [
               "boolean",
               "null"
+            ]
+          },
+          "sensitivity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemorySensitivity"
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -23636,6 +23737,13 @@
         "type": "object",
         "description": "改 AI 会话（CTX-032、TRIG-025）。字段缺省表示不改；null 或空串表示清除。",
         "properties": {
+          "incognito": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "无痕（MEM-070）。关掉时无痕期间的对话不会再补提炼。"
+          },
           "modelKey": {
             "type": [
               "string",

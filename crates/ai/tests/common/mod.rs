@@ -21,6 +21,7 @@ pub enum Step {
 pub struct Scripted {
     scripts: Mutex<VecDeque<Vec<Step>>>,
     requests: Mutex<Vec<ChatRequest>>,
+    embedded: Mutex<Vec<String>>,
 }
 
 impl Scripted {
@@ -30,6 +31,11 @@ impl Scripted {
 
     pub fn requests(&self) -> Vec<ChatRequest> {
         self.requests.lock().unwrap().clone()
+    }
+
+    /// 算过向量的文本（按调用顺序）。
+    pub fn embedded(&self) -> Vec<String> {
+        self.embedded.lock().unwrap().clone()
     }
 }
 
@@ -55,6 +61,28 @@ impl ChatProvider for Scripted {
         });
         Ok(Box::pin(stream.filter_map(|item| async move { item })))
     }
+
+    /// 假向量：字的二元组散列到 64 维再归一化，字面相近的文本余弦相似度高。
+    async fn embed(&self, _model: &str, inputs: &[String]) -> Result<Vec<Vec<f32>>, LlmError> {
+        self.embedded.lock().unwrap().extend(inputs.iter().cloned());
+        Ok(inputs.iter().map(|text| fake_embedding(text)).collect())
+    }
+}
+
+pub fn fake_embedding(text: &str) -> Vec<f32> {
+    let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
+    let mut vector = vec![0f32; 64];
+    for pair in chars.windows(2) {
+        let slot = (u32::from(pair[0]).wrapping_mul(31) ^ u32::from(pair[1])) as usize % 64;
+        vector[slot] += 1.0;
+    }
+    let norm = vector.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for x in &mut vector {
+            *x /= norm;
+        }
+    }
+    vector
 }
 
 pub fn content(text: &str) -> Step {

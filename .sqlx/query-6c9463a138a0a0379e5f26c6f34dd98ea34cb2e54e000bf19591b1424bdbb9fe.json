@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, created_at, updated_at\n         FROM ai_memories\n         WHERE user_id = $1 AND (ai_user_id IS NULL OR ai_user_id = $2)\n         ORDER BY pinned DESC, updated_at DESC, id DESC",
+  "query": "DELETE FROM ai_memories WHERE user_id = $1 AND id = ANY($2)\n         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
   "describe": {
     "columns": [
       {
@@ -82,6 +82,61 @@
       },
       {
         "ordinal": 7,
+        "name": "sensitivity",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "sensitivity"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "importance",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "importance"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "happened_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "happened_on"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "follow_up_on",
+        "type_info": "Date",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "follow_up_on"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "followed_up_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "followed_up_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -92,7 +147,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 13,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -106,7 +161,7 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int8"
+        "Int8Array"
       ]
     },
     "nullable": [
@@ -118,8 +173,13 @@
       false,
       false,
       false,
+      false,
+      true,
+      true,
+      true,
+      false,
       false
     ]
   },
-  "hash": "6cd26f113b10105c33d086e2216a706d2e91d85cae227b943f3c6054107c5bcb"
+  "hash": "6c9463a138a0a0379e5f26c6f34dd98ea34cb2e54e000bf19591b1424bdbb9fe"
 }
