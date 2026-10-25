@@ -201,7 +201,23 @@ GET /v1/posts?cursor=eyJ...&limit=20
 - 计数在进程内（不使用 Redis），多实例时每个实例各自计。
 - 搜索（`/v1/search/*`）：登录用户每秒 10 次，游客每 IP 每秒 5 次。
 - 剧情库 MCP（`POST /v1/story/mcp`）是只读查询，在全站默认限流里按「读」计。
+- QQ Webhook（`POST /v1/qq/webhook`）免于默认 IP 桶，也不带上述全站 RateLimit 头；按配置 AppID 每秒限流（默认 50），超限 429 + Retry-After。
 - 视频预览（`/v1/videos/resolve`，会访问 B 站）：每人每分钟 30 次；结果在进程内缓存 10 分钟。
+
+## QQ 官方机器人（ADR 0008，第 1 期）
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/v1/qq/webhook` | QQ 平台回调；AppID + Ed25519 验签，64 KiB，持久化入队后 ACK。无 Origin 回调通过现有 CSRF 中间件 |
+| GET / PUT | `/v1/admin/qq/settings` | 游客次数、游客 token、上下文、生成预算、清洗等设置 |
+| GET | `/v1/admin/qq/bots` | 部署配置中的机器人列表，不返回密钥 |
+| GET / PUT | `/v1/admin/qq/bots/{appId}` | 机器人展示名、默认角色、开关 |
+| GET | `/v1/admin/qq/groups` | page/limit 分页，返回群活跃时间与今日用量，不返回完整 openid |
+| PUT | `/v1/admin/qq/groups/{id}` | 群展示名、角色覆盖、启用/封禁、resetContext |
+
+后台接口只限管理员，写操作和审计同事务。角色卡接口增加 `qqEnabled`。
+第 1 期沿用已有错误码：401 UNAUTHORIZED、400 VALIDATION_FAILED、404 NOT_FOUND、429 RATE_LIMITED；
+绑定码和绑定身份接口、新错误码 `QQ_BIND_CODE_LIMIT` / `QQ_BOT_DISABLED` 留到第 2 期。
 
 ## 实时（WebSocket `/v1/realtime`）
 

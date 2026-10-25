@@ -40,6 +40,11 @@ pub fn crontabs() -> anyhow::Result<Vec<Crontab>> {
             .payload(ik_ai::memory_jobs::NightlyMemory::default())?
             .max_attempts(1)
             .build(),
+        Cron::daily_at::<ik_qqbot::jobs::Prune>(20, 47)
+            .map_err(invalid)?
+            .payload(ik_qqbot::jobs::Prune::default())?
+            .max_attempts(1)
+            .build(),
     ])
 }
 
@@ -63,8 +68,11 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_ai::memory_jobs::ExtractMemories>()
         .define_job::<ik_ai::memory_jobs::NightlyMemory>()
         .define_job::<ik_ai::memory_jobs::ConsolidateMemories>()
+        .define_job::<ik_qqbot::jobs::Reply>()
+        .define_job::<ik_qqbot::jobs::Prune>()
         .add_extension(state.mihoyo.clone())
         .add_extension(state.ai.clone())
+        .add_extension(state.qqbot.clone())
         .add_extension(state.db.clone())
         .add_extension(state.content.clone())
         .add_extension(state.media.clone());
@@ -91,7 +99,7 @@ mod tests {
     #[test]
     fn cron_payloads_decode_into_their_tasks() {
         let crontabs = crontabs().unwrap();
-        assert_eq!(crontabs.len(), 6);
+        assert_eq!(crontabs.len(), 7);
         for crontab in &crontabs {
             assert!(
                 decodes::<ik_media::jobs::SweepStaging>(crontab)
@@ -99,7 +107,8 @@ mod tests {
                     && decodes::<ik_mihoyo::jobs::PruneQrLogins>(crontab)
                     && decodes::<ik_ai::jobs::ReclaimQuotaHolds>(crontab)
                     && decodes::<ik_ai::mcp::RefreshMcpTools>(crontab)
-                    && decodes::<ik_ai::memory_jobs::NightlyMemory>(crontab),
+                    && decodes::<ik_ai::memory_jobs::NightlyMemory>(crontab)
+                    && decodes::<ik_qqbot::jobs::Prune>(crontab),
                 "{} 的 payload 解不出任务结构体",
                 crontab.task_identifier
             );

@@ -20,6 +20,7 @@ use ik_mihoyo::MihoyoState;
 use ik_moderation::ModerationState;
 use ik_notify::NotifyState;
 use ik_profile::ProfileState;
+use ik_qqbot::QqState;
 use ik_realtime::{RealtimeState, TypingHandler};
 use ik_search::SearchState;
 use ik_social::SocialState;
@@ -53,6 +54,7 @@ pub struct AppState {
     pub mihoyo: MihoyoState,
     pub moderation: ModerationState,
     pub ai: AiState,
+    pub qqbot: QqState,
     pub admin: AdminState,
     /// 剧情库：这里只建空壳，语料由 `serve` 显式加载（CLI 子命令不需要）。
     pub story: StoryState,
@@ -138,6 +140,13 @@ impl AppState {
         let ai =
             AiState::from_config(messaging.clone(), forum, &config.ai)?.with_story(story.clone());
         ai.install_hooks();
+        let qqbot = QqState::new(
+            db.clone(),
+            ids.clone(),
+            ik_kernel::jobs::Jobs::new(db.clone()),
+            ai.clone(),
+            config.qqbot.clone(),
+        )?;
         let admin = AdminState::new(
             content.clone(),
             exam.clone(),
@@ -149,6 +158,7 @@ impl AppState {
             story,
             admin,
             ai,
+            qqbot,
             moderation,
             cosmetics,
             mihoyo,
@@ -268,6 +278,12 @@ impl FromRef<AppState> for ModerationState {
 impl FromRef<AppState> for AiState {
     fn from_ref(state: &AppState) -> Self {
         state.ai.clone()
+    }
+}
+
+impl FromRef<AppState> for QqState {
+    fn from_ref(state: &AppState) -> Self {
+        state.qqbot.clone()
     }
 }
 

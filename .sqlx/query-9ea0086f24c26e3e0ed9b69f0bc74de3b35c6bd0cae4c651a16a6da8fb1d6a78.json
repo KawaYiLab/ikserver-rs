@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_turns SET status='completed',finished_at=$2 WHERE id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9ea0086f24c26e3e0ed9b69f0bc74de3b35c6bd0cae4c651a16a6da8fb1d6a78"
+}

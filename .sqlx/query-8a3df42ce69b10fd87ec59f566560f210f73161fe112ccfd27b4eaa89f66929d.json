@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_bots SET display_name=$2,default_card_slug=$3,enabled=$4 WHERE app_id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a3df42ce69b10fd87ec59f566560f210f73161fe112ccfd27b4eaa89f66929d"
+}

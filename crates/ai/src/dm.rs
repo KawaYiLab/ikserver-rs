@@ -878,6 +878,7 @@ mod tests {
             knock_visible: true,
             dm_enabled: true,
             comment_enabled: true,
+            qq_enabled: false,
             sort_order: 0,
             output_mode: OutputMode::Plain,
             system_prompt: "你是 Fairy。".into(),

@@ -10,6 +10,7 @@ pub mod catalog;
 pub mod comment;
 pub mod dm;
 pub mod dto;
+pub mod external;
 mod generate;
 pub mod immersion;
 pub mod jobs;

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids\n         FROM ai_role_cards ORDER BY sort_order, id",
+  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, qq_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids\n         FROM ai_role_cards ORDER BY sort_order, id",
   "describe": {
     "columns": [
       {
@@ -115,6 +115,17 @@
       },
       {
         "ordinal": 10,
+        "name": "qq_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "qq_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
         "name": "sort_order",
         "type_info": "Int4",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "output_mode",
         "type_info": "Text",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "system_prompt",
         "type_info": "Text",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "examples",
         "type_info": "Jsonb",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "default_model_id",
         "type_info": "Int8",
         "origin": {
@@ -169,7 +180,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "allowed_model_ids",
         "type_info": "Int8Array",
         "origin": {
@@ -180,7 +191,7 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "suggested_questions",
         "type_info": "TextArray",
         "origin": {
@@ -191,7 +202,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "story_tools",
         "type_info": "Bool",
         "origin": {
@@ -202,7 +213,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "mcp_server_ids",
         "type_info": "Int8Array",
         "origin": {
@@ -231,6 +242,7 @@
       false,
       false,
       false,
+      false,
       true,
       false,
       false,
@@ -238,5 +250,5 @@
       false
     ]
   },
-  "hash": "c96be5cfe532624eaed8736680c6f49f70b538f5478880ddb3e3062dc969a7f6"
+  "hash": "32a4f8a005c01a742f44f1e32a5b931c6cb4db9a7174a87741192597360c724e"
 }

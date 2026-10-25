@@ -33,6 +33,7 @@ ik-admin = { path = "crates/admin" }
 ik-legacy = { path = "crates/legacy" }
 ik-mail = { path = "crates/mail" }
 ik-story = { path = "crates/story" }
+ik-qqbot = { path = "crates/qqbot" }
 
 # 异步运行时与 Web
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "net", "sync"] }
@@ -85,6 +86,7 @@ hmac = "0.13"
 getrandom = "0.4"
 base64 = "0.23"
 subtle = "2.6"
+ring = "0.17"
 
 # 搜索（内网 HTTP，不启用 TLS）
 meilisearch-sdk = { version = "0.33", default-features = false, features = ["reqwest"] }

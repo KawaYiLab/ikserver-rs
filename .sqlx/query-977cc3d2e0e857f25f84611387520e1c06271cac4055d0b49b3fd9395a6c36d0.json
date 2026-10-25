@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_guest_usage(day,identity_id) VALUES($1,$2) ON CONFLICT(day,identity_id) DO UPDATE SET turns=qq_guest_usage.turns RETURNING turns",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "turns",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "qq_guest_usage",
+            "name": "turns"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "977cc3d2e0e857f25f84611387520e1c06271cac4055d0b49b3fd9395a6c36d0"
+}

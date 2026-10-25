@@ -44,6 +44,9 @@ export const auditActionLabel: Record<string, string> = {
   'ai.mcp_server.save': '保存 MCP 服务',
   'ai.mcp_server.delete': '删除 MCP 服务',
   'ai.mcp_tool.save': '修改 MCP 工具',
+  'qq.settings.update': '修改 QQ 设置',
+  'qq.bot.update': '修改 QQ 机器人',
+  'qq.group.update': '修改 QQ 群设置',
   'search.reindex': '重建索引',
   'site.settings.update': '修改系统设置',
 }
@@ -63,6 +66,9 @@ export const auditTargetLabel: Record<string, string> = {
   ai_provider: 'AI 提供方',
   ai_mcp_server: 'MCP 服务',
   ai_mcp_tool: 'MCP 工具',
+  qq_settings: 'QQ 设置',
+  qq_bot: 'QQ 机器人',
+  qq_group: 'QQ 群',
   search: '搜索',
   site_settings: '系统设置',
 }

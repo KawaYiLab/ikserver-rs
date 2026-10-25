@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_identities(id,app_id,scene,openid,group_id,nickname,last_active_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(app_id,scene,openid,group_id) DO UPDATE SET nickname=EXCLUDED.nickname,last_active_at=EXCLUDED.last_active_at RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c57828c84ac9d3d18cc3943a322274eee880e01a09b9eb30aa95ea216ee7af9f"
+}

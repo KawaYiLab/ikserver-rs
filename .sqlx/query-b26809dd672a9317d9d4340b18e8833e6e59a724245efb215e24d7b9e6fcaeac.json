@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM qq_guest_tokens WHERE day<$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b26809dd672a9317d9d4340b18e8833e6e59a724245efb215e24d7b9e6fcaeac"
+}

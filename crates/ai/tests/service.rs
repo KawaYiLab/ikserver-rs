@@ -88,6 +88,88 @@ fn limits(per_user: i64, site: i64) -> Limits {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn site_only_reservations_settle_and_reclaim_exactly_once(db: PgPool) {
+    let ids = Snowflake::new(1).unwrap();
+    let now = Utc::now();
+    let mut tx = db.begin().await.unwrap();
+    quota::reserve_site_only(&mut tx, &ids, limits(1, 100), 30, now, Duration::seconds(1))
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+    let mut tx = db.begin().await.unwrap();
+    assert_eq!(
+        quota::reclaim_expired(&mut tx, now + Duration::seconds(2), 10)
+            .await
+            .unwrap(),
+        1
+    );
+    tx.commit().await.unwrap();
+    assert_eq!(used(&db, quota::SITE).await, 0);
+    let mut tx = db.begin().await.unwrap();
+    // 个人额度故意设为 1：游客只受全站上限控制。
+    let hold = quota::reserve_site_only(&mut tx, &ids, limits(1, 100), 100, now, HOLD_TTL)
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(hold.user_id, quota::SITE);
+    assert_eq!(used(&db, quota::SITE).await, 100);
+    assert_eq!(
+        reserve(&db, &ids, limits(1, 100), quota::SITE, 10).await,
+        Err(Denial::SiteBudget)
+    );
+    assert_eq!(used(&db, quota::SITE).await, 100);
+    assert_eq!(
+        settle(&db, &hold, "guest:1", 10).await,
+        Settled::Applied { delta: -90 }
+    );
+    assert_eq!(settle(&db, &hold, "guest:1", 10).await, Settled::Duplicate);
+    assert_eq!(used(&db, quota::SITE).await, 10);
+
+    let mut tx = db.begin().await.unwrap();
+    let expired =
+        quota::reserve_site_only(&mut tx, &ids, limits(1, 100), 90, now, Duration::seconds(1))
+            .await
+            .unwrap()
+            .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(used(&db, quota::SITE).await, 100);
+    let mut tx = db.begin().await.unwrap();
+    assert_eq!(
+        quota::reclaim_expired(&mut tx, now + Duration::seconds(2), 10)
+            .await
+            .unwrap(),
+        1
+    );
+    tx.commit().await.unwrap();
+    assert_eq!(used(&db, quota::SITE).await, 10);
+    // 回收后迟到的真实用量仍只扣一次。
+    settle(&db, &expired, "guest:2", 30).await;
+    assert_eq!(used(&db, quota::SITE).await, 40);
+
+    let mut tx = db.begin().await.unwrap();
+    let free = quota::reserve_site_only(&mut tx, &ids, limits(1, 0), 100, now, HOLD_TTL)
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!((free.id, free.amount), (None, 0));
+    settle(&db, &free, "guest:unlimited", 15).await;
+    assert_eq!(used(&db, quota::SITE).await, 55);
+    // 纯游客预占 → 回收必须回到原始值，不能负数。
+    let mut tx = db.begin().await.unwrap();
+    let refund = quota::reserve_site_only(&mut tx, &ids, limits(0, 1_000), 45, now, HOLD_TTL)
+        .await
+        .unwrap()
+        .unwrap();
+    tx.commit().await.unwrap();
+    settle(&db, &refund, "guest:refund", 0).await;
+    assert_eq!(used(&db, quota::SITE).await, 55);
+    assert_eq!(used(&db, 1).await, 0);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn concurrent_reservations_admit_only_what_the_budget_allows(db: PgPool) {
     let ids = Arc::new(Snowflake::new(1).unwrap());
     // 上限 10000、每份 3000：进来时用量 0、3000、6000、9000 的放行，之后的都拒（QUOTA-005）。

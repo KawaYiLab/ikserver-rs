@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_groups(id,app_id,group_openid,last_active_at) VALUES($1,$2,$3,$4) ON CONFLICT(app_id,group_openid) DO UPDATE SET last_active_at=EXCLUDED.last_active_at RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "49c7c1affeb1e0cf41af140189d5dc3123bbabe26551b27a43e2036445bd33b9"
+}

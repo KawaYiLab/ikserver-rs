@@ -54,6 +54,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { to: '/ai', label: 'AI 助手', icon: Bot, adminOnly: true, badge: 'aiFailed', keywords: 'ai 模型 角色' },
       { to: '/memory', label: 'AI 记忆', icon: Brain, adminOnly: true, keywords: 'ai memory 记忆 摘要 向量' },
+      { to: '/qq', label: 'QQ 机器人', icon: MessagesSquare, adminOnly: true, keywords: 'qq bot 群聊 游客 额度 机器人' },
       { to: '/search', label: '搜索索引', icon: Search, adminOnly: true, keywords: 'search meilisearch 索引' },
       { to: '/audit', label: '审计日志', icon: FileText, adminOnly: true, keywords: 'audit log 日志' },
       { to: '/settings', label: '系统设置', icon: Settings, adminOnly: true, keywords: 'settings 设置 开关 入站考试 exam' },

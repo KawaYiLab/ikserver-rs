@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_identities(id,app_id,scene,openid,available,last_active_at) VALUES($1,$2,'c2c',$3,$4,$5) ON CONFLICT(app_id,scene,openid,group_id) DO UPDATE SET available=EXCLUDED.available,last_active_at=EXCLUDED.last_active_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0661c933e2a3dd6949d656544eecc28fea4b255fea9a5c117cd456947467c4cf"
+}

@@ -542,8 +542,28 @@ pub(crate) async fn generate(
     default_model: Option<&Model>,
     messages: &[ChatMessage],
 ) -> Generated {
+    generate_with_budget(
+        ctx,
+        workflow,
+        model,
+        default_model,
+        messages,
+        Duration::from_secs(ctx.state.config.reply_timeout_secs),
+    )
+    .await
+}
+
+/// 渠道可以收紧总预算；超时仍通过同一生成出口返回已发生的用量，不能在外层丢弃 future。
+pub(crate) async fn generate_with_budget(
+    ctx: &StreamCtx<'_>,
+    workflow: &mut Workflow,
+    model: &Model,
+    default_model: Option<&Model>,
+    messages: &[ChatMessage],
+    budget: Duration,
+) -> Generated {
     let state = ctx.state;
-    let deadline = Instant::now() + Duration::from_secs(state.config.reply_timeout_secs);
+    let deadline = Instant::now() + budget;
     let first_delta =
         Some(Duration::from_secs(state.config.first_delta_timeout_secs)).filter(|d| !d.is_zero());
     let mut streamed = run_rounds(ctx, workflow, model, messages, deadline, first_delta).await;

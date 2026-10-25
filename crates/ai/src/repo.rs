@@ -212,6 +212,7 @@ pub(crate) struct CardRow {
     pub knock_visible: bool,
     pub dm_enabled: bool,
     pub comment_enabled: bool,
+    pub qq_enabled: bool,
     pub sort_order: i32,
     pub output_mode: String,
     pub system_prompt: String,
@@ -227,7 +228,7 @@ pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>>
     sqlx::query_as!(
         CardRow,
         "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,
-                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,
+                dm_enabled, comment_enabled, qq_enabled, sort_order, output_mode, system_prompt, examples,
                 default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids
          FROM ai_role_cards ORDER BY sort_order, id"
     )
@@ -246,6 +247,7 @@ pub(crate) struct NewCard<'a> {
     pub knock_visible: bool,
     pub dm_enabled: bool,
     pub comment_enabled: bool,
+    pub qq_enabled: bool,
     pub sort_order: i32,
     pub output_mode: &'a str,
     pub system_prompt: &'a str,
@@ -265,14 +267,15 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
                                     enabled, knock_visible, dm_enabled, comment_enabled, sort_order,
                                     output_mode, system_prompt, examples, default_model_id,
                                     allowed_model_ids, suggested_questions, story_tools,
-                                    mcp_server_ids, created_at, updated_at)
+                                    mcp_server_ids, created_at, updated_at, qq_enabled)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $19,
-                 $20, $18, $18)
+                 $20, $18, $18, $21)
          ON CONFLICT (slug) DO UPDATE SET display_name = $3, bio = $4, avatar_media_id = $5,
              bound_user_id = $6, enabled = $7, knock_visible = $8, dm_enabled = $9,
              comment_enabled = $10, sort_order = $11, output_mode = $12, system_prompt = $13,
              examples = $14, default_model_id = $15, allowed_model_ids = $16,
-             suggested_questions = $17, story_tools = $19, mcp_server_ids = $20, updated_at = $18
+             suggested_questions = $17, story_tools = $19, mcp_server_ids = $20, updated_at = $18,
+             qq_enabled = $21
          RETURNING id",
         c.id,
         c.slug,
@@ -294,6 +297,7 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
         c.now,
         c.story_tools,
         c.mcp_server_ids,
+        c.qq_enabled,
     )
     .fetch_one(conn)
     .await

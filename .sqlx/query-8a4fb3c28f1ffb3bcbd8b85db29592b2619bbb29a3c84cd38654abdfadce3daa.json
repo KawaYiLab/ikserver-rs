@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_group_usage SET guest_turns=GREATEST(0,guest_turns-1) WHERE day=$1 AND group_id=$2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a4fb3c28f1ffb3bcbd8b85db29592b2619bbb29a3c84cd38654abdfadce3daa"
+}

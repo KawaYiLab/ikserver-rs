@@ -130,7 +130,11 @@ impl GlobalLimiter {
 
 pub async fn layer(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let limiter = state.rate_limit.clone();
-    if !limiter.enabled || !request.uri().path().starts_with("/v1/") {
+    // QQ 回调来自少量平台出口 IP；由 qqbot 在认证后按已配置 AppID 限流。
+    if !limiter.enabled
+        || !request.uri().path().starts_with("/v1/")
+        || request.uri().path() == "/v1/qq/webhook"
+    {
         return next.run(request).await;
     }
     // 剧情库 MCP 是只读查询，只是 JSON-RPC 规定用 POST：按读计，否则总结一章要读几十次就会撞上写的限额。

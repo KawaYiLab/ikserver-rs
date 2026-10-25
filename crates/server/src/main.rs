@@ -414,6 +414,7 @@ async fn serve() -> anyhow::Result<()> {
     // 剧情库：加载数据库里的生效版本（或开发用的本地语料）。加载失败则启动失败；
     // 之后的切换（上传、其他实例回滚、SIGHUP）失败只记日志、保留当前语料。
     state.story.load().await?;
+    state.qqbot.initialize().await?;
     let reload = spawn_reload_on_sighup(state.story.clone());
     let story_watch = state.story.spawn_watcher();
     state

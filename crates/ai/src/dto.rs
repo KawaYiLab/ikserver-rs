@@ -171,6 +171,9 @@ pub struct CharacterInput {
     pub dm_enabled: bool,
     #[serde(default = "yes")]
     pub comment_enabled: bool,
+    /// 允许在 QQ 渠道使用此角色，默认关闭（ADR 0008）。
+    #[serde(default)]
+    pub qq_enabled: bool,
     #[serde(default)]
     pub sort_order: i32,
     #[serde(default)]

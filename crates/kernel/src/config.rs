@@ -75,6 +75,82 @@ pub struct Config {
     pub moderation: Moderation,
     pub ai: Ai,
     pub story: Story,
+    pub qqbot: Qqbot,
+}
+
+/// QQ 官方机器人：凭据只在部署配置里，角色与使用限制在管理后台维护。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Qqbot {
+    pub enabled: bool,
+    pub sandbox: bool,
+    pub apps: std::collections::BTreeMap<String, QqbotApp>,
+    pub token_url: String,
+    /// 未设置时按 sandbox 选择腾讯的正式或沙箱地址。
+    pub api_base: Option<String>,
+    /// 仅在配置回调地址时临时打开；校验请求仍严格限制签名内容。
+    pub allow_validation: bool,
+    pub webhook_rate_per_second: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct QqbotApp {
+    pub app_id: String,
+    pub secret: Secret,
+}
+
+impl Default for Qqbot {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sandbox: false,
+            apps: std::collections::BTreeMap::new(),
+            token_url: "https://bots.qq.com/app/getAppAccessToken".to_owned(),
+            api_base: None,
+            allow_validation: false,
+            webhook_rate_per_second: 50,
+        }
+    }
+}
+
+impl Qqbot {
+    pub fn api_base(&self) -> &str {
+        self.api_base.as_deref().unwrap_or(if self.sandbox {
+            "https://sandbox.api.sgroup.qq.com"
+        } else {
+            "https://api.sgroup.qq.com"
+        })
+    }
+
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let mut ids = std::collections::BTreeSet::new();
+        if self.enabled && self.apps.is_empty() {
+            return Err(ConfigError::Missing("IK_QQBOT__APPS（启用时至少配置一个机器人）"));
+        }
+        for app in self.apps.values() {
+            if app.app_id.is_empty()
+                || app.app_id.len() > 32
+                || !app.app_id.bytes().all(|b| b.is_ascii_digit())
+                || app.secret.expose().trim().is_empty()
+                || !ids.insert(&app.app_id)
+            {
+                return Err(ConfigError::Invalid(
+                    "qqbot.apps 的 app_id 必须是唯一的数字字符串（≤32 位），secret 不能为空".to_owned(),
+                ));
+            }
+        }
+        let url_ok = |url: &str| url.starts_with("https://") || url.starts_with("http://");
+        if !(1..=10000).contains(&self.webhook_rate_per_second)
+            || !url_ok(&self.token_url)
+            || !url_ok(self.api_base())
+        {
+            return Err(ConfigError::Invalid(
+                "qqbot 的 token_url/api_base 须为 http(s)://，webhook_rate_per_second 必须在 1–10000 之间".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// AI 助手（ai-assistant.md）。模型、角色卡、额度上限在数据库里（后台维护）；这里是部署相关的参数与
@@ -420,6 +496,7 @@ impl Default for Config {
             moderation: Moderation::default(),
             ai: Ai::default(),
             story: Story::default(),
+            qqbot: Qqbot::default(),
         }
     }
 }
@@ -712,7 +789,8 @@ fn env_path(name: &str) -> String {
 /// 值是自由文本、不能按数字或布尔解析的配置项（密码、密钥、账号名、发件人）。
 fn is_free_text(path: &str) -> bool {
     let last = path.rsplit('.').next().unwrap_or(path);
-    matches!(last, "password" | "username" | "from" | "reply_to") || last.ends_with("key")
+    matches!(last, "password" | "username" | "from" | "reply_to" | "secret" | "app_id")
+        || last.ends_with("key")
 }
 
 impl Config {
@@ -901,6 +979,7 @@ impl Config {
             ));
         }
         self.mail.validate()?;
+        self.qqbot.validate()?;
         if self.session.cookie_cross_site && !self.session.cookie_secure {
             return Err(ConfigError::Invalid(
                 "session.cookie_cross_site 需要同时开启 session.cookie_secure（浏览器只接受 Secure 的跨站 Cookie）"
@@ -947,6 +1026,29 @@ mod tests {
         assert_eq!(config.http.addr.port(), 8080);
         assert_eq!(config.session.cookie_name, "ik_session");
         assert_eq!(config.database.url.expose(), "postgres://x");
+    }
+
+    #[test]
+    fn qqbot_config_requires_unique_apps_and_secrets() {
+        let mut config = Qqbot::default();
+        assert!(config.validate().is_ok());
+        assert!(!config.allow_validation);
+        assert_eq!(config.webhook_rate_per_second, 50);
+        config.enabled = true;
+        assert!(config.validate().is_err());
+        let app = QqbotApp { app_id: "00123".to_owned(), secret: Secret::new("secret") };
+        config.apps.insert("main".to_owned(), app.clone());
+        assert!(config.validate().is_ok());
+        assert!(!format!("{config:?}").contains("\"secret\""));
+        config.apps.insert("duplicate".to_owned(), app);
+        assert!(config.validate().is_err());
+        config.apps.remove("duplicate");
+        config.apps.get_mut("main").unwrap().secret = Secret::new(" ");
+        assert!(config.validate().is_err());
+        config.sandbox = true;
+        assert_eq!(config.api_base(), "https://sandbox.api.sgroup.qq.com");
+        assert!(is_free_text("qqbot.apps.main.app_id"));
+        assert!(is_free_text("qqbot.apps.main.secret"));
     }
 
     #[test]

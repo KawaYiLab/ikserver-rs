@@ -305,9 +305,12 @@ impl Toolbox {
                 ai_user_id,
                 conversation_id,
             } => {
+                let Some(viewer_id) = ctx.viewer_id else {
+                    return error_output("游客不能使用记忆工具".to_owned());
+                };
                 crate::memory::execute_tool(
                     state,
-                    ctx.viewer_id,
+                    viewer_id,
                     *ai_user_id,
                     *conversation_id,
                     name,

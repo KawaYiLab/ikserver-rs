@@ -1,0 +1,41 @@
+[package]
+name = "ik-qqbot"
+description = "QQ 官方机器人：Webhook、游客额度、角色回复和后台管理"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+ik-kernel.workspace = true
+ik-auth.workspace = true
+ik-ai.workspace = true
+ik-notify.workspace = true
+axum.workspace = true
+http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+utoipa.workspace = true
+utoipa-axum.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+ring.workspace = true
+reqwest13.workspace = true
+rustls.workspace = true
+webpki-roots.workspace = true
+regex.workspace = true
+moka.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+anyhow.workspace = true
+tower.workspace = true
+http-body-util.workspace = true
+
+[lints]
+workspace = true

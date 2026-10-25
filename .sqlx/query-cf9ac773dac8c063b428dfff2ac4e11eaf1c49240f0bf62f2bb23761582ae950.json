@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_guest_usage(day,identity_id,notified) VALUES($1,$2,TRUE) ON CONFLICT(day,identity_id) DO UPDATE SET notified=TRUE WHERE NOT qq_guest_usage.notified RETURNING identity_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "identity_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_guest_usage",
+            "name": "identity_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cf9ac773dac8c063b428dfff2ac4e11eaf1c49240f0bf62f2bb23761582ae950"
+}

@@ -423,6 +423,26 @@
 - `ai_memory_pairs`（ik-ai）：每个（用户, AI）上次整理的时刻，主键 `(user_id, ai_user_id)` 兼作 `user_id` 外键索引，
   `ai_user_id` 另有索引；用户或 AI 账号删除时级联删除。
 
+## QQ 机器人（`20261116000001_qq_bot.sql`）
+
+表归 `ik-qqbot`；AppSecret 只放部署配置。第一期包含：
+
+| 表 | 用途与约束 |
+|---|---|
+| `qq_bots` | AppID 主键，展示名、默认角色（外键 ai_role_cards.slug）、启用开关；启动同步配置，不覆盖后台选择 |
+| `qq_groups` | 雪花 id，AppID + group_openid 唯一；展示名、角色、启用、封禁、上下文起点、加退群与活跃时间 |
+| `qq_identities` | AppID + scene + openid + group_id 唯一（NULLS NOT DISTINCT，C2C 群为空）；昵称、封禁、可用状态、上下文起点。为后续绑定预留 user_id/bound_at |
+| `qq_messages` | 入出站正文（最多 4000 字）、角色、触发引用、时间；入站 AppID + qq_msg_id 部分唯一索引去重；群/身份时间索引服务上下文 |
+| `qq_turns` | 执行键与 message_id 各自唯一，状态、原因、额度预占所属日/金额、真实用量、输出段数组和已发送段数；保存结果后才能发 HTTP |
+| `qq_guest_usage` | day + identity_id 主键，游客预占/成功次数与当日超额提示标志 |
+| `qq_group_usage` | day + group_id 主键，游客次数与真实加权 token |
+| `qq_guest_tokens` | 配额日主键，全部游客的已用 token（含在飞预占） |
+| `qq_settings` | 单行设置；关闭为默认值，游客 10 次/人、100 次/群、200 万 token；上下文、90 秒预算、600 字、strip 链接模式 |
+
+`ai_role_cards.qq_enabled` 默认 false，由 `ik-ai` 维护。计数以北京时间 04:00 为日界。
+QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群消息、30 天前游客消息及 90 天前计数。
+绑定码、记忆进度、个人记忆来源群列和群共享记忆表按 ADR 第 2、3 期增加。
+
 ## 管理后台审计（`20261031000001_admin_audit.sql`）
 
 - `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、

@@ -162,6 +162,15 @@ pub async fn reserve(
     now: DateTime<Utc>,
     hold_ttl: Duration,
 ) -> Result<Result<Hold, Denial>, Problem> {
+    // SITE 表示没有个人付款人的渠道用量，不能把同一计数行加两次。
+    let limits = if user_id == SITE {
+        Limits {
+            per_user: 0,
+            ..limits
+        }
+    } else {
+        limits
+    };
     if !limits.global_enabled {
         return Ok(Err(Denial::GlobalDisabled));
     }
@@ -176,7 +185,11 @@ pub async fn reserve(
     }
     let amount = amount.max(1);
     let site_before = repo::add_used(conn, day, SITE, amount).await? - amount;
-    let user_before = repo::add_used(conn, day, user_id, amount).await? - amount;
+    let user_before = if user_id == SITE {
+        0
+    } else {
+        repo::add_used(conn, day, user_id, amount).await? - amount
+    };
     // 恰好等于上限即拒；进来时没到上限就放行（当天最后一条允许超出）。
     let denial = if limits.per_user > 0 && user_before >= limits.per_user {
         Some(Denial::UserBudget)
@@ -187,7 +200,9 @@ pub async fn reserve(
     };
     if let Some(denial) = denial {
         repo::add_used(conn, day, SITE, -amount).await?;
-        repo::add_used(conn, day, user_id, -amount).await?;
+        if user_id != SITE {
+            repo::add_used(conn, day, user_id, -amount).await?;
+        }
         return Ok(Err(denial));
     }
     let id = ids.next_raw();
@@ -198,6 +213,19 @@ pub async fn reserve(
         day,
         amount,
     }))
+}
+
+/// 游客渠道的预占：只检查并修改全站计数，不套用个人每日上限（ADR 0008 §5.3）。
+/// 调用方在同一事务里继续锁渠道计数，顺序为全站 → 游客合计 → 群 → 身份。
+pub async fn reserve_site_only(
+    conn: &mut PgConnection,
+    ids: &Snowflake,
+    limits: Limits,
+    amount: i64,
+    now: DateTime<Utc>,
+    hold_ttl: Duration,
+) -> Result<Result<Hold, Denial>, Problem> {
+    reserve(conn, ids, limits, SITE, amount, now, hold_ttl).await
 }
 
 /// 结算的结果。
@@ -241,7 +269,9 @@ pub async fn settle(
     };
     if delta != 0 {
         repo::add_used(conn, hold.day, SITE, delta).await?;
-        repo::add_used(conn, hold.day, hold.user_id, delta).await?;
+        if hold.user_id != SITE {
+            repo::add_used(conn, hold.day, hold.user_id, delta).await?;
+        }
     }
     Ok(Settled::Applied { delta })
 }
@@ -268,7 +298,9 @@ pub async fn reclaim_expired(
     holds.sort_by_key(|h| (h.day, h.user_id));
     // 回收不写去重标记：迟到的真实结算认领不到预占，按实际用量完整扣一次（见 `settle`）。
     for hold in &holds {
-        repo::add_used(conn, hold.day, hold.user_id, -hold.amount).await?;
+        if hold.user_id != SITE {
+            repo::add_used(conn, hold.day, hold.user_id, -hold.amount).await?;
+        }
     }
     Ok(holds.len())
 }

@@ -399,6 +399,7 @@ pub(crate) async fn apply(
                 knock_visible: c.knock_visible,
                 dm_enabled: c.dm_enabled,
                 comment_enabled: c.comment_enabled,
+                qq_enabled: c.qq_enabled,
                 sort_order: c.sort_order,
                 output_mode: c.output_mode.as_str(),
                 system_prompt: &c.system_prompt,

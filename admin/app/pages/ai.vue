@@ -262,6 +262,7 @@ interface CharacterDraft {
   knockVisible: boolean
   dmEnabled: boolean
   commentEnabled: boolean
+  qqEnabled: boolean
   sortOrder: number
   outputMode: Schemas['OutputMode']
   systemPrompt: string
@@ -293,6 +294,7 @@ function editCharacter(character?: Character) {
         knockVisible: character.knockVisible,
         dmEnabled: character.dmEnabled,
         commentEnabled: character.commentEnabled,
+        qqEnabled: character.qqEnabled,
         sortOrder: character.sortOrder,
         outputMode: character.outputMode,
         systemPrompt: character.systemPrompt,
@@ -315,6 +317,7 @@ function editCharacter(character?: Character) {
         knockVisible: true,
         dmEnabled: true,
         commentEnabled: true,
+        qqEnabled: false,
         sortOrder: (characters.value?.length ?? 0) * 10,
         outputMode: 'markdown',
         systemPrompt: '',
@@ -356,6 +359,7 @@ async function saveCharacter() {
     knockVisible: d.knockVisible,
     dmEnabled: d.dmEnabled,
     commentEnabled: d.commentEnabled,
+    qqEnabled: d.qqEnabled,
     sortOrder: d.sortOrder,
     outputMode: d.outputMode,
     systemPrompt: d.systemPrompt,
@@ -757,6 +761,7 @@ const jobFilters = jobList.filters
                   <div class="flex flex-wrap gap-1">
                     <Badge v-if="character.dmEnabled" variant="outline">私聊</Badge>
                     <Badge v-if="character.commentEnabled" variant="outline">评论</Badge>
+                    <Badge v-if="character.qqEnabled" variant="outline">QQ</Badge>
                     <Badge v-if="character.knockVisible" variant="outline">敲敲列表</Badge>
                   </div>
                 </TableCell>
@@ -1223,6 +1228,7 @@ const jobFilters = jobList.filters
             <label class="flex items-center justify-between gap-4 text-sm">在敲敲列表展示 <Switch v-model="characterDraft.knockVisible" /></label>
             <label class="flex items-center justify-between gap-4 text-sm">允许私聊 <Switch v-model="characterDraft.dmEnabled" /></label>
             <label class="flex items-center justify-between gap-4 text-sm">允许 @ 评论回复 <Switch v-model="characterDraft.commentEnabled" /></label>
+            <label class="flex items-center justify-between gap-4 text-sm">允许 QQ 对话 <Switch v-model="characterDraft.qqEnabled" /></label>
           </div>
           <label class="grid gap-2">
             <span class="text-sm leading-none font-medium">系统提示词</span>

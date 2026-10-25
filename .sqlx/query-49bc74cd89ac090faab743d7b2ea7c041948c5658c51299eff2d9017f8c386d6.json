@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT turns FROM qq_guest_usage WHERE day=$1 AND identity_id=$2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "turns",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "qq_guest_usage",
+            "name": "turns"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "49bc74cd89ac090faab743d7b2ea7c041948c5658c51299eff2d9017f8c386d6"
+}

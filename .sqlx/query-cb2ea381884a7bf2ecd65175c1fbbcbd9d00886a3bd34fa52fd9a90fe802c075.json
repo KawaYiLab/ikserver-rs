@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_turns SET model_key=$2,prompt_tokens=$3,completion_tokens=$4 WHERE id=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cb2ea381884a7bf2ecd65175c1fbbcbd9d00886a3bd34fa52fd9a90fe802c075"
+}

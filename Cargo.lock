@@ -2843,6 +2843,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ik-qqbot"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures-util",
+ "http",
+ "http-body-util",
+ "ik-ai",
+ "ik-auth",
+ "ik-kernel",
+ "ik-notify",
+ "moka",
+ "parking_lot",
+ "regex",
+ "reqwest 0.13.5",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower",
+ "tracing",
+ "utoipa",
+ "utoipa-axum",
+ "webpki-roots",
+]
+
+[[package]]
 name = "ik-realtime"
 version = "0.1.0"
 dependencies = [
@@ -2924,6 +2957,7 @@ dependencies = [
  "ik-moderation",
  "ik-notify",
  "ik-profile",
+ "ik-qqbot",
  "ik-realtime",
  "ik-search",
  "ik-social",

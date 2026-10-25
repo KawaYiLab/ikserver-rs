@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_guest_tokens SET used=GREATEST(0,used+$2) WHERE day=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c2c9255255df5f9d28f8f692a30254623a1b29ab8d5d3f3106f8c0e88f4c3ede"
+}

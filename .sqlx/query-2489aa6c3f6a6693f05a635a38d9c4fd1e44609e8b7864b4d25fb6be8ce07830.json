@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_guest_tokens(day,used) VALUES($1,0) ON CONFLICT(day) DO UPDATE SET used=qq_guest_tokens.used RETURNING used",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "used",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_guest_tokens",
+            "name": "used"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2489aa6c3f6a6693f05a635a38d9c4fd1e44609e8b7864b4d25fb6be8ce07830"
+}

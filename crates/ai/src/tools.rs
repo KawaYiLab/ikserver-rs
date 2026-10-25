@@ -72,7 +72,7 @@ pub(crate) async fn post_images(
 /// 执行上下文：查看者是触发者（TOOL-004）。
 #[derive(Debug, Clone)]
 pub struct ToolContext {
-    pub viewer_id: i64,
+    pub viewer_id: Option<i64>,
     /// 与查看者有拉黑关系的人（我拉黑的 ∪ 拉黑我的）。
     pub excluded: HashSet<i64>,
 }
@@ -85,9 +85,17 @@ impl ToolContext {
             .into_iter()
             .collect();
         Ok(Self {
-            viewer_id,
+            viewer_id: Some(viewer_id),
             excluded,
         })
+    }
+
+    /// 外部渠道的游客视角，不使用站内账号权限或账号的拉黑关系。
+    pub fn guest() -> Self {
+        Self {
+            viewer_id: None,
+            excluded: HashSet::new(),
+        }
     }
 
     /// 实名作者与查看者没有拉黑关系；匿名一律可见（不做拉黑过滤，防反推）。
@@ -910,8 +918,7 @@ async fn post_comments(
     };
     let limit = i64::from(arg_limit(args, 10, 20));
     let Some(hot) =
-        ik_comments::service::hot_comments(&state.forum.comments, Some(ctx.viewer_id), id, limit)
-            .await?
+        ik_comments::service::hot_comments(&state.forum.comments, ctx.viewer_id, id, limit).await?
     else {
         return Ok(ToolOutput::text(post_not_found(id)));
     };
@@ -998,7 +1005,9 @@ async fn related_posts(
         let found: Vec<PostCard> = search_term(state, ctx, term, 15)
             .await?
             .into_iter()
-            .filter(|c| c.id.get() != id && c.author.id.is_none_or(|a| a.get() != ctx.viewer_id))
+            .filter(|c| {
+                c.id.get() != id && c.author.id.is_none_or(|a| Some(a.get()) != ctx.viewer_id)
+            })
             .collect();
         lists.push(found.iter().map(|c| c.id.get()).collect::<Vec<_>>());
         for card in found {

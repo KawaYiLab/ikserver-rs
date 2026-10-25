@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_settings SET enabled=$1,guest_daily_turns=$2,guest_group_daily_turns=$3,guest_daily_tokens=$4,guest_model_key=$5,group_context_turns=$6,group_context_hours=$7,c2c_context_turns=$8,reply_timeout_secs=$9,max_reply_chars=$10,link_mode=$11,blocked_words=$12,guest_reads_group_memory=$13,updated_at=$14 WHERE singleton",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int4",
+        "Int4",
+        "Int8",
+        "Text",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text",
+        "TextArray",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "667d5cd06e12bec8bdda47c9649fe1e6e2dfb1f10dcf61b01bc414c4d88a74a1"
+}

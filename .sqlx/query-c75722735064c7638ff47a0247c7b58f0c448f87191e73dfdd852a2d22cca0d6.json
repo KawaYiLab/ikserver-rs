@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.id FROM qq_turns t JOIN qq_messages m ON m.id=t.message_id WHERE t.status IN ('queued','processing') AND m.created_at < $1 ORDER BY t.id LIMIT 500",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_turns",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c75722735064c7638ff47a0247c7b58f0c448f87191e73dfdd852a2d22cca0d6"
+}

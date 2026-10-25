@@ -172,6 +172,26 @@ cargo run --release -p ik-server -- story call --source /path/to/corpus \
 版本别名支持 `ik_catalog(path="3.3版本")`、`ik_search(keyword="3.3 核心")` 和
 `ik_read(docId="v3.3")`，限定该版新增主线。别名映射与检索规则见 [剧情库检索说明](../docs/story-search.md)。
 
+## QQ 官方机器人（ADR 0008）
+
+第 1 期提供游客对话、后台设置和群管理。默认关闭；绑定与共享记忆按后续阶段上线。
+
+1. QQ 开放平台建立官方机器人，选择 Webhook，登记服务器调用 OpenAPI 的出口 IP；准备沙箱群。
+2. 按 `ik-server.env.example` 配置 `IK_QQBOT__APPS__MAIN__APP_ID` 与 `SECRET`，启用 `IK_QQBOT__ENABLED=true`。
+   测试时设置 `SANDBOX=true`；未显式设置 API_BASE 时自动选沙箱域名。不要把密钥写入数据库或提交仓库。
+3. 回调地址设置为 `https://ik.tiwat.cn/v1/qq/webhook`，经 EdgeOne 443 直接回源；保留 X-Bot-Appid、签名头及原始请求体。
+   此路径禁用缓存，并避免按来源 IP 的边缘限流误伤集中回调（服务内部按 AppID 限流）。
+4. 仅在填写/修改回调地址的几分钟内开启 `IK_QQBOT__ALLOW_VALIDATION=true` 并重启；平台验证完成后立即改回 false 并重启。
+   无签名验证只接受数字时间戳和字母数字 token；不要放宽格式去签任意文本。
+5. 后台「AI 助手」给角色打开 QQ，后台「QQ 机器人」选机器人的默认角色并开启机器人、全站 QQ 开关。
+   群入站后自动进入群列表，可填展示名、覆盖角色、封禁或重置群上下文。
+6. 先使用默认 `linkMode=strip`；要试 domain，先在开放平台「开发设置 → 消息 URL 配置」登记 interk.net，
+   实测通过才开启。QQ 返回 URL 拒绝时客户端会去链接重发一次。
+
+上线前完成 ADR 第 0 期的待测项：带链接能否发送及实际错误码、群主/管理员身份字段。沙箱回复次数不受正式限制，
+群 5 分钟/5 次、单聊 60 分钟/4 次的验收需在正式环境完成。运营同时确认隐私政策与角色内容口径。
+后台 `qq_turns` 保存状态、原因及用量；重复任务不会重新生成。排障不打印 token、secret 或 openid 全文。
+
 ## 回滚
 
 迁移只增不改，旧版本在新表结构上照常工作，换回旧的可执行文件即可：

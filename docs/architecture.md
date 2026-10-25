@@ -46,6 +46,7 @@ flowchart LR
 | 8 | `account` | `auth, mihoyo, profile` |
 |   | `ai` | `auth, media, messaging, social, content, comments, profile, feed, search, economy, story` |
 | 9 | `admin` | `auth, economy, content, comments, exam, moderation, search, ai, notify, profile` |
+|   | `qqbot` | `auth, ai, notify` |
 | — | `legacy` | `media`（一次性数据导入，模块边界的例外，见 ADR 0003） |
 | — | `server` | 全部（唯一组装所有域的地方） |
 
@@ -138,6 +139,12 @@ flowchart LR
   只读工具、经管理员按摘要确认后才提供，每小时重拉清单 `ai.refresh_mcp_tools`）。站外调用与拉取清单都在事务之外。
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。
+- `qqbot`：QQ 官方 Webhook 与 OpenAPI、渠道身份、游客额度、短期上下文、后台配置与回复任务。
+  回调按 AppID 验签，入站消息、去重 turn 与 `qq.reply` 在同一事务落库后 ACK；不在 HTTP 请求里调用模型。
+  `ik_ai::external` 提供渠道无关的生成与额度预估，qqbot 自己预占和结算。游客仅记全站额度一次；锁顺序为
+  全站 → 游客合计 → 群 → 身份。生成结果先持久化，再在事务外按 `msg_id + msg_seq` 发送，发送重试不重复生成。
+  各实例每 60 秒刷新 QQ 设置；Webhook 单独按配置 AppID 限流，免于通用按 IP 的桶。第 1 期只开放游客模式；
+  绑定与个人记忆、群共享记忆按 ADR 0008 后续阶段实施。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。
 
 ## 请求处理流

@@ -122,6 +122,7 @@ pub struct AdminCharacter {
     pub knock_visible: bool,
     pub dm_enabled: bool,
     pub comment_enabled: bool,
+    pub qq_enabled: bool,
     pub sort_order: i32,
     pub output_mode: OutputMode,
     pub system_prompt: String,
@@ -482,6 +483,7 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
             knock_visible: c.knock_visible,
             dm_enabled: c.dm_enabled,
             comment_enabled: c.comment_enabled,
+            qq_enabled: c.qq_enabled,
             sort_order: c.sort_order,
             output_mode: if c.output_mode == "markdown" {
                 OutputMode::Markdown
@@ -638,6 +640,7 @@ pub async fn save_character(
         "enabled": input.enabled,
         "dmEnabled": input.dm_enabled,
         "commentEnabled": input.comment_enabled,
+        "qqEnabled": input.qq_enabled,
         "defaultModelKey": input.default_model_key,
         "allowedModelKeys": input.allowed_model_keys,
         "storyTools": input.story_tools,

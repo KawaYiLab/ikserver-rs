@@ -1,0 +1,141 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT g.id,g.app_id,g.display_name,g.card_slug,g.enabled,g.blocked,g.left_at,g.last_active_at,\n        COALESCE(u.guest_turns,0) AS \"turns!\",COALESCE(u.tokens,0) AS \"tokens!\",g.group_openid\n        FROM qq_groups g LEFT JOIN qq_group_usage u ON u.group_id=g.id AND u.day=$1\n        WHERE ($2::bigint IS NULL OR g.id=$2) ORDER BY g.last_active_at DESC,g.id DESC LIMIT $3 OFFSET $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "app_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "app_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "card_slug",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "card_slug"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "blocked",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "blocked"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "left_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "left_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "last_active_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "last_active_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "turns!",
+        "type_info": "Int4",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "tokens!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "group_openid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "group_openid"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "9c1a400a85ec36d665f01441778bd9395237cc2e593386bfc8e1840615a537aa"
+}
