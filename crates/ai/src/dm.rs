@@ -888,9 +888,6 @@ mod tests {
             default_model_id: None,
             allowed_model_ids: Vec::new(),
             suggested_questions: Vec::new(),
-            forum_content_tools: true,
-            forum_user_tools: true,
-            forum_browse_tools: true,
             story_tools: false,
             mcp_server_ids: Vec::new(),
         }

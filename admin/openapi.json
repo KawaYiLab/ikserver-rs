@@ -13268,9 +13268,6 @@
           "examples",
           "allowedModelKeys",
           "suggestedQuestions",
-          "forumContentTools",
-          "forumUserTools",
-          "forumBrowseTools",
           "storyTools",
           "mcpServers"
         ],
@@ -13314,18 +13311,6 @@
             "items": {
               "$ref": "#/components/schemas/Example"
             }
-          },
-          "forumBrowseTools": {
-            "type": "boolean",
-            "description": "社区浏览：热门帖子与分区目录。"
-          },
-          "forumContentTools": {
-            "type": "boolean",
-            "description": "内容检索：搜索帖子、阅读正文与评论。"
-          },
-          "forumUserTools": {
-            "type": "boolean",
-            "description": "用户查询：公开资料、统计与近期动态。"
           },
           "knockVisible": {
             "type": "boolean"
@@ -15540,18 +15525,6 @@
             "items": {
               "$ref": "#/components/schemas/Example"
             }
-          },
-          "forumBrowseTools": {
-            "type": "boolean",
-            "description": "社区浏览：热门帖子与分区目录。"
-          },
-          "forumContentTools": {
-            "type": "boolean",
-            "description": "内容检索：搜索帖子、阅读正文与评论。"
-          },
-          "forumUserTools": {
-            "type": "boolean",
-            "description": "用户查询：公开资料、统计与近期动态。"
           },
           "knockVisible": {
             "type": "boolean"

@@ -269,19 +269,11 @@ interface CharacterDraft {
   defaultModelKey: string
   allowedModelKeys: string[]
   suggestedQuestions: string
-  forumContentTools: boolean
-  forumUserTools: boolean
-  forumBrowseTools: boolean
   storyTools: boolean
   mcpServers: string[]
 }
 
 const characterDraft = ref<CharacterDraft | null>(null)
-const forumToolCount = computed(() => {
-  const draft = characterDraft.value
-  if (!draft) return 0
-  return (draft.forumContentTools ? 3 : 0) + (draft.forumUserTools ? 2 : 0) + (draft.forumBrowseTools ? 2 : 0)
-})
 
 watch(() => characterDraft.value?.avatar, (media) => {
   if (media && characterDraft.value) characterDraft.value.avatarId = media.id
@@ -308,9 +300,6 @@ function editCharacter(character?: Character) {
         defaultModelKey: character.defaultModelKey ?? 'none',
         allowedModelKeys: [...character.allowedModelKeys],
         suggestedQuestions: character.suggestedQuestions.join('\n'),
-        forumContentTools: character.forumContentTools ?? true,
-        forumUserTools: character.forumUserTools ?? true,
-        forumBrowseTools: character.forumBrowseTools ?? true,
         storyTools: character.storyTools,
         mcpServers: [...character.mcpServers],
       }
@@ -333,9 +322,6 @@ function editCharacter(character?: Character) {
         defaultModelKey: 'none',
         allowedModelKeys: [],
         suggestedQuestions: '',
-        forumContentTools: true,
-        forumUserTools: true,
-        forumBrowseTools: true,
         storyTools: false,
         mcpServers: [],
       }
@@ -377,9 +363,6 @@ async function saveCharacter() {
     defaultModelKey: d.defaultModelKey === 'none' ? null : d.defaultModelKey,
     allowedModelKeys: d.allowedModelKeys,
     suggestedQuestions: d.suggestedQuestions.split('\n').map(q => q.trim()).filter(Boolean),
-    forumContentTools: d.forumContentTools,
-    forumUserTools: d.forumUserTools,
-    forumBrowseTools: d.forumBrowseTools,
     storyTools: d.storyTools,
     mcpServers: d.mcpServers,
   }
@@ -1217,37 +1200,8 @@ const jobFilters = jobList.filters
               </label>
             </div>
           </div>
-          <div class="space-y-3">
-            <div class="flex items-center justify-between gap-4">
-              <Label>论坛能力</Label>
-              <span class="text-xs text-muted-foreground">已启用 {{ forumToolCount }} 个工具</span>
-            </div>
-            <p class="text-xs text-muted-foreground">按角色职责选择可查询的内容，私聊和评论回复均使用这些设置。</p>
-            <label class="flex items-center justify-between gap-4 text-sm">
-              <span>
-                内容检索
-                <span class="block text-xs text-muted-foreground">搜索帖子、阅读正文和评论</span>
-              </span>
-              <Switch v-model="characterDraft.forumContentTools" />
-            </label>
-            <label class="flex items-center justify-between gap-4 text-sm">
-              <span>
-                用户查询
-                <span class="block text-xs text-muted-foreground">查看用户的公开资料、统计和近期动态</span>
-              </span>
-              <Switch v-model="characterDraft.forumUserTools" />
-            </label>
-            <label class="flex items-center justify-between gap-4 text-sm">
-              <span>
-                社区浏览
-                <span class="block text-xs text-muted-foreground">浏览热门帖子和分区目录</span>
-              </span>
-              <Switch v-model="characterDraft.forumBrowseTools" />
-            </label>
-            <p v-if="forumToolCount === 0" class="text-xs text-muted-foreground">此角色不主动查询论坛，仍可根据对话和当前帖内容回复。剧情库、记忆和站外服务按各自设置生效。</p>
-          </div>
           <div class="space-y-2">
-            <Label>剧情库与站外工具</Label>
+            <Label>工具（论坛工具始终提供）</Label>
             <label class="flex items-center justify-between gap-4 text-sm">
               <span>
                 剧情库工具（检索、顺读绝区零剧情与设定）

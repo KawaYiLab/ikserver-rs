@@ -193,7 +193,7 @@ fn limit_param(max: u32, default: u32) -> Value {
     json!({ "type": "integer", "minimum": 1, "maximum": max, "default": default })
 }
 
-/// 提供给模型的工具清单，角色卡还会按能力组筛选。
+/// 提供给模型的工具清单（只有白名单里的 7 个）。
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {

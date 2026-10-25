@@ -666,57 +666,6 @@ impl Harness {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn role_tool_groups_apply_to_every_round_and_reject_disabled_calls(db: PgPool) {
-    let h = harness(db).await;
-    let file: ImportFile = serde_json::from_value(serde_json::json!({
-        "characters": [{
-            "slug": "fairy", "displayName": "Fairy", "username": format!("user{FAIRY}"),
-            "enabled": true, "dmEnabled": true,
-            "forumContentTools": false, "forumUserTools": false, "forumBrowseTools": true
-        }]
-    }))
-    .unwrap();
-    service::import(&h.state, file).await.unwrap();
-    let conversation = h.session().await;
-    let trigger = h.send(conversation, "看看论坛有什么").await;
-    let job = h.job_for_trigger(trigger).await;
-    h.fake.push(vec![
-        tool_call("disabled", "get_user_info", r#"{"username":"someone"}"#),
-        usage(100, 10),
-    ]);
-    h.fake.push(vec![
-        tool_call("allowed", "get_category_list", "{}"),
-        usage(100, 10),
-    ]);
-    h.fake
-        .push(vec![content("可以浏览论坛的公开分区。"), usage(100, 10)]);
-    assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
-        RunOutcome::Completed
-    );
-    let requests = h.fake.requests();
-    assert_eq!(requests.len(), 3);
-    for request in &requests {
-        let names: Vec<_> = request.tools.iter().map(|t| t.name.as_ref()).collect();
-        let forum: Vec<_> = names
-            .iter()
-            .copied()
-            .filter(|name| ik_ai::tools::TOOL_NAMES.contains(name))
-            .collect();
-        assert_eq!(forum, ["get_hot_posts", "get_category_list"]);
-        assert!(names.contains(&"remember"));
-    }
-    assert!(
-        matches!(requests[1].messages.last(), Some(ChatMessage::Tool { content, .. })
-        if content == "未知工具：get_user_info")
-    );
-    assert!(
-        matches!(requests[2].messages.last(), Some(ChatMessage::Tool { content, .. })
-        if !content.starts_with("未知工具"))
-    );
-}
-
-#[sqlx::test(migrator = "MIGRATOR")]
 async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
     let h = harness(db).await;
     let post = h.guide_post().await;

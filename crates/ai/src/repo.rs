@@ -219,9 +219,6 @@ pub(crate) struct CardRow {
     pub default_model_id: Option<i64>,
     pub allowed_model_ids: Vec<i64>,
     pub suggested_questions: Vec<String>,
-    pub forum_content_tools: bool,
-    pub forum_user_tools: bool,
-    pub forum_browse_tools: bool,
     pub story_tools: bool,
     pub mcp_server_ids: Vec<i64>,
 }
@@ -231,8 +228,7 @@ pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>>
         CardRow,
         "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,
                 dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,
-                default_model_id, allowed_model_ids, suggested_questions,
-                forum_content_tools, forum_user_tools, forum_browse_tools, story_tools, mcp_server_ids
+                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids
          FROM ai_role_cards ORDER BY sort_order, id"
     )
     .fetch_all(conn)
@@ -257,9 +253,6 @@ pub(crate) struct NewCard<'a> {
     pub default_model_id: Option<i64>,
     pub allowed_model_ids: &'a [i64],
     pub suggested_questions: &'a [String],
-    pub forum_content_tools: bool,
-    pub forum_user_tools: bool,
-    pub forum_browse_tools: bool,
     pub story_tools: bool,
     pub mcp_server_ids: &'a [i64],
     pub now: DateTime<Utc>,
@@ -272,17 +265,14 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
                                     enabled, knock_visible, dm_enabled, comment_enabled, sort_order,
                                     output_mode, system_prompt, examples, default_model_id,
                                     allowed_model_ids, suggested_questions, story_tools,
-                                    mcp_server_ids, forum_content_tools, forum_user_tools,
-                                    forum_browse_tools, created_at, updated_at)
+                                    mcp_server_ids, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $19,
-                 $20, $21, $22, $23, $18, $18)
+                 $20, $18, $18)
          ON CONFLICT (slug) DO UPDATE SET display_name = $3, bio = $4, avatar_media_id = $5,
              bound_user_id = $6, enabled = $7, knock_visible = $8, dm_enabled = $9,
              comment_enabled = $10, sort_order = $11, output_mode = $12, system_prompt = $13,
              examples = $14, default_model_id = $15, allowed_model_ids = $16,
-             suggested_questions = $17, story_tools = $19, mcp_server_ids = $20,
-             forum_content_tools = $21, forum_user_tools = $22, forum_browse_tools = $23,
-             updated_at = $18
+             suggested_questions = $17, story_tools = $19, mcp_server_ids = $20, updated_at = $18
          RETURNING id",
         c.id,
         c.slug,
@@ -304,9 +294,6 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
         c.now,
         c.story_tools,
         c.mcp_server_ids,
-        c.forum_content_tools,
-        c.forum_user_tools,
-        c.forum_browse_tools,
     )
     .fetch_one(conn)
     .await

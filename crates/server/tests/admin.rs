@@ -303,9 +303,6 @@ async fn ai_config_is_admin_only_and_round_trips(db: PgPool) {
     assert_eq!(status, StatusCode::OK, "{card}");
     assert_eq!(card["username"], "fairy");
     assert_eq!(card["allowedModelKeys"], json!(["base", "pro"]));
-    assert_eq!(card["forumContentTools"], true);
-    assert_eq!(card["forumUserTools"], true);
-    assert_eq!(card["forumBrowseTools"], true);
     // 绑定的账号被标为 AI 账号。
     let is_ai: bool = sqlx::query_scalar!("SELECT is_ai_agent FROM users WHERE id = 4")
         .fetch_one(&db)
@@ -376,42 +373,6 @@ async fn ai_config_is_admin_only_and_round_trips(db: PgPool) {
             "ai.character.delete",
         ]
     );
-}
-
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn ai_forum_tool_groups_round_trip_independently(db: PgPool) {
-    let app = setup(&db).await;
-    for (content, user, browse) in [
-        (false, false, false),
-        (true, false, false),
-        (false, true, false),
-        (false, false, true),
-        (true, true, true),
-    ] {
-        let (status, card) = call(
-            &app,
-            ADMIN,
-            "PUT",
-            "/v1/admin/ai/characters/fairy",
-            json!({ "slug": "fairy", "displayName": "Fairy", "username": "fairy",
-                "forumContentTools": content, "forumUserTools": user,
-                "forumBrowseTools": browse, "storyTools": true }),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{card}");
-        assert_eq!(card["forumContentTools"], content);
-        assert_eq!(card["forumUserTools"], user);
-        assert_eq!(card["forumBrowseTools"], browse);
-        assert_eq!(card["storyTools"], true);
-
-        let (status, cards) =
-            call(&app, ADMIN, "GET", "/v1/admin/ai/characters", Value::Null).await;
-        assert_eq!(status, StatusCode::OK, "{cards}");
-        assert_eq!(cards[0]["forumContentTools"], content);
-        assert_eq!(cards[0]["forumUserTools"], user);
-        assert_eq!(cards[0]["forumBrowseTools"], browse);
-        assert_eq!(cards[0]["storyTools"], true);
-    }
 }
 
 /// OpenAI 兼容的 `GET /models` 桩：只认给定的密钥。

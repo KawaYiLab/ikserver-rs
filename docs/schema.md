@@ -356,15 +356,6 @@
 - `ai_role_cards.story_tools`：是否提供剧情库工具；`mcp_server_ids`：启用的站外服务（与 `allowed_model_ids` 一样用数组，
   不建外键；删服务时用 `array_remove` 从各角色卡里去掉）。
 
-## AI 论坛工具能力组（`20261116000001_ai_forum_tool_groups.sql`）
-
-- `ai_role_cards` 新增三个 `BOOLEAN NOT NULL DEFAULT TRUE` 列：`forum_content_tools`（内容检索，3 个工具）、
-  `forum_user_tools`（用户查询，2 个工具）、`forum_browse_tools`（社区浏览，2 个工具）。既有角色迁移后保留全部论坛能力。
-- 管理后台 API 字段为 `forumContentTools`、`forumUserTools`、`forumBrowseTools`，请求缺省时均为 true；
-  三组按角色职责独立开启，私信与评论共用该角色配置，每次生成组装实际工具白名单。
-- 论坛工具从 12 个合并为 7 个；三项全关时不提供论坛工具，剧情库、记忆与站外 MCP 服务继续按各自配置生效。
-  开关随现有角色卡快照缓存更新，不需要额外关联表。
-
 ## AI 私聊（`20261028000001_ai_sessions.sql`）
 
 - messaging 的表：`conversations.kind` 增加 `ai`（AI 会话，同一对用户可以有多条，CONV-012），`title` 只有 AI 会话有。

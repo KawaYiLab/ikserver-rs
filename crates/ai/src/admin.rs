@@ -130,12 +130,6 @@ pub struct AdminCharacter {
     /// 空 = 全部启用模型。
     pub allowed_model_keys: Vec<String>,
     pub suggested_questions: Vec<String>,
-    /// 内容检索：搜索帖子、阅读正文与评论。
-    pub forum_content_tools: bool,
-    /// 用户查询：公开资料、统计与近期动态。
-    pub forum_user_tools: bool,
-    /// 社区浏览：热门帖子与分区目录。
-    pub forum_browse_tools: bool,
     /// 提供剧情库工具（ADR 0004）。
     pub story_tools: bool,
     /// 启用的站外 MCP 服务（服务名）。
@@ -499,9 +493,6 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
             default_model_key: c.default_model_id.and_then(key_of),
             allowed_model_keys: c.allowed_model_ids.into_iter().filter_map(key_of).collect(),
             suggested_questions: c.suggested_questions,
-            forum_content_tools: c.forum_content_tools,
-            forum_user_tools: c.forum_user_tools,
-            forum_browse_tools: c.forum_browse_tools,
             story_tools: c.story_tools,
             mcp_servers: c.mcp_server_ids.into_iter().filter_map(server_of).collect(),
         })
@@ -649,9 +640,6 @@ pub async fn save_character(
         "commentEnabled": input.comment_enabled,
         "defaultModelKey": input.default_model_key,
         "allowedModelKeys": input.allowed_model_keys,
-        "forumContentTools": input.forum_content_tools,
-        "forumUserTools": input.forum_user_tools,
-        "forumBrowseTools": input.forum_browse_tools,
         "storyTools": input.story_tools,
         "mcpServers": input.mcp_servers,
         "systemPromptChars": input.system_prompt.chars().count(),

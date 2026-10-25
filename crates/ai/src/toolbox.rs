@@ -2,7 +2,7 @@
 //! 私信里还有记忆工具（ADR 0007）。
 //!
 //! 按角色卡在准备阶段组装（随配置快照走，AI-002）；白名单就是本次组装出的名字，名字不在里面的
-//! 一律回 `未知工具`（TOOL-001）。论坛工具按角色的内容检索、用户查询、社区浏览三组开关筛选。
+//! 一律回 `未知工具`（TOOL-001）。论坛工具固定提供精简后的 7 个入口。
 //!
 //! 站外工具的约束（ADR 0004 第 3.4 节）：参数只有模型生成的内容，不注入任何用户身份（TOOL-004）；
 //! 单次调用有超时且不超过本次回复的总预算；结果截到每服务的上限；出错只告诉模型
@@ -136,25 +136,10 @@ impl Toolbox {
         }
     }
 
-    fn forum_for_card(card: &RoleCard) -> Self {
-        let mut toolbox = Self::forum();
-        toolbox
-            .entries
-            .retain(|entry| match entry.spec.name.as_ref() {
-                "search_posts" | "get_post_content" | "get_post_comments" => {
-                    card.forum_content_tools
-                }
-                "get_user_info" | "get_user_activity" => card.forum_user_tools,
-                "get_hot_posts" | "get_category_list" => card.forum_browse_tools,
-                _ => false,
-            });
-        toolbox
-    }
-
-    /// 按角色卡组装：开启的论坛能力组；开了剧情库且语料已加载时加剧情库；再加角色卡启用、没有熔断的站外服务。
+    /// 按角色卡组装：论坛工具；开了剧情库且语料已加载时加剧情库；再加角色卡启用、没有熔断的站外服务。
     /// 超过 [`MAX_TOOLS`] 时按服务的后台排序截断并告警。
     pub fn for_card(state: &AiState, catalog: &Catalog, card: &RoleCard, mcp: &McpClient) -> Self {
-        let mut toolbox = Self::forum_for_card(card);
+        let mut toolbox = Self::forum();
         if card.story_tools
             && state
                 .story
@@ -451,50 +436,6 @@ mod tests {
         assert_eq!(messages[0].text(), "人格");
     }
 
-    #[test]
-    fn forum_groups_and_memory_are_independent() {
-        for (enabled, expected) in [
-            ([true, true, true], tools::TOOL_NAMES.to_vec()),
-            ([false, false, false], vec![]),
-            (
-                [true, false, false],
-                vec!["search_posts", "get_post_content", "get_post_comments"],
-            ),
-            (
-                [false, true, false],
-                vec!["get_user_info", "get_user_activity"],
-            ),
-            (
-                [false, false, true],
-                vec!["get_hot_posts", "get_category_list"],
-            ),
-            (
-                [true, false, true],
-                vec![
-                    "search_posts",
-                    "get_hot_posts",
-                    "get_post_content",
-                    "get_post_comments",
-                    "get_category_list",
-                ],
-            ),
-        ] {
-            let mut card = crate::catalog::tests::card(None, Vec::new());
-            [
-                card.forum_content_tools,
-                card.forum_user_tools,
-                card.forum_browse_tools,
-            ] = enabled;
-            let toolbox = Toolbox::forum_for_card(&card);
-            assert_eq!(toolbox.names(), expected);
-            if !enabled.into_iter().any(|on| on) {
-                assert_eq!(
-                    toolbox.with_memory(7, 9).names(),
-                    ["remember", "forget", "recall_history"]
-                );
-            }
-        }
-    }
     #[test]
     fn adding_memory_keeps_builtins_and_caps_remote_tools() {
         let server = Arc::new(McpServer {
