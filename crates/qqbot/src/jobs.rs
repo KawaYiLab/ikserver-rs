@@ -183,9 +183,9 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     let history = repo::history(&mut conn, &t, &settings, card.bound_user_id).await?;
     drop(conn);
     let note = if t.group_id.is_some() {
-        "\n你在 QQ 群里和多位群友聊天；回答当前提问者，一般不超过 200 字。不要输出链接或 markdown。不要谈论对方绑定的绳网身份、私信、其他群的事。"
+        "\n【场合】群聊，在场的有多位群友；回答标着「当前提问者」的那条，一般不超过 200 字。不要输出链接或 markdown。不要谈论对方绑定的绳网身份、私信、其他群的事。"
     } else {
-        "\n你在 QQ 单聊中回复对方，用纯文本简短回答，不要输出链接或 markdown。"
+        "\n【场合】一对一私聊，简短回答，不要输出链接或 markdown。"
     };
     let scope = t.group_id.map(repo::group_scope);
     // 开场（这段上下文里还没有回复过）：私下场合可以问起到期的待跟进。
