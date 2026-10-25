@@ -756,6 +756,39 @@ pub(crate) async fn history(
     .await
 }
 
+/// 几个会话里 `since` 之后的最近文本消息，新的在前（AI 跨会话衔接）。每个会话只取各自上下文起点之后的，
+/// 且 `user_id` 仍是在场成员；AI 回复只取已定稿或被停止的。
+pub(crate) async fn recent_across(
+    conn: &mut PgConnection,
+    user_id: i64,
+    conversation_ids: &[i64],
+    context_from: &[Option<DateTime<Utc>>],
+    since: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<HistoryRow>> {
+    sqlx::query_as!(
+        HistoryRow,
+        r#"SELECT m.id, m.sender_id, m.content, m.created_at, m.ai_workflow, m.image_ids
+           FROM unnest($2::bigint[], $3::timestamptz[]) AS s(conversation_id, context_from)
+           JOIN conversation_members cm
+             ON cm.conversation_id = s.conversation_id AND cm.user_id = $1 AND cm.left_at IS NULL
+           JOIN messages m ON m.conversation_id = s.conversation_id
+           WHERE m.kind = 'text' AND m.withdrawn_at IS NULL
+             AND (m.ai_state IS NULL OR m.ai_state IN ('done', 'stopped'))
+             AND (s.context_from IS NULL OR m.created_at > s.context_from)
+             AND m.created_at > $4
+           ORDER BY m.created_at DESC, m.id DESC
+           LIMIT $5"#,
+        user_id,
+        conversation_ids,
+        context_from as &[Option<DateTime<Utc>>],
+        since,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
 /// 最近的若干条未撤回文本消息，新的在前（重新生成判定「最后一条 AI 回复」，GEN-013）。
 pub(crate) async fn recent_texts(
     conn: &mut PgConnection,

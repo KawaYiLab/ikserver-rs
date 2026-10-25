@@ -1,4 +1,5 @@
-//! 一次回复可用的工具（ADR 0004）：论坛工具 + 剧情库（进程内）+ 角色卡启用的站外 MCP 服务。
+//! 一次回复可用的工具（ADR 0004）：论坛工具 + 剧情库（进程内）+ 角色卡启用的站外 MCP 服务；
+//! 私信里还有记忆工具（ADR 0007）。
 //!
 //! 按角色卡在准备阶段组装（随配置快照走，AI-002）；白名单就是本次组装出的名字，名字不在里面的
 //! 一律回 `未知工具`（TOOL-001）。没有启用剧情库与站外服务的角色卡，工具清单与以前完全一样。
@@ -42,6 +43,11 @@ enum Source {
     Remote {
         server: Arc<McpServer>,
         tool: String,
+    },
+    /// 记忆工具（ADR 0007）：只在私信里提供，写的是触发者与这个 AI 的记忆。
+    Memory {
+        ai_user_id: i64,
+        conversation_id: i64,
     },
 }
 
@@ -175,6 +181,26 @@ impl Toolbox {
         toolbox
     }
 
+    /// 加上记忆工具 remember / forget（私信、且用户开着记忆时，MEM-014/015），排在论坛工具之后。
+    #[must_use]
+    pub fn with_memory(mut self, ai_user_id: i64, conversation_id: i64) -> Self {
+        let at = self
+            .entries
+            .iter()
+            .take_while(|e| matches!(e.source, Source::Forum))
+            .count();
+        let memory = crate::memory::tool_specs().into_iter().map(|spec| Entry {
+            label: crate::memory::tool_title(&spec.name).map(str::to_owned),
+            spec,
+            source: Source::Memory {
+                ai_user_id,
+                conversation_id,
+            },
+        });
+        self.entries.splice(at..at, memory);
+        self
+    }
+
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.entries.iter().map(|e| e.spec.clone()).collect()
     }
@@ -183,11 +209,11 @@ impl Toolbox {
         self.entries.iter().map(|e| e.spec.name.as_ref()).collect()
     }
 
-    /// 有论坛工具以外的工具（system prompt 要追加 [`EXTERNAL_DATA_NOTE`]）。
+    /// 有站外数据的工具（剧情库、站外 MCP；system prompt 要追加 [`EXTERNAL_DATA_NOTE`]）。
     pub fn has_external(&self) -> bool {
         self.entries
             .iter()
-            .any(|e| !matches!(e.source, Source::Forum))
+            .any(|e| matches!(e.source, Source::Story | Source::Remote { .. }))
     }
 
     /// 有站外数据时在 system prompt 末尾追加 [`EXTERNAL_DATA_NOTE`]。
@@ -206,7 +232,7 @@ impl Toolbox {
         let mut largest = 0usize;
         for entry in &self.entries {
             let cap = match &entry.source {
-                Source::Forum => continue,
+                Source::Forum | Source::Memory { .. } => continue,
                 Source::Story => STORY_MAX_RESULT_CHARS,
                 Source::Remote { server, .. } => server.max_result_chars,
             };
@@ -247,6 +273,14 @@ impl Toolbox {
                 title: label.as_deref(),
                 source: Some(server.name.as_str()),
             },
+            Some(Entry {
+                label,
+                source: Source::Memory { .. },
+                ..
+            }) => ToolLabel {
+                title: label.as_deref(),
+                source: Some(crate::memory::MEMORY_SOURCE),
+            },
             _ => ToolLabel::default(),
         }
     }
@@ -267,6 +301,20 @@ impl Toolbox {
         match &entry.source {
             Source::Forum => tools::execute(state, ctx, name, arguments).await,
             Source::Story => story(state, name, arguments).await,
+            Source::Memory {
+                ai_user_id,
+                conversation_id,
+            } => {
+                crate::memory::execute_tool(
+                    state,
+                    ctx.viewer_id,
+                    *ai_user_id,
+                    *conversation_id,
+                    name,
+                    arguments,
+                )
+                .await
+            }
             Source::Remote { server, tool } => {
                 let remaining = deadline.saturating_duration_since(Instant::now());
                 let endpoint = Endpoint {

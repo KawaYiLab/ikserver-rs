@@ -488,6 +488,33 @@ impl Workflow {
                     self.emit("forum.read.finish", step, Some(flag(json!({}))), None);
                 }
             }
+            (_, ToolMeta::Memory { saved, forgotten }) => {
+                self.emit(
+                    "tool.finish",
+                    step,
+                    Some(flag(tool_data(name, label, Some(ms)))),
+                    None,
+                );
+                // 对话里的「记住了」「忘掉了」提示（MEM-014/015、WF-011）。
+                if let Some((id, kind, content)) = saved {
+                    self.emit(
+                        "memory.saved",
+                        step,
+                        Some(
+                            json!({ "memoryId": id.to_string(), "kind": kind, "content": content }),
+                        ),
+                        None,
+                    );
+                }
+                if !forgotten.is_empty() {
+                    self.emit(
+                        "memory.forgotten",
+                        step,
+                        Some(json!({ "contents": forgotten })),
+                        None,
+                    );
+                }
+            }
             (_, ToolMeta::Comments { post }) => {
                 self.emit(
                     "tool.finish",

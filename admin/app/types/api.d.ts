@@ -1270,6 +1270,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ai/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 我的 AI 记忆
+         * @description 记忆面板：开关与全部记忆。`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的
+         *     关系记忆（带 `character`）。置顶的在前，其余最近更新的在前；每类最多 40 条。
+         */
+        get: operations["memories"];
+        put?: never;
+        /**
+         * 添加记忆
+         * @description 手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。
+         */
+        post: operations["create_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/memories/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 清空记忆
+         * @description 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。
+         */
+        post: operations["clear_memories"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/memories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 删除记忆 */
+        delete: operations["delete_memory"];
+        options?: never;
+        head?: never;
+        /**
+         * 修改记忆
+         * @description 改正文（来源变为 `manual`）或置顶 / 取消置顶。置顶的不会被自动整理改写或淘汰。
+         */
+        patch: operations["update_memory"];
+        trace?: never;
+    };
+    "/v1/ai/memory-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 记忆开关
+         * @description 关掉后 AI 不再读取、不再记下新的记忆，也不再跨会话衔接；已有记忆保留，可以在面板里清空。
+         */
+        put: operations["memory_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ai/messages/{id}/regenerate": {
         parameters: {
             query?: never;
@@ -3945,6 +4031,32 @@ export interface components {
         AiAgentUpdate: {
             isAiAgent: boolean;
         };
+        /** @description 我的记忆面板：开关与全部记忆（置顶的在前，其余最近更新的在前）。 */
+        AiMemoryList: {
+            enabled: boolean;
+            items: components["schemas"]["AiMemoryView"][];
+        };
+        /** @description 记忆开关。关掉后不读、不写、不跨会话衔接，已有记忆保留。 */
+        AiMemorySettings: {
+            enabled: boolean;
+        };
+        /** @description 一条记忆。 */
+        AiMemoryView: {
+            /** @description 关系记忆所属角色的 AI 账号；档案时省略。 */
+            aiUserId?: string | null;
+            /** @description 关系记忆所属的角色（slug）；档案、或角色卡已删除时省略。 */
+            character?: string | null;
+            content: string;
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            kind: components["schemas"]["MemoryKind"];
+            origin: components["schemas"]["MemoryOrigin"];
+            /** @description 置顶的不会被自动整理改写或淘汰。 */
+            pinned: boolean;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         /** @description AI 今日概况（管理后台仪表盘）。 */
         AiOverview: {
             /**
@@ -4338,6 +4450,11 @@ export interface components {
              */
             claimedCount: number;
         };
+        /** @description 清空记忆。 */
+        ClearAiMemoriesRequest: {
+            /** @description 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部（含档案）。 */
+            character?: string | null;
+        };
         /** @description 客户端 → 服务端。 */
         ClientFrame: {
             d?: Record<string, never> | null;
@@ -4533,6 +4650,14 @@ export interface components {
             today: number;
             /** Format: int64 */
             total: number;
+        };
+        /** @description 手动添加一条记忆。 */
+        CreateAiMemoryRequest: {
+            /** @description `relation` 必填（角色 slug）；`profile` 不能填。 */
+            character?: string | null;
+            /** @description 1–200 字。 */
+            content: string;
+            kind: components["schemas"]["MemoryKind"];
         };
         CreateCommentRequest: {
             /**
@@ -5171,6 +5296,16 @@ export interface components {
             /** Format: int32 */
             width?: number | null;
         };
+        /**
+         * @description 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆。
+         * @enum {string}
+         */
+        MemoryKind: "profile" | "relation";
+        /**
+         * @description 记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 自己在记忆面板里写或改过。
+         * @enum {string}
+         */
+        MemoryOrigin: "extracted" | "told" | "manual";
         /** @description @ 提及候选。 */
         MentionCandidate: {
             /** @description 头像（360 宽缩略图），没有设置时省略。 */
@@ -6971,6 +7106,12 @@ export interface components {
         UnreadCount: {
             /** Format: int64 */
             count: number;
+        };
+        /** @description 改一条记忆。字段缺省不改。 */
+        UpdateAiMemoryRequest: {
+            /** @description 1–200 字；改了之后来源变为 `manual`。 */
+            content?: string | null;
+            pinned?: boolean | null;
         };
         UpdateConversationRequest: {
             muted?: boolean | null;
@@ -9975,6 +10116,217 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CharacterList"];
+                };
+            };
+        };
+    };
+    memories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiMemoryList"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    create_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateAiMemoryRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiMemoryView"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description AI_CHARACTER_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description AI_MEMORY_FULL */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    clear_memories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearAiMemoriesRequest"];
+            };
+        };
+        responses: {
+            /** @description 已清空 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description AI_CHARACTER_NOT_FOUND */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    delete_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 记忆 id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    update_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description 记忆 id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateAiMemoryRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiMemoryView"];
+                };
+            };
+            /** @description VALIDATION_FAILED */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    memory_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiMemorySettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiMemorySettings"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };

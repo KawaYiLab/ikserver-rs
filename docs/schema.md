@@ -386,6 +386,22 @@
   （思考文本、工具参数与结果从不进入事件），最多 1000 个事件（超限先丢最早的 `reasoning.delta`，WF-005）。
   同一占位重试时清空为 `[]`，seq 与 stepId 按尝试次数换起点继续递增（WF-006）。CHECK：只有 AI 回复有，且是数组。
 
+## AI 记忆（`20261113000001_ai_memory.sql`，ADR 0007）
+
+- `ai_sessions` 加会话滚动摘要 `summary` / `summary_until` / `summary_epoch`（三者同时为空或同时非空，CHECK）：
+  `summary_epoch` 与 `context_epoch` 不同就作废，所以重置上下文不用清这几列（MEM-001）。写摘要的
+  `UPDATE … WHERE context_epoch = $epoch`，期间被重置就什么都不写。`memory_until` 是长期记忆的提炼进度，只前进，
+  不随重置变化（MEM-020）。
+- `ai_memories`（ik-ai）：一条一个事实，1–200 字。`kind = 'profile'`（用户档案，`ai_user_id` 为空，所有角色共享）或
+  `'relation'`（与某个 AI 的关系记忆，`ai_user_id` 非空），CHECK 约束保证两者一致。`origin`：`extracted`（后台提炼）、
+  `told`（对话里让 AI 记下）、`manual`（用户在面板里写或改过）；`pinned` 的不会被自动整理改写、删除或淘汰。
+  `source_conversation_id` 删会话时置空。用户或 AI 账号删除时级联删除。
+  每个范围（档案；与每个 AI 的关系）最多 40 条，超出时先淘汰不置顶的 `extracted`，再按 `updated_at` 从旧到新（MEM-013）。
+  同一用户的写入先拿 `pg_advisory_xact_lock(hashtextextended('ik:ai_memories:' || user_id, 0))` 再判重与计数。
+  索引 `(user_id, ai_user_id, updated_at DESC)` 覆盖读取与 `user_id` 外键；`ai_user_id`、`source_conversation_id`
+  各有部分索引。
+- `ai_memory_prefs`（ik-ai）：用户的记忆开关（MEM-030），没有行 = 开启。
+
 ## 管理后台审计（`20261031000001_admin_audit.sql`）
 
 - `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、

@@ -327,6 +327,25 @@ pub async fn history(
     Ok(items)
 }
 
+/// AI 跨会话衔接（ai-assistant.md MEM-005）：`sessions` 是（会话 id, 上下文起点）；取 `since` 之后、
+/// `user_id` 仍在场的那些会话里最近的 `limit` 条文本消息，按时间正序。
+pub async fn recent_across(
+    conn: &mut PgConnection,
+    user_id: i64,
+    sessions: &[(i64, Option<DateTime<Utc>>)],
+    since: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<HistoryItem>, Problem> {
+    if sessions.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (ids, from): (Vec<i64>, Vec<Option<DateTime<Utc>>>) = sessions.iter().copied().unzip();
+    let mut items =
+        history_items(repo::recent_across(conn, user_id, &ids, &from, since, limit).await?);
+    items.reverse();
+    Ok(items)
+}
+
 /// 最近的未撤回文本消息（新的在前）。
 pub async fn recent_texts(
     conn: &mut PgConnection,

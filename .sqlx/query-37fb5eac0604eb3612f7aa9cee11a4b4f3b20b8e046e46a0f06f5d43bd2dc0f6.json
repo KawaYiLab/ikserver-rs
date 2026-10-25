@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_sessions SET memory_until = GREATEST(COALESCE(memory_until, $2), $2)\n         WHERE conversation_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "37fb5eac0604eb3612f7aa9cee11a4b4f3b20b8e046e46a0f06f5d43bd2dc0f6"
+}

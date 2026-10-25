@@ -16,6 +16,8 @@ pub mod jobs;
 pub mod llm;
 pub mod mcp;
 pub mod mcp_client;
+pub mod memory;
+pub mod memory_jobs;
 pub mod quota;
 mod repo;
 mod routes;

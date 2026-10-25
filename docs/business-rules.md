@@ -22,7 +22,7 @@
 | [moderation-exam.md](business-rules/moderation-exam.md) | 举报（用户侧）、审核（按目标聚合、领取、结案、删除 outbox）、多人举报自动隐藏、入站考试、题库后台、管理员权力、处罚效果 | 147 | `RPT` `RPTADM` `EXAM` `EXAMADM` `ADMIN` `SANCTION` | `RPTADM-055` 一次结案作用于同目标的整组未结案举报；`RPTADM-073` 删除内容分两阶段（先隐藏并入队，再在审核事务外删除、收尾时发通知）；`EXAM-011` 写操作门控 `EXAM_REQUIRED`，每次请求重查 |
 | [auth-account.md](business-rules/auth-account.md) | 账号模型、邮箱验证码（5 种用途）、注册、密码/验证码登录、重置与修改密码、会话旋转与重放检测、米游社扫码、身份模型、注销、认证限流与中间件、邮件双通道 | 146 | `ACC` `CODE` `REG` `LOGIN` `SESS` `LOCK` `MHY` `IDENT` `DEL` `RL` `MW` `EMAIL` | `SESS-011` 已撤销超过 30 秒的 refresh token 再次出现即判定泄露，撤销整个家族；`CODE-009` 验证码消费是单条 CAS，一码只用一次；`CODE-013` 登录与重置发码反枚举，账号状态与「验证码错误」不可区分 |
 | [messaging-notifications.md](business-rules/messaging-notifications.md) | 私信会话与消息、DM WebSocket、通知（8 种类型）与分桶、敲敲与统一收件箱融合、在线状态、相关 cron | 120 | `CONV` `MSG` `WS` `NOTIF` `KNOCK` `PRES` `CRON` `X` | `NOTIF-040` 通知投递必须发生在事务提交之后；`NOTIF-013` contacts 桶绝不能读到匿名评论类通知；`KNOCK-010` 统一收件箱的双源归并规则（同 peer 合并、严格早于游标） |
-| [ai-assistant.md](business-rules/ai-assistant.md) | AI 配置、模型、角色卡、触发与去重、上下文与代际、配额预占与结算、流式生成、输出清洗、沉浸守卫、工作流事件、12 个只读论坛工具、直连大模型要求 | 161 | `AI` `TRIG` `CTX` `QUOTA` `GEN` `WF` `TOOL` `LLM` | `QUOTA-005` 调用模型前先预占，用量达到上限才拒；`QUOTA-020` 拿不到额度判定时不得调用模型（fail-closed）；`TOOL-004` 工具的查看者身份只来自可信执行上下文，绝不读工具参数 |
+| [ai-assistant.md](business-rules/ai-assistant.md) | AI 配置、模型、角色卡、触发与去重、上下文与代际、配额预占与结算、流式生成、输出清洗、沉浸守卫、工作流事件、12 个只读论坛工具、直连大模型要求、记忆（新设计，ADR 0007） | 161 | `AI` `TRIG` `CTX` `QUOTA` `GEN` `WF` `TOOL` `LLM` `MEM` | `QUOTA-005` 调用模型前先预占，用量达到上限才拒；`QUOTA-020` 拿不到额度判定时不得调用模型（fail-closed）；`TOOL-004` 工具的查看者身份只来自可信执行上下文，绝不读工具参数 |
 | [media-ops.md](business-rules/media-ops.md) | 直传上传（签名、PUT、完成校验与发布）、文件与引用、CDN URL、用户图库、自定义头像、全局限流与客户端 IP、错误格式、响应缓存、cron 与启动任务、邮件调度、后台手工维护内容 | 161 | `UPL` `FILE` `CDN` `MEUP` `AVA` `UPV` `RL` `ERR` `CACHE` `CRON` `BOOT` `MAIL` `ADMINCRUD` `OPS` | `UPL-033` 完成阶段校验大小、SHA-256 与魔数嗅探；`UPL-052` 校验后的字节发布到客户端不可写的新 key；`UPL-014` 收据以 token 哈希为唯一键，重试幂等 |
 
 ---
@@ -221,6 +221,9 @@
 - **拉黑后帖子详情返回 403 `USER_BLOCKED`，但不带作者信息**（旧系统带 `authorDocumentId`、`authorName`，BLOCK-012）。客户端已经知道自己点开的是谁的帖子。
 - **拉黑的日额度改为令牌桶**：容量 100、每 864 秒回 1 个，近似「每天 100 次」。旧系统是从第一次计数起的 86400 秒固定窗口（BLOCK-006）。
 - **与读者有拉黑关系的人的非匿名评论，其回复页同样 404**；回复数也不计入这些人的回复，保证「共 N 条回复」与能翻到的条数一致。
+- **AI 有了长期记忆**（[ADR 0007](adr/0007-ai-memory.md)，MEM 第 13 节）：会话窗口外的消息压成滚动摘要，新会话带上同一角色其他会话的最近几轮，
+  用户档案（所有角色共享）与关系记忆（每个角色单独）跨会话保留；对话里说「记住 / 忘掉」当场生效；用户能在记忆面板里查看、修改、删除、关闭。
+  旧系统由 AstrBot 托管记忆，用户看不到也改不了。
 - **评论改为扁平楼层**（[ADR 0006](adr/0006-flat-comments.md)）：取消楼中楼，每条评论占一层、从旧到新排，回复带被回复评论的引用；
   删除不再级联，置顶与采纳对所有评论开放。
 - **私信「离开会话」改为「从自己的列表移除」**：只影响自己，对方的列表不变、也不收到 `member.removed`；

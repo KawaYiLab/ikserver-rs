@@ -28,6 +28,7 @@ use crate::sanitize;
 use crate::toolbox::Toolbox;
 use crate::tools::ToolContext;
 use crate::workflow::{self, Workflow};
+use crate::{memory, memory_jobs};
 
 const FAILED_TEXT: &str = "（生成失败，请重试）";
 const STOPPED_TEXT: &str = "（已停止）";
@@ -467,8 +468,20 @@ async fn prepare(
         HashMap::new()
     };
     let mut messages = build_messages(&card, &history, job.ai_user_id, &names, &images);
-    let toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
+    let mut toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
+    // 记忆（ADR 0007）：会话摘要只看部署开关；长期记忆、跨会话衔接与记忆工具还要看用户的开关。
+    let long_term = state.config.memory_enabled && repo::memory_enabled(&mut tx, sender).await?;
+    if long_term {
+        toolbox = toolbox.with_memory(job.ai_user_id, conversation_id);
+    }
     toolbox.annotate_system(&mut messages);
+    if state.config.memory_enabled {
+        let recall = memory::recall(&mut tx, state, &session, &history, long_term, now).await?;
+        memory::annotate(&mut messages, &recall);
+        if memory::needs_summary(&session, &history, state.config.max_history_messages) {
+            memory_jobs::enqueue_summary(&state.jobs, &mut tx, conversation_id).await?;
+        }
+    }
 
     // 预占（QUOTA-005～010）：调用模型之前，按本次模型的倍率估高。
     let prompt_chars = quota::prompt_estimate(&messages, model.vision)
@@ -781,6 +794,18 @@ async fn finalize(
         },
     )
     .await?;
+    // 对话停下来之后提炼长期记忆（MEM-020）：每次回复都把同一个任务往后推。
+    if state.config.memory_enabled && matches!(outcome, RunOutcome::Completed | RunOutcome::Stopped)
+    {
+        let delay = i64::try_from(state.config.memory_extract_delay_secs).unwrap_or(0);
+        memory_jobs::enqueue_extract(
+            &state.jobs,
+            &mut tx,
+            prepared.session.conversation_id,
+            now + chrono::Duration::seconds(delay),
+        )
+        .await?;
+    }
     tx.commit().await?;
     // 收尾事件先于定稿的 `dm.message.edited` 推出。
     ctx.publish_workflow(&mut workflow);

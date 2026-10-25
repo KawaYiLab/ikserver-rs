@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, created_at, updated_at\n         FROM ai_memories\n         WHERE user_id = $1 AND (ai_user_id IS NULL OR ai_user_id = $2)\n         ORDER BY pinned DESC, updated_at DESC, id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "ai_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "ai_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "kind"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "pinned",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "pinned"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "origin",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "origin"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6cd26f113b10105c33d086e2216a706d2e91d85cae227b943f3c6054107c5bcb"
+}

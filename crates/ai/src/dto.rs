@@ -271,3 +271,97 @@ pub struct RegenerateAccepted {
     #[schema(value_type = String)]
     pub replaced_message_id: Id<ik_kernel::id::marker::Message>,
 }
+
+// ---------- 记忆（ADR 0007） ----------
+
+/// 记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryKind {
+    Profile,
+    Relation,
+}
+
+/// 记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 自己在记忆面板里写或改过。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum MemoryOrigin {
+    Extracted,
+    Told,
+    Manual,
+}
+
+/// 一条记忆。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AiMemoryView)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryView {
+    #[schema(value_type = String)]
+    pub id: Id<ik_kernel::id::marker::AiMemory>,
+    pub kind: MemoryKind,
+    /// 关系记忆所属的角色（slug）；档案、或角色卡已删除时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub character: Option<String>,
+    /// 关系记忆所属角色的 AI 账号；档案时省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub ai_user_id: Option<Id<User>>,
+    pub content: String,
+    /// 置顶的不会被自动整理改写或淘汰。
+    pub pinned: bool,
+    pub origin: MemoryOrigin,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 我的记忆面板：开关与全部记忆（置顶的在前，其余最近更新的在前）。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[schema(as = AiMemoryList)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryList {
+    pub enabled: bool,
+    pub items: Vec<MemoryView>,
+}
+
+/// 手动添加一条记忆。
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[schema(as = CreateAiMemoryRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateMemoryRequest {
+    pub kind: MemoryKind,
+    /// `relation` 必填（角色 slug）；`profile` 不能填。
+    #[serde(default)]
+    pub character: Option<String>,
+    /// 1–200 字。
+    pub content: String,
+}
+
+/// 改一条记忆。字段缺省不改。
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[schema(as = UpdateAiMemoryRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateMemoryRequest {
+    /// 1–200 字；改了之后来源变为 `manual`。
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub pinned: Option<bool>,
+}
+
+/// 清空记忆。
+#[derive(Debug, Clone, Default, Deserialize, ToSchema)]
+#[schema(as = ClearAiMemoriesRequest)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClearMemoriesRequest {
+    /// 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部（含档案）。
+    #[serde(default)]
+    pub character: Option<String>,
+}
+
+/// 记忆开关。关掉后不读、不写、不跨会话衔接，已有记忆保留。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[schema(as = AiMemorySettings)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemorySettings {
+    pub enabled: bool,
+}

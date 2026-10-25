@@ -4725,6 +4725,311 @@
         }
       }
     },
+    "/v1/ai/memories": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "我的 AI 记忆",
+        "description": "记忆面板：开关与全部记忆。`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的\n关系记忆（带 `character`）。置顶的在前，其余最近更新的在前；每类最多 40 条。",
+        "operationId": "memories",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryList"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "添加记忆",
+        "description": "手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。",
+        "operationId": "create_memory",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAiMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "AI_CHARACTER_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "AI_MEMORY_FULL",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/ai/memories/clear": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "清空记忆",
+        "description": "指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。",
+        "operationId": "clear_memories",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearAiMemoriesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "已清空"
+          },
+          "404": {
+            "description": "AI_CHARACTER_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/ai/memories/{id}": {
+      "delete": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "删除记忆",
+        "operationId": "delete_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "记忆 id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "已删除"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "修改记忆",
+        "description": "改正文（来源变为 `manual`）或置顶 / 取消置顶。置顶的不会被自动整理改写或淘汰。",
+        "operationId": "update_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "记忆 id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAiMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemoryView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "VALIDATION_FAILED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/ai/memory-settings": {
+      "put": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "记忆开关",
+        "description": "关掉后 AI 不再读取、不再记下新的记忆，也不再跨会话衔接；已有记忆保留，可以在面板里清空。",
+        "operationId": "memory_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiMemorySettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiMemorySettings"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/ai/messages/{id}/regenerate": {
       "post": {
         "tags": [
@@ -14103,6 +14408,91 @@
         },
         "additionalProperties": false
       },
+      "AiMemoryList": {
+        "type": "object",
+        "description": "我的记忆面板：开关与全部记忆（置顶的在前，其余最近更新的在前）。",
+        "required": [
+          "enabled",
+          "items"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AiMemoryView"
+            }
+          }
+        }
+      },
+      "AiMemorySettings": {
+        "type": "object",
+        "description": "记忆开关。关掉后不读、不写、不跨会话衔接，已有记忆保留。",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AiMemoryView": {
+        "type": "object",
+        "description": "一条记忆。",
+        "required": [
+          "id",
+          "kind",
+          "content",
+          "pinned",
+          "origin",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "aiUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "关系记忆所属角色的 AI 账号；档案时省略。"
+          },
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "关系记忆所属的角色（slug）；档案、或角色卡已删除时省略。"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKind"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/MemoryOrigin"
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "置顶的不会被自动整理改写或淘汰。"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "AiOverview": {
         "type": "object",
         "description": "AI 今日概况（管理后台仪表盘）。",
@@ -15261,6 +15651,20 @@
           }
         }
       },
+      "ClearAiMemoriesRequest": {
+        "type": "object",
+        "description": "清空记忆。",
+        "properties": {
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部（含档案）。"
+          }
+        },
+        "additionalProperties": false
+      },
       "ClientFrame": {
         "type": "object",
         "description": "客户端 → 服务端。",
@@ -15828,6 +16232,31 @@
             "format": "int64"
           }
         }
+      },
+      "CreateAiMemoryRequest": {
+        "type": "object",
+        "description": "手动添加一条记忆。",
+        "required": [
+          "kind",
+          "content"
+        ],
+        "properties": {
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`relation` 必填（角色 slug）；`profile` 不能填。"
+          },
+          "content": {
+            "type": "string",
+            "description": "1–200 字。"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MemoryKind"
+          }
+        },
+        "additionalProperties": false
       },
       "CreateCommentRequest": {
         "type": "object",
@@ -17472,6 +17901,23 @@
             "format": "int32"
           }
         }
+      },
+      "MemoryKind": {
+        "type": "string",
+        "description": "记忆的种类：`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的关系记忆。",
+        "enum": [
+          "profile",
+          "relation"
+        ]
+      },
+      "MemoryOrigin": {
+        "type": "string",
+        "description": "记忆的来源：后台从对话里提炼 / 对话里让 AI 记下 / 自己在记忆面板里写或改过。",
+        "enum": [
+          "extracted",
+          "told",
+          "manual"
+        ]
       },
       "MentionCandidate": {
         "type": "object",
@@ -23126,6 +23572,26 @@
             "format": "int64"
           }
         }
+      },
+      "UpdateAiMemoryRequest": {
+        "type": "object",
+        "description": "改一条记忆。字段缺省不改。",
+        "properties": {
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1–200 字；改了之后来源变为 `manual`。"
+          },
+          "pinned": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "UpdateConversationRequest": {
         "type": "object",

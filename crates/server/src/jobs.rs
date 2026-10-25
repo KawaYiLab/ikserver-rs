@@ -53,6 +53,8 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_ai::mcp::RefreshMcpTools>()
         .define_job::<ik_ai::dm::DmReply>()
         .define_job::<ik_ai::comment::CommentReply>()
+        .define_job::<ik_ai::memory_jobs::SummarizeSession>()
+        .define_job::<ik_ai::memory_jobs::ExtractMemories>()
         .add_extension(state.mihoyo.clone())
         .add_extension(state.ai.clone())
         .add_extension(state.db.clone())

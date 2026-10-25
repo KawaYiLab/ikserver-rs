@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT memory_until FROM ai_sessions WHERE conversation_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "memory_until",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_sessions",
+            "name": "memory_until"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c999627b1526304b808f22547b99197531b26e2b99482343a1f6249230a32b7e"
+}

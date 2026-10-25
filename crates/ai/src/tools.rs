@@ -121,6 +121,11 @@ pub enum ToolMeta {
     Comments {
         post: Option<(i64, String)>,
     },
+    /// 记忆工具（MEM-014/015）：记下的那条（id、种类、正文）与忘掉的那些。
+    Memory {
+        saved: Option<(i64, String, String)>,
+        forgotten: Vec<String>,
+    },
 }
 
 /// 一次工具调用的结果。

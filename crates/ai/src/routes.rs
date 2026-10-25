@@ -1,12 +1,13 @@
 //! HTTP 接口：`/v1/ai/characters`、`/v1/ai/models`、`/v1/ai/quota`、`/v1/me/ai-assistant`，
-//! 以及 AI 会话 `/v1/ai/sessions*`、AI 回复的停止与重新生成 `/v1/ai/messages/{id}/*`。
+//! 以及 AI 会话 `/v1/ai/sessions*`、AI 回复的停止与重新生成 `/v1/ai/messages/{id}/*`、
+//! 记忆面板 `/v1/ai/memories*`、`/v1/ai/memory-settings`（ADR 0007）。
 
 use axum::extract::{FromRef, State};
 use http::StatusCode;
 use ik_auth::{AuthState, CurrentUser};
 use ik_kernel::error::ProblemBody;
 use ik_kernel::extract::{Json, Path};
-use ik_kernel::id::marker::{Conversation, Message};
+use ik_kernel::id::marker::{AiMemory, Conversation, Message};
 use ik_kernel::{Id, Problem};
 use ik_messaging::dto::{ConversationView, MessageView};
 use utoipa_axum::router::OpenApiRouter;
@@ -14,10 +15,11 @@ use utoipa_axum::routes;
 
 use crate::AiState;
 use crate::dto::{
-    AssistantView, CharacterList, CreateSessionRequest, ModelList, QuotaView, RegenerateAccepted,
-    RegenerateRequest, SessionView, UpdateSessionRequest,
+    AssistantView, CharacterList, ClearMemoriesRequest, CreateMemoryRequest, CreateSessionRequest,
+    MemoryList, MemorySettings, MemoryView, ModelList, QuotaView, RegenerateAccepted,
+    RegenerateRequest, SessionView, UpdateMemoryRequest, UpdateSessionRequest,
 };
-use crate::{service, sessions};
+use crate::{memory, service, sessions};
 
 pub fn router<S>() -> OpenApiRouter<S>
 where
@@ -35,6 +37,10 @@ where
         .routes(routes!(reset_session))
         .routes(routes!(stop))
         .routes(routes!(regenerate))
+        .routes(routes!(memories, create_memory))
+        .routes(routes!(update_memory, delete_memory))
+        .routes(routes!(clear_memories))
+        .routes(routes!(memory_settings))
         .merge(crate::admin::router())
 }
 
@@ -257,5 +263,148 @@ async fn regenerate(
     Ok((
         StatusCode::ACCEPTED,
         Json(sessions::regenerate(&state, &principal, id.get(), request).await?),
+    ))
+}
+
+/// 我的 AI 记忆
+///
+/// 记忆面板：开关与全部记忆。`profile` 是用户档案（所有角色共享），`relation` 是与某个角色之间的
+/// 关系记忆（带 `character`）。置顶的在前，其余最近更新的在前；每类最多 40 条。
+#[utoipa::path(
+    get,
+    path = "/v1/ai/memories",
+    tag = "ai",
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = MemoryList),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn memories(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+) -> Result<Json<MemoryList>, Problem> {
+    Ok(Json(memory::list(&state, &principal).await?))
+}
+
+/// 添加记忆
+///
+/// 手动写一条（来源 `manual`）。同一类里已经有一样的就返回那条。
+#[utoipa::path(
+    post,
+    path = "/v1/ai/memories",
+    tag = "ai",
+    request_body = CreateMemoryRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 201, body = MemoryView),
+        (status = 400, description = "VALIDATION_FAILED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "AI_CHARACTER_NOT_FOUND", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 409, description = "AI_MEMORY_FULL", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn create_memory(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+    Json(request): Json<CreateMemoryRequest>,
+) -> Result<(StatusCode, Json<MemoryView>), Problem> {
+    Ok((
+        StatusCode::CREATED,
+        Json(memory::create(&state, &principal, request).await?),
+    ))
+}
+
+/// 修改记忆
+///
+/// 改正文（来源变为 `manual`）或置顶 / 取消置顶。置顶的不会被自动整理改写或淘汰。
+#[utoipa::path(
+    patch,
+    path = "/v1/ai/memories/{id}",
+    tag = "ai",
+    request_body = UpdateMemoryRequest,
+    params(("id" = String, Path, description = "记忆 id")),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = MemoryView),
+        (status = 400, description = "VALIDATION_FAILED", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn update_memory(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<AiMemory>>,
+    Json(request): Json<UpdateMemoryRequest>,
+) -> Result<Json<MemoryView>, Problem> {
+    Ok(Json(
+        memory::update(&state, &principal, id.get(), request).await?,
+    ))
+}
+
+/// 删除记忆
+#[utoipa::path(
+    delete,
+    path = "/v1/ai/memories/{id}",
+    tag = "ai",
+    params(("id" = String, Path, description = "记忆 id")),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204, description = "已删除"),
+        (status = 404, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn delete_memory(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+    Path(id): Path<Id<AiMemory>>,
+) -> Result<StatusCode, Problem> {
+    memory::delete(&state, &principal, id.get()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 清空记忆
+///
+/// 指定角色：只清与它的关系记忆（「让它忘了我」）；不指定：清空全部，含档案。不可恢复。
+#[utoipa::path(
+    post,
+    path = "/v1/ai/memories/clear",
+    tag = "ai",
+    request_body = ClearMemoriesRequest,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204, description = "已清空"),
+        (status = 404, description = "AI_CHARACTER_NOT_FOUND", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn clear_memories(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+    Json(request): Json<ClearMemoriesRequest>,
+) -> Result<StatusCode, Problem> {
+    memory::clear(&state, &principal, request).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 记忆开关
+///
+/// 关掉后 AI 不再读取、不再记下新的记忆，也不再跨会话衔接；已有记忆保留，可以在面板里清空。
+#[utoipa::path(
+    put,
+    path = "/v1/ai/memory-settings",
+    tag = "ai",
+    request_body = MemorySettings,
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = MemorySettings),
+        (status = 401, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn memory_settings(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+    Json(request): Json<MemorySettings>,
+) -> Result<Json<MemorySettings>, Problem> {
+    Ok(Json(
+        memory::set_enabled(&state, &principal, request).await?,
     ))
 }
