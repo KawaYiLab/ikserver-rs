@@ -1326,6 +1326,7 @@ pub(crate) struct RelatedQuery<'a> {
     pub viewer: Option<i64>,
     pub excluded_authors: &'a [i64],
     pub limit: i64,
+    pub named_only: bool,
 }
 
 /// 相关推荐的候选，按相关度从高到低。
@@ -1365,6 +1366,7 @@ pub(crate) async fn related_candidates(
              AND p.published_at > now() - interval '365 days'
              AND ($3::bigint IS NULL OR p.author_id <> $3)
              AND (p.is_anonymous OR NOT (p.author_id = ANY($4)))
+             AND (NOT $6 OR NOT p.is_anonymous)
            ORDER BY
                3.0 * coalesce(t.shared, 0)
              + CASE WHEN $2::bigint IS NOT NULL AND p.category_id = $2 THEN 2.0 ELSE 0.0 END
@@ -1381,6 +1383,7 @@ pub(crate) async fn related_candidates(
         q.viewer,
         q.excluded_authors,
         q.limit,
+        q.named_only,
     )
     .fetch_all(conn)
     .await

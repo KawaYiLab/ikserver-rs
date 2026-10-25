@@ -567,7 +567,7 @@ async fn approved_mcp_tools_reach_the_model_and_changes_need_review(db: PgPool) 
     .unwrap();
     assert_eq!(enabled.status, McpToolStatus::Active);
 
-    // 生成：工具清单里有 kb__search（论坛 12 + 1），模型调用它，结果回灌；时间线带文案与来源。
+    // 生成：工具清单里有 kb__search（论坛 7 + 1），模型调用它，结果回灌；时间线带文案与来源。
     let job = h.ask("帮我查一下零号空洞").await;
     h.llm.push(vec![
         content("我查一下。"),
@@ -590,8 +590,8 @@ async fn approved_mcp_tools_reach_the_model_and_changes_need_review(db: PgPool) 
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    // 论坛 12 + 记忆 3（ADR 0007）+ 站外 1。
-    assert_eq!(names.len(), 16);
+    // 论坛 7 + 记忆 3（ADR 0007）+ 站外 1。
+    assert_eq!(names.len(), 11);
     assert_eq!(names.last().map(String::as_str), Some("kb__search"));
     let ChatMessage::System { content: system } = &requests[0].messages[0] else {
         panic!()
@@ -655,7 +655,7 @@ async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
     let catalog = h.state.catalog.get().await.unwrap();
     let card = catalog.card_by_slug("fairy").unwrap();
     let toolbox = ik_ai::toolbox::Toolbox::for_card(&h.state, &catalog, card, &h.state.mcp);
-    assert_eq!(toolbox.names().len(), 12);
+    assert_eq!(toolbox.names().len(), 7);
     assert!(!toolbox.has_external());
 
     h.import_character(json!({ "storyTools": true })).await;
@@ -681,8 +681,8 @@ async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    // 论坛 12 + 记忆 3（ADR 0007）+ 剧情库 6。
-    assert_eq!(names.len(), 21);
+    // 论坛 7 + 记忆 3（ADR 0007）+ 剧情库 6。
+    assert_eq!(names.len(), 16);
     assert!(names.contains(&"ik_search".to_owned()));
     // 结果回灌：正常结果与参数错误（工具自己的错误文本，让模型改参数）。
     let ChatMessage::Tool { content: ok, .. } = requests[1].messages.last().unwrap() else {

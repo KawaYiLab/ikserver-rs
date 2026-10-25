@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids\n         FROM ai_role_cards ORDER BY sort_order, id",
+  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions,\n                forum_content_tools, forum_user_tools, forum_browse_tools, story_tools, mcp_server_ids\n         FROM ai_role_cards ORDER BY sort_order, id",
   "describe": {
     "columns": [
       {
@@ -192,6 +192,39 @@
       },
       {
         "ordinal": 17,
+        "name": "forum_content_tools",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "forum_content_tools"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "forum_user_tools",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "forum_user_tools"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "forum_browse_tools",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "forum_browse_tools"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
         "name": "story_tools",
         "type_info": "Bool",
         "origin": {
@@ -202,7 +235,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 21,
         "name": "mcp_server_ids",
         "type_info": "Int8Array",
         "origin": {
@@ -235,8 +268,11 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "c96be5cfe532624eaed8736680c6f49f70b538f5478880ddb3e3062dc969a7f6"
+  "hash": "3e31c306b28d5bb61859941d8686d0f9a859a7140d18d3a439d5a0accf001874"
 }

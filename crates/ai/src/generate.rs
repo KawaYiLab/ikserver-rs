@@ -7,10 +7,13 @@
 //! - 私信有推送目标（[`Live`]）：推累计正文（GEN-004）、「正在输入」（GEN-005）、工作流事件（WF-003），
 //!   并轮询停止信号（GEN-011）；评论没有。
 
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::Future;
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::future::{BoxFuture, Shared};
 use futures_util::stream::FuturesUnordered;
+use futures_util::{FutureExt, StreamExt};
 use ik_kernel::bus::{Audience, Event};
 use tokio::time::Instant;
 
@@ -362,6 +365,35 @@ fn search_query(arguments: &str) -> Option<String> {
     }
 }
 
+type ForumCallKey = (String, String);
+type SharedToolCall<'a> = Shared<BoxFuture<'a, tools::ToolOutput>>;
+
+/// 仅在本次回复内复用论坛只读工具；记忆写入、剧情库和站外工具始终独立执行。
+/// 同轮重复调用共享执行，跨轮只复用成功结果。参数键顺序和 JSON 空白不影响命中。
+fn share_forum_call<'a>(
+    call: &ToolCall,
+    cache: &mut HashMap<ForumCallKey, SharedToolCall<'a>>,
+    execute: impl Future<Output = tools::ToolOutput> + Send + 'a,
+) -> (SharedToolCall<'a>, bool) {
+    let key = tools::TOOL_NAMES.contains(&call.name.as_str()).then(|| {
+        let args: BTreeMap<_, _> = tools::parse_args(&call.arguments).into_iter().collect();
+        (
+            call.name.clone(),
+            serde_json::to_string(&args).unwrap_or_default(),
+        )
+    });
+    if let Some(output) = key.as_ref().and_then(|key| cache.get(key))
+        && output.peek().is_none_or(|result| !result.is_error)
+    {
+        return (output.clone(), true);
+    }
+    let output = execute.boxed().shared();
+    if let Some(key) = key {
+        cache.insert(key, output.clone());
+    }
+    (output, false)
+}
+
 /// 用一个模型跑完整个工具循环。
 async fn run_rounds(
     ctx: &StreamCtx<'_>,
@@ -388,9 +420,11 @@ async fn run_rounds(
         base.iter().map(ChatMessage::without_images).collect()
     };
     let mut tool_images = 0usize;
+    let mut seen_tool_images = HashSet::new();
     let mut out = Streamed::failed(LlmError::Timeout);
     out.end = End::Finished;
     let mut rounds = 0u32;
+    let mut shared_tools = HashMap::new();
     loop {
         let offer_tools = rounds < max_rounds;
         let request = ChatRequest {
@@ -449,19 +483,17 @@ async fn run_rounds(
                 workflow.tool_start(&call.name, query.as_deref(), label),
                 label,
             ));
+            // 共享执行可跨轮保留，因此参数归 future 自己所有。
+            let name = call.name.clone();
+            let arguments = call.arguments.clone();
+            let (output, reused) = share_forum_call(call, &mut shared_tools, async move {
+                ctx.toolbox
+                    .execute(state, tool_ctx, &state.mcp, &name, &arguments, deadline)
+                    .await
+            });
             pending.push(async move {
-                let output = ctx
-                    .toolbox
-                    .execute(
-                        state,
-                        tool_ctx,
-                        &state.mcp,
-                        &call.name,
-                        &call.arguments,
-                        deadline,
-                    )
-                    .await;
-                (index, output)
+                let started = Instant::now();
+                (index, output.await, reused, started.elapsed())
             });
         }
         ctx.publish_workflow(workflow);
@@ -470,7 +502,23 @@ async fn run_rounds(
         loop {
             tokio::select! {
                 next = pending.next() => {
-                    let Some((index, output)) = next else { break };
+                    let Some((index, output, reused, elapsed)) = next else { break };
+                    let hits = match &output.meta {
+                        tools::ToolMeta::Search { hits, .. } => Some(*hits),
+                        _ => None,
+                    };
+                    tracing::info!(
+                        target: "ik_ai::tool_usage",
+                        tool = %round.tool_calls[index].name,
+                        scene = if ctx.live.is_some() { "dm" } else { "comment" },
+                        round = rounds,
+                        reused,
+                        error = output.is_error,
+                        ms = elapsed.as_millis(),
+                        result_chars = output.text.chars().count(),
+                        search_hits = ?hits,
+                        "AI 工具调用完成"
+                    );
                     let (step, label) = &steps[index];
                     workflow.tool_finish(
                         step,
@@ -512,6 +560,7 @@ async fn run_rounds(
         }
         // 工具消息只能是文本：识图模型的图片另起一条用户消息跟在工具结果后面（LLM-015）。
         if model.vision {
+            images.retain(|url| seen_tool_images.insert(url.clone()));
             images.truncate(MAX_TOOL_IMAGES.saturating_sub(tool_images));
             if !images.is_empty() {
                 tool_images += images.len();
@@ -584,5 +633,71 @@ mod tests {
             Some("a、b")
         );
         assert_eq!(search_query("{}"), None);
+    }
+
+    #[tokio::test]
+    async fn forum_calls_share_execution_but_memory_writes_do_not() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let count = Arc::new(AtomicUsize::new(0));
+        let execute = |is_error| {
+            let count = count.clone();
+            async move {
+                count.fetch_add(1, Ordering::SeqCst);
+                tools::ToolOutput {
+                    text: "结果".into(),
+                    is_error,
+                    meta: tools::ToolMeta::None,
+                    images: Vec::new(),
+                }
+            }
+        };
+        let mut cache = HashMap::new();
+        let mut call = ToolCall {
+            id: "a".into(),
+            name: "get_post_content".into(),
+            arguments: r#"{"document_id":"7","offset":0}"#.into(),
+        };
+        let (first, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(!reused);
+        call.arguments = r#"{ "offset": 0, "document_id": "7" }"#.into();
+        let (second, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(reused);
+        let (a, b) = futures_util::join!(first, second);
+        assert_eq!(a, b);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        let (next_round, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(reused);
+        next_round.await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        // 续读参数不同，必须重新执行。
+        call.arguments = r#"{"document_id":"7","offset":4000}"#.into();
+        let (next_page, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(!reused);
+        next_page.await;
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+
+        call.name = "remember".into();
+        let (first, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(!reused);
+        let (second, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(!reused);
+        futures_util::join!(first, second);
+        assert_eq!(count.load(Ordering::SeqCst), 4);
+
+        // 已完成的失败不复用，下一轮允许重试；重试成功后再复用。
+        call.name = "search_posts".into();
+        let (failed, _) = share_forum_call(&call, &mut cache, execute(true));
+        assert!(failed.await.is_error);
+        let (retry, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(!reused);
+        assert!(!retry.await.is_error);
+        let (success, reused) = share_forum_call(&call, &mut cache, execute(false));
+        assert!(reused);
+        assert!(!success.await.is_error);
+        assert_eq!(count.load(Ordering::SeqCst), 6);
     }
 }

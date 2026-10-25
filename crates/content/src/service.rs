@@ -1359,14 +1359,34 @@ pub async fn related(
     post_id: i64,
     limit: Option<u32>,
 ) -> Result<Vec<PostCard>, Problem> {
+    related_inner(state, viewer, post_id, limit, None).await
+}
+
+/// 公开实名推荐：种子按游客权限读取，候选截断前排除匿名帖、查看者本人和有拉黑关系的作者。
+pub async fn related_named(
+    state: &ContentState,
+    viewer_id: i64,
+    post_id: i64,
+    limit: Option<u32>,
+) -> Result<Vec<PostCard>, Problem> {
+    related_inner(state, None, post_id, limit, Some(viewer_id)).await
+}
+
+async fn related_inner(
+    state: &ContentState,
+    viewer: Option<&Principal>,
+    post_id: i64,
+    limit: Option<u32>,
+    named_for: Option<i64>,
+) -> Result<Vec<PostCard>, Problem> {
     let limit = usize::try_from(limit.unwrap_or(RELATED_DEFAULT).clamp(1, RELATED_MAX))
         .unwrap_or(RELATED_DEFAULT as usize);
-    let viewer_id = viewer.map(|p| p.user_id.get());
+    let viewer_id = named_for.or_else(|| viewer.map(|p| p.user_id.get()));
     let mut conn = state.db.acquire().await?;
     let seed = repo::get_post(&mut conn, post_id)
         .await?
         .ok_or_else(post_not_found)?;
-    let is_owner = viewer_id == Some(seed.author_id);
+    let is_owner = viewer.is_some_and(|p| p.user_id.get() == seed.author_id);
     if seed.status != "published" || (seed.hidden_at.is_some() && !is_owner) {
         return Err(post_not_found());
     }
@@ -1382,6 +1402,7 @@ pub async fn related(
             viewer: viewer_id,
             excluded_authors: &excluded_authors,
             limit: i64::try_from(limit * 4).unwrap_or(40),
+            named_only: named_for.is_some(),
         },
     )
     .await?;

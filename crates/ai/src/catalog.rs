@@ -92,6 +92,9 @@ pub struct RoleCard {
     /// 空 = 全部启用模型。
     pub allowed_model_ids: Vec<i64>,
     pub suggested_questions: Vec<String>,
+    pub forum_content_tools: bool,
+    pub forum_user_tools: bool,
+    pub forum_browse_tools: bool,
     /// 提供剧情库工具（ADR 0004）。
     pub story_tools: bool,
     /// 启用的站外 MCP 服务。
@@ -350,6 +353,9 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
                 .into_iter()
                 .filter(|q| !q.trim().is_empty())
                 .collect(),
+            forum_content_tools: row.forum_content_tools,
+            forum_user_tools: row.forum_user_tools,
+            forum_browse_tools: row.forum_browse_tools,
             story_tools: row.story_tools,
             mcp_server_ids: row.mcp_server_ids,
         })
@@ -470,6 +476,9 @@ pub(crate) mod tests {
             default_model_id,
             allowed_model_ids: allowed,
             suggested_questions: Vec::new(),
+            forum_content_tools: true,
+            forum_user_tools: true,
+            forum_browse_tools: true,
             story_tools: false,
             mcp_server_ids: Vec::new(),
         }

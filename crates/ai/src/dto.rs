@@ -185,6 +185,15 @@ pub struct CharacterInput {
     pub allowed_model_keys: Vec<String>,
     #[serde(default)]
     pub suggested_questions: Vec<String>,
+    /// 内容检索：搜索帖子、阅读正文与评论。
+    #[serde(default = "yes")]
+    pub forum_content_tools: bool,
+    /// 用户查询：公开资料、统计与近期动态。
+    #[serde(default = "yes")]
+    pub forum_user_tools: bool,
+    /// 社区浏览：热门帖子与分区目录。
+    #[serde(default = "yes")]
+    pub forum_browse_tools: bool,
     /// 提供剧情库工具（ADR 0004）。
     #[serde(default)]
     pub story_tools: bool,

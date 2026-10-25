@@ -662,7 +662,7 @@ async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
     let conversation = h.session("fairy").await;
     let request = h.turn(conversation, "你还记得我吗", "当然").await;
     assert!(!system_of(&request).contains("【记忆】"));
-    assert_eq!(request.tools.len(), 12);
+    assert_eq!(request.tools.len(), 7);
     assert_eq!(h.queued(format!("ai-memory:{conversation}")).await, 0);
     let calls = h.fake.requests().len();
     assert_eq!(
@@ -677,7 +677,7 @@ async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
         .unwrap();
     let request = h.turn(conversation, "现在呢", "记得").await;
     assert!(system_of(&request).contains("- 对方叫阿哲"));
-    assert_eq!(request.tools.len(), 15);
+    assert_eq!(request.tools.len(), 10);
 
     // 按 id 或用户名（不区分大小写，可带 @）查某个用户的记忆。
     h.insert_memory(2, Some(FAIRY), "relation", "你叫对方阿哲")

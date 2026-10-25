@@ -3709,6 +3709,12 @@ export interface components {
             dmEnabled: boolean;
             enabled: boolean;
             examples: components["schemas"]["Example"][];
+            /** @description 社区浏览：热门帖子与分区目录。 */
+            forumBrowseTools: boolean;
+            /** @description 内容检索：搜索帖子、阅读正文与评论。 */
+            forumContentTools: boolean;
+            /** @description 用户查询：公开资料、统计与近期动态。 */
+            forumUserTools: boolean;
             knockVisible: boolean;
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers: string[];
@@ -4427,6 +4433,12 @@ export interface components {
             dmEnabled?: boolean;
             enabled?: boolean;
             examples?: components["schemas"]["Example"][];
+            /** @description 社区浏览：热门帖子与分区目录。 */
+            forumBrowseTools?: boolean;
+            /** @description 内容检索：搜索帖子、阅读正文与评论。 */
+            forumContentTools?: boolean;
+            /** @description 用户查询：公开资料、统计与近期动态。 */
+            forumUserTools?: boolean;
             knockVisible?: boolean;
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers?: string[];
