@@ -1611,7 +1611,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** 删除自己的评论（一级评论连同回复一起删除） */
+        /** 删除自己的评论（回复它的评论保留，显示「原评论已删除」） */
         delete: operations["delete_comment"];
         options?: never;
         head?: never;
@@ -1685,7 +1685,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** 一级评论的回复（旧的在前） */
+        /** 回复某条评论的评论（旧的在前） */
         get: operations["list_replies"];
         put?: never;
         post?: never;
@@ -2933,11 +2933,12 @@ export interface paths {
         };
         /**
          * 帖子的评论
-         * @description 一级评论新的在前，每条带前 3 条回复。第一页额外返回采纳与置顶。
+         * @description 所有评论按楼层从旧到新排成一条线（回复也是普通的一层，带上被回复评论的摘要）。
+         *     第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。
          */
         get: operations["list_comments"];
         put?: never;
-        /** 发表评论或回复 */
+        /** 发表评论（可以回复本帖下任意一条评论） */
         post: operations["create_comment"];
         delete?: never;
         options?: never;
@@ -3651,11 +3652,8 @@ export interface components {
             author?: components["schemas"]["AdminUserBrief"] | null;
             /** Format: date-time */
             createdAt: string;
-            /**
-             * Format: int32
-             * @description 一级评论的楼层号。
-             */
-            floor?: number | null;
+            /** Format: int32 */
+            floor: number;
             /** Format: date-time */
             hiddenAt?: string | null;
             hiddenBy?: components["schemas"]["AdminUserBrief"] | null;
@@ -3666,12 +3664,12 @@ export interface components {
             isAnonymous: boolean;
             /** Format: int32 */
             likeCount: number;
-            /** @description 回复的一级评论；一级评论为 null。 */
-            parentId?: string | null;
             pinned: boolean;
             postId: string;
             /** @description 所属帖子的标题（帖子隐藏了也给）。 */
             postTitle?: string | null;
+            /** @description 回复了哪条评论；直接评论帖子、或原评论已删除时为 null。 */
+            replyToId?: string | null;
             /** @description 纯文本（提及与表情 token 已转成可读文本）。 */
             text: string;
         };
@@ -4395,9 +4393,9 @@ export interface components {
             createdAt: string;
             /**
              * Format: int32
-             * @description 一级评论的楼层号（发表时确定，不随删除变化）。回复没有楼层号。
+             * @description 楼层号：本帖第几条评论，发表时确定，删除前面的评论不会变。
              */
-            floor?: number | null;
+            floor: number;
             id: string;
             images: components["schemas"]["MediaView"][];
             isAccepted: boolean;
@@ -4409,15 +4407,23 @@ export interface components {
             likeCount: number;
             /** @description 当前用户已点赞。 */
             liked: boolean;
-            parentId?: string | null;
             postId: string;
+            /**
+             * Format: int64
+             * @description 收到的可见回复数（`GET /v1/comments/{id}/replies` 列出）。
+             */
+            replyCount: number;
+            replyTo?: components["schemas"]["ReplyToView"] | null;
         };
         CommentsPage: {
-            accepted?: components["schemas"]["ThreadView"] | null;
-            /** @description 其余一级评论，新的在前。 */
-            items: components["schemas"]["ThreadView"][];
+            accepted?: components["schemas"]["CommentView"] | null;
+            /** @description 评论，按楼层从旧到新。 */
+            items: components["schemas"]["CommentView"][];
+            /** @description 往后（更新的楼层）翻页。 */
             nextCursor?: string | null;
-            pinned?: components["schemas"]["ThreadView"] | null;
+            pinned?: components["schemas"]["CommentView"] | null;
+            /** @description 往前（更早的楼层）翻页：从 `anchor` 开始或往前翻过时才有。 */
+            prevCursor?: string | null;
         };
         CompleteRequest: {
             /** Format: int32 */
@@ -4538,8 +4544,11 @@ export interface components {
             /** @description 图片（自己图库里的媒体 id，有序）。数量上限随等级（Lv1 3 张 … Lv7 18 张）。 */
             imageIds?: string[];
             isAnonymous?: boolean;
-            /** @description 回复哪条一级评论。回复「回复」时也填它所属的一级评论 id，并在正文开头提及对方。 */
-            parentId?: string | null;
+            /**
+             * @description 回复哪条评论（本帖下任意一条未隐藏的评论）。不填就是直接评论帖子。
+             *     旧客户端的 `parentId` 按同样的意思接收。
+             */
+            replyToId?: string | null;
         };
         CreateQrRequest: {
             mode: components["schemas"]["QrMode"];
@@ -5364,9 +5373,9 @@ export interface components {
                 createdAt: string;
                 /**
                  * Format: int32
-                 * @description 一级评论的楼层号（发表时确定，不随删除变化）。回复没有楼层号。
+                 * @description 楼层号：本帖第几条评论，发表时确定，删除前面的评论不会变。
                  */
-                floor?: number | null;
+                floor: number;
                 id: string;
                 images: components["schemas"]["MediaView"][];
                 isAccepted: boolean;
@@ -5378,8 +5387,13 @@ export interface components {
                 likeCount: number;
                 /** @description 当前用户已点赞。 */
                 liked: boolean;
-                parentId?: string | null;
                 postId: string;
+                /**
+                 * Format: int64
+                 * @description 收到的可见回复数（`GET /v1/comments/{id}/replies` 列出）。
+                 */
+                replyCount: number;
+                replyTo?: components["schemas"]["ReplyToView"] | null;
             }[];
             nextCursor?: string | null;
         };
@@ -5640,11 +5654,8 @@ export interface components {
                 author?: components["schemas"]["AdminUserBrief"] | null;
                 /** Format: date-time */
                 createdAt: string;
-                /**
-                 * Format: int32
-                 * @description 一级评论的楼层号。
-                 */
-                floor?: number | null;
+                /** Format: int32 */
+                floor: number;
                 /** Format: date-time */
                 hiddenAt?: string | null;
                 hiddenBy?: components["schemas"]["AdminUserBrief"] | null;
@@ -5655,12 +5666,12 @@ export interface components {
                 isAnonymous: boolean;
                 /** Format: int32 */
                 likeCount: number;
-                /** @description 回复的一级评论；一级评论为 null。 */
-                parentId?: string | null;
                 pinned: boolean;
                 postId: string;
                 /** @description 所属帖子的标题（帖子隐藏了也给）。 */
                 postTitle?: string | null;
+                /** @description 回复了哪条评论；直接评论帖子、或原评论已删除时为 null。 */
+                replyToId?: string | null;
                 /** @description 纯文本（提及与表情 token 已转成可读文本）。 */
                 text: string;
             }[];
@@ -6350,6 +6361,12 @@ export interface components {
             /** @description 没有个人上限。 */
             unlimited: boolean;
         };
+        QuotedComment: {
+            author: components["schemas"]["AuthorView"];
+            /** @description 纯文本摘要（最多 80 字；纯图片评论为「[图片]」）。 */
+            excerpt: string;
+            id: string;
+        };
         ReadResult: {
             /**
              * Format: int64
@@ -6427,6 +6444,17 @@ export interface components {
              */
             balance: number;
             username: string;
+        };
+        /** @description 被回复的评论。 */
+        ReplyToView: {
+            comment?: components["schemas"]["QuotedComment"] | null;
+            /** @description 原评论已删除。 */
+            deleted: boolean;
+            /**
+             * Format: int32
+             * @description 被回复评论的楼层号（原评论删除后也保留）。
+             */
+            floor: number;
         };
         /** @description 被回复的消息（摘要）。 */
         ReplyView: {
@@ -6899,16 +6927,6 @@ export interface components {
             /** @description 评论所在的帖子。 */
             postId?: string | null;
             postTitle?: string | null;
-        };
-        /** @description 一级评论 + 前 3 条回复。 */
-        ThreadView: components["schemas"]["CommentView"] & {
-            replies: components["schemas"]["CommentView"][];
-            repliesHasMore: boolean;
-            /**
-             * Format: int64
-             * @description 可见回复总数。
-             */
-            replyCount: number;
         };
         /** @description 按业务日（北京时间 04:00 切日）的趋势，旧的在前；最后一天是今天（还没过完）。 */
         Trends: {
@@ -10779,15 +10797,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description COMMENT_NOT_TOP_LEVEL */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemBody"];
-                };
-            };
             /** @description FORBIDDEN / ACCEPT_DISABLED */
             403: {
                 headers: {
@@ -10931,15 +10940,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            /** @description COMMENT_NOT_TOP_LEVEL */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemBody"];
-                };
             };
             403: {
                 headers: {
@@ -13789,9 +13789,15 @@ export interface operations {
     list_comments: {
         parameters: {
             query?: {
+                /** @description `nextCursor` 或 `prevCursor`。 */
                 cursor?: string;
                 /** @description 默认 20，最大 50。 */
                 limit?: number;
+                /**
+                 * @description 从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始。
+                 *     与 `cursor` 同时给时以 `cursor` 为准。
+                 */
+                anchor?: string;
             };
             header?: never;
             path: {

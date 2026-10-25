@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO comments (id, post_id, reply_to_id, reply_to_floor, author_id, floor, body,\n                               is_anonymous, anonymous_seed, created_at, image_ids)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int8",
+        "Int4",
+        "Text",
+        "Bool",
+        "Text",
+        "Timestamptz",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2c50123c903adcd71a6b9e46de01db11b7a6a0d36fa8d7a11a6565630eba2545"
+}

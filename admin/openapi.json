@@ -5714,7 +5714,7 @@
         "tags": [
           "comments"
         ],
-        "summary": "删除自己的评论（一级评论连同回复一起删除）",
+        "summary": "删除自己的评论（回复它的评论保留，显示「原评论已删除」）",
         "operationId": "delete_comment",
         "parameters": [
           {
@@ -5779,16 +5779,6 @@
         "responses": {
           "204": {
             "description": "已采纳（会替换本帖原来的采纳）"
-          },
-          "400": {
-            "description": "COMMENT_NOT_TOP_LEVEL",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemBody"
-                }
-              }
-            }
           },
           "403": {
             "description": "FORBIDDEN / ACCEPT_DISABLED",
@@ -5997,16 +5987,6 @@
           "204": {
             "description": "已置顶（会替换本帖原来的置顶）"
           },
-          "400": {
-            "description": "COMMENT_NOT_TOP_LEVEL",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemBody"
-                }
-              }
-            }
-          },
           "403": {
             "content": {
               "application/problem+json": {
@@ -6089,7 +6069,7 @@
         "tags": [
           "comments"
         ],
-        "summary": "一级评论的回复（旧的在前）",
+        "summary": "回复某条评论的评论（旧的在前）",
         "operationId": "list_replies",
         "parameters": [
           {
@@ -10358,7 +10338,7 @@
           "comments"
         ],
         "summary": "帖子的评论",
-        "description": "一级评论新的在前，每条带前 3 条回复。第一页额外返回采纳与置顶。",
+        "description": "所有评论按楼层从旧到新排成一条线（回复也是普通的一层，带上被回复评论的摘要）。\n第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。",
         "operationId": "list_comments",
         "parameters": [
           {
@@ -10373,6 +10353,7 @@
           {
             "name": "cursor",
             "in": "query",
+            "description": "`nextCursor` 或 `prevCursor`。",
             "required": false,
             "schema": {
               "type": "string"
@@ -10387,6 +10368,15 @@
               "type": "integer",
               "format": "int32",
               "minimum": 0
+            }
+          },
+          {
+            "name": "anchor",
+            "in": "query",
+            "description": "从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始。\n与 `cursor` 同时给时以 `cursor` 为准。",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -10426,7 +10416,7 @@
         "tags": [
           "comments"
         ],
-        "summary": "发表评论或回复",
+        "summary": "发表评论（可以回复本帖下任意一条评论）",
         "operationId": "create_comment",
         "parameters": [
           {
@@ -13144,6 +13134,7 @@
         "required": [
           "id",
           "postId",
+          "floor",
           "text",
           "images",
           "isAnonymous",
@@ -13179,12 +13170,8 @@
             "format": "date-time"
           },
           "floor": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "description": "一级评论的楼层号。"
+            "type": "integer",
+            "format": "int32"
           },
           "hiddenAt": {
             "type": [
@@ -13227,13 +13214,6 @@
             "type": "integer",
             "format": "int32"
           },
-          "parentId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "回复的一级评论；一级评论为 null。"
-          },
           "pinned": {
             "type": "boolean"
           },
@@ -13246,6 +13226,13 @@
               "null"
             ],
             "description": "所属帖子的标题（帖子隐藏了也给）。"
+          },
+          "replyToId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "回复了哪条评论；直接评论帖子、或原评论已删除时为 null。"
           },
           "text": {
             "type": "string",
@@ -15431,6 +15418,8 @@
         "required": [
           "id",
           "postId",
+          "floor",
+          "replyCount",
           "body",
           "images",
           "author",
@@ -15454,12 +15443,9 @@
             "format": "date-time"
           },
           "floor": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32",
-            "description": "一级评论的楼层号（发表时确定，不随删除变化）。回复没有楼层号。"
+            "description": "楼层号：本帖第几条评论，发表时确定，删除前面的评论不会变。"
           },
           "id": {
             "type": "string"
@@ -15491,14 +15477,24 @@
             "type": "boolean",
             "description": "当前用户已点赞。"
           },
-          "parentId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "postId": {
             "type": "string"
+          },
+          "replyCount": {
+            "type": "integer",
+            "format": "int64",
+            "description": "收到的可见回复数（`GET /v1/comments/{id}/replies` 列出）。"
+          },
+          "replyTo": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReplyToView",
+                "description": "回复了哪条评论；直接评论帖子时为空。"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -15511,8 +15507,8 @@
           "accepted": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/ThreadView",
-                "description": "采纳的最佳答案（只在第一页返回）。"
+                "$ref": "#/components/schemas/CommentView",
+                "description": "采纳的最佳答案（只在第一页返回；它在 `items` 里也照常出现在自己的楼层）。"
               },
               {
                 "type": "null"
@@ -15522,26 +15518,34 @@
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/ThreadView"
+              "$ref": "#/components/schemas/CommentView"
             },
-            "description": "其余一级评论，新的在前。"
+            "description": "评论，按楼层从旧到新。"
           },
           "nextCursor": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "往后（更新的楼层）翻页。"
           },
           "pinned": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/ThreadView",
+                "$ref": "#/components/schemas/CommentView",
                 "description": "置顶评论（只在第一页返回；同时被采纳时只出现在 `accepted`）。"
               },
               {
                 "type": "null"
               }
             ]
+          },
+          "prevCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "往前（更早的楼层）翻页：从 `anchor` 开始或往前翻过时才有。"
           }
         }
       },
@@ -15843,12 +15847,12 @@
           "isAnonymous": {
             "type": "boolean"
           },
-          "parentId": {
+          "replyToId": {
             "type": [
               "string",
               "null"
             ],
-            "description": "回复哪条一级评论。回复「回复」时也填它所属的一级评论 id，并在正文开头提及对方。"
+            "description": "回复哪条评论（本帖下任意一条未隐藏的评论）。不填就是直接评论帖子。\n旧客户端的 `parentId` 按同样的意思接收。"
           }
         },
         "additionalProperties": false
@@ -18162,6 +18166,8 @@
               "required": [
                 "id",
                 "postId",
+                "floor",
+                "replyCount",
                 "body",
                 "images",
                 "author",
@@ -18185,12 +18191,9 @@
                   "format": "date-time"
                 },
                 "floor": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": "integer",
                   "format": "int32",
-                  "description": "一级评论的楼层号（发表时确定，不随删除变化）。回复没有楼层号。"
+                  "description": "楼层号：本帖第几条评论，发表时确定，删除前面的评论不会变。"
                 },
                 "id": {
                   "type": "string"
@@ -18222,14 +18225,24 @@
                   "type": "boolean",
                   "description": "当前用户已点赞。"
                 },
-                "parentId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
                 "postId": {
                   "type": "string"
+                },
+                "replyCount": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "收到的可见回复数（`GET /v1/comments/{id}/replies` 列出）。"
+                },
+                "replyTo": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ReplyToView",
+                      "description": "回复了哪条评论；直接评论帖子时为空。"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 }
               }
             }
@@ -19131,6 +19144,7 @@
               "required": [
                 "id",
                 "postId",
+                "floor",
                 "text",
                 "images",
                 "isAnonymous",
@@ -19166,12 +19180,8 @@
                   "format": "date-time"
                 },
                 "floor": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
-                  "format": "int32",
-                  "description": "一级评论的楼层号。"
+                  "type": "integer",
+                  "format": "int32"
                 },
                 "hiddenAt": {
                   "type": [
@@ -19214,13 +19224,6 @@
                   "type": "integer",
                   "format": "int32"
                 },
-                "parentId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "description": "回复的一级评论；一级评论为 null。"
-                },
                 "pinned": {
                   "type": "boolean"
                 },
@@ -19233,6 +19236,13 @@
                     "null"
                   ],
                   "description": "所属帖子的标题（帖子隐藏了也给）。"
+                },
+                "replyToId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "回复了哪条评论；直接评论帖子、或原评论已删除时为 null。"
                 },
                 "text": {
                   "type": "string",
@@ -21208,6 +21218,26 @@
           }
         }
       },
+      "QuotedComment": {
+        "type": "object",
+        "required": [
+          "id",
+          "author",
+          "excerpt"
+        ],
+        "properties": {
+          "author": {
+            "$ref": "#/components/schemas/AuthorView"
+          },
+          "excerpt": {
+            "type": "string",
+            "description": "纯文本摘要（最多 80 字；纯图片评论为「[图片]」）。"
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "ReadResult": {
         "type": "object",
         "required": [
@@ -21428,6 +21458,36 @@
           },
           "username": {
             "type": "string"
+          }
+        }
+      },
+      "ReplyToView": {
+        "type": "object",
+        "description": "被回复的评论。",
+        "required": [
+          "floor",
+          "deleted"
+        ],
+        "properties": {
+          "comment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QuotedComment",
+                "description": "原评论的摘要；已删除、被隐藏或作者与你有拉黑关系时为空。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "原评论已删除。"
+          },
+          "floor": {
+            "type": "integer",
+            "format": "int32",
+            "description": "被回复评论的楼层号（原评论删除后也保留）。"
           }
         }
       },
@@ -22936,38 +22996,6 @@
           }
         ],
         "description": "被举报目标的现状与快照。"
-      },
-      "ThreadView": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/CommentView"
-          },
-          {
-            "type": "object",
-            "required": [
-              "replies",
-              "replyCount",
-              "repliesHasMore"
-            ],
-            "properties": {
-              "replies": {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/CommentView"
-                }
-              },
-              "repliesHasMore": {
-                "type": "boolean"
-              },
-              "replyCount": {
-                "type": "integer",
-                "format": "int64",
-                "description": "可见回复总数。"
-              }
-            }
-          }
-        ],
-        "description": "一级评论 + 前 3 条回复。"
       },
       "Trends": {
         "type": "object",

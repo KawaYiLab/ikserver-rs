@@ -80,8 +80,11 @@
 
 ## 评论域（`20261008000003_comments.sql`）
 
-- 楼中楼只有一层：`parent_id` 必须指向同帖的一级评论（服务端校验），删除一级评论级联删除回复。
-- `floor` 只属于一级评论（`CHECK (parent_id IS NULL) = (floor IS NOT NULL)`），在锁住帖子行后按 `MAX(floor)+1` 分配，删除不回收。
+- 扁平楼层（ADR 0006，`20261112000001_flat_comments.sql`）：每条评论都有 `floor`（`NOT NULL`，`UNIQUE (post_id, floor)`），
+  在锁住帖子行后由 `posts.last_comment_floor` 递增分配，删除不回收（包括最后一层）。
+- `reply_to_id` 可以指向同帖任意一条评论（服务端校验同帖、未隐藏），外键 `ON DELETE SET NULL`：原评论删除后回复保留；
+  `reply_to_floor` 是被回复评论的楼层号快照（`CHECK (reply_to_id IS NULL OR reply_to_floor IS NOT NULL)`），用于显示「原评论已删除」。
+  `comments_reply_to_idx (reply_to_id, floor)` 用于回复列表与回复数。
 - 每帖最多一条置顶、一条采纳，由部分唯一索引兜底；`posts.accepted_comment_id` 外键 `ON DELETE SET NULL`。
 
 ## 经济域（`20261014000001_economy.sql`）

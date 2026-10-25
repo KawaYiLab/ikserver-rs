@@ -751,22 +751,24 @@ pub(crate) async fn lock_post_ref(
 }
 
 /// 新评论：评论数 +1 并顶帖（CMT-084/088）。
+/// 返回分给这条评论的楼层号。
 pub(crate) async fn comment_added(
     conn: &mut PgConnection,
     id: i64,
     by: i64,
     now: DateTime<Utc>,
-) -> sqlx::Result<()> {
-    sqlx::query!(
-        "UPDATE posts SET comment_count = comment_count + 1, bumped_at = $3, last_bumped_by = $2
-         WHERE id = $1",
+) -> sqlx::Result<i32> {
+    sqlx::query_scalar!(
+        "UPDATE posts SET comment_count = comment_count + 1, last_comment_floor = last_comment_floor + 1,
+                          bumped_at = $3, last_bumped_by = $2
+         WHERE id = $1
+         RETURNING last_comment_floor",
         id,
         by,
         now,
     )
-    .execute(conn)
-    .await?;
-    Ok(())
+    .fetch_one(conn)
+    .await
 }
 
 pub(crate) async fn comments_removed(conn: &mut PgConnection, id: i64, n: i32) -> sqlx::Result<()> {

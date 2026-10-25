@@ -174,51 +174,68 @@ async fn post_tags(conn: &mut PgConnection) -> anyhow::Result<u64> {
     Ok(result.rows_affected())
 }
 
-/// 评论：楼层号、一层楼中楼、置顶与采纳只留在顶层评论上（comments_flags_top_level）。
+/// 评论：扁平楼层（ADR 0006）。旧系统只给顶层评论编号，这里按发表时间给全部评论重新编号；
+/// 旧的「回复」记为回复所在的顶层评论。导入后帖子的 `last_comment_floor` 设为最大楼层号。
 async fn comments(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Result<u64> {
     let result = sqlx::query!(
-        r#"INSERT INTO comments (id, post_id, parent_id, author_id, floor, body, is_anonymous,
-                                 anonymous_seed, pinned_at, pinned_by, accepted_at, accepted_by,
-                                 hidden_at, hidden_reason, legacy_id, created_at, image_ids)
-           SELECT c.id, c.post_id, c.parent_id, c.author_id, c.floor::int,
+        r#"WITH numbered AS (
+               SELECT c.*, coalesce(c.created_at AT TIME ZONE $1, $2) AS at,
+                      row_number() OVER (
+                          PARTITION BY c.post_id
+                          ORDER BY coalesce(c.created_at AT TIME ZONE $1, $2), c.id
+                      )::int AS new_floor
+               FROM legacy.ik_comments c
+               JOIN posts p ON p.id = c.post_id
+           )
+           INSERT INTO comments (id, post_id, reply_to_id, reply_to_floor, author_id, floor, body,
+                                 is_anonymous, anonymous_seed, pinned_at, pinned_by, accepted_at,
+                                 accepted_by, hidden_at, hidden_reason, legacy_id, created_at, image_ids)
+           SELECT c.id, c.post_id, parent.id, parent.new_floor, c.author_id, c.new_floor,
                   left(legacy.ik_fix_hosts(c.content), 2000),
                   c.is_anonymous,
                   CASE WHEN c.is_anonymous
                        THEN coalesce(c.anonymous_seed, md5('legacy-comment:' || coalesce(c.document_id, c.id::text)))
                        ELSE c.anonymous_seed END,
-                  CASE WHEN c.parent_id IS NULL THEN c.pinned_at AT TIME ZONE $1 END,
-                  CASE WHEN c.parent_id IS NULL AND c.pinned_at IS NOT NULL THEN pinner.id END,
-                  CASE WHEN c.parent_id IS NULL THEN c.accepted_at AT TIME ZONE $1 END,
-                  CASE WHEN c.parent_id IS NULL AND c.accepted_at IS NOT NULL THEN acceptor.id END,
+                  c.pinned_at AT TIME ZONE $1,
+                  CASE WHEN c.pinned_at IS NOT NULL THEN pinner.id END,
+                  c.accepted_at AT TIME ZONE $1,
+                  CASE WHEN c.accepted_at IS NOT NULL THEN acceptor.id END,
                   CASE WHEN c.is_hidden
                        THEN coalesce(c.updated_at, c.created_at) AT TIME ZONE $1 END,
                   CASE WHEN c.is_hidden THEN c.hidden_reason END,
                   c.document_id,
-                  coalesce(c.created_at AT TIME ZONE $1, $2),
+                  c.at,
                   coalesce((SELECT array_agg(i.file_id ORDER BY i."order", i.file_id)
                             FROM (SELECT r.file_id, r."order" FROM legacy.ik_file_refs r
                                   WHERE r.related_type = 'api::comment.comment' AND r.field = 'images'
                                     AND r.related_id = c.id
                                   ORDER BY r."order", r.file_id LIMIT 18) i), '{}')
-           FROM legacy.ik_comments c
-           JOIN posts p ON p.id = c.post_id
+           FROM numbered c
+           LEFT JOIN numbered parent ON parent.id = c.parent_id AND parent.post_id = c.post_id
            LEFT JOIN users pinner ON pinner.id = c.pinned_by
            LEFT JOIN users acceptor ON acceptor.id = c.accepted_by"#,
         options.legacy_timezone,
         options.now,
+    )
+    .execute(&mut *conn)
+    .await?;
+    sqlx::query!(
+        "UPDATE posts p SET last_comment_floor = m.max_floor
+         FROM (SELECT post_id, max(floor) AS max_floor FROM comments GROUP BY post_id) m
+         WHERE p.id = m.post_id"
     )
     .execute(conn)
     .await?;
     Ok(result.rows_affected())
 }
 
-/// 采纳的评论：旧系统存的是评论的 documentId；只认同一帖子下的顶层评论。
+/// 采纳的评论：旧系统存的是评论的 documentId；只认同一帖子下的评论。
 async fn accepted(conn: &mut PgConnection) -> anyhow::Result<u64> {
     let result = sqlx::query!(
         r#"UPDATE posts np SET accepted_comment_id = c.id
            FROM legacy.ik_posts p
            JOIN comments c ON c.legacy_id = p.accepted_comment_document_id
-           WHERE np.id = p.post_id AND c.post_id = np.id AND c.parent_id IS NULL"#
+           WHERE np.id = p.post_id AND c.post_id = np.id"#
     )
     .execute(conn)
     .await?;

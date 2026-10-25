@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO comments (id, post_id, reply_to_id, reply_to_floor, author_id, floor, body,\n                                   is_anonymous, anonymous_seed)\n             VALUES ($1, $2, $3, (SELECT floor FROM comments WHERE id = $3), $4, $7, $5, $6,\n                     CASE WHEN $6 THEN 'seed' END)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Bool",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "30e6ea9a52ae85127452285d61e09a7f901aaa56a088a82a509ca750ce9e53ac"
+}

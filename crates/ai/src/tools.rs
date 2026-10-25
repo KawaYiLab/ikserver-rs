@@ -225,7 +225,7 @@ pub fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: Cow::Borrowed("get_post_comments"),
-            description: Cow::Borrowed("按热度读取一篇帖子的评论（含部分楼中楼回复）。"),
+            description: Cow::Borrowed("按热度读取一篇帖子的评论（带楼层号与回复关系）。"),
             parameters: object(
                 json!({ "document_id": document_id_param(), "limit": limit_param(20, 10) }),
                 &["document_id"],
@@ -905,7 +905,7 @@ async fn post_comments(
     };
     let limit = i64::from(arg_limit(args, 10, 20));
     let Some(hot) =
-        ik_comments::service::hot_threads(&state.forum.comments, Some(ctx.viewer_id), id, limit, 3)
+        ik_comments::service::hot_comments(&state.forum.comments, Some(ctx.viewer_id), id, limit)
             .await?
     else {
         return Ok(ToolOutput::text(post_not_found(id)));
@@ -914,32 +914,34 @@ async fn post_comments(
     let meta = ToolMeta::Comments {
         post: Some((id, post.title.clone())),
     };
-    if hot.threads.is_empty() {
+    if hot.comments.is_empty() {
         return Ok(ToolOutput::with(
             format!("帖子《{title}》目前还没有评论。"),
             meta,
         ));
     }
     let mut text = format!(
-        "帖子《{title}》共有 {} 条顶层评论，按热度展示前 {} 条（含部分楼中楼回复）：",
+        "帖子《{title}》共有 {} 条评论，按热度展示前 {} 条：",
         hot.total,
-        hot.threads.len()
+        hot.comments.len()
     );
-    for (i, (top, replies)) in hot.threads.iter().enumerate() {
+    for comment in &hot.comments {
+        let reply_to = match &comment.reply_to {
+            None => String::new(),
+            Some(r) => match &r.comment {
+                Some(quoted) => format!("回复 #{} {}，", r.floor, quoted.author.name),
+                None if r.deleted => format!("回复 #{}（原评论已删除），", r.floor),
+                None => format!("回复 #{}，", r.floor),
+            },
+        };
         text.push_str(&format!(
-            "\n{}. {}：{}（赞{}）",
-            i + 1,
-            top.author.name,
-            comment_preview(&top.body),
-            top.like_count
+            "\n#{} {}：{}{}（赞{}）",
+            comment.floor,
+            comment.author.name,
+            reply_to,
+            comment_preview(&comment.body),
+            comment.like_count
         ));
-        for reply in replies {
-            text.push_str(&format!(
-                "\n   └ {}：{}",
-                reply.author.name,
-                comment_preview(&reply.body)
-            ));
-        }
     }
     Ok(ToolOutput::with(text, meta))
 }

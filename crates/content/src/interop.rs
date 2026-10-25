@@ -53,17 +53,18 @@ pub async fn lock_post(conn: &mut PgConnection, post_id: i64) -> Result<Option<P
     Ok(repo::lock_post_ref(conn, post_id).await?.map(PostRef::from))
 }
 
-/// 新评论：评论数 +1，并把帖子顶到信息流前面。
+/// 新评论：评论数 +1，并把帖子顶到信息流前面。返回分给它的楼层号（递增、删除不回收）；
+/// 调用方必须已锁住帖子行。
 pub async fn comment_added(
     conn: &mut PgConnection,
     post_id: i64,
     commenter_id: i64,
     now: DateTime<Utc>,
-) -> Result<(), Problem> {
+) -> Result<i32, Problem> {
     Ok(repo::comment_added(conn, post_id, commenter_id, now).await?)
 }
 
-/// 删除了 `n` 条评论（含级联删除的回复）。
+/// 删除了 `n` 条评论。
 pub async fn comments_removed(
     conn: &mut PgConnection,
     post_id: i64,

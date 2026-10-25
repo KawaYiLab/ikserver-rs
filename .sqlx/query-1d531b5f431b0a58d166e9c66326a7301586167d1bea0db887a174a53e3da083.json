@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE posts p SET last_comment_floor = m.max_floor\n         FROM (SELECT post_id, max(floor) AS max_floor FROM comments GROUP BY post_id) m\n         WHERE p.id = m.post_id",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "1d531b5f431b0a58d166e9c66326a7301586167d1bea0db887a174a53e3da083"
+}

@@ -1,4 +1,4 @@
-//! 媒体与内容导入：草稿行 / 发布行合并、待发布修改、封面、标签合并、评论楼层与楼中楼、采纳、精选。
+//! 媒体与内容导入：草稿行 / 发布行合并、待发布修改、封面、标签合并、评论楼层与回复关系、采纳、精选。
 
 use crate::common::{at, import, setup};
 use sqlx::PgPool;
@@ -111,7 +111,6 @@ async fn content_is_merged_and_remapped(db: PgPool) {
     assert_eq!(count("tags.merged"), 1);
     assert_eq!(count("categories.fixed"), 1);
     assert_eq!(count("comments.dropped"), 1);
-    assert_eq!(count("comments.reparented"), 1);
     assert_eq!(count("comments.body_truncated"), 1);
 
     import(&db, "UTC").await;
@@ -217,28 +216,33 @@ async fn content_is_merged_and_remapped(db: PgPool) {
         "保留原顺序，合并后的重复标签只留一个"
     );
 
-    // 评论：楼层、回复的回复挂到顶层、截断、隐藏、配图；无主帖子下的评论不导入。
+    // 评论：全部评论按时间编楼层、回复的回复照原样、截断、隐藏、配图；无主帖子下的评论不导入。
     let comments = sqlx::query!(
-        r#"SELECT id, post_id, parent_id, author_id, floor, char_length(body) AS "len!",
+        r#"SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, char_length(body) AS "len!",
                   is_anonymous, anonymous_seed, accepted_at, accepted_by, hidden_at, image_ids, legacy_id
            FROM comments ORDER BY id"#
     )
     .fetch_all(&db)
     .await
     .unwrap();
-    let shape: Vec<(i64, Option<i64>, Option<i32>)> = comments
+    let shape: Vec<(i64, Option<i64>, Option<i32>, i32)> = comments
         .iter()
-        .map(|c| (c.id, c.parent_id, c.floor))
+        .map(|c| (c.id, c.reply_to_id, c.reply_to_floor, c.floor))
         .collect();
     assert_eq!(
         shape,
         vec![
-            (100, None, Some(1)),
-            (101, Some(100), None),
-            (102, Some(100), None),
-            (103, None, Some(2))
+            (100, None, None, 1),
+            (101, Some(100), Some(1), 2),
+            (102, Some(101), Some(2), 3),
+            (103, None, None, 4)
         ]
     );
+    let last_floor = sqlx::query_scalar!("SELECT last_comment_floor FROM posts WHERE id = 10")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(last_floor, 4);
     assert!(comments.iter().all(|c| c.post_id == 10));
     assert_eq!(
         (comments[0].accepted_at, comments[0].accepted_by),

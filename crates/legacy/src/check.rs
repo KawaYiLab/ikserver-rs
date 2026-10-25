@@ -237,7 +237,6 @@ async fn content(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
         r#"SELECT
                (SELECT count(*) FROM legacy.comments) AS "total!",
                count(*) AS "kept!",
-               count(*) FILTER (WHERE reparented) AS "reparented!",
                count(*) FILTER (WHERE char_length(content) > 2000) AS "long_body!"
            FROM legacy.ik_comments c
            WHERE EXISTS (SELECT 1 FROM legacy.ik_posts p
@@ -250,12 +249,6 @@ async fn content(db: &PgPool, out: &mut Vec<Finding>) -> anyhow::Result<()> {
         Severity::Fixed,
         comments.total - comments.kept,
         "所在帖子或作者已不存在的评论不导入",
-    ));
-    out.push(Finding::new(
-        "comments.reparented",
-        Severity::Fixed,
-        comments.reparented,
-        "回复的回复（楼中楼只有一层，CMT-025）挂到所属的顶层评论下",
     ));
     out.push(Finding::new(
         "comments.body_truncated",

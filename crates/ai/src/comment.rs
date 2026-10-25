@@ -6,7 +6,7 @@
 //!    （帖子、父评论、同一评论者在本帖与这个 AI 之前的问答，CTX-001～003），预占额度；
 //! 2. 生成（事务之外）：调用上游，不推增量（GEN-030、D-089 方案 A），首帧看门狗与总预算同私信；
 //! 3. 定稿（短事务）：清洗（plain，上限 1500，GEN-031）、沉浸守卫（GEN-060～063）、以 AI 的名义
-//!    回复（D-004 方案 A：挂到触发评论所在的一级评论下，开头提及触发者），结算额度，记审计。
+//!    回复（D-004 方案 A：回复触发评论本身，开头提及触发者），结算额度，记审计。
 //!
 //! 失败交给后台任务重试；首帧超时是终态，不重试（TRIG-034）。额度不足、全局关闭时静默跳过
 //! （评论区没有私信那样的系统提示位）。
@@ -132,7 +132,7 @@ impl CommentHooks for Hooks {
         // TRIG-012：评论、帖子、父评论任一匿名，或作者本身是 AI（防 AI 互相接龙），都不触发。
         if comment.is_anonymous
             || comment.post_is_anonymous
-            || comment.parent.as_ref().is_some_and(|p| p.is_anonymous)
+            || comment.reply_to.as_ref().is_some_and(|p| p.is_anonymous)
             || comment.author_is_ai
         {
             return Ok(());
@@ -152,7 +152,7 @@ impl CommentHooks for Hooks {
         let Some(ai_user_id) = target(
             &catalog,
             &mentioned,
-            comment.parent.as_ref().map(|p| p.author_id),
+            comment.reply_to.as_ref().map(|p| p.author_id),
             comment.post_author_id,
         ) else {
             return Ok(());
@@ -357,7 +357,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         }};
     }
 
-    // 复核（TRIG-016）：触发评论仍可见且不匿名，所在一级评论同样，帖子公开且不匿名。
+    // 复核（TRIG-016）：触发评论仍可见且不匿名，它回复的评论（父评论）同样，帖子公开且不匿名。
     let (Some(post_id), Some(trigger_id)) = (job.post_id, job.trigger_comment_id) else {
         skip_with!("trigger_removed");
     };
@@ -367,7 +367,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
     else {
         skip_with!("trigger_removed");
     };
-    let parent = match trigger.parent_id {
+    let parent = match trigger.reply_to_id {
         None => None,
         Some(parent_id) => {
             let Some(parent) = ik_comments::interop::ai_comment(&mut tx, parent_id)

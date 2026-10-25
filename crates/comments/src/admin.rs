@@ -54,11 +54,10 @@ pub struct AdminComment {
     pub post_id: Id,
     /// 所属帖子的标题（帖子隐藏了也给）。
     pub post_title: Option<String>,
-    /// 回复的一级评论；一级评论为 null。
+    /// 回复了哪条评论；直接评论帖子、或原评论已删除时为 null。
     #[schema(value_type = Option<String>)]
-    pub parent_id: Option<Id>,
-    /// 一级评论的楼层号。
-    pub floor: Option<i32>,
+    pub reply_to_id: Option<Id>,
+    pub floor: i32,
     /// 纯文本（提及与表情 token 已转成可读文本）。
     pub text: String,
     pub images: Vec<MediaView>,
@@ -133,7 +132,7 @@ pub async fn comment_list(
             id: Id::new(r.id),
             post_id: Id::new(r.post_id),
             post_title: titles.get(&r.post_id).cloned(),
-            parent_id: r.parent_id.map(Id::new),
+            reply_to_id: r.reply_to_id.map(Id::new),
             floor: r.floor,
             text: crate::text::plain_text(&r.body),
             images: r

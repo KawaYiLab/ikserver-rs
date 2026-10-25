@@ -49,7 +49,6 @@ pub(crate) struct PostDocument {
 pub(crate) struct CommentDocument {
     pub id: String,
     pub post_id: String,
-    pub parent_id: Option<String>,
     pub content: String,
     pub post_title: String,
     pub author_name: Option<String>,
@@ -237,7 +236,7 @@ impl Engine {
             ]);
         let comment_settings = Settings::new()
             .with_searchable_attributes(["content", "postTitle", "authorName"])
-            .with_filterable_attributes(["postId", "parentId", "authorUserId", "generation"])
+            .with_filterable_attributes(["postId", "authorUserId", "generation"])
             .with_sortable_attributes(["createdAt", "likes"])
             .with_ranking_rules([
                 "words",
@@ -370,12 +369,6 @@ impl Engine {
         }
         let ids: Vec<String> = post_ids.iter().map(|id| filter_string(&sid(*id))).collect();
         self.delete_comments_where(&format!("postId IN [{}]", ids.join(", ")))
-            .await
-    }
-
-    /// 删除这条评论的回复文档（删除一级评论时级联）。
-    pub(crate) async fn delete_replies_of(&self, comment_id: i64) -> anyhow::Result<()> {
-        self.delete_comments_where(&format!("parentId = {}", filter_string(&sid(comment_id))))
             .await
     }
 

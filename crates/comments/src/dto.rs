@@ -20,10 +20,11 @@ pub struct CreateCommentRequest {
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
     pub image_ids: Vec<Id<Media>>,
-    /// 回复哪条一级评论。回复「回复」时也填它所属的一级评论 id，并在正文开头提及对方。
-    #[serde(default)]
+    /// 回复哪条评论（本帖下任意一条未隐藏的评论）。不填就是直接评论帖子。
+    /// 旧客户端的 `parentId` 按同样的意思接收。
+    #[serde(default, alias = "parentId")]
     #[schema(value_type = Option<String>)]
-    pub parent_id: Option<Id<Comment>>,
+    pub reply_to_id: Option<Id<Comment>>,
     #[serde(default)]
     pub is_anonymous: bool,
 }
@@ -35,10 +36,12 @@ pub struct CommentView {
     pub id: Id<Comment>,
     #[schema(value_type = String)]
     pub post_id: Id<Post>,
-    #[schema(value_type = Option<String>)]
-    pub parent_id: Option<Id<Comment>>,
-    /// 一级评论的楼层号（发表时确定，不随删除变化）。回复没有楼层号。
-    pub floor: Option<i32>,
+    /// 楼层号：本帖第几条评论，发表时确定，删除前面的评论不会变。
+    pub floor: i32,
+    /// 回复了哪条评论；直接评论帖子时为空。
+    pub reply_to: Option<ReplyToView>,
+    /// 收到的可见回复数（`GET /v1/comments/{id}/replies` 列出）。
+    pub reply_count: i64,
     pub body: String,
     pub images: Vec<MediaView>,
     pub author: AuthorView,
@@ -53,29 +56,57 @@ pub struct CommentView {
     pub created_at: DateTime<Utc>,
 }
 
-/// 一级评论 + 前 3 条回复。
-#[derive(Debug, Serialize, ToSchema)]
+/// 被回复的评论。
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ThreadView {
-    #[serde(flatten)]
-    pub comment: CommentView,
-    pub replies: Vec<CommentView>,
-    /// 可见回复总数。
-    pub reply_count: i64,
-    pub replies_has_more: bool,
+pub struct ReplyToView {
+    /// 被回复评论的楼层号（原评论删除后也保留）。
+    pub floor: i32,
+    /// 原评论已删除。
+    pub deleted: bool,
+    /// 原评论的摘要；已删除、被隐藏或作者与你有拉黑关系时为空。
+    pub comment: Option<QuotedComment>,
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct QuotedComment {
+    #[schema(value_type = String)]
+    pub id: Id<Comment>,
+    pub author: AuthorView,
+    /// 纯文本摘要（最多 80 字；纯图片评论为「[图片]」）。
+    pub excerpt: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CommentsPage {
-    /// 采纳的最佳答案（只在第一页返回）。
-    pub accepted: Option<ThreadView>,
+    /// 采纳的最佳答案（只在第一页返回；它在 `items` 里也照常出现在自己的楼层）。
+    pub accepted: Option<CommentView>,
     /// 置顶评论（只在第一页返回；同时被采纳时只出现在 `accepted`）。
-    pub pinned: Option<ThreadView>,
-    /// 其余一级评论，新的在前。
-    pub items: Vec<ThreadView>,
+    pub pinned: Option<CommentView>,
+    /// 评论，按楼层从旧到新。
+    pub items: Vec<CommentView>,
+    /// 往后（更新的楼层）翻页。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
+    /// 往前（更早的楼层）翻页：从 `anchor` 开始或往前翻过时才有。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prev_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentsQuery {
+    /// `nextCursor` 或 `prevCursor`。
+    pub cursor: Option<String>,
+    /// 默认 20，最大 50。
+    pub limit: Option<u32>,
+    /// 从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始。
+    /// 与 `cursor` 同时给时以 `cursor` 为准。
+    #[param(value_type = Option<String>)]
+    pub anchor: Option<Id<Comment>>,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]

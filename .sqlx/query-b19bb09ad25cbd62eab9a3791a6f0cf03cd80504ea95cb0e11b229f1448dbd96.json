@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT parent_id AS \"parent_id!\", count(*) AS \"n!\"\n           FROM comments\n           WHERE parent_id = ANY($1) AND hidden_at IS NULL\n             AND (is_anonymous OR NOT (author_id = ANY($2)))\n           GROUP BY parent_id",
+  "query": "SELECT reply_to_id AS \"reply_to_id!\", count(*) AS \"n!\"\n           FROM comments\n           WHERE reply_to_id = ANY($1) AND hidden_at IS NULL\n             AND (is_anonymous OR NOT (author_id = ANY($2)))\n           GROUP BY reply_to_id",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "parent_id!",
+        "name": "reply_to_id!",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "parent_id"
+            "name": "reply_to_id"
           }
         }
       },
@@ -32,5 +32,5 @@
       null
     ]
   },
-  "hash": "a32683a5d57c7feaa685b39dccce1406cc662ce7e7330f4bed68f50febe331db"
+  "hash": "b19bb09ad25cbd62eab9a3791a6f0cf03cd80504ea95cb0e11b229f1448dbd96"
 }

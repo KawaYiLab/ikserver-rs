@@ -12,7 +12,9 @@ use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
 use crate::CommentsState;
-use crate::dto::{CommentLikeResult, CommentView, CommentsPage, CreateCommentRequest, PageQuery};
+use crate::dto::{
+    CommentLikeResult, CommentView, CommentsPage, CommentsQuery, CreateCommentRequest, PageQuery,
+};
 use crate::service;
 
 pub fn router<S>() -> OpenApiRouter<S>
@@ -33,12 +35,13 @@ where
 
 /// 帖子的评论
 ///
-/// 一级评论新的在前，每条带前 3 条回复。第一页额外返回采纳与置顶。
+/// 所有评论按楼层从旧到新排成一条线（回复也是普通的一层，带上被回复评论的摘要）。
+/// 第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。
 #[utoipa::path(
     get,
     path = "/v1/posts/{id}/comments",
     tag = "comments",
-    params(("id" = String, Path, description = "帖子 id"), PageQuery),
+    params(("id" = String, Path, description = "帖子 id"), CommentsQuery),
     responses(
         (status = 200, body = CommentsPage),
         (status = 400, description = "CURSOR_INVALID", body = ProblemBody, content_type = "application/problem+json"),
@@ -49,14 +52,14 @@ async fn list_comments(
     State(state): State<CommentsState>,
     MaybeUser(viewer): MaybeUser,
     Path(id): Path<Id<Post>>,
-    Query(query): Query<PageQuery>,
+    Query(query): Query<CommentsQuery>,
 ) -> Result<Json<CommentsPage>, Problem> {
     Ok(Json(
         service::list(&state, viewer.as_ref(), id.get(), query).await?,
     ))
 }
 
-/// 发表评论或回复
+/// 发表评论（可以回复本帖下任意一条评论）
 #[utoipa::path(
     post,
     path = "/v1/posts/{id}/comments",
@@ -82,7 +85,7 @@ async fn create_comment(
     Ok((StatusCode::CREATED, Json(view)))
 }
 
-/// 删除自己的评论（一级评论连同回复一起删除）
+/// 删除自己的评论（回复它的评论保留，显示「原评论已删除」）
 #[utoipa::path(
     delete,
     path = "/v1/comments/{id}",
@@ -104,7 +107,7 @@ async fn delete_comment(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// 一级评论的回复（旧的在前）
+/// 回复某条评论的评论（旧的在前）
 #[utoipa::path(
     get,
     path = "/v1/comments/{id}/replies",
@@ -135,7 +138,6 @@ async fn list_replies(
     security(("session_cookie" = []), ("bearer" = [])),
     responses(
         (status = 204, description = "已置顶（会替换本帖原来的置顶）"),
-        (status = 400, description = "COMMENT_NOT_TOP_LEVEL", body = ProblemBody, content_type = "application/problem+json"),
         (status = 403, body = ProblemBody, content_type = "application/problem+json"),
         (status = 404, body = ProblemBody, content_type = "application/problem+json"),
     )
@@ -180,7 +182,6 @@ async fn unpin(
     security(("session_cookie" = []), ("bearer" = [])),
     responses(
         (status = 204, description = "已采纳（会替换本帖原来的采纳）"),
-        (status = 400, description = "COMMENT_NOT_TOP_LEVEL", body = ProblemBody, content_type = "application/problem+json"),
         (status = 403, description = "FORBIDDEN / ACCEPT_DISABLED", body = ProblemBody, content_type = "application/problem+json"),
         (status = 404, body = ProblemBody, content_type = "application/problem+json"),
     )

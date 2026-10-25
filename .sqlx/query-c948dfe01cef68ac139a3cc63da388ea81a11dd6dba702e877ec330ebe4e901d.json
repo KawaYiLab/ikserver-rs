@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL AND accepted_at IS NOT NULL\n           AND (is_anonymous OR NOT (author_id = ANY($2)))",
+  "query": "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,\n                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments\n         WHERE author_id = $1 AND NOT is_anonymous AND hidden_at IS NULL\n           AND ($2::timestamptz IS NULL OR (created_at, id) < ($2, $3::bigint))\n         ORDER BY created_at DESC, id DESC\n         LIMIT $4",
   "describe": {
     "columns": [
       {
@@ -27,17 +27,28 @@
       },
       {
         "ordinal": 2,
-        "name": "parent_id",
+        "name": "reply_to_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "parent_id"
+            "name": "reply_to_id"
           }
         }
       },
       {
         "ordinal": 3,
+        "name": "reply_to_floor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "reply_to_floor"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "author_id",
         "type_info": "Int8",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "floor",
         "type_info": "Int4",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "body",
         "type_info": "Text",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "is_anonymous",
         "type_info": "Bool",
         "origin": {
@@ -81,7 +92,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "anonymous_seed",
         "type_info": "Text",
         "origin": {
@@ -92,7 +103,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "like_count",
         "type_info": "Int4",
         "origin": {
@@ -103,7 +114,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "pinned_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "accepted_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -125,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "hidden_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "image_ids",
         "type_info": "Int8Array",
         "origin": {
@@ -161,15 +172,18 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int8Array"
+        "Timestamptz",
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
       false,
       false,
       true,
-      false,
       true,
+      false,
+      false,
       false,
       false,
       true,
@@ -181,5 +195,5 @@
       false
     ]
   },
-  "hash": "cca7628f920a093278463843a47427a40587fdab643cab7eaace228680b07932"
+  "hash": "c948dfe01cef68ac139a3cc63da388ea81a11dd6dba702e877ec330ebe4e901d"
 }

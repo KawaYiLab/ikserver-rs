@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, parent_id, author_id, floor, body, is_anonymous, anonymous_seed,\n                like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments\n         WHERE post_id = $1 AND parent_id IS NULL AND hidden_at IS NULL\n           AND (is_anonymous OR NOT (author_id = ANY($2)))\n         ORDER BY like_count DESC, created_at DESC, id DESC\n         LIMIT $3",
+  "query": "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, char_length(body) AS \"len!\",\n                  is_anonymous, anonymous_seed, accepted_at, accepted_by, hidden_at, image_ids, legacy_id\n           FROM comments ORDER BY id",
   "describe": {
     "columns": [
       {
@@ -27,17 +27,28 @@
       },
       {
         "ordinal": 2,
-        "name": "parent_id",
+        "name": "reply_to_id",
         "type_info": "Int8",
         "origin": {
           "Table": {
             "table": "comments",
-            "name": "parent_id"
+            "name": "reply_to_id"
           }
         }
       },
       {
         "ordinal": 3,
+        "name": "reply_to_floor",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "reply_to_floor"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "author_id",
         "type_info": "Int8",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "floor",
         "type_info": "Int4",
         "origin": {
@@ -59,18 +70,13 @@
         }
       },
       {
-        "ordinal": 5,
-        "name": "body",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "body"
-          }
-        }
+        "ordinal": 6,
+        "name": "len!",
+        "type_info": "Int4",
+        "origin": "Expression"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "is_anonymous",
         "type_info": "Bool",
         "origin": {
@@ -81,7 +87,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "anonymous_seed",
         "type_info": "Text",
         "origin": {
@@ -92,35 +98,24 @@
         }
       },
       {
-        "ordinal": 8,
-        "name": "like_count",
-        "type_info": "Int4",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "like_count"
-          }
-        }
-      },
-      {
         "ordinal": 9,
-        "name": "pinned_at",
-        "type_info": "Timestamptz",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "pinned_at"
-          }
-        }
-      },
-      {
-        "ordinal": 10,
         "name": "accepted_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "comments",
             "name": "accepted_at"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "accepted_by",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "accepted_by"
           }
         }
       },
@@ -137,17 +132,6 @@
       },
       {
         "ordinal": 12,
-        "name": "created_at",
-        "type_info": "Timestamptz",
-        "origin": {
-          "Table": {
-            "table": "comments",
-            "name": "created_at"
-          }
-        }
-      },
-      {
-        "ordinal": 13,
         "name": "image_ids",
         "type_info": "Int8Array",
         "origin": {
@@ -156,31 +140,38 @@
             "name": "image_ids"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "legacy_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "comments",
+            "name": "legacy_id"
+          }
+        }
       }
     ],
     "parameters": {
-      "Left": [
-        "Int8",
-        "Int8Array",
-        "Int8"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
       false,
       true,
-      false,
       true,
       false,
       false,
-      true,
+      null,
       false,
       true,
       true,
       true,
+      true,
       false,
-      false
+      true
     ]
   },
-  "hash": "db7054502f29d5fbe7447b38fa4e7fd01df75b4b184c95200d450e62ebf3058f"
+  "hash": "4e1ff357783b2d0a7923890dac763a6f5de57ed7076d21baaf5fab9846935093"
 }

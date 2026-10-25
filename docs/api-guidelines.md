@@ -92,7 +92,6 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | DELETE_ACCOUNT_NO_EMAIL | 400 | 当前账号未绑定邮箱，请通过米游社扫码注销 | 发注销验证码时 |
 | MIHOYO_DELETE_TICKET_EXPIRED | 400 | 扫码验证已过期，请重新扫码 | 注销时：核验结果不存在或超过 5 分钟 |
 | MIHOYO_DELETE_TICKET_INVALID | 400 | 这不是注销用的扫码验证 | 注销时给了登录 / 绑定用的二维码 |
-| COMMENT_NOT_TOP_LEVEL | 400 | 只有一级评论可以置顶或采纳 | |
 | FOLLOW_SELF | 400 | 不能关注自己 | |
 | UPLOAD_TOKEN_INVALID | 400 | 上传凭证无效 | 格式或签名不对，或不是自己的凭证 |
 | UPLOAD_TOKEN_EXPIRED | 400 | 上传凭证已过期，请重新上传 | 签名后 10 分钟内完成 |
