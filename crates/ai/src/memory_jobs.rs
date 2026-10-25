@@ -3,7 +3,7 @@
 //!
 //! 都在回复链路之外：准备阶段发现历史窗口快装不下时入队摘要任务；回复定稿时入队提炼任务，
 //! 用同一个任务键推迟执行（对话停下来 `memory_extract_delay_secs` 之后才跑，聊天中途不反复调用）。
-//! 模型用部署配置的 `ai.memory_model`，没有或不可用时用默认模型；这些调用不扣用户额度（MEM-040）。
+//! 模型用管理后台设置的记忆模型，没有或不可用时用默认模型；这些调用不扣额度、也不计入全站额度（MEM-040）。
 
 use std::time::Duration;
 
@@ -107,6 +107,15 @@ impl TaskHandler for ExtractMemories {
 
 // ---------- 调用模型 ----------
 
+/// 记忆总开关（管理后台，MEM-030）。读不到配置时当作关着。
+async fn memory_on(state: &AiState) -> bool {
+    state
+        .catalog
+        .get()
+        .await
+        .is_ok_and(|catalog| catalog.memory.enabled)
+}
+
 /// 非流式地调一次模型（内部收集流），返回正文与用量。
 async fn complete(
     state: &AiState,
@@ -115,9 +124,9 @@ async fn complete(
 ) -> Result<(String, Usage), String> {
     let catalog = state.catalog.get().await.map_err(|p| format!("{p:?}"))?;
     let usable = |m: &&crate::catalog::Model| catalog.providers.contains(&m.provider);
-    let model = state
-        .config
-        .memory_model
+    let model = catalog
+        .memory
+        .model_key
         .as_deref()
         .and_then(|key| catalog.model(key))
         .filter(usable)
@@ -203,7 +212,7 @@ const SUMMARY_PROMPT: &str = "你负责给一段 AI 角色与用户的私聊写�
 /// 更新一个会话的滚动摘要（MEM-002）：保留最近半个窗口的原文不压，把它之前、上次摘要之后的消息
 /// 与旧摘要合并成新摘要。返回是否写入了新摘要。
 pub async fn summarize(state: &AiState, conversation_id: i64) -> Result<bool, String> {
-    if !state.config.memory_enabled {
+    if !memory_on(state).await {
         return Ok(false);
     }
     let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
@@ -431,10 +440,9 @@ fn listed(index: usize, row: &repo::MemoryRow) -> String {
     format!("m{} [{}] {}\n", index + 1, tags.join("，"), row.content)
 }
 
-/// 从一个会话上次提炼之后的新消息里提炼长期记忆（MEM-020～024）。用户关了记忆、或没有新的用户消息时
-/// 只推进进度；无痕会话什么都不做（MEM-070）。
+/// 从一个会话上次提炼之后的新消息里提炼长期记忆（MEM-020～024）。没有新的用户消息时只推进进度。
 pub async fn extract(state: &AiState, conversation_id: i64) -> Result<Extracted, String> {
-    if !state.config.memory_enabled {
+    if !memory_on(state).await {
         return Ok(Extracted::default());
     }
     let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
@@ -444,9 +452,6 @@ pub async fn extract(state: &AiState, conversation_id: i64) -> Result<Extracted,
     else {
         return Ok(Extracted::default());
     };
-    if session.incognito {
-        return Ok(Extracted::default());
-    }
     let since = repo::memory_until(&mut conn, conversation_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -459,13 +464,9 @@ pub async fn extract(state: &AiState, conversation_id: i64) -> Result<Extracted,
         return Ok(Extracted::default());
     };
     let until = last.created_at;
-    let enabled = repo::memory_enabled(&mut conn, session.user_id)
-        .await
-        .map_err(|e| e.to_string())?;
-    if !enabled
-        || batch
-            .iter()
-            .all(|item| item.sender_id == session.ai_user_id)
+    if batch
+        .iter()
+        .all(|item| item.sender_id == session.ai_user_id)
     {
         repo::advance_memory_until(&mut conn, conversation_id, until)
             .await
@@ -511,8 +512,7 @@ pub async fn extract(state: &AiState, conversation_id: i64) -> Result<Extracted,
     Ok(result)
 }
 
-/// 在一个事务里执行操作并推进进度（MEM-023）：置顶的不改不删；用户在提炼期间关了记忆、
-/// 或把会话设成了无痕，就什么都不写。
+/// 在一个事务里执行操作并推进进度（MEM-023）：置顶的不改不删。
 async fn apply(
     state: &AiState,
     session: &repo::SessionRow,
@@ -524,100 +524,92 @@ async fn apply(
     let mut result = Extracted::default();
     let mut tx = state.db.begin().await?;
     repo::lock_memories(&mut tx, session.user_id).await?;
-    let incognito = repo::lock_session(&mut tx, session.conversation_id)
-        .await?
-        .is_none_or(|s| s.incognito);
-    if incognito {
-        return Ok(result);
-    }
-    if repo::memory_enabled(&mut tx, session.user_id).await? {
-        let mut deleted = Vec::new();
-        for op in ops {
-            match op {
-                Op::Add(fact) => {
-                    let ai_user_id = (fact.kind != memory::PROFILE).then_some(session.ai_user_id);
-                    let (_, created) = memory::store(
-                        &mut tx,
-                        state,
-                        &NewMemory {
-                            id: 0,
-                            user_id: session.user_id,
-                            ai_user_id,
-                            kind: fact.kind,
-                            content: &fact.content,
-                            origin: EXTRACTED,
-                            sensitivity: if fact.public {
-                                memory::PUBLIC
-                            } else {
-                                memory::PRIVATE
-                            },
-                            importance: fact.importance,
-                            happened_on: fact.happened_on,
-                            follow_up_on: fact.follow_up_on,
-                            source_conversation_id: Some(session.conversation_id),
-                            now,
+    let mut deleted = Vec::new();
+    for op in ops {
+        match op {
+            Op::Add(fact) => {
+                let ai_user_id = (fact.kind != memory::PROFILE).then_some(session.ai_user_id);
+                let (_, created) = memory::store(
+                    &mut tx,
+                    state,
+                    &NewMemory {
+                        id: 0,
+                        user_id: session.user_id,
+                        ai_user_id,
+                        kind: fact.kind,
+                        content: &fact.content,
+                        origin: EXTRACTED,
+                        sensitivity: if fact.public {
+                            memory::PUBLIC
+                        } else {
+                            memory::PRIVATE
                         },
-                    )
-                    .await?;
-                    result.added += usize::from(created);
-                }
-                Op::Update { index, change } => {
-                    let Some(row) = existing.get(index).filter(|r| !r.pinned) else {
-                        continue;
-                    };
-                    // 期间被用户删了或置顶了：不动。
-                    if !repo::lock_memory(&mut tx, row.id)
-                        .await?
-                        .is_some_and(|current| !current.pinned)
-                    {
-                        continue;
-                    }
-                    let event = row.kind == memory::EVENT;
-                    let patch = MemoryPatch {
-                        content: change.content.as_deref().filter(|c| *c != row.content),
-                        importance: change.importance,
-                        sensitivity: change
-                            .public
-                            .map(|p| if p { memory::PUBLIC } else { memory::PRIVATE }),
-                        happened_on: change.happened_on.filter(|_| event),
-                        follow_up_on: change.follow_up_on.filter(|_| event),
-                        ..MemoryPatch::default()
-                    };
-                    // 改完和原来一样（或只剩对非事件无效的日期）：不动，也不算一次修改。
-                    let unchanged = patch.content.is_none()
-                        && patch.importance.is_none_or(|i| i == row.importance)
-                        && patch.sensitivity.is_none_or(|v| v == row.sensitivity)
-                        && patch.happened_on.is_none_or(|d| d == row.happened_on)
-                        && patch.follow_up_on.is_none_or(|d| d == row.follow_up_on);
-                    if unchanged {
-                        continue;
-                    }
-                    repo::update_memory(&mut tx, row.id, &patch, now).await?;
-                    result.updated += 1;
-                }
-                Op::Delete { index } => {
-                    if let Some(row) = existing.get(index).filter(|r| !r.pinned) {
-                        deleted.push(row.id);
-                    }
-                }
+                        importance: fact.importance,
+                        happened_on: fact.happened_on,
+                        follow_up_on: fact.follow_up_on,
+                        source_conversation_id: Some(session.conversation_id),
+                        now,
+                    },
+                )
+                .await?;
+                result.added += usize::from(created);
             }
-        }
-        if !deleted.is_empty() {
-            // 期间被用户置顶的不删。
-            let mut keep = Vec::new();
-            for id in &deleted {
-                if repo::lock_memory(&mut tx, *id)
+            Op::Update { index, change } => {
+                let Some(row) = existing.get(index).filter(|r| !r.pinned) else {
+                    continue;
+                };
+                // 期间被用户删了或置顶了：不动。
+                if !repo::lock_memory(&mut tx, row.id)
                     .await?
-                    .is_some_and(|row| row.pinned)
+                    .is_some_and(|current| !current.pinned)
                 {
-                    keep.push(*id);
+                    continue;
+                }
+                let event = row.kind == memory::EVENT;
+                let patch = MemoryPatch {
+                    content: change.content.as_deref().filter(|c| *c != row.content),
+                    importance: change.importance,
+                    sensitivity: change
+                        .public
+                        .map(|p| if p { memory::PUBLIC } else { memory::PRIVATE }),
+                    happened_on: change.happened_on.filter(|_| event),
+                    follow_up_on: change.follow_up_on.filter(|_| event),
+                    ..MemoryPatch::default()
+                };
+                // 改完和原来一样（或只剩对非事件无效的日期）：不动，也不算一次修改。
+                let unchanged = patch.content.is_none()
+                    && patch.importance.is_none_or(|i| i == row.importance)
+                    && patch.sensitivity.is_none_or(|v| v == row.sensitivity)
+                    && patch.happened_on.is_none_or(|d| d == row.happened_on)
+                    && patch.follow_up_on.is_none_or(|d| d == row.follow_up_on);
+                if unchanged {
+                    continue;
+                }
+                repo::update_memory(&mut tx, row.id, &patch, now).await?;
+                result.updated += 1;
+            }
+            Op::Delete { index } => {
+                if let Some(row) = existing.get(index).filter(|r| !r.pinned) {
+                    deleted.push(row.id);
                 }
             }
-            deleted.retain(|id| !keep.contains(id));
-            result.deleted = repo::delete_memories(&mut tx, session.user_id, &deleted)
-                .await?
-                .len();
         }
+    }
+    if !deleted.is_empty() {
+        // 期间被用户置顶的不删。
+        let mut keep = Vec::new();
+        for id in &deleted {
+            if repo::lock_memory(&mut tx, *id)
+                .await?
+                .is_some_and(|row| row.pinned)
+            {
+                keep.push(*id);
+            }
+        }
+        deleted.retain(|id| !keep.contains(id));
+        result.deleted = repo::delete_memories(&mut tx, session.user_id, &deleted)
+            .await?
+            .len();
     }
     repo::advance_memory_until(&mut tx, session.conversation_id, until).await?;
     tx.commit().await?;
@@ -675,7 +667,7 @@ impl TaskHandler for ConsolidateMemories {
 
 /// 每晚一次（MEM-080、MEM-090）：先遗忘，再排整理任务。返回（遗忘的条数, 排了几个整理任务）。
 pub async fn nightly(state: &AiState) -> Result<(u64, usize), String> {
-    if !state.config.memory_enabled {
+    if !memory_on(state).await {
         return Ok((0, 0));
     }
     let now = Utc::now();
@@ -816,23 +808,17 @@ pub(crate) fn parse_plan(text: &str, known: usize) -> Option<Plan> {
     Some(plan)
 }
 
-/// 整理一个用户与一个 AI 的旧事件（MEM-080～083）：合并、归纳、丢弃。用户关了记忆时不做。
+/// 整理一个用户与一个 AI 的旧事件（MEM-080～083）：合并、归纳、丢弃。
 pub async fn consolidate(
     state: &AiState,
     user_id: i64,
     ai_user_id: i64,
 ) -> Result<Consolidated, String> {
-    if !state.config.memory_enabled {
+    if !memory_on(state).await {
         return Ok(Consolidated::default());
     }
     let now = Utc::now();
     let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
-    if !repo::memory_enabled(&mut conn, user_id)
-        .await
-        .map_err(|e| e.to_string())?
-    {
-        return Ok(Consolidated::default());
-    }
     let events = repo::consolidatable_events(
         &mut conn,
         user_id,
@@ -898,9 +884,6 @@ async fn apply_plan(
     let mut result = Consolidated::default();
     let mut tx = state.db.begin().await?;
     repo::lock_memories(&mut tx, user_id).await?;
-    if !repo::memory_enabled(&mut tx, user_id).await? {
-        return Ok(result);
-    }
     // 还是当初给模型看的那条（没删、没置顶、没改过）。
     let mut intact = Vec::with_capacity(events.len());
     for row in events {

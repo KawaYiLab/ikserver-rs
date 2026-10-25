@@ -1,5 +1,5 @@
-//! AI 记忆第一期（ADR 0007）：长期记忆跨会话、跨会话衔接、会话滚动摘要、对话里的记住 / 忘掉、
-//! 记忆面板与开关。上游用脚本化的假提供方（实现 `ChatProvider`），不连网络。
+//! AI 记忆（ADR 0007）：长期记忆跨会话、跨会话衔接、会话滚动摘要、对话里的记住 / 忘掉 / 翻聊天记录、
+//! 事件检索与待跟进、久别重逢、每晚整理、管理后台的设置与按用户管理。上游用脚本化的假提供方，不连网络。
 
 // clippy.toml 的测试豁免只覆盖 #[test] 函数本身，不覆盖集成测试里的辅助函数。
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -9,13 +9,15 @@ use std::sync::Arc;
 use ik_ai::AiState;
 use ik_ai::dm::{self, RunOutcome};
 use ik_ai::dto::{
-    ClearMemoriesRequest, CreateMemoryRequest, CreateSessionRequest, ImportFile, MemoryKind,
-    MemoryOrigin, MemorySettings, UpdateMemoryRequest,
+    ClearMemoriesRequest, CreateSessionRequest, ImportFile, MemoryKind, MemoryOrigin,
+    MemorySettingsInput,
 };
 use ik_ai::llm::{ChatMessage, ChatRequest, Providers, StreamEvent};
 use ik_ai::memory_jobs::{self, Extracted};
-use ik_ai::{memory, service, sessions};
+use ik_ai::{memory, memory_admin, service, sessions};
 use ik_auth::Principal;
+use ik_auth::admin::Operator;
+use ik_auth::service::RequestMeta;
 use ik_kernel::bus::LocalBus;
 use ik_kernel::config::Ai;
 use ik_kernel::{Id, Role, Snowflake};
@@ -32,6 +34,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 const HUMAN: i64 = 100;
 const FAIRY: i64 = 200;
 const OTHER: i64 = 300;
+const ADMIN: i64 = 900;
 
 struct Harness {
     db: PgPool,
@@ -195,11 +198,51 @@ impl Harness {
         .unwrap()
     }
 
+    async fn items(&self) -> Vec<ik_ai::dto::MemoryView> {
+        memory::user_memories(&self.state, HUMAN).await.unwrap()
+    }
+
+    async fn insert_memory(&self, id: i64, ai: Option<i64>, kind: &str, content: &str) {
+        sqlx::query!(
+            "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin)
+             VALUES ($1, $2, $3, $4, $5, 'told')",
+            id,
+            HUMAN,
+            ai,
+            kind,
+            content,
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+    }
+
+    async fn set_memory(&self, enabled: bool, embedding: bool) {
+        let (provider, model) = if embedding {
+            (Some("fake"), Some("fake-embed"))
+        } else {
+            (None, None)
+        };
+        sqlx::query!(
+            "INSERT INTO ai_memory_settings (id, enabled, embedding_provider, embedding_model)
+             VALUES (1, $1, $2, $3)
+             ON CONFLICT (id) DO UPDATE SET enabled = EXCLUDED.enabled,
+                 embedding_provider = EXCLUDED.embedding_provider,
+                 embedding_model = EXCLUDED.embedding_model",
+            enabled,
+            provider,
+            model,
+        )
+        .execute(&self.db)
+        .await
+        .unwrap();
+        self.state.catalog.invalidate().await;
+    }
+
     async fn contents(&self) -> Vec<(String, String)> {
-        let mut items: Vec<(String, String)> = memory::list(&self.state, &self.me)
+        let mut items: Vec<(String, String)> = self
+            .items()
             .await
-            .unwrap()
-            .items
             .into_iter()
             .map(|m| {
                 (
@@ -308,23 +351,18 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
     assert!(!system.contains("【最近在另一个对话里】"), "{system}");
 
     // 置顶的不会被自动整理删掉或改写；冲突的说法用 update 改那一条。
-    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let items = h.items().await;
     let shanghai = items
         .iter()
         .find(|m| m.content == "对方住在上海")
         .unwrap()
         .id;
     let name = items.iter().find(|m| m.content == "对方叫阿哲").unwrap().id;
-    memory::update(
-        &h.state,
-        &h.me,
-        name.get(),
-        UpdateMemoryRequest {
-            content: None,
-            pinned: Some(true),
-            ..UpdateMemoryRequest::default()
-        },
+    sqlx::query!(
+        "UPDATE ai_memories SET pinned = TRUE WHERE id = $1",
+        name.get()
     )
+    .execute(&h.db)
     .await
     .unwrap();
     h.turn(second, "我搬到北京了", "北京冬天冷，记得多穿点")
@@ -353,10 +391,9 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
         contents.contains(&("profile".into(), "对方叫阿哲".into())),
         "{contents:?}"
     );
-    let updated = memory::list(&h.state, &h.me)
+    let updated = h
+        .items()
         .await
-        .unwrap()
-        .items
         .into_iter()
         .find(|m| m.id == shanghai)
         .unwrap();
@@ -446,7 +483,7 @@ async fn remember_and_forget_take_effect_during_the_reply(db: PgPool) {
     };
     assert_eq!(result, "已记住：对方的生日是 3 月 14 日");
     // 记在触发者名下（参数里的 userId 被忽略，TOOL-004），来源 told。
-    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let items = h.items().await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].origin, MemoryOrigin::Told);
     assert_eq!(items[0].kind, MemoryKind::Profile);
@@ -471,13 +508,7 @@ async fn remember_and_forget_take_effect_during_the_reply(db: PgPool) {
     ]);
     h.fake.push(vec![content("好，忘掉了。"), usage(10, 5)]);
     dm::run_job(&h.state, job, 1, false).await.unwrap();
-    assert!(
-        memory::list(&h.state, &h.me)
-            .await
-            .unwrap()
-            .items
-            .is_empty()
-    );
+    assert!(h.items().await.is_empty());
     let events = h.workflow(job).await;
     let forgotten = events
         .iter()
@@ -489,181 +520,96 @@ async fn remember_and_forget_take_effect_during_the_reply(db: PgPool) {
     );
 }
 
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
-    let h = harness(db).await;
-    let profile = memory::create(
-        &h.state,
-        &h.me,
-        CreateMemoryRequest {
-            kind: MemoryKind::Profile,
-            character: None,
-            content: "  喜欢\n猫  ".into(),
-            sensitivity: None,
-            happened_on: None,
-            follow_up_on: None,
+fn admin_operator() -> Operator {
+    Operator {
+        principal: Principal {
+            user_id: Id::new(ADMIN),
+            session_id: Id::new(ADMIN),
+            role: Role::Admin,
+            exam_passed: true,
+            is_ai_agent: false,
+            level: 1,
         },
-    )
-    .await
-    .unwrap();
-    assert_eq!(profile.content, "喜欢 猫");
-    assert_eq!(profile.origin, MemoryOrigin::Manual);
-    // 同一类里一样的不重复存。
-    let again = memory::create(
-        &h.state,
-        &h.me,
-        CreateMemoryRequest {
-            kind: MemoryKind::Profile,
-            character: None,
-            content: "喜欢猫".into(),
-            sensitivity: None,
-            happened_on: None,
-            follow_up_on: None,
+        meta: RequestMeta {
+            ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            user_agent: None,
         },
-    )
-    .await
-    .unwrap();
-    assert_eq!(again.id, profile.id);
-    let relation = memory::create(
-        &h.state,
-        &h.me,
-        CreateMemoryRequest {
-            kind: MemoryKind::Relation,
-            character: Some("fairy".into()),
-            content: "你叫我阿哲".into(),
-            sensitivity: None,
-            happened_on: None,
-            follow_up_on: None,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(relation.character.as_deref(), Some("fairy"));
-    assert_eq!(relation.ai_user_id.map(Id::get), Some(FAIRY));
-
-    // 校验：关系记忆要指定角色、档案不能指定、正文 1–200 字、角色要存在。
-    assert_eq!(
-        code(
-            memory::create(
-                &h.state,
-                &h.me,
-                CreateMemoryRequest {
-                    kind: MemoryKind::Relation,
-                    character: None,
-                    content: "x".into(),
-                    sensitivity: None,
-                    happened_on: None,
-                    follow_up_on: None,
-                },
-            )
-            .await
-        ),
-        (400, "VALIDATION_FAILED".into())
-    );
-    assert_eq!(
-        code(
-            memory::create(
-                &h.state,
-                &h.me,
-                CreateMemoryRequest {
-                    kind: MemoryKind::Profile,
-                    character: None,
-                    content: "字".repeat(201),
-                    sensitivity: None,
-                    happened_on: None,
-                    follow_up_on: None,
-                },
-            )
-            .await
-        ),
-        (400, "VALIDATION_FAILED".into())
-    );
-    assert_eq!(
-        code(
-            memory::create(
-                &h.state,
-                &h.me,
-                CreateMemoryRequest {
-                    kind: MemoryKind::Relation,
-                    character: Some("nobody".into()),
-                    content: "x".into(),
-                    sensitivity: None,
-                    happened_on: None,
-                    follow_up_on: None,
-                },
-            )
-            .await
-        ),
-        (404, "AI_CHARACTER_NOT_FOUND".into())
-    );
-    // 别人的记忆当作不存在。
-    assert_eq!(
-        code(memory::delete(&h.state, &principal(OTHER), profile.id.get()).await),
-        (404, "NOT_FOUND".into())
-    );
-
-    // 改正文：来源变为 manual。
-    let edited = memory::update(
-        &h.state,
-        &h.me,
-        profile.id.get(),
-        UpdateMemoryRequest {
-            content: Some("喜欢橘猫".into()),
-            pinned: Some(true),
-            ..UpdateMemoryRequest::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(edited.content, "喜欢橘猫");
-    assert!(edited.pinned);
-
-    // 满了：手动添加直接拒绝。
-    for i in 1..memory::PROFILE_LIMIT {
-        memory::create(
-            &h.state,
-            &h.me,
-            CreateMemoryRequest {
-                kind: MemoryKind::Profile,
-                character: None,
-                content: format!("第 {i} 件事"),
-                sensitivity: None,
-                happened_on: None,
-                follow_up_on: None,
-            },
-        )
-        .await
-        .unwrap();
     }
-    assert_eq!(
-        code(
-            memory::create(
-                &h.state,
-                &h.me,
-                CreateMemoryRequest {
-                    kind: MemoryKind::Profile,
-                    character: None,
-                    content: "再来一条".into(),
-                    sensitivity: None,
-                    happened_on: None,
-                    follow_up_on: None,
-                },
-            )
-            .await
-        ),
-        (409, "AI_MEMORY_FULL".into())
-    );
+}
 
-    // 关掉开关：不带记忆、不提供记忆工具、不跨会话衔接；提炼只推进进度。
-    let off = memory::set_enabled(&h.state, &h.me, MemorySettings { enabled: false })
+fn settings_input(enabled: bool) -> MemorySettingsInput {
+    MemorySettingsInput {
+        enabled,
+        model_key: None,
+        extract_delay_secs: 180,
+        bridge_hours: 48,
+        embedding_provider: None,
+        embedding_model: None,
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
+    let h = harness(db).await;
+    insert_user(&h.db, ADMIN, false).await;
+    let op = admin_operator();
+
+    // 默认设置：开着，用默认模型，不算向量。
+    let view = memory_admin::settings(&h.state).await.unwrap();
+    assert!(view.enabled);
+    assert_eq!(view.updated_at, None);
+    assert_eq!((view.extract_delay_secs, view.bridge_hours), (180, 48));
+
+    // 校验：模型要存在，向量的提供方与模型名要么都填要么都不填，范围。
+    let bad = |f: fn(&mut MemorySettingsInput)| {
+        let mut input = settings_input(true);
+        f(&mut input);
+        input
+    };
+    for input in [
+        bad(|i| i.model_key = Some("nope".into())),
+        bad(|i| i.embedding_provider = Some("fake".into())),
+        bad(|i| i.embedding_model = Some("bge-m3".into())),
+        bad(|i| {
+            i.embedding_provider = Some("nowhere".into());
+            i.embedding_model = Some("bge-m3".into());
+        }),
+        bad(|i| i.extract_delay_secs = -1),
+        bad(|i| i.bridge_hours = 721),
+    ] {
+        assert_eq!(
+            code(memory_admin::update_settings(&h.state, &op, input).await),
+            (400, "VALIDATION_FAILED".into())
+        );
+    }
+    let mut input = settings_input(true);
+    input.model_key = Some("base".into());
+    input.embedding_provider = Some("fake".into());
+    input.embedding_model = Some(" fake-embed ".into());
+    let saved = memory_admin::update_settings(&h.state, &op, input)
         .await
         .unwrap();
-    assert!(!off.enabled);
-    assert!(!memory::list(&h.state, &h.me).await.unwrap().enabled);
+    assert_eq!(saved.model_key.as_deref(), Some("base"));
+    assert_eq!(saved.embedding_model.as_deref(), Some("fake-embed"));
+    assert!(saved.updated_at.is_some());
+    let audited: i64 = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM admin_audit_log WHERE action = 'ai.memory.settings.update'"#
+    )
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // 关掉：不带记忆、不提供记忆工具、不排提炼任务。
+    h.insert_memory(1, None, "profile", "对方叫阿哲").await;
+    memory_admin::update_settings(&h.state, &op, settings_input(false))
+        .await
+        .unwrap();
     let conversation = h.session("fairy").await;
     let request = h.turn(conversation, "你还记得我吗", "当然").await;
     assert!(!system_of(&request).contains("【记忆】"));
     assert_eq!(request.tools.len(), 12);
+    assert_eq!(h.queued(format!("ai-memory:{conversation}")).await, 0);
     let calls = h.fake.requests().len();
     assert_eq!(
         memory_jobs::extract(&h.state, conversation).await.unwrap(),
@@ -672,44 +618,88 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
     assert_eq!(h.fake.requests().len(), calls);
 
     // 打开：记忆回来了。
-    memory::set_enabled(&h.state, &h.me, MemorySettings { enabled: true })
+    memory_admin::update_settings(&h.state, &op, settings_input(true))
         .await
         .unwrap();
     let request = h.turn(conversation, "现在呢", "记得").await;
-    assert!(system_of(&request).contains("- 喜欢橘猫"));
+    assert!(system_of(&request).contains("- 对方叫阿哲"));
     assert_eq!(request.tools.len(), 15);
 
-    // 「让它忘了我」：只清与这个角色的关系记忆；不指定角色清空全部。
-    memory::clear(
+    // 按 id 或用户名（不区分大小写，可带 @）查某个用户的记忆。
+    h.insert_memory(2, Some(FAIRY), "relation", "你叫对方阿哲")
+        .await;
+    h.insert_memory(3, Some(OTHER), "relation", "你们约好周五开黑")
+        .await;
+    let found = memory_admin::user_memories(&h.state, &HUMAN.to_string())
+        .await
+        .unwrap();
+    assert_eq!(found.username, format!("user{HUMAN}"));
+    assert_eq!(found.items.len(), 3);
+    let by_name = memory_admin::user_memories(&h.state, &format!("@USER{HUMAN}"))
+        .await
+        .unwrap();
+    assert_eq!(by_name.user_id, found.user_id);
+    assert_eq!(
+        code(memory_admin::user_memories(&h.state, "nobody").await),
+        (404, "NOT_FOUND".into())
+    );
+    let stats = memory_admin::settings(&h.state).await.unwrap().stats;
+    assert_eq!((stats.users, stats.profile, stats.relation), (1, 1, 2));
+
+    // 删一条、按角色清、全部清，都记审计。
+    memory_admin::delete(&h.state, &op, 1).await.unwrap();
+    assert_eq!(
+        code(memory_admin::delete(&h.state, &op, 1).await),
+        (404, "NOT_FOUND".into())
+    );
+    let cleared = memory_admin::clear(
         &h.state,
-        &h.me,
+        &op,
         ClearMemoriesRequest {
+            user_id: Id::new(HUMAN),
             character: Some("fairy".into()),
         },
     )
     .await
     .unwrap();
-    let items = memory::list(&h.state, &h.me).await.unwrap().items;
-    assert_eq!(usize::try_from(memory::PROFILE_LIMIT).unwrap(), items.len());
-    assert!(items.iter().all(|m| m.kind == MemoryKind::Profile));
-    memory::clear(&h.state, &h.me, ClearMemoriesRequest::default())
-        .await
-        .unwrap();
-    assert!(
-        memory::list(&h.state, &h.me)
-            .await
-            .unwrap()
-            .items
-            .is_empty()
+    assert_eq!(cleared, 1);
+    assert_eq!(
+        h.contents().await,
+        vec![("other".into(), "你们约好周五开黑".into())]
     );
-}
-
-fn embedding_config() -> Ai {
-    Ai {
-        memory_embedding_provider: Some("fake".into()),
-        memory_embedding_model: Some("fake-embed".into()),
-        ..Ai::default()
-    }
+    assert_eq!(
+        code(
+            memory_admin::clear(
+                &h.state,
+                &op,
+                ClearMemoriesRequest {
+                    user_id: Id::new(HUMAN),
+                    character: Some("nobody".into()),
+                },
+            )
+            .await
+        ),
+        (404, "AI_CHARACTER_NOT_FOUND".into())
+    );
+    memory_admin::clear(
+        &h.state,
+        &op,
+        ClearMemoriesRequest {
+            user_id: Id::new(HUMAN),
+            character: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(h.items().await.is_empty());
+    let audited: i64 = sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM admin_audit_log
+           WHERE action IN ('ai.memory.delete', 'ai.memory.clear')"#
+    )
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(audited, 3);
 }
 
 fn beijing_today() -> chrono::NaiveDate {
@@ -718,7 +708,8 @@ fn beijing_today() -> chrono::NaiveDate {
 
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgPool) {
-    let h = harness_with(db, embedding_config()).await;
+    let h = harness(db).await;
+    h.set_memory(true, true).await;
     let today = beijing_today();
     let first = h.session("fairy").await;
     h.turn(
@@ -746,7 +737,7 @@ async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgP
         embedded.contains(&"对方的猫团子生病了".to_owned()),
         "{embedded:?}"
     );
-    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let items = h.items().await;
     let exam = items
         .iter()
         .find(|m| m.content == "对方考驾照科目二")
@@ -764,10 +755,9 @@ async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgP
         "{system}"
     );
     // 回复完成后记为已问起（MEM-056），之后不再提。
-    let exam = memory::list(&h.state, &h.me)
+    let exam = h
+        .items()
         .await
-        .unwrap()
-        .items
         .into_iter()
         .find(|m| m.content == "对方考驾照科目二")
         .unwrap();
@@ -815,7 +805,7 @@ async fn remember_can_record_an_event_with_a_follow_up(db: PgPool) {
     h.fake
         .push(vec![content("记下啦，到时候问你！"), usage(10, 5)]);
     dm::run_job(&h.state, job, 1, false).await.unwrap();
-    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let items = h.items().await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].kind, MemoryKind::Event);
     assert_eq!(
@@ -833,83 +823,7 @@ async fn remember_can_record_an_event_with_a_follow_up(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn incognito_sessions_stay_out_of_long_term_memory(db: PgPool) {
-    let h = harness(db).await;
-    memory::create(
-        &h.state,
-        &h.me,
-        CreateMemoryRequest {
-            kind: MemoryKind::Profile,
-            character: None,
-            content: "对方叫阿哲".into(),
-            sensitivity: None,
-            happened_on: None,
-            follow_up_on: None,
-        },
-    )
-    .await
-    .unwrap();
-    let secret = h.session("fairy").await;
-    let view = sessions::update(
-        &h.state,
-        &h.me,
-        secret,
-        ik_ai::dto::UpdateSessionRequest {
-            incognito: Some(true),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    assert!(view.incognito);
-
-    // 无痕：仍然认识对方，但只能忘不能记，也不排提炼任务（MEM-070）。
-    let request = h.turn(secret, "说个秘密", "你说").await;
-    assert!(system_of(&request).contains("对方叫阿哲"));
-    let names: Vec<&str> = request.tools.iter().map(|t| t.name.as_ref()).collect();
-    assert!(
-        names.contains(&"forget")
-            && names.contains(&"recall_history")
-            && !names.contains(&"remember"),
-        "{names:?}"
-    );
-    assert_eq!(h.queued(format!("ai-memory:{secret}")).await, 0);
-    let calls = h.fake.requests().len();
-    assert_eq!(
-        memory_jobs::extract(&h.state, secret).await.unwrap(),
-        Extracted::default()
-    );
-    assert_eq!(h.fake.requests().len(), calls);
-
-    // 别的会话不带无痕会话的衔接。
-    let open = h.session("fairy").await;
-    let request = h.turn(open, "你好", "你好").await;
-    assert!(!system_of(&request).contains("说个秘密"));
-
-    // 关掉无痕：之前的无痕对话不补提炼，之后的照常。
-    sessions::update(
-        &h.state,
-        &h.me,
-        secret,
-        ik_ai::dto::UpdateSessionRequest {
-            incognito: Some(false),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-    h.turn(secret, "我养了一只狗", "好可爱").await;
-    h.fake.push(vec![content(r#"{"ops":[]}"#)]);
-    memory_jobs::extract(&h.state, secret).await.unwrap();
-    let input = h.fake.requests().last().unwrap().messages[1]
-        .text()
-        .to_owned();
-    assert!(input.contains("我养了一只狗"), "{input}");
-    assert!(!input.contains("说个秘密"), "{input}");
-}
-
-#[sqlx::test(migrator = "MIGRATOR")]
-async fn recall_history_reads_old_turns_but_not_other_incognito_chats(db: PgPool) {
+async fn recall_history_reads_old_turns_after_each_reset(db: PgPool) {
     let h = harness(db).await;
     let first = h.session("fairy").await;
     h.turn(
@@ -919,19 +833,10 @@ async fn recall_history_reads_old_turns_but_not_other_incognito_chats(db: PgPool
     )
     .await;
     let secret = h.session("fairy").await;
-    sessions::update(
-        &h.state,
-        &h.me,
-        secret,
-        ik_ai::dto::UpdateSessionRequest {
-            incognito: Some(true),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
     h.turn(secret, "零号空洞里我其实有个秘密", "嗯，我听着")
         .await;
+    // 重置过的会话只翻重置之后的（CTX-021：AI 不再记得重置之前的）。
+    sessions::reset(&h.state, &h.me, secret).await.unwrap();
 
     let now_chat = h.session("fairy").await;
     let trigger = h.send(now_chat, "我们第一次聊的是什么来着？").await;
@@ -957,7 +862,7 @@ async fn recall_history_reads_old_turns_but_not_other_incognito_chats(db: PgPool
     else {
         panic!()
     };
-    // 别的会话里的原文按时间给出，带日期与说话人（MEM-095）；无痕会话不在里面。
+    // 别的会话里的原文按时间给出，带日期与说话人（MEM-095）；重置之前的不在里面。
     assert!(
         result.contains("] 对方：第一次来，想聊聊零号空洞的打法"),
         "{result}"
@@ -969,25 +874,6 @@ async fn recall_history_reads_old_turns_but_not_other_incognito_chats(db: PgPool
         start["data"],
         serde_json::json!({ "tool": "recall_history", "title": "翻看聊天记录", "source": "memory" })
     );
-
-    // 无痕会话自己能翻到自己。
-    let trigger = h.send(secret, "我刚才说了什么秘密").await;
-    let job = h.job_for_trigger(trigger).await;
-    h.fake.push(vec![
-        tool_call("call_2", "recall_history", r#"{"query":"秘密"}"#),
-        Step::Emit(StreamEvent::Finish("tool_calls".into())),
-        usage(10, 5),
-    ]);
-    h.fake.push(vec![content("你说你有个秘密。"), usage(10, 5)]);
-    dm::run_job(&h.state, job, 1, false).await.unwrap();
-    let requests = h.fake.requests();
-    let ChatMessage::Tool {
-        content: result, ..
-    } = requests[requests.len() - 1].messages.last().unwrap()
-    else {
-        panic!()
-    };
-    assert!(result.contains("零号空洞里我其实有个秘密"), "{result}");
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -1079,7 +965,7 @@ async fn nightly_forgets_small_old_things_and_consolidates_the_rest(db: PgPool) 
     assert!(input.contains("e1 ["), "{input}");
     // 重要的老事也给模型看（可以合并、归纳），提示词要求不要丢。
     assert!(input.contains("外婆"), "{input}");
-    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let items = h.items().await;
     let events: Vec<_> = items
         .iter()
         .filter(|m| m.kind == MemoryKind::Event)

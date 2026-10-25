@@ -133,7 +133,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CANNOT_SANCTION_STAFF | 403 | 不能封禁版主或管理员 | 审核结案 `block_user`、后台直接封禁 |
 | MIHOYO_UNBIND_FORBIDDEN | 403 | 当前账号只能通过米游社扫码登录，请先绑定邮箱 | 没有邮箱的账号解绑会把自己锁在外面（MHY-014） |
 | MIHOYO_NOT_BOUND | 404 | 当前账号未绑定米游社 | |
-| AI_CHARACTER_NOT_FOUND | 404 | AI 角色不存在或未开放私信 | 新建 AI 会话时角色停用、不开放私信或绑定账号不可用（TRIG-024）；记忆面板指定的角色不存在或已停用（MEM-031/032，文案为「AI 角色不存在或已下线」） |
+| AI_CHARACTER_NOT_FOUND | 404 | AI 角色不存在或未开放私信 | 新建 AI 会话时角色停用、不开放私信或绑定账号不可用（TRIG-024）；管理后台清空某个用户与某个角色的记忆时角色不存在（MEM-032，文案为「AI 角色不存在」） |
 | IDENTITY_ALREADY_BOUND | 409 | 该米游社账号已绑定其他绳网账号，请先在原账号解绑或注销 | 不接管任何账号（MHY-013） |
 | USER_ALREADY_BOUND | 409 | 当前账号已绑定其他米游社账号，请先解绑 | |
 | IDENTITY_CONFLICT | 409 | 这个米游社账号关联了多个绳网账号，请联系管理员 | aid 与 mid 指向不同账号（历史数据），运维处理 |
@@ -148,7 +148,6 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | AI_PROVIDER_FROM_CONFIG | 409 | 部署配置里的提供方只能在部署配置里修改 | 管理后台删除部署配置（`IK_AI__PROVIDERS__…`）里的提供方 |
 | AI_MCP_TOOL_CHANGED | 409 | 工具定义已经变了，请刷新后重新确认 | 管理后台启用 MCP 工具时带的 `digest` 与远端当前定义不同，或远端已没有这个工具（ADR 0004） |
 | AI_MCP_TOOL_NOT_READ_ONLY | 409 | 只能启用声明为只读（readOnlyHint）的工具 | 管理后台启用 MCP 工具（ADR 0004） |
-| AI_MEMORY_FULL | 409 | 这一类记忆已满（最多 <n> 条），先删掉一些再添加 | 记忆面板手动添加（MEM-013、MEM-053、MEM-031：档案、关系各 40 条，事件 300 条）；后台提炼与对话里的记住会淘汰旧的，不报错 |
 | AI_NOT_LATEST_REPLY | 409 | 只能重新生成最后一条 AI 回复 | GEN-013 |
 | AI_TRIGGER_WITHDRAWN | 409 | 触发这条回复的消息已撤回 | 重新生成时（GEN-014） |
 | REPORT_DUPLICATE | 409 | 你已举报过该内容，正在处理中 | 同一目标有未结案的举报；结案后可以再举报 |

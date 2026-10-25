@@ -181,25 +181,22 @@ impl Toolbox {
         toolbox
     }
 
-    /// 加上记忆工具 remember / forget（私信、且用户开着记忆时，MEM-014/015），排在论坛工具之后。
-    /// 无痕会话只有 forget（MEM-070）。
+    /// 加上记忆工具 remember / forget / recall_history（私信、且记忆开着时，MEM-014/015/095），排在论坛工具之后。
     #[must_use]
-    pub fn with_memory(mut self, ai_user_id: i64, conversation_id: i64, incognito: bool) -> Self {
+    pub fn with_memory(mut self, ai_user_id: i64, conversation_id: i64) -> Self {
         let at = self
             .entries
             .iter()
             .take_while(|e| matches!(e.source, Source::Forum))
             .count();
-        let memory = crate::memory::tool_specs(incognito)
-            .into_iter()
-            .map(|spec| Entry {
-                label: crate::memory::tool_title(&spec.name).map(str::to_owned),
-                spec,
-                source: Source::Memory {
-                    ai_user_id,
-                    conversation_id,
-                },
-            });
+        let memory = crate::memory::tool_specs().into_iter().map(|spec| Entry {
+            label: crate::memory::tool_title(&spec.name).map(str::to_owned),
+            spec,
+            source: Source::Memory {
+                ai_user_id,
+                conversation_id,
+            },
+        });
         self.entries.splice(at..at, memory);
         self
     }

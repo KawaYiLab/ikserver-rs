@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_memory_settings (id, enabled, embedding_provider, embedding_model)\n             VALUES (1, $1, $2, $3)\n             ON CONFLICT (id) DO UPDATE SET enabled = EXCLUDED.enabled,\n                 embedding_provider = EXCLUDED.embedding_provider,\n                 embedding_model = EXCLUDED.embedding_model",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "52e2e6b49bae546b7d4d5de668fb2666413648e9092cb47c8395c3bbc2373d4c"
+}

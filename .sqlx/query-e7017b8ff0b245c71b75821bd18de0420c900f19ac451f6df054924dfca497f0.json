@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT conversation_id, context_from FROM ai_sessions\n         WHERE user_id = $1 AND ai_user_id = $2 AND conversation_id <> $3 AND NOT incognito",
+  "query": "SELECT conversation_id, context_from FROM ai_sessions WHERE user_id = $1 AND ai_user_id = $2",
   "describe": {
     "columns": [
       {
@@ -29,7 +29,6 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Int8",
         "Int8"
       ]
     },
@@ -38,5 +37,5 @@
       true
     ]
   },
-  "hash": "8f07e2932a1781d773df1a2f7dd2b50a597931ea2d8c03d7756ba885489381df"
+  "hash": "e7017b8ff0b245c71b75821bd18de0420c900f19ac451f6df054924dfca497f0"
 }

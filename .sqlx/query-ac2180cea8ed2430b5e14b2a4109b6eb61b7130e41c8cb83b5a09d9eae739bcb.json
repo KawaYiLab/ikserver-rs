@@ -1,0 +1,98 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT enabled, model_key, extract_delay_secs, bridge_hours, embedding_provider,\n                embedding_model, updated_at\n         FROM ai_memory_settings WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "model_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "model_key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "extract_delay_secs",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "extract_delay_secs"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "bridge_hours",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "bridge_hours"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "embedding_provider",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "embedding_provider"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "embedding_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "embedding_model"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "ai_memory_settings",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "ac2180cea8ed2430b5e14b2a4109b6eb61b7130e41c8cb83b5a09d9eae739bcb"
+}

@@ -504,7 +504,8 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
     toolbox.annotate_system(&mut messages);
     // 评论区是公开的：只用标为公开的档案与关系记忆（MEM-061）。
     if let Some(note) =
-        crate::memory::public_note(&mut tx, state, job.quota_user_id, job.ai_user_id).await?
+        crate::memory::public_note(&mut tx, &catalog.memory, job.quota_user_id, job.ai_user_id)
+            .await?
     {
         crate::memory::append_system(&mut messages, &note);
     }

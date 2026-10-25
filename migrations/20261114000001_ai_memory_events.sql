@@ -1,7 +1,4 @@
--- AI 记忆第二期（ADR 0007，ai-assistant.md 第 13 节 MEM-050～075）：事件记忆与检索、待跟进、敏感度、无痕模式。
-
--- 无痕会话（MEM-070）：不提炼进长期记忆、不给别的会话做衔接、不提供 remember 工具。
-ALTER TABLE ai_sessions ADD COLUMN incognito BOOLEAN NOT NULL DEFAULT FALSE;
+-- AI 记忆第二期（ADR 0007，ai-assistant.md 第 13 节 MEM-050～062）：事件记忆与检索、待跟进、敏感度。
 
 -- 事件记忆（MEM-050）：带日期的具体经历，每个 AI 单独记，按相关度检索。
 ALTER TABLE ai_memories DROP CONSTRAINT ai_memories_kind_check;

@@ -400,11 +400,12 @@
   同一用户的写入先拿 `pg_advisory_xact_lock(hashtextextended('ik:ai_memories:' || user_id, 0))` 再判重与计数。
   索引 `(user_id, ai_user_id, updated_at DESC)` 覆盖读取与 `user_id` 外键；`ai_user_id`、`source_conversation_id`
   各有部分索引。
-- `ai_memory_prefs`（ik-ai）：用户的记忆开关（MEM-030），没有行 = 开启。
+- `ai_memory_settings`（ik-ai）：全站的记忆设置（MEM-030），只有一行（`id = 1`，CHECK），管理后台「AI 记忆」页维护；
+  缺行时按默认值（开启、默认模型、提炼延迟 180 秒、衔接 48 小时、不算向量）。模型存 key，删模型不级联（不可用时退回默认模型）；
+  向量的提供方与模型名同时为空或同时非空（CHECK）。用户端没有任何记忆设置。
 
 ## AI 记忆第二期（`20261114000001_ai_memory_events.sql`，ADR 0007）
 
-- `ai_sessions.incognito`：无痕会话（MEM-070）；跨会话衔接的候选会话排除无痕的。
 - `ai_memories.kind` 增加 `event`（事件，`ai_user_id` 非空）。新列：`sensitivity`（`private` / `public`，默认 `private`，
   公开的才用在评论区）、`importance`（1–5，默认 3）、`happened_on` / `follow_up_on`（DATE，北京时间）与 `followed_up_at`
   ——这三列只有事件能有（CHECK）。

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_memories (id, user_id, kind, content, origin, sensitivity)\n             VALUES ($1, $2, 'profile', $3, 'extracted', $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0932c41bb0401495d536beec0a6bdf491adced43b3b794b44f1ffa0f7dbb8c8b"
+}

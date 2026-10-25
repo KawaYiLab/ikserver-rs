@@ -102,18 +102,6 @@ pub struct Ai {
     pub estimated_context_tokens: i64,
     /// 单个任务最多尝试几次（TRIG-033，1–10）。
     pub max_attempts: i16,
-    /// AI 记忆总开关（ADR 0007：会话摘要、长期记忆、跨会话衔接）。关掉后行为与没有记忆时一样。
-    pub memory_enabled: bool,
-    /// 摘要与记忆提炼用的模型 key（`ai_models.key`）；不配或不可用时用默认模型。
-    pub memory_model: Option<String>,
-    /// 回复后等多久再提炼长期记忆（MEM-020，0–86400 秒）：对话停下来之后才提炼，聊天中途不反复调用。
-    pub memory_extract_delay_secs: u64,
-    /// 新会话带上同一角色其他会话里多久以内的最近几轮（MEM-005，0–720 小时，0 关闭）。
-    pub memory_bridge_hours: u64,
-    /// 事件记忆的语义向量（MEM-052）：提供方名字（部署配置或后台里的，需支持 OpenAI 兼容的
-    /// `/embeddings`）与上游的向量模型名。两项都配了才算语义相似度，否则只按关键词检索。
-    pub memory_embedding_provider: Option<String>,
-    pub memory_embedding_model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -136,12 +124,6 @@ impl Default for Ai {
             max_tool_rounds: 8,
             estimated_context_tokens: 4000,
             max_attempts: 3,
-            memory_enabled: true,
-            memory_model: None,
-            memory_extract_delay_secs: 180,
-            memory_bridge_hours: 48,
-            memory_embedding_provider: None,
-            memory_embedding_model: None,
         }
     }
 }
@@ -886,8 +868,6 @@ impl Config {
             || !(1..=200).contains(&ai.max_history_messages)
             || !(0..=100_000).contains(&ai.estimated_context_tokens)
             || !(1..=10).contains(&ai.max_attempts)
-            || ai.memory_extract_delay_secs > 86_400
-            || ai.memory_bridge_hours > 720
             || ai.providers.iter().any(|(name, p)| {
                 name.is_empty()
                     || !(p.base_url.starts_with("https://") || p.base_url.starts_with("http://"))
@@ -896,8 +876,7 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "ai 配置不合法：hold_ttl_secs 60–7200，reply_timeout_secs 10–1800，first_delta_timeout_secs 不超过总预算，\
                  stream_min_chars 1–1000，max_history_messages 1–200，\
-                 estimated_context_tokens 0–100000，max_attempts 1–10，\
-                 memory_extract_delay_secs 0–86400，memory_bridge_hours 0–720，providers 的 base_url 须为 http(s)://"
+                 estimated_context_tokens 0–100000，max_attempts 1–10，providers 的 base_url 须为 http(s)://"
                     .to_owned(),
             ));
         }
