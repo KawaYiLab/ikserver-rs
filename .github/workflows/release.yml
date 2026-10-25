@@ -31,8 +31,14 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@v2
       - run: deploy/release.sh
+      # 产物名不能含 /（分支名如 claude/xxx 会让上传失败），换成 -。
+      - name: Artifact name
+        id: artifact
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: echo "name=ik-server-${REF_NAME//\//-}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: ik-server-${{ github.ref_name }}-${{ github.sha }}
+          name: ${{ steps.artifact.outputs.name }}
           path: target/release/ik-server
           if-no-files-found: error
