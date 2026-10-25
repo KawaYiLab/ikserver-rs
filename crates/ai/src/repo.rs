@@ -1756,3 +1756,153 @@ pub(crate) async fn set_embedding(
     .await?;
     Ok(())
 }
+
+// ---------- 记忆第三期：整理、遗忘、翻聊天记录（ADR 0007） ----------
+
+/// 同一用户与同一 AI 的全部会话（久别重逢算上次聊天的时刻，MEM-100）。
+pub(crate) async fn pair_sessions(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+) -> sqlx::Result<Vec<i64>> {
+    sqlx::query_scalar!(
+        "SELECT conversation_id FROM ai_sessions WHERE user_id = $1 AND ai_user_id = $2",
+        user_id,
+        ai_user_id,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 翻聊天记录能看的会话（MEM-095）：同一用户与同一 AI 的会话与各自的上下文起点；无痕会话只有当前这个算。
+pub(crate) async fn recall_sessions(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    current: i64,
+) -> sqlx::Result<Vec<(i64, Option<DateTime<Utc>>)>> {
+    Ok(sqlx::query!(
+        "SELECT conversation_id, context_from FROM ai_sessions
+         WHERE user_id = $1 AND ai_user_id = $2 AND (NOT incognito OR conversation_id = $3)",
+        user_id,
+        ai_user_id,
+        current,
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.conversation_id, r.context_from))
+    .collect())
+}
+
+/// 记下这些事件刚被想起（MEM-090）。
+pub(crate) async fn touch_recalled(
+    conn: &mut PgConnection,
+    ids: &[i64],
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_memories SET recalled_at = $2 WHERE id = ANY($1)",
+        ids,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 遗忘（MEM-090）：后台提炼、没置顶、没有待跟进的事件，重要度 ≤2 的半年没更新且 90 天没被想起、
+/// 重要度 3 的一年没更新且半年没被想起，就删掉。关了记忆的用户不动。返回删掉的条数。
+pub(crate) async fn forget_stale(conn: &mut PgConnection, now: DateTime<Utc>) -> sqlx::Result<u64> {
+    Ok(sqlx::query!(
+        "DELETE FROM ai_memories m
+         WHERE m.kind = 'event' AND m.origin = 'extracted' AND NOT m.pinned
+           AND (m.follow_up_on IS NULL OR m.followed_up_at IS NOT NULL)
+           AND ((m.importance <= 2 AND m.updated_at < $1::timestamptz - interval '180 days'
+                 AND (m.recalled_at IS NULL OR m.recalled_at < $1::timestamptz - interval '90 days'))
+             OR (m.importance = 3 AND m.updated_at < $1::timestamptz - interval '365 days'
+                 AND (m.recalled_at IS NULL OR m.recalled_at < $1::timestamptz - interval '180 days')))
+           AND NOT EXISTS (SELECT 1 FROM ai_memory_prefs p WHERE p.user_id = m.user_id AND NOT p.enabled)",
+        now,
+    )
+    .execute(conn)
+    .await?
+    .rows_affected())
+}
+
+/// 该整理的（用户, AI）（MEM-080）：`old_before` 之前的、可以整理的事件不少于 `min_events` 条，且上次整理在
+/// `stale_before` 之前（或从没整理过）。关了记忆的用户不算。可以整理的多的在前。
+pub(crate) async fn consolidation_candidates(
+    conn: &mut PgConnection,
+    min_events: i64,
+    old_before: DateTime<Utc>,
+    stale_before: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<(i64, i64)>> {
+    Ok(sqlx::query!(
+        r#"SELECT m.user_id, m.ai_user_id AS "ai_user_id!" FROM ai_memories m
+           LEFT JOIN ai_memory_pairs p ON p.user_id = m.user_id AND p.ai_user_id = m.ai_user_id
+           WHERE m.kind = 'event' AND m.origin = 'extracted' AND NOT m.pinned AND m.updated_at < $2
+             AND (m.follow_up_on IS NULL OR m.followed_up_at IS NOT NULL)
+             AND (p.consolidated_at IS NULL OR p.consolidated_at < $3)
+             AND NOT EXISTS (SELECT 1 FROM ai_memory_prefs f WHERE f.user_id = m.user_id AND NOT f.enabled)
+           GROUP BY m.user_id, m.ai_user_id
+           HAVING count(*) >= $1
+           ORDER BY count(*) DESC, m.user_id, m.ai_user_id
+           LIMIT $4"#,
+        min_events,
+        old_before,
+        stale_before,
+        limit,
+    )
+    .fetch_all(conn)
+    .await?
+    .into_iter()
+    .map(|r| (r.user_id, r.ai_user_id))
+    .collect())
+}
+
+/// 可以整理的事件（MEM-081）：后台提炼、没置顶、没有待跟进、`before` 之前更新的，按时间从早到晚。
+pub(crate) async fn consolidatable_events(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    before: DateTime<Utc>,
+    limit: i64,
+) -> sqlx::Result<Vec<MemoryRow>> {
+    sqlx::query_as!(
+        MemoryRow,
+        "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+         FROM ai_memories
+         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event' AND origin = 'extracted'
+           AND NOT pinned AND updated_at < $3
+           AND (follow_up_on IS NULL OR followed_up_at IS NOT NULL)
+         ORDER BY happened_on NULLS LAST, updated_at, id
+         LIMIT $4",
+        user_id,
+        ai_user_id,
+        before,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) async fn mark_consolidated(
+    conn: &mut PgConnection,
+    user_id: i64,
+    ai_user_id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_memory_pairs (user_id, ai_user_id, consolidated_at) VALUES ($1, $2, $3)
+         ON CONFLICT (user_id, ai_user_id) DO UPDATE SET consolidated_at = EXCLUDED.consolidated_at",
+        user_id,
+        ai_user_id,
+        now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}

@@ -1,4 +1,5 @@
-//! 记忆的后台任务（ADR 0007）：会话滚动摘要（MEM-002）与长期记忆提炼（MEM-020～024，事件与待跟进 MEM-050～057）。
+//! 记忆的后台任务（ADR 0007）：会话滚动摘要（MEM-002）、长期记忆提炼（MEM-020～024，事件与待跟进 MEM-050～057）、
+//! 每晚整理与遗忘（MEM-080～090）。
 //!
 //! 都在回复链路之外：准备阶段发现历史窗口快装不下时入队摘要任务；回复定稿时入队提炼任务，
 //! 用同一个任务键推迟执行（对话停下来 `memory_extract_delay_secs` 之后才跑，聊天中途不反复调用）。
@@ -623,6 +624,365 @@ async fn apply(
     Ok(result)
 }
 
+// ---------- 每晚整理与遗忘（MEM-080～090） ----------
+
+/// 整理只看这么多天以前的事件：最近的还在聊，不动。
+const CONSOLIDATE_AGE_DAYS: i64 = 30;
+/// 同一对（用户, AI）至少隔这么多天整理一次。
+const CONSOLIDATE_EVERY_DAYS: i64 = 7;
+/// 可以整理的旧事件至少这么多条才整理。
+const CONSOLIDATE_MIN_EVENTS: i64 = 20;
+/// 一次最多拿多少条旧事件给模型。
+const CONSOLIDATE_BATCH: i64 = 80;
+/// 每晚最多整理多少对。
+const CONSOLIDATE_PAIRS: i64 = 500;
+
+/// 定时任务（每晚一次）：遗忘久不提起的小事，再为该整理的（用户, AI）各排一个整理任务。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct NightlyMemory {}
+
+/// 后台任务：整理一个用户与一个 AI 的旧事件。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsolidateMemories {
+    pub user_id: i64,
+    pub ai_user_id: i64,
+}
+
+impl TaskHandler for NightlyMemory {
+    const IDENTIFIER: &'static str = "ai.nightly_memory";
+
+    async fn run(self, ctx: WorkerContext) -> impl IntoTaskHandlerResult {
+        let Some(state) = ctx.get_ext::<AiState>() else {
+            return Err("执行器没有注册 AiState".to_owned());
+        };
+        nightly(state).await.map(|_| ())
+    }
+}
+
+impl TaskHandler for ConsolidateMemories {
+    const IDENTIFIER: &'static str = "ai.consolidate_memories";
+
+    async fn run(self, ctx: WorkerContext) -> impl IntoTaskHandlerResult {
+        let Some(state) = ctx.get_ext::<AiState>() else {
+            return Err("执行器没有注册 AiState".to_owned());
+        };
+        consolidate(state, self.user_id, self.ai_user_id)
+            .await
+            .map(|_| ())
+    }
+}
+
+/// 每晚一次（MEM-080、MEM-090）：先遗忘，再排整理任务。返回（遗忘的条数, 排了几个整理任务）。
+pub async fn nightly(state: &AiState) -> Result<(u64, usize), String> {
+    if !state.config.memory_enabled {
+        return Ok((0, 0));
+    }
+    let now = Utc::now();
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    let forgotten = repo::forget_stale(&mut tx, now)
+        .await
+        .map_err(|e| e.to_string())?;
+    let pairs = repo::consolidation_candidates(
+        &mut tx,
+        CONSOLIDATE_MIN_EVENTS,
+        now - chrono::Duration::days(CONSOLIDATE_AGE_DAYS),
+        now - chrono::Duration::days(CONSOLIDATE_EVERY_DAYS),
+        CONSOLIDATE_PAIRS,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    for (user_id, ai_user_id) in &pairs {
+        let spec = JobSpec {
+            max_attempts: Some(MAX_ATTEMPTS),
+            job_key: Some(format!("ai-consolidate:{user_id}:{ai_user_id}")),
+            ..JobSpec::default()
+        };
+        state
+            .jobs
+            .enqueue(
+                &mut tx,
+                ConsolidateMemories {
+                    user_id: *user_id,
+                    ai_user_id: *ai_user_id,
+                },
+                spec,
+            )
+            .await
+            .map_err(|p| format!("{p:?}"))?;
+    }
+    tx.commit().await.map_err(|e| e.to_string())?;
+    tracing::info!(forgotten, pairs = pairs.len(), "AI 记忆每晚整理");
+    Ok((forgotten, pairs.len()))
+}
+
+const CONSOLIDATE_PROMPT: &str = "你负责在夜里整理 AI 角色对用户的长期记忆，像人睡觉时整理记忆一样：\
+把零碎的旧事合并、从中归纳出对对方的认识、丢掉不值得记的小事。只输出一个 JSON 对象：\n\
+{\"merge\": [{\"ids\": [\"e1\", \"e3\"], \"content\": \"…\", \"date\": \"YYYY-MM-DD\", \"importance\": 1-5}],\n\
+ \"insights\": [{\"kind\": \"profile\" | \"relation\", \"content\": \"…\"}],\n\
+ \"drop\": [\"e5\"]}\n\
+规则：\n\
+- merge：说的是同一件事、或同一段经历的几条（至少两条）合成一条，content 写成第三人称一句话（≤80 字），\
+date 写这件事开始的日期，importance 取其中最高的。\n\
+- insights：从多条旧事里能看出的、长期成立的认识，如「对方常在深夜来聊天，最近压力比较大」「对方是零号空洞的老玩家」；\
+profile 是对方本人的，relation 是你们之间的。必须有多条旧事支撑，不要猜测，不要重复「已有档案与关系」里已经有的。\n\
+- drop：已经过去、以后几乎不会再提的小事（一次性的闲聊、已经解决的小麻烦）。重要的事、对方的重要经历不要丢。\n\
+- 每条旧事最多出现在一个 merge 或 drop 里；拿不准就不动。没有要做的就输出 {\"merge\": [], \"insights\": [], \"drop\": []}。\n\
+- 不记敏感信息（密码、证件号、银行卡、电话、精确住址、健康与财务细节、第三方隐私）。只输出 JSON，不要解释。";
+
+/// 整理的结果。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Consolidated {
+    pub merged: usize,
+    pub insights: usize,
+    pub dropped: usize,
+}
+
+/// 模型给出的整理方案（编号已换成下标，MEM-082）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Plan {
+    pub merges: Vec<Merge>,
+    pub insights: Vec<(&'static str, String)>,
+    pub drops: Vec<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Merge {
+    pub sources: Vec<usize>,
+    pub content: String,
+    pub happened_on: Option<NaiveDate>,
+    pub importance: Option<i16>,
+}
+
+/// 解析整理方案（MEM-082）：`e<n>` 从 1 开始；越界、重复使用的编号忽略（先出现的为准），少于两条的合并忽略。
+pub(crate) fn parse_plan(text: &str, known: usize) -> Option<Plan> {
+    let start = text.find('{')?;
+    let end = text.rfind('}')?;
+    let value: Value = serde_json::from_str(text.get(start..=end)?).ok()?;
+    let index = |v: &Value| -> Option<usize> {
+        let n: usize = v.as_str()?.trim().strip_prefix('e')?.parse().ok()?;
+        (1..=known).contains(&n).then(|| n - 1)
+    };
+    let mut used = std::collections::HashSet::new();
+    let mut plan = Plan::default();
+    for merge in value["merge"].as_array().into_iter().flatten() {
+        let Some(content) = merge["content"]
+            .as_str()
+            .map(memory::normalize)
+            .filter(|c| !c.is_empty())
+        else {
+            continue;
+        };
+        let mut sources: Vec<usize> = merge["ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(index)
+            .filter(|i| !used.contains(i))
+            .collect();
+        sources.sort_unstable();
+        sources.dedup();
+        if sources.len() < 2 {
+            continue;
+        }
+        used.extend(sources.iter().copied());
+        plan.merges.push(Merge {
+            sources,
+            content,
+            happened_on: merge["date"].as_str().and_then(memory::parse_date),
+            importance: importance_field(merge),
+        });
+    }
+    for insight in value["insights"].as_array().into_iter().flatten() {
+        let kind = match insight["kind"].as_str() {
+            Some("relation") => memory::RELATION,
+            Some("profile") => memory::PROFILE,
+            _ => continue,
+        };
+        if let Some(content) = insight["content"]
+            .as_str()
+            .map(memory::normalize)
+            .filter(|c| !c.is_empty())
+        {
+            plan.insights.push((kind, content));
+        }
+    }
+    for drop in value["drop"].as_array().into_iter().flatten() {
+        if let Some(i) = index(drop).filter(|i| used.insert(*i)) {
+            plan.drops.push(i);
+        }
+    }
+    plan.insights.truncate(MAX_OPS);
+    Some(plan)
+}
+
+/// 整理一个用户与一个 AI 的旧事件（MEM-080～083）：合并、归纳、丢弃。用户关了记忆时不做。
+pub async fn consolidate(
+    state: &AiState,
+    user_id: i64,
+    ai_user_id: i64,
+) -> Result<Consolidated, String> {
+    if !state.config.memory_enabled {
+        return Ok(Consolidated::default());
+    }
+    let now = Utc::now();
+    let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
+    if !repo::memory_enabled(&mut conn, user_id)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(Consolidated::default());
+    }
+    let events = repo::consolidatable_events(
+        &mut conn,
+        user_id,
+        ai_user_id,
+        now - chrono::Duration::days(CONSOLIDATE_AGE_DAYS),
+        CONSOLIDATE_BATCH,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    if events.len() < 2 {
+        repo::mark_consolidated(&mut conn, user_id, ai_user_id, now)
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(Consolidated::default());
+    }
+    let known = repo::memories_for(&mut conn, user_id, ai_user_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    drop(conn);
+
+    let mut input = format!(
+        "今天是 {}。\n\n已有档案与关系：\n",
+        memory::beijing_today(now).format("%Y-%m-%d")
+    );
+    if known.is_empty() {
+        input.push_str("（无）\n");
+    }
+    for row in &known {
+        input.push_str(&format!("- [{}] {}\n", row.kind, row.content));
+    }
+    input.push_str("\n旧事件：\n");
+    for (i, row) in events.iter().enumerate() {
+        let date = row
+            .happened_on
+            .map_or_else(|| "日期不详".to_owned(), |d| d.to_string());
+        input.push_str(&format!(
+            "e{} [{date}，重要 {}] {}\n",
+            i + 1,
+            row.importance,
+            row.content
+        ));
+    }
+    let (text, _) = complete(state, CONSOLIDATE_PROMPT.to_owned(), input).await?;
+    let Some(plan) = parse_plan(&text, events.len()) else {
+        return Err("记忆整理的输出不是合法的 JSON".to_owned());
+    };
+    let result = apply_plan(state, user_id, ai_user_id, &events, plan)
+        .await
+        .map_err(|p| format!("{p:?}"))?;
+    memory::embed_missing(state, user_id, ai_user_id).await;
+    Ok(result)
+}
+
+/// 在一个事务里执行整理方案（MEM-083）：来源里有一条在期间被删、被置顶、被改过，这个合并或丢弃就跳过。
+async fn apply_plan(
+    state: &AiState,
+    user_id: i64,
+    ai_user_id: i64,
+    events: &[repo::MemoryRow],
+    plan: Plan,
+) -> Result<Consolidated, Problem> {
+    let now = Utc::now();
+    let mut result = Consolidated::default();
+    let mut tx = state.db.begin().await?;
+    repo::lock_memories(&mut tx, user_id).await?;
+    if !repo::memory_enabled(&mut tx, user_id).await? {
+        return Ok(result);
+    }
+    // 还是当初给模型看的那条（没删、没置顶、没改过）。
+    let mut intact = Vec::with_capacity(events.len());
+    for row in events {
+        let current = repo::lock_memory(&mut tx, row.id).await?;
+        intact.push(current.is_some_and(|c| !c.pinned && c.updated_at == row.updated_at));
+    }
+    for merge in plan.merges {
+        if !merge.sources.iter().all(|i| intact[*i]) {
+            continue;
+        }
+        let sources: Vec<&repo::MemoryRow> = merge.sources.iter().map(|i| &events[*i]).collect();
+        let importance = sources
+            .iter()
+            .map(|r| r.importance)
+            .chain(merge.importance)
+            .max()
+            .unwrap_or(3);
+        let happened_on = merge
+            .happened_on
+            .or_else(|| sources.iter().filter_map(|r| r.happened_on).min());
+        let sensitivity = if sources.iter().all(|r| r.sensitivity == memory::PUBLIC) {
+            memory::PUBLIC
+        } else {
+            memory::PRIVATE
+        };
+        let ids: Vec<i64> = sources.iter().map(|r| r.id).collect();
+        repo::delete_memories(&mut tx, user_id, &ids).await?;
+        memory::store(
+            &mut tx,
+            state,
+            &NewMemory {
+                id: 0,
+                user_id,
+                ai_user_id: Some(ai_user_id),
+                kind: memory::EVENT,
+                content: &merge.content,
+                origin: EXTRACTED,
+                sensitivity,
+                importance,
+                happened_on,
+                follow_up_on: None,
+                source_conversation_id: None,
+                now,
+            },
+        )
+        .await?;
+        result.merged += 1;
+    }
+    for (kind, content) in plan.insights {
+        let (_, created) = memory::store(
+            &mut tx,
+            state,
+            &NewMemory {
+                id: 0,
+                user_id,
+                ai_user_id: (kind == memory::RELATION).then_some(ai_user_id),
+                kind,
+                content: &content,
+                origin: EXTRACTED,
+                sensitivity: memory::PRIVATE,
+                importance: 3,
+                happened_on: None,
+                follow_up_on: None,
+                source_conversation_id: None,
+                now,
+            },
+        )
+        .await?;
+        result.insights += usize::from(created);
+    }
+    let drops: Vec<i64> = plan
+        .drops
+        .into_iter()
+        .filter(|i| intact[*i])
+        .map(|i| events[i].id)
+        .collect();
+    result.dropped = repo::delete_memories(&mut tx, user_id, &drops).await?.len();
+    repo::mark_consolidated(&mut tx, user_id, ai_user_id, now).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -690,6 +1050,37 @@ mod tests {
         );
         assert_eq!(parse_ops("{\"ops\": []}", 0).unwrap(), vec![]);
         assert_eq!(parse_ops("没有 JSON", 0), None);
+    }
+
+    #[test]
+    fn plan_parse_skips_reused_and_out_of_range_ids() {
+        let text = r#"整理如下 {"merge": [
+                {"ids": ["e1", "e2"], "content": "对方 9 月连着几周准备考研", "date": "2026-09-01", "importance": 4},
+                {"ids": ["e2", "e3"], "content": "重复用了 e2，只剩一条，不合并"},
+                {"ids": ["e4", "e9"], "content": "越界的不算，只剩一条"}
+            ],
+            "insights": [
+                {"kind": "profile", "content": "对方常在深夜来聊天"},
+                {"kind": "weird", "content": "不认识的种类"}
+            ],
+            "drop": ["e1", "e5", "e5", "e0"]}"#;
+        let plan = parse_plan(text, 5).unwrap();
+        assert_eq!(
+            plan.merges,
+            vec![Merge {
+                sources: vec![0, 1],
+                content: "对方 9 月连着几周准备考研".into(),
+                happened_on: memory::parse_date("2026-09-01"),
+                importance: Some(4),
+            }]
+        );
+        assert_eq!(
+            plan.insights,
+            vec![(memory::PROFILE, "对方常在深夜来聊天".to_owned())]
+        );
+        // e1 已经合并了；e5 只算一次。
+        assert_eq!(plan.drops, vec![4]);
+        assert_eq!(parse_plan("不是 JSON", 3), None);
     }
 
     #[test]

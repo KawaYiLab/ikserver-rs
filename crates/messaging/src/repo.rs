@@ -789,6 +789,80 @@ pub(crate) async fn recent_across(
     .await
 }
 
+/// 翻聊天记录的一条命中。
+pub(crate) struct SearchRow {
+    pub id: i64,
+    pub conversation_id: i64,
+    pub sender_id: i64,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+    /// 命中的关键词数（排序用）。
+    #[allow(dead_code)]
+    pub hits: i64,
+}
+
+/// 在几个会话里按关键词翻聊天记录（AI 记忆 MEM-095）：各会话只看上下文起点之后的、`user_id` 仍在场的；
+/// 命中的关键词多的在前，同样多的按 `oldest_first` 从早到晚或从晚到早。没有关键词时只按时间。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn search_across(
+    conn: &mut PgConnection,
+    user_id: i64,
+    conversation_ids: &[i64],
+    context_from: &[Option<DateTime<Utc>>],
+    terms: &[String],
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+    oldest_first: bool,
+    limit: i64,
+) -> sqlx::Result<Vec<SearchRow>> {
+    sqlx::query_as!(
+        SearchRow,
+        r#"SELECT m.id, m.conversation_id, m.sender_id, m.content, m.created_at,
+                  (SELECT count(*) FROM unnest($4::text[]) AS t(term)
+                   WHERE strpos(lower(m.content), lower(t.term)) > 0) AS "hits!"
+           FROM unnest($2::bigint[], $3::timestamptz[]) AS s(conversation_id, context_from)
+           JOIN conversation_members cm
+             ON cm.conversation_id = s.conversation_id AND cm.user_id = $1 AND cm.left_at IS NULL
+           JOIN messages m ON m.conversation_id = s.conversation_id
+           WHERE m.kind = 'text' AND m.withdrawn_at IS NULL
+             AND (m.ai_state IS NULL OR m.ai_state IN ('done', 'stopped'))
+             AND (s.context_from IS NULL OR m.created_at > s.context_from)
+             AND ($5::timestamptz IS NULL OR m.created_at >= $5)
+             AND ($6::timestamptz IS NULL OR m.created_at < $6)
+             AND (cardinality($4::text[]) = 0 OR EXISTS (
+                  SELECT 1 FROM unnest($4::text[]) AS t(term)
+                  WHERE strpos(lower(m.content), lower(t.term)) > 0))
+           ORDER BY 6 DESC, (CASE WHEN $7 THEN m.created_at END) NULLS LAST, m.created_at DESC, m.id
+           LIMIT $8"#,
+        user_id,
+        conversation_ids,
+        context_from as &[Option<DateTime<Utc>>],
+        terms,
+        from,
+        to,
+        oldest_first,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 几个会话里 `before` 之前最后一条文本消息的时刻（AI 久别重逢，MEM-100）。
+pub(crate) async fn last_text_before(
+    conn: &mut PgConnection,
+    conversation_ids: &[i64],
+    before: DateTime<Utc>,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar!(
+        "SELECT max(created_at) FROM messages
+         WHERE conversation_id = ANY($1) AND kind = 'text' AND withdrawn_at IS NULL AND created_at < $2",
+        conversation_ids,
+        before,
+    )
+    .fetch_one(conn)
+    .await
+}
+
 /// 最近的若干条未撤回文本消息，新的在前（重新生成判定「最后一条 AI 回复」，GEN-013）。
 pub(crate) async fn recent_texts(
     conn: &mut PgConnection,

@@ -2,6 +2,7 @@
 //!
 //! 进 system prompt 末尾的几段（人格、日期等稳定的前缀不变，不破坏上游前缀缓存）：
 //! - **长期记忆**（MEM-010～016）：用户档案（所有角色共享）与关系记忆（每个角色单独），每次都带；
+//! - **久别重逢**（MEM-100）：隔了一周以上再来，让角色自然地说声好久不见；
 //! - **待跟进**（MEM-055～057）：到期的事件，在会话开场或久别重逢时让角色自然地问起；
 //! - **会话摘要**（MEM-001～004）：历史窗口装不下的更早消息压成一段摘要，后台滚动更新；
 //! - **跨会话衔接**（MEM-005）：新会话开头带上同一角色其他会话里最近的几轮；
@@ -9,7 +10,9 @@
 //!   在事务之外、生成之前取。
 //!
 //! 写入：后台提炼（[`crate::memory_jobs`]）；用户在对话里说「记住……」「忘掉……」时模型调用
-//! [`REMEMBER_TOOL`] / [`FORGET_TOOL`] 当场生效。无痕会话不写（MEM-070）。
+//! [`REMEMBER_TOOL`] / [`FORGET_TOOL`] 当场生效；问起以前聊过的细节时模型用 [`RECALL_TOOL`] 翻聊天原文。
+//! 每晚整理：合并零碎的旧事件、归纳出对对方的认识、遗忘久不提起的小事（[`crate::memory_jobs`]，MEM-080～090）。
+//! 无痕会话不写（MEM-070）。
 //! 私信用全部记忆；公开的评论区只用标为 `public` 的档案与关系记忆（MEM-060～062）。
 //! 用户可以在记忆面板里查看、修改、置顶、删除、清空，也可以整个关掉（MEM-030～033）。
 
@@ -67,6 +70,7 @@ const EMBED_BATCH: i64 = 32;
 
 pub const REMEMBER_TOOL: &str = "remember";
 pub const FORGET_TOOL: &str = "forget";
+pub const RECALL_TOOL: &str = "recall_history";
 /// 记忆工具在时间线上的来源名。
 pub const MEMORY_SOURCE: &str = "memory";
 
@@ -95,6 +99,15 @@ const SUMMARY_NOTE: &str =
     "\n\n【更早的对话摘要】本次对话更早部分的摘要（之后的原文在下面的对话轮次里）：\n";
 const BRIDGE_NOTE: &str = "\n\n【最近在另一个对话里】对方最近在与你的另一个对话里聊过下面这些（按时间顺序，\
      只用来衔接话题，不是本次对话的轮次）：";
+/// 隔了这么多天再聊算久别重逢（MEM-100）。
+const REUNION_DAYS: i64 = 7;
+/// 翻聊天记录一次最多给几条（MEM-095）。
+const RECALL_HITS: i64 = 8;
+/// 翻聊天记录里每条的上限。
+const RECALL_ITEM_CHARS: usize = 200;
+/// 翻聊天记录最多几个关键词。
+const RECALL_TERMS: usize = 5;
+
 const EVENTS_NOTE: &str = "\n\n【相关往事】之前和对方聊过的、可能与当前话题有关的事（按时间顺序；\
      用得上就自然地提，用不上就忽略）：";
 
@@ -105,6 +118,8 @@ pub(crate) struct Recall {
     pub profile: Vec<String>,
     /// 与这个 AI 的关系记忆。
     pub relation: Vec<String>,
+    /// 久别重逢（MEM-100）：`(隔了几天, 上次聊天的日期)`。
+    pub reunion: Option<(i64, NaiveDate)>,
     /// 到期的待跟进：`(记忆 id, 一行文本)`。
     pub follow_ups: Vec<(i64, String)>,
     /// 当前代际的会话摘要。
@@ -174,6 +189,18 @@ pub(crate) async fn recall(
         }
     }
     if is_opening(history, session.ai_user_id) {
+        if let Some(trigger) = history.last() {
+            let sessions = repo::pair_sessions(conn, session.user_id, session.ai_user_id).await?;
+            let last = ik_messaging::interop::last_text_before(conn, &sessions, trigger.created_at)
+                .await?;
+            if let Some(last) = last {
+                let last_day = beijing_today(last);
+                let days = (beijing_today(trigger.created_at) - last_day).num_days();
+                if days >= REUNION_DAYS {
+                    recall.reunion = Some((days, last_day));
+                }
+            }
+        }
         let today = beijing_today(now);
         let oldest = today - chrono::Duration::days(FOLLOW_UP_EXPIRE_DAYS);
         recall.follow_ups = repo::due_follow_ups(
@@ -241,6 +268,12 @@ pub(crate) fn note(recall: &Recall) -> Option<String> {
             note.push_str("\n你们之间：");
             push_list(&mut note, &recall.relation);
         }
+    }
+    if let Some((days, last)) = recall.reunion {
+        note.push_str(&format!(
+            "\n\n【久别重逢】你们上次聊天是 {last}，已经过了 {days} 天。可以自然地说声好久不见、\
+             问问对方这段时间过得怎么样（别夸张，也别说是系统提醒的）。"
+        ));
     }
     if !recall.follow_ups.is_empty() {
         note.push_str(FOLLOW_UP_NOTE);
@@ -462,6 +495,13 @@ pub(crate) async fn recall_events(
     if hits.is_empty() {
         return None;
     }
+    // 被想起的事件不容易被遗忘（MEM-090）。
+    let ids: Vec<i64> = hits.iter().map(|e| e.id).collect();
+    if let Ok(mut conn) = state.db.acquire().await
+        && let Err(error) = repo::touch_recalled(&mut conn, &ids, Utc::now()).await
+    {
+        tracing::warn!(%error, "记录事件被想起失败");
+    }
     let lines: Vec<String> = hits
         .into_iter()
         .map(|e| event_line(e.happened_on, &e.content))
@@ -592,7 +632,7 @@ pub(crate) fn matches(needle: &str, content: &str) -> bool {
 
 // ---------- 对话里的工具 ----------
 
-/// remember / forget（MEM-014、MEM-015）：只在私信里提供。无痕会话只有 forget（MEM-070）。
+/// remember / forget / recall_history（MEM-014、MEM-015、MEM-095）：只在私信里提供。无痕会话没有 remember（MEM-070）。
 pub(crate) fn tool_specs(incognito: bool) -> Vec<ToolSpec> {
     let remember = ToolSpec {
         name: REMEMBER_TOOL.into(),
@@ -627,10 +667,27 @@ pub(crate) fn tool_specs(incognito: bool) -> Vec<ToolSpec> {
             "required": ["content"]
         }),
     };
+    let recall = ToolSpec {
+        name: RECALL_TOOL.into(),
+        description: "翻看你和对方以前的聊天记录（包括别的会话）。对方问「我们之前聊过什么」「我上次说的那个……」\
+             「我们第一次聊的是什么」，而你的记忆里没有细节时调用。query 写 1-5 个关键词（空格分隔），\
+             可以不写只按时间翻；from / to 限定日期（YYYY-MM-DD，含当天）；order：oldest 从最早的翻起，\
+             newest（默认）从最近的翻起。返回的是聊天原文，按需引用，不要整段复述。"
+            .into(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "关键词，空格分隔，如「科目二 考试」" },
+                "from": { "type": "string", "description": "开始日期 YYYY-MM-DD" },
+                "to": { "type": "string", "description": "结束日期 YYYY-MM-DD" },
+                "order": { "type": "string", "enum": ["newest", "oldest"] }
+            }
+        }),
+    };
     if incognito {
-        vec![forget]
+        vec![forget, recall]
     } else {
-        vec![remember, forget]
+        vec![remember, forget, recall]
     }
 }
 
@@ -639,6 +696,7 @@ pub(crate) fn tool_title(name: &str) -> Option<&'static str> {
     match name {
         REMEMBER_TOOL => Some("记下这件事"),
         FORGET_TOOL => Some("忘掉这件事"),
+        RECALL_TOOL => Some("翻看聊天记录"),
         _ => None,
     }
 }
@@ -654,6 +712,20 @@ pub(crate) async fn execute_tool(
 ) -> ToolOutput {
     let args = tools::parse_args(arguments);
     let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default();
+    if name == RECALL_TOOL {
+        let search = HistorySearch {
+            terms: search_terms(text("query")),
+            from: parse_date(text("from")),
+            to: parse_date(text("to")),
+            oldest_first: text("order") == "oldest",
+        };
+        return recall_history(state, user_id, ai_user_id, conversation_id, &search)
+            .await
+            .unwrap_or_else(|problem| {
+                tracing::warn!(?problem, tool = name, "翻聊天记录失败");
+                error_output(format!("工具执行失败：{name}"))
+            });
+    }
     let content = normalize(text("content"));
     if content.is_empty() {
         return error_output("缺少 content 参数。".to_owned());
@@ -688,6 +760,92 @@ pub(crate) async fn execute_tool(
     outcome.unwrap_or_else(|problem| {
         tracing::warn!(?problem, tool = name, "记忆工具执行失败");
         error_output(format!("工具执行失败：{name}"))
+    })
+}
+
+/// 翻聊天记录的条件（MEM-095）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct HistorySearch {
+    pub terms: Vec<String>,
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+    pub oldest_first: bool,
+}
+
+/// 关键词：按空白与标点切开，去掉单字，最多 [`RECALL_TERMS`] 个。
+pub(crate) fn search_terms(query: &str) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    for term in query
+        .split(|c: char| c.is_whitespace() || is_punctuation(c))
+        .map(str::trim)
+        .filter(|t| t.chars().count() >= 2)
+    {
+        if !terms.iter().any(|t| t == term) {
+            terms.push(term.to_owned());
+        }
+        if terms.len() >= RECALL_TERMS {
+            break;
+        }
+    }
+    terms
+}
+
+/// 北京时间某天 0 点。
+fn day_start(date: NaiveDate) -> Option<DateTime<Utc>> {
+    let tz = FixedOffset::east_opt(8 * 3600)?;
+    date.and_hms_opt(0, 0, 0)?
+        .and_local_timezone(tz)
+        .single()
+        .map(|t| t.with_timezone(&Utc))
+}
+
+/// 翻聊天记录（MEM-095）：同一用户与同一 AI 的会话（无痕会话只有当前这个），各自上下文起点之后的原文。
+async fn recall_history(
+    state: &AiState,
+    user_id: i64,
+    ai_user_id: i64,
+    conversation_id: i64,
+    search: &HistorySearch,
+) -> Result<ToolOutput, Problem> {
+    let mut conn = state.db.acquire().await?;
+    let sessions = repo::recall_sessions(&mut conn, user_id, ai_user_id, conversation_id).await?;
+    let hits = ik_messaging::interop::search_across(
+        &mut conn,
+        user_id,
+        &sessions,
+        &search.terms,
+        search.from.and_then(day_start),
+        search.to.and_then(|d| d.succ_opt()).and_then(day_start),
+        search.oldest_first,
+        RECALL_HITS,
+    )
+    .await?;
+    let text = if hits.is_empty() {
+        "没有找到相关的聊天记录。".to_owned()
+    } else {
+        let mut hits = hits;
+        hits.sort_by_key(|h| (h.created_at, h.message_id));
+        hits.iter()
+            .map(|hit| {
+                let who = if hit.sender_id == ai_user_id {
+                    "你"
+                } else {
+                    "对方"
+                };
+                format!(
+                    "[{}] {who}：{}",
+                    beijing_today(hit.created_at),
+                    truncate(&one_line(&hit.content), RECALL_ITEM_CHARS)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Ok(ToolOutput {
+        text,
+        is_error: false,
+        meta: ToolMeta::None,
+        images: Vec::new(),
     })
 }
 
@@ -1089,6 +1247,7 @@ mod tests {
         let recall = Recall {
             profile: vec!["对方叫阿哲".into()],
             relation: vec!["你们约好周五一起打空洞".into()],
+            reunion: Some((12, parse_date("2026-10-13").unwrap())),
             follow_ups: vec![(9, "2026-10-26 对方考试".into())],
             summary: Some("之前聊了新角色的配队。".into()),
             bridge: vec![(false, "我明天考试".into()), (true, "加油！".into())],
@@ -1098,6 +1257,7 @@ mod tests {
             "【记忆】",
             "关于对方：\n- 对方叫阿哲",
             "你们之间：\n- 你们约好周五一起打空洞",
+            "【久别重逢】你们上次聊天是 2026-10-13，已经过了 12 天。",
             "【待跟进】",
             "\n- 2026-10-26 对方考试",
             "【更早的对话摘要】",
@@ -1219,14 +1379,27 @@ mod tests {
     }
 
     #[test]
-    fn incognito_only_offers_forget() {
+    fn incognito_has_no_remember() {
         let names = |incognito| -> Vec<String> {
             tool_specs(incognito)
                 .into_iter()
                 .map(|s| s.name.into_owned())
                 .collect()
         };
-        assert_eq!(names(false), vec![REMEMBER_TOOL, FORGET_TOOL]);
-        assert_eq!(names(true), vec![FORGET_TOOL]);
+        assert_eq!(names(false), vec![REMEMBER_TOOL, FORGET_TOOL, RECALL_TOOL]);
+        assert_eq!(names(true), vec![FORGET_TOOL, RECALL_TOOL]);
+    }
+
+    #[test]
+    fn search_terms_split_and_drop_single_characters() {
+        assert_eq!(
+            search_terms(" 科目二，考试 我 考试 驾照 a 猫咪 狗狗 多余 "),
+            vec!["科目二", "考试", "驾照", "猫咪", "狗狗"]
+        );
+        assert!(search_terms("").is_empty());
+        assert_eq!(
+            day_start(parse_date("2026-10-25").unwrap()).map(|t| t.to_rfc3339()),
+            Some("2026-10-24T16:00:00+00:00".to_owned())
+        );
     }
 }

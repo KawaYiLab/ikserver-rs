@@ -677,7 +677,7 @@ async fn memory_panel_edits_and_the_switch_turns_everything_off(db: PgPool) {
         .unwrap();
     let request = h.turn(conversation, "现在呢", "记得").await;
     assert!(system_of(&request).contains("- 喜欢橘猫"));
-    assert_eq!(request.tools.len(), 14);
+    assert_eq!(request.tools.len(), 15);
 
     // 「让它忘了我」：只清与这个角色的关系记忆；不指定角色清空全部。
     memory::clear(
@@ -868,7 +868,9 @@ async fn incognito_sessions_stay_out_of_long_term_memory(db: PgPool) {
     assert!(system_of(&request).contains("对方叫阿哲"));
     let names: Vec<&str> = request.tools.iter().map(|t| t.name.as_ref()).collect();
     assert!(
-        names.contains(&"forget") && !names.contains(&"remember"),
+        names.contains(&"forget")
+            && names.contains(&"recall_history")
+            && !names.contains(&"remember"),
         "{names:?}"
     );
     assert_eq!(h.queued(format!("ai-memory:{secret}")).await, 0);
@@ -904,4 +906,196 @@ async fn incognito_sessions_stay_out_of_long_term_memory(db: PgPool) {
         .to_owned();
     assert!(input.contains("我养了一只狗"), "{input}");
     assert!(!input.contains("说个秘密"), "{input}");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn recall_history_reads_old_turns_but_not_other_incognito_chats(db: PgPool) {
+    let h = harness(db).await;
+    let first = h.session("fairy").await;
+    h.turn(
+        first,
+        "第一次来，想聊聊零号空洞的打法",
+        "好呀，先说说你的配队",
+    )
+    .await;
+    let secret = h.session("fairy").await;
+    sessions::update(
+        &h.state,
+        &h.me,
+        secret,
+        ik_ai::dto::UpdateSessionRequest {
+            incognito: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    h.turn(secret, "零号空洞里我其实有个秘密", "嗯，我听着")
+        .await;
+
+    let now_chat = h.session("fairy").await;
+    let trigger = h.send(now_chat, "我们第一次聊的是什么来着？").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        tool_call(
+            "call_1",
+            "recall_history",
+            r#"{"query":"零号空洞","order":"oldest"}"#,
+        ),
+        Step::Emit(StreamEvent::Finish("tool_calls".into())),
+        usage(10, 5),
+    ]);
+    h.fake.push(vec![
+        content("第一次你是来聊零号空洞的打法的。"),
+        usage(10, 5),
+    ]);
+    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    let requests = h.fake.requests();
+    let ChatMessage::Tool {
+        content: result, ..
+    } = requests[requests.len() - 1].messages.last().unwrap()
+    else {
+        panic!()
+    };
+    // 别的会话里的原文按时间给出，带日期与说话人（MEM-095）；无痕会话不在里面。
+    assert!(
+        result.contains("] 对方：第一次来，想聊聊零号空洞的打法"),
+        "{result}"
+    );
+    assert!(!result.contains("秘密"), "{result}");
+    let events = h.workflow(job).await;
+    let start = events.iter().find(|e| e["type"] == "tool.start").unwrap();
+    assert_eq!(
+        start["data"],
+        serde_json::json!({ "tool": "recall_history", "title": "翻看聊天记录", "source": "memory" })
+    );
+
+    // 无痕会话自己能翻到自己。
+    let trigger = h.send(secret, "我刚才说了什么秘密").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        tool_call("call_2", "recall_history", r#"{"query":"秘密"}"#),
+        Step::Emit(StreamEvent::Finish("tool_calls".into())),
+        usage(10, 5),
+    ]);
+    h.fake.push(vec![content("你说你有个秘密。"), usage(10, 5)]);
+    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    let requests = h.fake.requests();
+    let ChatMessage::Tool {
+        content: result, ..
+    } = requests[requests.len() - 1].messages.last().unwrap()
+    else {
+        panic!()
+    };
+    assert!(result.contains("零号空洞里我其实有个秘密"), "{result}");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn coming_back_after_a_week_is_a_reunion(db: PgPool) {
+    let h = harness(db).await;
+    let first = h.session("fairy").await;
+    h.turn(first, "晚安", "晚安～").await;
+    sqlx::query!(
+        "UPDATE messages SET created_at = created_at - interval '10 days' WHERE conversation_id = $1",
+        first
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    let second = h.session("fairy").await;
+    let request = h.turn(second, "我回来啦", "好久不见！").await;
+    let system = system_of(&request);
+    assert!(
+        system.contains("【久别重逢】") && system.contains("已经过了 10 天"),
+        "{system}"
+    );
+    // 接着聊就不再提。
+    let request = h.turn(second, "最近好忙", "辛苦了").await;
+    assert!(!system_of(&request).contains("【久别重逢】"));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn nightly_forgets_small_old_things_and_consolidates_the_rest(db: PgPool) {
+    let h = harness(db).await;
+    // 25 条一个多月前提炼的普通事件，加一条半年多前、从没被想起的小事，再加一条重要的老事。
+    sqlx::query!(
+        "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin, importance,
+                                  happened_on, created_at, updated_at)
+         SELECT 900000 + n, $1, $2, 'event', '对方第 ' || n || ' 次聊到考研复习', 'extracted', 3,
+                (now() - interval '40 days')::date, now() - interval '40 days', now() - interval '40 days'
+         FROM generate_series(1, 25) AS n",
+        HUMAN,
+        FAIRY,
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin, importance,
+                                  created_at, updated_at)
+         VALUES (990001, $1, $2, 'event', '对方那天午饭吃了拉面', 'extracted', 1,
+                 now() - interval '200 days', now() - interval '200 days'),
+                (990002, $1, $2, 'event', '对方的外婆去世了', 'extracted', 5,
+                 now() - interval '400 days', now() - interval '400 days')",
+        HUMAN,
+        FAIRY,
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+
+    let (forgotten, pairs) = memory_jobs::nightly(&h.state).await.unwrap();
+    assert_eq!((forgotten, pairs), (1, 1));
+    assert_eq!(h.queued(format!("ai-consolidate:{HUMAN}:{FAIRY}")).await, 1);
+    let contents = h.contents().await;
+    assert!(
+        !contents.iter().any(|(_, c)| c.contains("拉面")),
+        "小事被遗忘"
+    );
+    assert!(
+        contents.iter().any(|(_, c)| c.contains("外婆")),
+        "重要的不忘"
+    );
+
+    h.fake.push(vec![content(
+        r#"{"merge": [{"ids": ["e1", "e2", "e3"], "content": "对方一个多月前一直在复习考研", "importance": 4}],
+            "insights": [{"kind": "profile", "content": "对方在准备考研"}],
+            "drop": ["e4"]}"#,
+    )]);
+    let done = memory_jobs::consolidate(&h.state, HUMAN, FAIRY)
+        .await
+        .unwrap();
+    assert_eq!(
+        done,
+        memory_jobs::Consolidated {
+            merged: 1,
+            insights: 1,
+            dropped: 1,
+        }
+    );
+    let input = h.fake.requests().last().unwrap().messages[1]
+        .text()
+        .to_owned();
+    assert!(input.contains("e1 ["), "{input}");
+    // 重要的老事也给模型看（可以合并、归纳），提示词要求不要丢。
+    assert!(input.contains("外婆"), "{input}");
+    let items = memory::list(&h.state, &h.me).await.unwrap().items;
+    let events: Vec<_> = items
+        .iter()
+        .filter(|m| m.kind == MemoryKind::Event)
+        .collect();
+    // 25 + 外婆 - 3（合并）+ 1（合并结果）- 1（丢弃）= 23。
+    assert_eq!(events.len(), 23);
+    let merged = events
+        .iter()
+        .find(|m| m.content == "对方一个多月前一直在复习考研")
+        .unwrap();
+    assert_eq!(merged.importance, 4);
+    assert!(
+        items
+            .iter()
+            .any(|m| m.kind == MemoryKind::Profile && m.content == "对方在准备考研")
+    );
+    // 整理过的一周内不再排。
+    assert_eq!(memory_jobs::nightly(&h.state).await.unwrap(), (0, 0));
 }

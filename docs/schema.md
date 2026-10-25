@@ -414,6 +414,14 @@
 - 部分索引 `ai_memories_follow_up_idx (user_id, ai_user_id, follow_up_on) WHERE follow_up_on IS NOT NULL AND followed_up_at IS NULL`：
   会话开场查到期的待跟进。
 
+## AI 记忆第三期（`20261115000001_ai_memory_consolidation.sql`，ADR 0007）
+
+- `ai_memories.recalled_at`：事件最近一次被检索带进对话的时刻；每晚遗忘（MEM-090）用它判断「久不提起」。
+  部分索引 `ai_memories_forget_idx (importance, updated_at) WHERE kind = 'event' AND origin = 'extracted' AND NOT pinned`
+  覆盖遗忘的扫描。
+- `ai_memory_pairs`（ik-ai）：每个（用户, AI）上次整理的时刻，主键 `(user_id, ai_user_id)` 兼作 `user_id` 外键索引，
+  `ai_user_id` 另有索引；用户或 AI 账号删除时级联删除。
+
 ## 管理后台审计（`20261031000001_admin_audit.sql`）
 
 - `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、

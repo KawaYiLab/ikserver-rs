@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin, importance,\n                                  created_at, updated_at)\n         VALUES (990001, $1, $2, 'event', '对方那天午饭吃了拉面', 'extracted', 1,\n                 now() - interval '200 days', now() - interval '200 days'),\n                (990002, $1, $2, 'event', '对方的外婆去世了', 'extracted', 5,\n                 now() - interval '400 days', now() - interval '400 days')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b8b610449f18dfd265e31a25c5e9a9fb00aae553bac3e8f21595866c8e8c7d84"
+}
