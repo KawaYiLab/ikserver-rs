@@ -128,7 +128,8 @@ async fn complete(
         .memory
         .model_key
         .as_deref()
-        .and_then(|key| catalog.model(key))
+        // 专用记忆模型不要求启用；启用状态仍限制普通聊天的模型选择。
+        .and_then(|key| catalog.models.iter().find(|m| m.key == key))
         .filter(usable)
         .or_else(|| catalog.default_model().filter(usable))
         .ok_or_else(|| "没有可用的记忆模型".to_owned())?;

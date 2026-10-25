@@ -549,6 +549,60 @@ fn settings_input(enabled: bool) -> MemorySettingsInput {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn memory_jobs_use_disabled_models_and_fall_back_when_unavailable(db: PgPool) {
+    let h = harness(db).await;
+    insert_user(&h.db, ADMIN, false).await;
+    sqlx::query(
+        "INSERT INTO ai_models (id, key, display_name, provider, provider_model, enabled)
+         VALUES (2, 'memory-only', '记忆专用', 'fake', 'fake-memory', false)",
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+
+    // 后台可以保存停用的专用模型，但用户的可选模型列表仍只显示启用模型。
+    let mut input = settings_input(true);
+    input.model_key = Some("memory-only".into());
+    let saved = memory_admin::update_settings(&h.state, &admin_operator(), input)
+        .await
+        .unwrap();
+    assert_eq!(saved.model_key.as_deref(), Some("memory-only"));
+    let visible = service::models(&h.state).await.unwrap();
+    assert_eq!(visible.items.len(), 1);
+    assert_eq!(visible.items[0].key, "base");
+
+    let conversation = h.session("fairy").await;
+    for (change, expected_model) in [
+        (None, "fake-memory"),
+        (
+            Some("UPDATE ai_models SET provider = 'missing' WHERE key = 'memory-only'"),
+            "fake-base",
+        ),
+        (
+            Some("DELETE FROM ai_models WHERE key = 'memory-only'"),
+            "fake-base",
+        ),
+    ] {
+        if let Some(sql) = change {
+            sqlx::query(sql).execute(&h.db).await.unwrap();
+            h.state.catalog.invalidate().await;
+        }
+        // 普通聊天始终用全站默认模型；提炼优先用专用模型，仅在提供方不可用或模型被删时回退。
+        let reply = h.turn(conversation, "我喜欢看书", "最近读了什么？").await;
+        assert_eq!(reply.model, "fake-base");
+        let calls = h.fake.requests().len();
+        h.fake.push(vec![content(r#"{"ops":[]}"#)]);
+        assert_eq!(
+            memory_jobs::extract(&h.state, conversation).await.unwrap(),
+            Extracted::default()
+        );
+        let requests = h.fake.requests();
+        assert_eq!(requests.len(), calls + 1);
+        assert_eq!(requests.last().unwrap().model, expected_model);
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
     let h = harness(db).await;
     insert_user(&h.db, ADMIN, false).await;

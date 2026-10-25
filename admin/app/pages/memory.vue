@@ -212,7 +212,7 @@ async function clearAll() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <span class="text-xs text-muted-foreground">建议选便宜、擅长输出 JSON 的模型。</span>
+              <span class="text-xs text-muted-foreground">可选择未启用的模型。建议选便宜、擅长输出 JSON 的模型。</span>
             </label>
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">对话停下来多久后提炼（秒）</span>
