@@ -228,6 +228,8 @@ pub(crate) struct PostContext {
     pub id: i64,
     pub title: String,
     pub body: String,
+    /// 原始完整正文长度，续读 offset 与工具保持同一字符口径。
+    pub body_chars: usize,
     /// 封面与正文插图（发给识图模型的地址，LLM-015）。
     pub images: Vec<String>,
 }
@@ -268,6 +270,17 @@ pub(crate) fn build_messages(
     system.push_str(&format!("\n\n【当前帖子】{title}"));
     if !post.body.trim().is_empty() {
         system.push_str(&format!("\n{}", post.body.trim()));
+    }
+    let supplied = post.body.chars().count();
+    if supplied < post.body_chars {
+        system.push_str(&format!(
+            "\n（当前帖正文已提供前 {supplied} 字，共 {} 字；需要后文且有读取工具时，使用 get_post_content，document_id={}、offset={supplied}。无需重复读取已提供的正文。）",
+            post.body_chars, post.id
+        ));
+    } else {
+        system.push_str(
+            "\n（当前帖正文已完整提供，无需重复读取；需要其他帖或评论区资料时再使用可用工具。）",
+        );
     }
     let mut messages = Vec::with_capacity(memory.len() * 2 + 2);
     messages.push(ChatMessage::system(system));
@@ -457,6 +470,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         id: post.id,
         title: post.title.clone(),
         body: truncate(&raw_body, POST_BODY_MAX_CHARS),
+        body_chars: raw_body.chars().count(),
         images: post_images,
     };
     let turns = repo::comment_memory(
@@ -751,6 +765,7 @@ mod tests {
             id: 7,
             title: "标题".into(),
             body: "正文".into(),
+            body_chars: 2,
             images: vec!["https://cdn.test/cover.png".into()],
         };
         let parent = CommentContext {
@@ -794,5 +809,28 @@ mod tests {
                 <= 1500
         );
         assert_eq!(finished_reply("<br>", "帖子", 1), "");
+    }
+
+    #[test]
+    fn truncated_post_context_explains_where_to_continue() {
+        let card = crate::catalog::tests::card(None, Vec::new());
+        let mut post = PostContext {
+            id: 7,
+            title: "长帖".into(),
+            body: "字".repeat(4000),
+            body_chars: 5000,
+            images: Vec::new(),
+        };
+        let comment = CommentContext {
+            text: "总结后半段".into(),
+            images: Vec::new(),
+        };
+        let messages = build_messages(&card, &post, None, "绳匠", &comment, &[]);
+        assert!(messages[0].text().contains("共 5000 字"));
+        assert!(messages[0].text().contains("document_id=7、offset=4000"));
+        post.body_chars = 4000;
+        let messages = build_messages(&card, &post, None, "绳匠", &comment, &[]);
+        assert!(messages[0].text().contains("正文已完整提供"));
+        assert!(!messages[0].text().contains("offset="));
     }
 }

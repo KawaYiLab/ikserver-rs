@@ -1396,6 +1396,8 @@ pub(crate) struct MemoryRow {
     pub followed_up_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// 在哪个公开场合说的（ADR 0008）；为空是私下说的。
+    pub source_scope: Option<String>,
 }
 
 /// 事件记忆的检索候选（MEM-052）：带向量。
@@ -1420,7 +1422,7 @@ pub(crate) async fn memories_for(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories
          WHERE user_id = $1 AND kind <> 'event' AND (ai_user_id IS NULL OR ai_user_id = $2)
          ORDER BY pinned DESC, updated_at DESC, id DESC",
@@ -1441,7 +1443,7 @@ pub(crate) async fn scope_memories(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories
          WHERE user_id = $1 AND ai_user_id IS NOT DISTINCT FROM $2 AND kind = $3",
         user_id,
@@ -1453,10 +1455,12 @@ pub(crate) async fn scope_memories(
 }
 
 /// 事件检索的候选：与这个 AI 的事件，最近更新的 `limit` 条。
+/// `scope` 不为空时只取来源是这个公开场合的（ADR 0008）。
 pub(crate) async fn events_for(
     conn: &mut PgConnection,
     user_id: i64,
     ai_user_id: i64,
+    scope: Option<&str>,
     limit: i64,
 ) -> sqlx::Result<Vec<EventRow>> {
     sqlx::query_as!(
@@ -1464,11 +1468,13 @@ pub(crate) async fn events_for(
         "SELECT id, content, pinned, importance, happened_on, updated_at, embedding, embedding_model
          FROM ai_memories
          WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
+           AND ($4::text IS NULL OR source_scope = $4)
          ORDER BY updated_at DESC, id DESC
          LIMIT $3",
         user_id,
         ai_user_id,
         limit,
+        scope,
     )
     .fetch_all(conn)
     .await
@@ -1485,7 +1491,7 @@ pub(crate) async fn recent_events(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories
          WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
            AND (updated_at >= $3 OR (follow_up_on IS NOT NULL AND followed_up_at IS NULL))
@@ -1512,7 +1518,7 @@ pub(crate) async fn due_follow_ups(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories
          WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'
            AND follow_up_on BETWEEN $4 AND $3 AND followed_up_at IS NULL
@@ -1553,7 +1559,7 @@ pub(crate) async fn all_memories(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories WHERE user_id = $1
          ORDER BY pinned DESC, updated_at DESC, id DESC",
         user_id,
@@ -1569,7 +1575,7 @@ pub(crate) async fn lock_memory(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories WHERE id = $1 FOR UPDATE",
         id,
     )
@@ -1590,6 +1596,8 @@ pub(crate) struct NewMemory<'a> {
     pub happened_on: Option<NaiveDate>,
     pub follow_up_on: Option<NaiveDate>,
     pub source_conversation_id: Option<i64>,
+    /// 公开场合说的才有（ADR 0008），见 [`MemoryRow::source_scope`]。
+    pub source_scope: Option<&'a str>,
     pub now: DateTime<Utc>,
 }
 
@@ -1601,10 +1609,10 @@ pub(crate) async fn insert_memory(
         MemoryRow,
         "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin, sensitivity,
                                   importance, happened_on, follow_up_on, source_conversation_id,
-                                  created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)
+                                  source_scope, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12, $12)
          RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+                   happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope",
         memory.id,
         memory.user_id,
         memory.ai_user_id,
@@ -1617,6 +1625,7 @@ pub(crate) async fn insert_memory(
         memory.follow_up_on,
         memory.source_conversation_id,
         memory.now,
+        memory.source_scope,
     )
     .fetch_one(conn)
     .await
@@ -1657,7 +1666,7 @@ pub(crate) async fn update_memory(
              updated_at = $11
          WHERE id = $1
          RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+                   happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope",
         id,
         patch.content,
         patch.origin,
@@ -1684,7 +1693,7 @@ pub(crate) async fn delete_memories(
         MemoryRow,
         "DELETE FROM ai_memories WHERE user_id = $1 AND id = ANY($2)
          RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+                   happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope",
         user_id,
         ids,
     )
@@ -1893,7 +1902,7 @@ pub(crate) async fn consolidatable_events(
     sqlx::query_as!(
         MemoryRow,
         "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,
-                happened_on, follow_up_on, followed_up_at, created_at, updated_at
+                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope
          FROM ai_memories
          WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event' AND origin = 'extracted'
            AND NOT pinned AND updated_at < $3
@@ -1925,4 +1934,160 @@ pub(crate) async fn mark_consolidated(
     .execute(conn)
     .await?;
     Ok(())
+}
+
+// ---------- 按场合共享的记忆（ADR 0008 第三期，QQ 群共享记忆） ----------
+
+#[derive(Debug, Clone)]
+pub(crate) struct SharedMemoryRow {
+    pub id: i64,
+    pub ai_user_id: i64,
+    pub content: String,
+    pub origin: String,
+    pub pinned: bool,
+    pub created_by_user_id: Option<i64>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// 同一场合的共享记忆串行写入（与个人记忆的锁分开）。
+pub(crate) async fn lock_shared_memories(conn: &mut PgConnection, scope: &str) -> sqlx::Result<()> {
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtextextended('ik:ai_shared_memories:' || $1::text, 0))",
+        scope,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+/// 一个场合的共享记忆；`ai_user_id` 为空时取全部角色的。置顶的在前，其余新的在前。
+pub(crate) async fn shared_memories(
+    conn: &mut PgConnection,
+    scope: &str,
+    ai_user_id: Option<i64>,
+) -> sqlx::Result<Vec<SharedMemoryRow>> {
+    sqlx::query_as!(
+        SharedMemoryRow,
+        "SELECT id, ai_user_id, content, origin, pinned, created_by_user_id, created_at, updated_at
+         FROM ai_shared_memories
+         WHERE scope = $1 AND ($2::bigint IS NULL OR ai_user_id = $2)
+         ORDER BY pinned DESC, updated_at DESC, id DESC",
+        scope,
+        ai_user_id,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+pub(crate) struct NewSharedMemory<'a> {
+    pub id: i64,
+    pub scope: &'a str,
+    pub ai_user_id: i64,
+    pub content: &'a str,
+    pub origin: &'a str,
+    pub pinned: bool,
+    pub created_by_user_id: Option<i64>,
+    pub now: DateTime<Utc>,
+}
+
+pub(crate) async fn insert_shared_memory(
+    conn: &mut PgConnection,
+    memory: &NewSharedMemory<'_>,
+) -> sqlx::Result<SharedMemoryRow> {
+    sqlx::query_as!(
+        SharedMemoryRow,
+        "INSERT INTO ai_shared_memories (id, scope, ai_user_id, content, origin, pinned,
+                                         created_by_user_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+         RETURNING id, ai_user_id, content, origin, pinned, created_by_user_id, created_at, updated_at",
+        memory.id,
+        memory.scope,
+        memory.ai_user_id,
+        memory.content,
+        memory.origin,
+        memory.pinned,
+        memory.created_by_user_id,
+        memory.now,
+    )
+    .fetch_one(conn)
+    .await
+}
+
+/// 改正文与置顶（`None` 不改）。返回改后的行；不在这个场合里时为 None。
+pub(crate) async fn update_shared_memory(
+    conn: &mut PgConnection,
+    scope: &str,
+    id: i64,
+    content: Option<&str>,
+    origin: Option<&str>,
+    pinned: Option<bool>,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<SharedMemoryRow>> {
+    sqlx::query_as!(
+        SharedMemoryRow,
+        "UPDATE ai_shared_memories
+         SET content = COALESCE($3, content), origin = COALESCE($4, origin),
+             pinned = COALESCE($5, pinned), updated_at = $6
+         WHERE scope = $1 AND id = $2
+         RETURNING id, ai_user_id, content, origin, pinned, created_by_user_id, created_at, updated_at",
+        scope,
+        id,
+        content,
+        origin,
+        pinned,
+        now,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
+pub(crate) async fn delete_shared_memories(
+    conn: &mut PgConnection,
+    scope: &str,
+    ids: &[i64],
+) -> sqlx::Result<Vec<SharedMemoryRow>> {
+    sqlx::query_as!(
+        SharedMemoryRow,
+        "DELETE FROM ai_shared_memories WHERE scope = $1 AND id = ANY($2)
+         RETURNING id, ai_user_id, content, origin, pinned, created_by_user_id, created_at, updated_at",
+        scope,
+        ids,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 超出上限时淘汰最旧的未置顶记忆。
+pub(crate) async fn trim_shared_memories(
+    conn: &mut PgConnection,
+    scope: &str,
+    ai_user_id: i64,
+    limit: i64,
+) -> sqlx::Result<u64> {
+    let result = sqlx::query!(
+        "DELETE FROM ai_shared_memories WHERE id IN (
+             SELECT id FROM ai_shared_memories
+             WHERE scope = $1 AND ai_user_id = $2 AND NOT pinned
+             ORDER BY updated_at DESC, id DESC
+             OFFSET GREATEST(0, $3 - (SELECT count(*) FROM ai_shared_memories
+                                      WHERE scope = $1 AND ai_user_id = $2 AND pinned)))",
+        scope,
+        ai_user_id,
+        limit,
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
+}
+
+/// 删掉一个场合的全部共享记忆（机器人退群很久以后清理）。
+pub(crate) async fn clear_shared_memories(
+    conn: &mut PgConnection,
+    scope: &str,
+) -> sqlx::Result<u64> {
+    let result = sqlx::query!("DELETE FROM ai_shared_memories WHERE scope = $1", scope)
+        .execute(conn)
+        .await?;
+    Ok(result.rows_affected())
 }

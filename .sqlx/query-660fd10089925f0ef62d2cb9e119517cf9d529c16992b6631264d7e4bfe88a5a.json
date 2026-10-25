@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "DELETE FROM ai_memories WHERE user_id = $1 AND id = ANY($2)\n         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                   happened_on, follow_up_on, followed_up_at, created_at, updated_at",
+  "query": "INSERT INTO ai_memories (id, user_id, ai_user_id, kind, content, origin, sensitivity,\n                                  importance, happened_on, follow_up_on, source_conversation_id,\n                                  source_scope, created_at, updated_at)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12, $12)\n         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                   happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope",
   "describe": {
     "columns": [
       {
@@ -156,12 +156,34 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 14,
+        "name": "source_scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "source_scope"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
-        "Int8Array"
+        "Int8",
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int2",
+        "Date",
+        "Date",
+        "Int8",
+        "Timestamptz",
+        "Text"
       ]
     },
     "nullable": [
@@ -178,8 +200,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "6c9463a138a0a0379e5f26c6f34dd98ea34cb2e54e000bf19591b1424bdbb9fe"
+  "hash": "660fd10089925f0ef62d2cb9e119517cf9d529c16992b6631264d7e4bfe88a5a"
 }

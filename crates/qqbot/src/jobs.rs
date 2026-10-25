@@ -7,7 +7,7 @@ use crate::{
 };
 use chrono::{Duration, Utc};
 use ik_ai::{
-    external::{self, ExternalTurn, RunOutcome},
+    external::{self, ExternalMemory, ExternalTurn, RunOutcome},
     quota::{self, Hold},
 };
 use ik_kernel::{
@@ -57,10 +57,38 @@ fn expired(t: &Turn, reserve_secs: i64) -> bool {
 fn hold(t: &Turn) -> Option<Hold> {
     Some(Hold {
         id: t.hold_id,
-        user_id: quota::SITE,
+        user_id: t.payer_user_id.unwrap_or(quota::SITE),
         day: t.quota_day?,
         amount: t.hold_amount,
     })
+}
+
+/// 绑定账号的状态（ADR 0008 §4.2）。
+enum Account {
+    /// 没绑定：游客。
+    Guest,
+    /// 绑定了状态正常的账号：按个人额度，可以用记忆。
+    Bound(i64),
+    /// 绑定的账号被封禁：不回复，也不降级成游客（否则封号后还能用游客次数）。
+    Blocked,
+}
+
+/// 读绑定账号的状态。已注销或合并的账号顺手解绑，按游客处理（注销即解绑）。
+async fn account(c: &mut PgConnection, t: &Turn) -> Result<Account, Problem> {
+    let Some(user_id) = t.user_id else {
+        return Ok(Account::Guest);
+    };
+    let status = ik_auth::interop::user_statuses(c, &[user_id])
+        .await?
+        .remove(&user_id);
+    match status {
+        Some(user) if user.status == "active" => Ok(Account::Bound(user_id)),
+        Some(user) if !user.gone() => Ok(Account::Blocked),
+        _ => {
+            crate::me::release(c, t.identity_id, Some(user_id)).await?;
+            Ok(Account::Guest)
+        }
+    }
 }
 
 /// Public for integration testing with fake AI and QQ HTTP providers.
@@ -76,7 +104,6 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     if !s.config.enabled
         || !settings.enabled
         || !t.allowed
-        || t.user_id.is_some()
         || !s.config.apps.values().any(|app| app.app_id == t.app_id)
     {
         abandon(&mut tx, &t, "disabled_or_blocked").await?;
@@ -116,20 +143,23 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         tx.commit().await?;
         return deliver(s, t).await;
     }
-    let command = t.content.split_whitespace().next().unwrap_or("");
-    if command.starts_with('/') {
-        let content=match command {
-            "/帮助"=>"在群里 @我或直接给我发消息就能聊天。游客每天有免费次数，北京时间 04:00 重置。发送 /额度 查看剩余次数。账号绑定功能将在下一期开放。".to_owned(),
-            "/额度"=>{
-                let day=ik_kernel::time::biz_day(Utc::now());
-                let used=sqlx::query_scalar!("SELECT turns FROM qq_guest_usage WHERE day=$1 AND identity_id=$2",day,t.identity_id).fetch_optional(&mut *tx).await?.unwrap_or(0);
-                format!("今天还剩 {} 次免费对话，04:00 重置。",(settings.guest_daily_turns-used).max(0))
-            }
-            _=>"暂不支持这个指令，发送 /帮助 查看可用指令。".to_owned(),
-        };
-        t.output = Some(vec![content]);
+    let account = account(&mut tx, &t).await?;
+    if matches!(account, Account::Blocked) {
+        repo::terminal(&mut tx, id, "skipped", "account_blocked").await?;
+        tx.commit().await?;
+        return Ok(());
+    }
+    let bound = match account {
+        Account::Bound(user_id) => Some(user_id),
+        _ => None,
+    };
+    if t.content.starts_with('/') {
+        let reply = crate::commands::run(s, &mut tx, &t, bound, &settings).await?;
+        t.output = Some(vec![reply.text]);
+        t.reason = reply.reason.map(str::to_owned);
         save_output(&mut tx, &t).await?;
         tx.commit().await?;
+        reply.effects.dispatch(s.ai.bus.as_ref());
         return deliver(s, t).await;
     }
     let Some(slug) = t.card_slug.clone() else {
@@ -157,17 +187,34 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     } else {
         "\n你在 QQ 单聊中回复对方，用纯文本简短回答，不要输出链接或 markdown。"
     };
+    let scope = t.group_id.map(repo::group_scope);
+    // 开场（这段上下文里还没有回复过）：私下场合可以问起到期的待跟进。
+    let opening = !history.iter().any(|line| line.assistant);
     let prepared = match external::prepare(
         &s.ai,
         ExternalTurn {
             channel: "qq",
             card_slug: slug.clone(),
-            model_key: settings.guest_model_key.clone(),
-            viewer: None,
+            // 游客专用模型只给游客；绑定用户与站内一样用角色卡的模型。
+            model_key: if bound.is_some() {
+                None
+            } else {
+                settings.guest_model_key.clone()
+            },
+            // 群是公开场合，论坛工具一律按游客视角（不按某个人的权限去读）；单聊里绑定用户用自己的身份（TOOL-004）。
+            viewer: bound.filter(|_| t.group_id.is_none()),
             history,
             system_note: note.to_owned(),
             max_chars: settings.max_reply_chars as usize,
             timeout_secs: settings.reply_timeout_secs as u64,
+            memory: bound.map(|user_id| ExternalMemory {
+                user_id,
+                public: scope.clone(),
+                opening,
+            }),
+            shared_scope: scope
+                .clone()
+                .filter(|_| bound.is_some() || settings.guest_reads_group_memory),
         },
     )
     .await
@@ -194,7 +241,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         return Ok(());
     }
     if !t.allowed
-        || t.user_id.is_some()
+        || t.user_id != bound
         || t.card_slug.as_deref() != Some(&slug)
         || expired(&t, i64::from(settings.reply_timeout_secs) + 15)
     {
@@ -202,27 +249,66 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         tx.commit().await?;
         return Ok(());
     }
-    // Fixed lock order: site quota -> all guest tokens -> group usage -> identity usage.
     let now = Utc::now();
-    let reserved = quota::reserve_site_only(
-        &mut tx,
-        &s.ids,
-        prepared.limits,
-        estimate,
-        now,
-        Duration::seconds(900),
-    )
-    .await?;
-    let site_hold = match reserved {
-        Ok(h) => h,
-        Err(reason) => {
-            quota_notice(
-                &mut tx,
-                &mut t,
-                reason.as_str(),
-                "今天的 AI 额度已用完，04:00 重置。",
-            )
-            .await?;
+    let ttl = Duration::seconds(900);
+    let hold = if let Some(user_id) = bound {
+        // 绑定用户：与站内私信同一个每日额度（QUOTA-005～010）。
+        match quota::reserve(
+            &mut tx,
+            &s.ids,
+            prepared.limits,
+            user_id,
+            estimate,
+            now,
+            ttl,
+        )
+        .await?
+        {
+            Ok(hold) => hold,
+            Err(reason) => {
+                // 配额日在北京时间 04:00 切换（QUOTA-004）。
+                quota_notice(
+                    &mut tx,
+                    &mut t,
+                    reason.as_str(),
+                    "你今天的 AI 额度已用完，04:00 重置。",
+                )
+                .await?;
+                tx.commit().await?;
+                return if t.output.is_some() {
+                    deliver(s, t).await
+                } else {
+                    Ok(())
+                };
+            }
+        }
+    } else {
+        // Fixed lock order: site quota -> all guest tokens -> group usage -> identity usage.
+        let site_hold =
+            match quota::reserve_site_only(&mut tx, &s.ids, prepared.limits, estimate, now, ttl)
+                .await?
+            {
+                Ok(h) => h,
+                Err(reason) => {
+                    quota_notice(
+                        &mut tx,
+                        &mut t,
+                        reason.as_str(),
+                        "今天的 AI 额度已用完，04:00 重置。",
+                    )
+                    .await?;
+                    tx.commit().await?;
+                    return if t.output.is_some() {
+                        deliver(s, t).await
+                    } else {
+                        Ok(())
+                    };
+                }
+            };
+        if let Some(reason) = reserve_guest(&mut tx, &t, &settings, estimate, site_hold.day).await?
+        {
+            quota::settle(&mut tx, &site_hold, &t.execution_key, 0, now).await?;
+            quota_notice(&mut tx,&mut t,reason,&format!("今天的免费次数或游客额度用完了（每天 {} 次，04:00 重置）。在绳网「设置 → 绑定 QQ」绑定后按个人额度使用，还能让我记住你。发送 /帮助 查看绑定方法。",settings.guest_daily_turns)).await?;
             tx.commit().await?;
             return if t.output.is_some() {
                 deliver(s, t).await
@@ -230,24 +316,18 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
                 Ok(())
             };
         }
+        site_hold
     };
-    if let Some(reason) = reserve_guest(&mut tx, &t, &settings, estimate, site_hold.day).await? {
-        quota::settle(&mut tx, &site_hold, &t.execution_key, 0, now).await?;
-        quota_notice(&mut tx,&mut t,reason,&format!("今天的免费次数或游客额度用完了（每天 {} 次，04:00 重置）。账号绑定功能将在下一期开放。",settings.guest_daily_turns)).await?;
-        tx.commit().await?;
-        return if t.output.is_some() {
-            deliver(s, t).await
-        } else {
-            Ok(())
-        };
-    }
-    t.hold_id = site_hold.id;
-    t.hold_amount = site_hold.amount;
-    t.quota_day = Some(site_hold.day);
-    t.guest_reserved = true;
-    t.guest_token_reserved = estimate;
+    let guest = bound.is_none();
+    let guest_tokens = if guest { estimate } else { 0 };
+    t.hold_id = hold.id;
+    t.hold_amount = hold.amount;
+    t.quota_day = Some(hold.day);
+    t.payer_user_id = bound;
+    t.guest_reserved = guest;
+    t.guest_token_reserved = guest_tokens;
     t.ai_user_id = Some(prepared.ai_user_id);
-    sqlx::query!("UPDATE qq_turns SET status='processing',ai_user_id=$2,hold_id=$3,quota_day=$4,hold_amount=$5,guest_reserved=TRUE,guest_token_reserved=$6,model_key=$7 WHERE id=$1",id,prepared.ai_user_id,site_hold.id,site_hold.day,site_hold.amount,estimate,prepared.model_key).execute(&mut *tx).await?;
+    sqlx::query!("UPDATE qq_turns SET status='processing',ai_user_id=$2,hold_id=$3,quota_day=$4,hold_amount=$5,guest_reserved=$6,guest_token_reserved=$7,model_key=$8,payer_user_id=$9 WHERE id=$1",id,prepared.ai_user_id,hold.id,hold.day,hold.amount,guest,guest_tokens,prepared.model_key,bound).execute(&mut *tx).await?;
     sqlx::query!(
         "UPDATE qq_messages SET ai_user_id=$2 WHERE id=$1",
         t.message_id,
@@ -258,7 +338,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     tx.commit().await?;
 
     let reply = external::reply(&s.ai, &prepared, id).await;
-    let actual = reply.charge(site_hold.amount.max(estimate));
+    let actual = reply.charge(hold.amount.max(estimate));
     let mut tx = s.db.begin().await?;
     let Some(mut t) = repo::turn(&mut tx, id).await? else {
         return Ok(());
@@ -288,12 +368,12 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         || segments.is_empty()
         || expired(&t, 0)
         || !t.allowed
-        || t.user_id.is_some()
+        || t.user_id != bound
     {
         refund_turn(&mut tx, &t).await?;
         let reason = if expired(&t, 0) {
             "window_expired"
-        } else if !t.allowed || t.user_id.is_some() {
+        } else if !t.allowed || t.user_id != bound {
             "disabled_or_blocked"
         } else {
             "generation_failed"
@@ -307,6 +387,14 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         t.reason = Some("blocked_word".to_owned());
     }
     save_output(&mut tx, &t).await?;
+    // 绑定用户的对话停下来以后提炼记忆（MEM-020 的去抖：同一个任务键，每次往后推）。
+    if let Some(user_id) = bound
+        && catalog.memory.enabled
+    {
+        let run_at = Utc::now() + Duration::seconds(catalog.memory.extract_delay_secs);
+        crate::memory_jobs::enqueue(s, &mut tx, user_id, prepared.ai_user_id, t.group_id, run_at)
+            .await?;
+    }
     tx.commit().await?;
     deliver(s, t).await
 }
@@ -394,17 +482,21 @@ async fn finalize_cost(c: &mut PgConnection, t: &Turn, actual: i64) -> Result<()
     ) {
         return Ok(());
     }
-    let delta = actual - t.guest_token_reserved;
-    sqlx::query!(
-        "UPDATE qq_guest_tokens SET used=GREATEST(0,used+$2) WHERE day=$1",
-        h.day,
-        delta
-    )
-    .execute(&mut *c)
-    .await?;
+    // 游客合计只记游客的用量；绑定用户的用量已经记在个人与全站计数上。
+    if t.payer_user_id.is_none() {
+        let delta = actual - t.guest_token_reserved;
+        sqlx::query!(
+            "UPDATE qq_guest_tokens SET used=GREATEST(0,used+$2) WHERE day=$1",
+            h.day,
+            delta
+        )
+        .execute(&mut *c)
+        .await?;
+    }
+    // 群的当日用量统计（后台展示）：绑定用户没有经过游客预占，这一行可能还不存在。
     if let Some(g) = t.group_id {
         sqlx::query!(
-            "UPDATE qq_group_usage SET tokens=tokens+$3 WHERE day=$1 AND group_id=$2",
+            "INSERT INTO qq_group_usage(day,group_id,tokens) VALUES($1,$2,$3) ON CONFLICT(day,group_id) DO UPDATE SET tokens=qq_group_usage.tokens+EXCLUDED.tokens",
             h.day,
             g,
             actual
@@ -563,6 +655,23 @@ pub async fn prune(s: &QqState) -> Result<(), Problem> {
     sqlx::query!("DELETE FROM qq_guest_tokens WHERE day<$1", before)
         .execute(&mut *tx)
         .await?;
+    // 过期一天以上的绑定码（留一天给排障）。
+    sqlx::query!(
+        "DELETE FROM qq_bind_codes WHERE expires_at<$1",
+        Utc::now() - Duration::days(1)
+    )
+    .execute(&mut *tx)
+    .await?;
+    let left = sqlx::query_scalar!(
+        "SELECT id FROM qq_groups WHERE left_at<$1",
+        Utc::now() - Duration::days(30)
+    )
+    .fetch_all(&mut *tx)
+    .await?;
     tx.commit().await?;
+    // 机器人退群 30 天后清掉那个群的共享记忆（ADR 0008 §8.3）；重新加群从头开始。
+    for group_id in left {
+        ik_ai::shared_memory::clear(&s.ai, &repo::group_scope(group_id)).await?;
+    }
     Ok(())
 }

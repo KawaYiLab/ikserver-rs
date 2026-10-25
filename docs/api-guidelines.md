@@ -186,6 +186,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | MIHOYO_UPSTREAM_ERROR | 502 | 米游社服务暂时不可用，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | VIDEO_UPSTREAM_ERROR | 502 | B 站服务暂时不可用，请稍后再试 | 视频预览时 B 站超时或报错；5xx 统一文案，客户端按 code 区分。保存帖子不受影响 |
 | MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | `IK_MIHOYO__ENABLED=false`；5xx 统一文案 |
+| QQ_BOT_DISABLED | 409 | QQ 机器人没有开启 | 部署配置 `IK_QQBOT__ENABLED=false` 或管理后台关了 QQ 时生成绑定码（ADR 0008） |
+| QQ_BIND_CODE_LIMIT | 429 | 绑定码生成得太频繁了，请稍后再试 | 同时有 3 个有效的 QQ 绑定码，或一小时内生成了 10 个（ADR 0008） |
 | STORY_DISABLED | 503 | 剧情库暂不可用 | 还没有上传语料（没有生效版本）；5xx 统一文案 |
 
 ## 限流
@@ -204,20 +206,28 @@ GET /v1/posts?cursor=eyJ...&limit=20
 - QQ Webhook（`POST /v1/qq/webhook`）免于默认 IP 桶，也不带上述全站 RateLimit 头；按配置 AppID 每秒限流（默认 50），超限 429 + Retry-After。
 - 视频预览（`/v1/videos/resolve`，会访问 B 站）：每人每分钟 30 次；结果在进程内缓存 10 分钟。
 
-## QQ 官方机器人（ADR 0008，第 1 期）
+## QQ 官方机器人（ADR 0008）
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/v1/qq/webhook` | QQ 平台回调；AppID + Ed25519 验签，64 KiB，持久化入队后 ACK。无 Origin 回调通过现有 CSRF 中间件 |
+| POST | `/v1/me/qq/bind-codes` | 生成一次性绑定码（8 位，10 分钟），201 `{code, expiresAt, instruction}`；同时最多 3 个有效、每小时 10 个 |
+| GET | `/v1/me/qq/bindings` | 我绑定的 QQ 身份：场景、群展示名、绑定与最后使用时间，不返回 openid |
+| DELETE | `/v1/me/qq/bindings/{id}` | 解绑，204；不是自己的 404 |
 | GET / PUT | `/v1/admin/qq/settings` | 游客次数、游客 token、上下文、生成预算、清洗等设置 |
 | GET | `/v1/admin/qq/bots` | 部署配置中的机器人列表，不返回密钥 |
 | GET / PUT | `/v1/admin/qq/bots/{appId}` | 机器人展示名、默认角色、开关 |
 | GET | `/v1/admin/qq/groups` | page/limit 分页，返回群活跃时间与今日用量，不返回完整 openid |
 | PUT | `/v1/admin/qq/groups/{id}` | 群展示名、角色覆盖、启用/封禁、resetContext |
+| GET | `/v1/admin/qq/identities?user=&group=` | QQ 身份与绑定（`user` 为 id 或用户名），openid 只给后 6 位 |
+| PUT | `/v1/admin/qq/identities/{id}` | `{blocked, unbind}`：封禁 / 解封身份、强制解绑，204 |
+| GET | `/v1/admin/qq/turns?status=&group=` | 回复记录（状态、原因、模型、用量），不含消息正文 |
+| GET / POST | `/v1/admin/qq/groups/{id}/memories` | 群共享记忆列表 / 新建（`{character, content, pinned}`） |
+| PUT / DELETE | `/v1/admin/qq/groups/{id}/memories/{memoryId}` | 改正文与置顶 / 删除 |
 
 后台接口只限管理员，写操作和审计同事务。角色卡接口增加 `qqEnabled`。
-第 1 期沿用已有错误码：401 UNAUTHORIZED、400 VALIDATION_FAILED、404 NOT_FOUND、429 RATE_LIMITED；
-绑定码和绑定身份接口、新错误码 `QQ_BIND_CODE_LIMIT` / `QQ_BOT_DISABLED` 留到第 2 期。
+新错误码 `QQ_BOT_DISABLED`（409）、`QQ_BIND_CODE_LIMIT`（429）；其余沿用 401 UNAUTHORIZED、400 VALIDATION_FAILED、
+404 NOT_FOUND、429 RATE_LIMITED。绑定码错误、过期发生在 QQ 里，用文字回复，不是接口错误码。
 
 ## 实时（WebSocket `/v1/realtime`）
 

@@ -3054,6 +3054,517 @@
         ]
       }
     },
+    "/v1/admin/qq/bots": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_bots",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqBotList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/qq/bots/{appId}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_bot",
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqBotView"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_put_bot",
+        "parameters": [
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QqUpdateBot"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqBotView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/qq/groups": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_groups",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_QqGroupView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/qq/groups/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_put_group",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QqUpdateGroup"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqGroupView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/qq/groups/{id}/memories": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "群共享记忆",
+        "operationId": "qq_group_memories",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqGroupMemories"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "新建一条群共享记忆",
+        "operationId": "qq_create_group_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedMemoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedMemoryView"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      }
+    },
+    "/v1/admin/qq/groups/{id}/memories/{memoryId}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "修改一条群共享记忆（正文、置顶）",
+        "operationId": "qq_update_group_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "memoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SharedMemoryInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedMemoryView"
+                }
+              }
+            }
+          },
+          "404": {}
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "删除一条群共享记忆",
+        "operationId": "qq_delete_group_memory",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "memoryId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "404": {}
+        }
+      }
+    },
+    "/v1/admin/qq/identities": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "QQ 身份与绑定",
+        "operationId": "qq_identities",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "description": "绳网用户 id 或用户名：只看这个账号绑定的身份。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "description": "群 id：只看这个群里的身份。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_QqIdentityView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/qq/identities/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "封禁 / 解封 QQ 身份、强制解绑",
+        "operationId": "qq_put_identity",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QqUpdateIdentity"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {},
+          "404": {}
+        }
+      }
+    },
+    "/v1/admin/qq/settings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_settings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "qq_put_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QqSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqSettings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/admin/qq/turns": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "QQ 回复记录（排障：状态、原因、模型、用量；不含消息正文）",
+        "operationId": "qq_turns",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "queued / processing / completed / failed / skipped。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Paged_QqTurnView"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/reports": {
       "get": {
         "tags": [
@@ -9347,6 +9858,149 @@
         ]
       }
     },
+    "/v1/me/qq/bind-codes": {
+      "post": {
+        "tags": [
+          "me"
+        ],
+        "summary": "生成 QQ 绑定码",
+        "description": "一次性、10 分钟有效。在 QQ 里对机器人发 `/绑定 <码>`（单聊或在群里 @机器人）就把发消息的那个 QQ 身份绑到当前账号；\n同一个人在不同群里是不同的身份，每个群要各绑一次。同时最多 3 个有效码，每小时最多生成 10 个。",
+        "operationId": "qq_create_code",
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindCode"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "QQ_BOT_DISABLED",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "QQ_BIND_CODE_LIMIT",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/qq/bindings": {
+      "get": {
+        "tags": [
+          "me"
+        ],
+        "summary": "我绑定的 QQ 身份",
+        "operationId": "qq_bindings",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingList"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/me/qq/bindings/{id}": {
+      "delete": {
+        "tags": [
+          "me"
+        ],
+        "summary": "解绑一个 QQ 身份",
+        "operationId": "qq_unbind",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/me/reads": {
       "post": {
         "tags": [
@@ -11696,6 +12350,22 @@
         }
       }
     },
+    "/v1/qq/webhook": {
+      "post": {
+        "tags": [
+          "qq"
+        ],
+        "operationId": "qq_webhook",
+        "responses": {
+          "200": {
+            "description": "QQ event acknowledged"
+          },
+          "401": {
+            "description": "Signature rejected"
+          }
+        }
+      }
+    },
     "/v1/realtime": {
       "get": {
         "tags": [
@@ -13262,6 +13932,7 @@
           "knockVisible",
           "dmEnabled",
           "commentEnabled",
+          "qqEnabled",
           "sortOrder",
           "outputMode",
           "systemPrompt",
@@ -13324,6 +13995,9 @@
           },
           "outputMode": {
             "$ref": "#/components/schemas/OutputMode"
+          },
+          "qqEnabled": {
+            "type": "boolean"
           },
           "slug": {
             "type": "string"
@@ -15029,6 +15703,28 @@
           }
         }
       },
+      "BindCode": {
+        "type": "object",
+        "required": [
+          "code",
+          "expiresAt",
+          "instruction"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "8 位绑定码（大写字母与数字）。"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "instruction": {
+            "type": "string",
+            "description": "给用户看的用法说明。"
+          }
+        }
+      },
       "BindEmailCodeRequest": {
         "type": "object",
         "description": "给要绑定的新邮箱发验证码。",
@@ -15058,6 +15754,55 @@
           }
         },
         "additionalProperties": false
+      },
+      "Binding": {
+        "type": "object",
+        "required": [
+          "id",
+          "scene",
+          "lastActiveAt"
+        ],
+        "properties": {
+          "boundAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "groupName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "群的展示名（管理员在后台填，没有时为「QQ 群 #后四位」）；单聊为空。"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastActiveAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scene": {
+            "type": "string",
+            "description": "`group` 群 / `c2c` 单聊。"
+          }
+        }
+      },
+      "BindingList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Binding"
+            }
+          }
+        }
       },
       "BindingView": {
         "type": "object",
@@ -15538,6 +16283,10 @@
           },
           "outputMode": {
             "$ref": "#/components/schemas/OutputMode"
+          },
+          "qqEnabled": {
+            "type": "boolean",
+            "description": "允许在 QQ 渠道使用此角色，默认关闭（ADR 0008）。"
           },
           "slug": {
             "type": "string"
@@ -20516,6 +21265,304 @@
           }
         }
       },
+      "Paged_QqGroupView": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "appId",
+                "displayName",
+                "enabled",
+                "blocked",
+                "lastActiveAt",
+                "todayGuestTurns",
+                "todayTokens"
+              ],
+              "properties": {
+                "appId": {
+                  "type": "string"
+                },
+                "blocked": {
+                  "type": "boolean"
+                },
+                "cardSlug": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "displayName": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastActiveAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "leftAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "todayGuestTurns": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "todayTokens": {
+                  "type": "integer",
+                  "format": "int64"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
+      "Paged_QqIdentityView": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "appId",
+                "scene",
+                "openidTail",
+                "nickname",
+                "blocked",
+                "available",
+                "lastActiveAt"
+              ],
+              "properties": {
+                "appId": {
+                  "type": "string"
+                },
+                "available": {
+                  "type": "boolean",
+                  "description": "单聊身份是否还是机器人的好友（删好友后为 false）。"
+                },
+                "blocked": {
+                  "type": "boolean"
+                },
+                "boundAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "groupId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "groupName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastActiveAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "nickname": {
+                  "type": "string",
+                  "description": "最近一次的群昵称。"
+                },
+                "openidTail": {
+                  "type": "string",
+                  "description": "openid 只给后 6 位，用于区分。"
+                },
+                "scene": {
+                  "type": "string",
+                  "description": "`group` / `c2c`。"
+                },
+                "userId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
+      "Paged_QqTurnView": {
+        "type": "object",
+        "description": "管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "limit"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "scene",
+                "identityId",
+                "status",
+                "promptTokens",
+                "completionTokens",
+                "segmentsSent",
+                "createdAt"
+              ],
+              "properties": {
+                "aiUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "completionTokens": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "createdAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "finishedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "groupId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "identityId": {
+                  "type": "string"
+                },
+                "modelKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "payerUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "按谁的个人额度计；游客为空。"
+                },
+                "promptTokens": {
+                  "type": "integer",
+                  "format": "int64"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "scene": {
+                  "type": "string"
+                },
+                "segmentsSent": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "status": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "description": "从 1 开始。",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "符合条件的总数。"
+          }
+        }
+      },
       "PaperQuestion": {
         "type": "object",
         "description": "试卷上的一道题（不含正确答案）。",
@@ -21494,6 +22541,405 @@
           },
           "ok": {
             "type": "boolean"
+          }
+        }
+      },
+      "QqBotList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QqBotView"
+            }
+          }
+        }
+      },
+      "QqBotView": {
+        "type": "object",
+        "required": [
+          "appId",
+          "displayName",
+          "enabled"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string"
+          },
+          "defaultCardSlug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QqGroupMemories": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SharedMemoryView"
+            }
+          }
+        }
+      },
+      "QqGroupView": {
+        "type": "object",
+        "required": [
+          "id",
+          "appId",
+          "displayName",
+          "enabled",
+          "blocked",
+          "lastActiveAt",
+          "todayGuestTurns",
+          "todayTokens"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string"
+          },
+          "blocked": {
+            "type": "boolean"
+          },
+          "cardSlug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastActiveAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "leftAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "todayGuestTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "todayTokens": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "QqIdentityView": {
+        "type": "object",
+        "required": [
+          "id",
+          "appId",
+          "scene",
+          "openidTail",
+          "nickname",
+          "blocked",
+          "available",
+          "lastActiveAt"
+        ],
+        "properties": {
+          "appId": {
+            "type": "string"
+          },
+          "available": {
+            "type": "boolean",
+            "description": "单聊身份是否还是机器人的好友（删好友后为 false）。"
+          },
+          "blocked": {
+            "type": "boolean"
+          },
+          "boundAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "groupName": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastActiveAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nickname": {
+            "type": "string",
+            "description": "最近一次的群昵称。"
+          },
+          "openidTail": {
+            "type": "string",
+            "description": "openid 只给后 6 位，用于区分。"
+          },
+          "scene": {
+            "type": "string",
+            "description": "`group` / `c2c`。"
+          },
+          "userId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "QqSettings": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "guestDailyTurns",
+          "guestGroupDailyTurns",
+          "guestDailyTokens",
+          "groupContextTurns",
+          "groupContextHours",
+          "c2cContextTurns",
+          "replyTimeoutSecs",
+          "maxReplyChars",
+          "linkMode",
+          "blockedWords",
+          "guestReadsGroupMemory"
+        ],
+        "properties": {
+          "blockedWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "c2cContextTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "groupContextHours": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "groupContextTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "guestDailyTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "guestDailyTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "guestGroupDailyTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "guestModelKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guestReadsGroupMemory": {
+            "type": "boolean"
+          },
+          "linkMode": {
+            "type": "string"
+          },
+          "maxReplyChars": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "replyTimeoutSecs": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "QqTurnView": {
+        "type": "object",
+        "required": [
+          "id",
+          "scene",
+          "identityId",
+          "status",
+          "promptTokens",
+          "completionTokens",
+          "segmentsSent",
+          "createdAt"
+        ],
+        "properties": {
+          "aiUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completionTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "identityId": {
+            "type": "string"
+          },
+          "modelKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "payerUserId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "按谁的个人额度计；游客为空。"
+          },
+          "promptTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "scene": {
+            "type": "string"
+          },
+          "segmentsSent": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "QqUpdateBot": {
+        "type": "object",
+        "required": [
+          "displayName",
+          "enabled"
+        ],
+        "properties": {
+          "defaultCardSlug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QqUpdateGroup": {
+        "type": "object",
+        "required": [
+          "displayName",
+          "enabled",
+          "blocked"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "boolean"
+          },
+          "cardSlug": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "resetContext": {
+            "type": "boolean"
+          }
+        }
+      },
+      "QqUpdateIdentity": {
+        "type": "object",
+        "required": [
+          "blocked"
+        ],
+        "properties": {
+          "blocked": {
+            "type": "boolean",
+            "description": "封禁这个 QQ 身份（不再回复）。"
+          },
+          "unbind": {
+            "type": "boolean",
+            "description": "强制解绑。"
           }
         }
       },
@@ -23113,6 +24559,83 @@
           }
         },
         "additionalProperties": false
+      },
+      "SharedMemoryInput": {
+        "type": "object",
+        "description": "管理员新建或修改一条共享记忆。",
+        "properties": {
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "新建时必填：角色 slug。"
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pinned": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "SharedMemoryView": {
+        "type": "object",
+        "description": "管理后台看到的一条共享记忆。",
+        "required": [
+          "id",
+          "aiUserId",
+          "content",
+          "origin",
+          "pinned",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "aiUserId": {
+            "type": "string"
+          },
+          "character": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "角色 slug（角色卡被删掉时为空）。"
+          },
+          "content": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "description": "`extracted` / `told` / `manual`。"
+          },
+          "pinned": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "SignRequest": {
         "type": "object",

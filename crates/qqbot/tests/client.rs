@@ -211,7 +211,7 @@ async fn rejected_token_refreshes_once_and_keeps_message_identity() {
 }
 
 #[tokio::test]
-async fn near_expiry_refresh_accepts_the_same_platform_token() {
+async fn near_expiry_refresh_is_throttled_and_accepts_the_same_platform_token() {
     let response = (
         StatusCode::OK,
         json!({"access_token":"same","expires_in":60}),
@@ -230,8 +230,9 @@ async fn near_expiry_refresh_accepts_the_same_platform_token() {
         .send(APP, "c2c", "user", "incoming", 2, "second")
         .await
         .unwrap();
+    // 刚取过：即使离过期不到 5 分钟，也不为每条消息再打一次 token 接口（会被限频）。
     let calls = server.calls.lock().await;
-    assert_eq!(calls.tokens.len(), 2);
+    assert_eq!(calls.tokens.len(), 1);
     assert!(
         calls
             .messages

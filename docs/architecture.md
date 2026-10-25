@@ -131,7 +131,7 @@ flowchart LR
   后台任务 `ai.comment_reply` 准备（复核、组装上下文与记忆、预占）→ 事务外调用（不推增量）→ 定稿（清洗、
   沉浸守卫、经 `ik_comments::interop::insert_ai_reply` 以 AI 名义回复、结算、审计）。AI 账号发出的互动通知
   由 `ik_notify::interop::send` 统一不写（NOTIF-014）。
-  生成核心在 `ik_ai::generate`（私信与评论共用）：工具循环（12 个只读论坛工具，`ik_ai::tools`，以游客身份调用
+  生成核心在 `ik_ai::generate`（私信与评论共用）：工具循环（7 个只读论坛工具，`ik_ai::tools`，以游客身份调用
   content / comments / profile / feed / search 的 service，再按触发者做拉黑过滤）、逐轮计费、首帧看门狗与退回默认模型；
   私信另有工作流时间线与多气泡分段（`ik_ai::workflow`），评论没有（D-089 方案 A）。
   工具清单按角色卡组装（`ik_ai::toolbox`，ADR 0004）：论坛工具之外，可以开剧情库工具（进程内调用
@@ -143,8 +143,12 @@ flowchart LR
   回调按 AppID 验签，入站消息、去重 turn 与 `qq.reply` 在同一事务落库后 ACK；不在 HTTP 请求里调用模型。
   `ik_ai::external` 提供渠道无关的生成与额度预估，qqbot 自己预占和结算。游客仅记全站额度一次；锁顺序为
   全站 → 游客合计 → 群 → 身份。生成结果先持久化，再在事务外按 `msg_id + msg_seq` 发送，发送重试不重复生成。
-  各实例每 60 秒刷新 QQ 设置；Webhook 单独按配置 AppID 限流，免于通用按 IP 的桶。第 1 期只开放游客模式；
-  绑定与个人记忆、群共享记忆按 ADR 0008 后续阶段实施。
+  各实例每 60 秒刷新 QQ 设置；Webhook 单独按配置 AppID 限流，免于通用按 IP 的桶。
+  绑定：站内 `/v1/me/qq/*` 发一次性码，QQ 里 `/绑定` 消费，绑定成功经 `ik_notify::interop::system` 发站内通知。
+  绑定用户经 `ik_ai::quota::reserve` 用个人额度，记忆读写走 `ik_ai::external`（`ExternalMemory` 指明公开场合的键）；
+  提炼由 qqbot 的 `qq.extract_memories` / `qq.extract_group_memories` 取自己的消息，交给
+  `ik_ai::memory_jobs::extract_external` 与 `ik_ai::shared_memory::extract`。记忆按场合使用的规则（`ai_memories.source_scope`、
+  `ai_shared_memories`）在 ik-ai 里，ik-ai 不认识 QQ，只认场合键。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。
 
 ## 请求处理流

@@ -269,6 +269,99 @@ async fn search_returns_public_named_unblocked_posts_as_links(db: PgPool) {
     );
 }
 
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn search_can_filter_keywords_by_public_category(db: PgPool) {
+    let w = world(db).await;
+    let outside = post(
+        &w.state,
+        DAVE,
+        "零号空洞实录",
+        "另一分区的相同关键词。",
+        None,
+        false,
+    )
+    .await;
+    let out = w
+        .run(
+            "search_posts",
+            serde_json::json!({ "query": "零号空洞", "category": "guide", "limit": 1 }),
+        )
+        .await;
+    assert!(out.text.contains(&format!("/post/{})", w.guide)));
+    assert!(!out.text.contains(&format!("/post/{outside})")));
+    assert!(
+        matches!(out.meta, ToolMeta::Search { items, .. } if items.len() == 1 && items[0].0 == w.guide)
+    );
+    let out = w
+        .run(
+            "search_posts",
+            serde_json::json!({ "query": "零号空洞", "category": "staff" }),
+        )
+        .await;
+    assert_eq!(out.text, "没有找到分类「staff」。");
+}
+
+fn page_body(text: &str) -> &str {
+    text.split_once("\n帖子正文：")
+        .unwrap()
+        .1
+        .rsplit_once("\n读取范围：")
+        .unwrap()
+        .0
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn post_content_continues_unicode_body_without_losing_statistics(db: PgPool) {
+    let w = world(db).await;
+    let body = "甲🙂乙é".repeat(1300);
+    let id = post(&w.state, BOB, "长篇测试", &body, None, false).await;
+    let first = w
+        .run("get_post_content", serde_json::json!({ "document_id": id }))
+        .await;
+    assert!(!first.is_error);
+    assert!(first.text.chars().count() <= tools::MAX_RESULT_CHARS);
+    assert!(first.text.contains("\n互动：阅读 "));
+    assert!(first.text.contains("\ntruncated: true\n"));
+    let offset: usize = first
+        .text
+        .lines()
+        .last()
+        .unwrap()
+        .strip_prefix("next_offset: ")
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert_eq!(offset, page_body(&first.text).chars().count());
+    let second = w
+        .run(
+            "get_post_content",
+            serde_json::json!({ "document_id": id, "offset": offset }),
+        )
+        .await;
+    assert!(!second.is_error);
+    assert!(second.text.chars().count() <= tools::MAX_RESULT_CHARS);
+    assert!(second.text.ends_with("truncated: false\nnext_offset: null"));
+    assert_eq!(
+        format!("{}{}", page_body(&first.text), page_body(&second.text)),
+        body
+    );
+    for offset in [
+        serde_json::json!(-1),
+        serde_json::json!(1.5),
+        serde_json::json!("no"),
+        serde_json::json!(body.chars().count() + 1),
+    ] {
+        assert!(
+            w.run(
+                "get_post_content",
+                serde_json::json!({ "document_id": id, "offset": offset })
+            )
+            .await
+            .is_error
+        );
+    }
+}
+
 async fn out_images(w: &World, id: i64) -> Vec<String> {
     w.run("get_post_content", serde_json::json!({ "document_id": id }))
         .await
@@ -285,10 +378,11 @@ async fn post_content_hides_author_and_respects_visibility(db: PgPool) {
             serde_json::json!({ "document_id": w.anonymous.to_string() }),
         )
         .await;
-    assert_eq!(
-        out.text,
-        "帖子标题：零号空洞匿名爆料\n帖子正文：听说有隐藏关卡。"
-    );
+    assert!(out.text.starts_with("帖子标题：零号空洞匿名爆料\n"));
+    assert!(out.text.contains("\n帖子正文：听说有隐藏关卡。\n"));
+    assert!(out.text.contains("\n互动：阅读 ") && out.text.contains(" · 收藏 "));
+    assert!(out.text.ends_with("truncated: false\nnext_offset: null"));
+    assert!(!out.text.contains("bob"));
     assert_eq!(
         out.meta,
         ToolMeta::Read {
@@ -321,13 +415,6 @@ async fn post_content_hides_author_and_respects_visibility(db: PgPool) {
         out_images(&w, pictured).await,
         vec!["https://cdn.test/p.png".to_owned()]
     );
-    let engagement = w
-        .text(
-            "get_post_engagement",
-            serde_json::json!({ "document_id": w.guide }),
-        )
-        .await;
-    assert!(engagement.starts_with("帖子《零号空洞攻略》互动数据：\n阅读："));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -404,7 +491,7 @@ async fn users_are_found_exactly_and_hidden_ones_are_not(db: PgPool) {
         lines[1].starts_with("等级：Lv.") && lines[2].starts_with("丁尼："),
         "{info}"
     );
-    assert!(info.ends_with("简介：简介 第一行 第二行"));
+    assert!(info.contains("\n简介：简介 第一行 第二行\n"));
     // 只做精确匹配（D-085 方案 A）；隐藏主页、与查看者有拉黑关系的当作查无此人。
     for name in ["bo", "dave", "carol"] {
         assert_eq!(
@@ -414,22 +501,19 @@ async fn users_are_found_exactly_and_hidden_ones_are_not(db: PgPool) {
         );
     }
     assert_eq!(
-        w.text("get_user_stats", serde_json::json!({})).await,
+        w.text("get_user_info", serde_json::json!({})).await,
         "（未提供用户名）"
     );
-    let stats = w
-        .text("get_user_stats", serde_json::json!({ "username": "bob" }))
-        .await;
-    assert!(stats.contains("\n发帖数：1\n"), "{stats}");
-    assert!(stats.ends_with("粉丝数：0\n关注数：0"));
+    assert!(info.contains("\n发帖数：1\n"), "{info}");
+    assert!(info.ends_with("粉丝数：0\n关注数：0"));
 
     let posts = w
         .text(
-            "get_posts_by_author",
-            serde_json::json!({ "username": "bob" }),
+            "get_user_activity",
+            serde_json::json!({ "username": "bob", "kind": "posts" }),
         )
         .await;
-    assert!(posts.starts_with("@bob 近期发布的帖子：\n"));
+    assert!(posts.starts_with("@bob 的近期动态：\n最新发帖：\n"));
     assert!(posts.contains(&format!("[零号空洞攻略](/post/{})", w.guide)));
     assert!(!posts.contains("匿名爆料") && !posts.contains("被隐藏"));
 
@@ -450,6 +534,28 @@ async fn users_are_found_exactly_and_hidden_ones_are_not(db: PgPool) {
         "{activity}"
     );
     assert!(!activity.contains("匿名补充"));
+    let comments = w
+        .text(
+            "get_user_activity",
+            serde_json::json!({ "username": "bob", "kind": "comments" }),
+        )
+        .await;
+    assert!(comments.contains("补充一点") && !comments.contains("最新发帖"));
+    let posts = w
+        .text(
+            "get_user_activity",
+            serde_json::json!({ "username": "bob", "kind": "posts" }),
+        )
+        .await;
+    assert!(!posts.contains("补充一点") && !posts.contains("最新评论"));
+    comment(&w.state, BOB, w.carols, None, "拉黑作者帖子上的评论", false).await;
+    let comments = w
+        .text(
+            "get_user_activity",
+            serde_json::json!({ "username": "bob", "kind": "comments" }),
+        )
+        .await;
+    assert!(!comments.contains("拉黑作者帖子上的评论"));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -458,24 +564,17 @@ async fn categories_hot_and_related(db: PgPool) {
     let list = w.text("get_category_list", serde_json::json!({})).await;
     assert_eq!(list, "1. 攻略区（/c/guide） - 攻略与心得");
     let by_category = w
-        .text(
-            "search_posts_by_category",
-            serde_json::json!({ "category": "攻略" }),
-        )
+        .text("search_posts", serde_json::json!({ "category": "攻略" }))
         .await;
+    assert!(by_category.starts_with(&format!(
+        "分类「攻略区」下的最新帖子：\n1. [零号空洞攻略](/post/{})\n",
+        w.guide
+    )));
+    assert!(by_category.contains("分区：攻略区 · 发布："));
+    assert!(by_category.ends_with("先清怪，再开箱。"));
     assert_eq!(
-        by_category,
-        format!(
-            "分类「攻略区」下的最新帖子：\n1. [零号空洞攻略](/post/{})\n   先清怪，再开箱。",
-            w.guide
-        )
-    );
-    assert_eq!(
-        w.text(
-            "search_posts_by_category",
-            serde_json::json!({ "category": "staff" })
-        )
-        .await,
+        w.text("search_posts", serde_json::json!({ "category": "staff" }))
+            .await,
         "没有找到分类「staff」。"
     );
 
@@ -487,31 +586,76 @@ async fn categories_hot_and_related(db: PgPool) {
 
     let related = w
         .text(
-            "get_related_posts",
-            serde_json::json!({ "document_id": w.guide }),
+            "search_posts",
+            serde_json::json!({ "seed_post_id": w.guide }),
         )
         .await;
     assert_eq!(related, "没有找到相关帖子。");
     let more = post(
         &w.state,
         DAVE,
-        "零号空洞攻略进阶",
+        "防御配装细节",
         "第二层怎么打。",
         None,
         false,
     )
     .await;
-    let related = w
-        .text(
-            "get_related_posts",
-            serde_json::json!({ "document_id": w.guide }),
+    let category = ik_content::service::detail(&w.state.forum.content, None, w.guide)
+        .await
+        .unwrap()
+        .category
+        .unwrap()
+        .id;
+    for _ in 0..10 {
+        post(
+            &w.state,
+            BOB,
+            "匿名推荐候选",
+            "同分区候选排在实名帖前面。",
+            Some(category),
+            true,
         )
         .await;
-    assert_eq!(
-        related,
-        format!(
-            "与《零号空洞攻略》相关的帖子：\n1. [零号空洞攻略进阶](/post/{more})\n   第二层怎么打。"
+    }
+    // 游客推荐的前 10 条全被匿名候选占满，AI 仍应找到后面的实名帖。
+    let guest = ik_content::service::related(&w.state.forum.content, None, w.guide, Some(10))
+        .await
+        .unwrap();
+    assert_eq!(guest.len(), 10);
+    assert!(guest.iter().all(|card| card.is_anonymous));
+    let related = w
+        .text(
+            "search_posts",
+            serde_json::json!({ "seed_post_id": w.guide }),
         )
+        .await;
+    // 标题毫无关键词重合，仍可由论坛推荐算法找到。
+    assert!(related.contains(&format!("[防御配装细节](/post/{more})")));
+    assert!(related.ends_with("第二层怎么打。"));
+    let own = post(
+        &w.state,
+        ALICE,
+        "我的攻略",
+        "自己的帖不推荐给自己。",
+        None,
+        false,
+    )
+    .await;
+    let related = w
+        .run(
+            "search_posts",
+            serde_json::json!({ "seed_post_id": w.guide, "viewerUserId": DAVE }),
+        )
+        .await;
+    for id in [w.guide, w.anonymous, w.carols, w.hidden, own] {
+        assert!(
+            !related.text.contains(&format!("/post/{id})")),
+            "{}",
+            related.text
+        );
+    }
+    assert!(
+        matches!(related.meta, ToolMeta::Search { items, .. } if items.iter().any(|(id, _)| *id == more))
     );
 }
 
@@ -522,6 +666,30 @@ async fn unknown_tools_and_bad_arguments(db: PgPool) {
     let out = tools::execute(&w.state, &ctx, "delete_post", "{}").await;
     assert!(out.is_error);
     assert_eq!(out.text, "未知工具：delete_post");
+    for removed in [
+        "get_user_stats",
+        "get_posts_by_author",
+        "search_posts_by_category",
+        "get_related_posts",
+        "get_post_engagement",
+    ] {
+        let out = tools::execute(&w.state, &ctx, removed, "{}").await;
+        assert!(out.is_error, "{removed}");
+    }
+    for args in [
+        serde_json::json!({ "seed_post_id": w.guide, "query": "攻略" }),
+        serde_json::json!({ "seed_post_id": w.guide, "category": "guide" }),
+    ] {
+        assert!(w.run("search_posts", args).await.is_error);
+    }
+    assert!(
+        w.run(
+            "get_user_activity",
+            serde_json::json!({ "username": "bob", "kind": "likes" })
+        )
+        .await
+        .is_error
+    );
     // 参数不是 JSON：按空参数。
     let out = tools::execute(&w.state, &ctx, "get_user_info", "not json").await;
     assert_eq!(out.text, "（未提供用户名）");

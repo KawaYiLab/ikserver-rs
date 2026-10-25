@@ -56,6 +56,8 @@ fn turn() -> ExternalTurn {
         system_note: "\n这是 QQ 群聊，只用公开资料。".into(),
         max_chars: 600,
         timeout_secs: 1,
+        memory: None,
+        shared_scope: None,
     }
 }
 

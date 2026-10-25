@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                happened_on, follow_up_on, followed_up_at, created_at, updated_at\n         FROM ai_memories\n         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event' AND origin = 'extracted'\n           AND NOT pinned AND updated_at < $3\n           AND (follow_up_on IS NULL OR followed_up_at IS NOT NULL)\n         ORDER BY happened_on NULLS LAST, updated_at, id\n         LIMIT $4",
+  "query": "UPDATE ai_memories SET\n             content = COALESCE($2, content),\n             origin = COALESCE($3, origin),\n             pinned = COALESCE($4, pinned),\n             sensitivity = COALESCE($5, sensitivity),\n             importance = COALESCE($6, importance),\n             happened_on = CASE WHEN $7 THEN $8 ELSE happened_on END,\n             follow_up_on = CASE WHEN $9 THEN $10 ELSE follow_up_on END,\n             followed_up_at = CASE WHEN $9 THEN NULL ELSE followed_up_at END,\n             embedding = CASE WHEN $2::text IS NULL THEN embedding END,\n             embedding_model = CASE WHEN $2::text IS NULL THEN embedding_model END,\n             updated_at = $11\n         WHERE id = $1\n         RETURNING id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                   happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope",
   "describe": {
     "columns": [
       {
@@ -156,14 +156,32 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 14,
+        "name": "source_scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "source_scope"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
-        "Int8",
-        "Timestamptz",
-        "Int8"
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Int2",
+        "Bool",
+        "Date",
+        "Bool",
+        "Date",
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -180,8 +198,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "b0c9fb0c42179ff9d81190a8c811cac2d3a4bdef52051d7a0e9ff17d397b33fd"
+  "hash": "71bc12c8c7f65758835233670c7f55105e58fb9fff04d567f76be56a4a558f8c"
 }

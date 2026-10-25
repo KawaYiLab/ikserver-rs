@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_lifecycle_receipts(app_id,event_hash) VALUES($1,$2) ON CONFLICT DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4fde2aaa6fbe1900cd6a63d9f06b437082334b3c7d69ae0becab9f2093fdd576"
+}

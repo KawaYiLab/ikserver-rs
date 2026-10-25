@@ -1,4 +1,4 @@
-//! 论坛工具（ai-assistant.md 第 8 节）：12 个只读工具，在进程内执行。
+//! 论坛工具（ai-assistant.md 第 8 节）：7 个只读工具，在进程内执行。
 //!
 //! 约束（TOOL-001～009）：
 //! - 只读、无副作用、只面向公开内容：都以游客身份调用各域的 service（隐藏、未发布的内容天然读不到）；
@@ -148,6 +148,13 @@ pub struct ToolOutput {
 }
 
 impl ToolOutput {
+    fn error(text: impl Into<String>) -> Self {
+        Self {
+            is_error: true,
+            ..Self::text(text)
+        }
+    }
+
     fn text(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -168,18 +175,13 @@ impl ToolOutput {
 }
 
 /// 白名单（TOOL-001）。
-pub const TOOL_NAMES: [&str; 12] = [
+pub const TOOL_NAMES: [&str; 7] = [
     "search_posts",
     "get_hot_posts",
     "get_user_info",
     "get_post_content",
     "get_post_comments",
-    "get_posts_by_author",
-    "search_posts_by_category",
-    "get_user_stats",
-    "get_related_posts",
     "get_category_list",
-    "get_post_engagement",
     "get_user_activity",
 ];
 
@@ -199,21 +201,25 @@ fn limit_param(max: u32, default: u32) -> Value {
     json!({ "type": "integer", "minimum": 1, "maximum": max, "default": default })
 }
 
-/// 提供给模型的工具清单（只有白名单里的 12 个）。
+/// 提供给模型的工具清单（只有白名单里的 7 个）。
 pub fn specs() -> Vec<ToolSpec> {
     vec![
         ToolSpec {
             name: Cow::Borrowed("search_posts"),
             description: Cow::Borrowed(
-                "在绳网站内搜索帖子。query 请拆成 2-4 个用顿号或逗号分隔的短词。\
+                "在绳网站内找帖子：query 用短检索词，可用 category 限定公开分区；\
+                 只给 category 时浏览分区最新帖子。或只给 seed_post_id 查该帖的相关推荐，\
+                 不与 query/category 同用。\
                  结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
             ),
             parameters: object(
                 json!({
                     "query": { "type": "string", "description": "检索词，如「攻略、零号空洞」" },
-                    "queries": { "type": "array", "items": { "type": "string" } }
+                    "category": { "type": "string", "description": "公开分区的 slug 或名称关键词" },
+                    "seed_post_id": document_id_param(),
+                    "limit": limit_param(10, 5)
                 }),
-                &["query"],
+                &[],
             ),
         },
         ToolSpec {
@@ -225,14 +231,21 @@ pub fn specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: Cow::Borrowed("get_user_info"),
-            description: Cow::Borrowed("获取用户的公开资料：等级、丁尼、简介。"),
+            description: Cow::Borrowed(
+                "获取用户的公开资料与统计：简介、等级、丁尼、发帖、获赞、阅读、粉丝与关注数。",
+            ),
             parameters: object(json!({ "username": username_param() }), &["username"]),
         },
         ToolSpec {
             name: Cow::Borrowed("get_post_content"),
-            description: Cow::Borrowed("读取一篇帖子的标题与正文。"),
+            description: Cow::Borrowed(
+                "读取帖子的正文、图片和互动统计。正文较长时按结果中的 next_offset 续读；上下文已有的正文不必重复读取。",
+            ),
             parameters: object(
-                json!({ "document_id": document_id_param() }),
+                json!({
+                    "document_id": document_id_param(),
+                    "offset": { "type": "integer", "minimum": 0, "default": 0, "description": "正文的 Unicode 字符偏移；续读使用上次返回的 next_offset" }
+                }),
                 &["document_id"],
             ),
         },
@@ -245,65 +258,21 @@ pub fn specs() -> Vec<ToolSpec> {
             ),
         },
         ToolSpec {
-            name: Cow::Borrowed("get_posts_by_author"),
-            description: Cow::Borrowed(
-                "获取某位用户近期公开发布的帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
-            ),
-            parameters: object(
-                json!({ "username": username_param(), "limit": limit_param(10, 5) }),
-                &["username"],
-            ),
-        },
-        ToolSpec {
-            name: Cow::Borrowed("search_posts_by_category"),
-            description: Cow::Borrowed(
-                "获取某个分区下的最新帖子。category 可以是分区 slug 或名称关键词。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
-            ),
-            parameters: object(
-                json!({
-                    "category": { "type": "string", "description": "分区 slug 或名称关键词" },
-                    "limit": limit_param(10, 5)
-                }),
-                &["category"],
-            ),
-        },
-        ToolSpec {
-            name: Cow::Borrowed("get_user_stats"),
-            description: Cow::Borrowed(
-                "获取用户的统计：等级、丁尼、发帖数、获赞总数、总阅读量、粉丝数、关注数。",
-            ),
-            parameters: object(json!({ "username": username_param() }), &["username"]),
-        },
-        ToolSpec {
-            name: Cow::Borrowed("get_related_posts"),
-            description: Cow::Borrowed(
-                "获取与某篇帖子相关的其他帖子。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
-            ),
-            parameters: object(
-                json!({ "document_id": document_id_param(), "limit": limit_param(10, 5) }),
-                &["document_id"],
-            ),
-        },
-        ToolSpec {
             name: Cow::Borrowed("get_category_list"),
             description: Cow::Borrowed("列出可以公开浏览的分区。"),
             parameters: object(json!({}), &[]),
         },
         ToolSpec {
-            name: Cow::Borrowed("get_post_engagement"),
-            description: Cow::Borrowed("获取一篇帖子的互动数据：阅读、点赞、收藏、评论、丁尼。"),
-            parameters: object(
-                json!({ "document_id": document_id_param() }),
-                &["document_id"],
-            ),
-        },
-        ToolSpec {
             name: Cow::Borrowed("get_user_activity"),
             description: Cow::Borrowed(
-                "获取用户近期公开的发帖与评论。结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
+                "获取用户近期公开的发帖或评论，kind 可选 posts/comments/all，默认 all。结果中的 [标题](/post/id) 链接引用时原样保留。",
             ),
             parameters: object(
-                json!({ "username": username_param(), "limit": limit_param(10, 5) }),
+                json!({
+                    "username": username_param(),
+                    "kind": { "type": "string", "enum": ["posts", "comments", "all"], "default": "all" },
+                    "limit": limit_param(10, 5)
+                }),
                 &["username"],
             ),
         },
@@ -346,7 +315,11 @@ fn arg_limit(args: &serde_json::Map<String, Value>, default: u32, max: u32) -> u
 
 /// 帖子 id：数字或数字字符串；也接受 `/post/<id>` 这样的链接。
 fn post_id(args: &serde_json::Map<String, Value>) -> Option<Result<i64, String>> {
-    let raw = arg_str(args, &["document_id", "documentId", "id", "post_id"])?;
+    id_arg(args, &["document_id", "documentId", "id", "post_id"])
+}
+
+fn id_arg(args: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<Result<i64, String>> {
+    let raw = arg_str(args, keys)?;
     let digits = raw.rsplit('/').next().unwrap_or(&raw).trim().to_owned();
     Some(digits.parse::<i64>().map_err(|_| raw))
 }
@@ -384,20 +357,35 @@ fn title_or_placeholder(title: &str) -> &str {
     }
 }
 
-fn card_lines(cards: &[&PostCard]) -> String {
-    cards
-        .iter()
-        .enumerate()
-        .map(|(i, card)| {
-            let mut line = format!("{}. {}", i + 1, post_link(card.id.get(), &card.title));
-            let excerpt = collapse(&card.excerpt);
-            if !excerpt.is_empty() {
-                line.push_str(&format!("\n   {}", truncate(&excerpt, 120)));
-            }
-            line
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+fn card_lines_budget(cards: &[&PostCard], budget: usize) -> (String, usize) {
+    let mut text = String::new();
+    let mut count = 0;
+    let mut used = 0;
+    for card in cards {
+        let category = card.category.as_ref().map_or("未分区", |c| c.name.as_str());
+        let mut line = format!(
+            "{}. {}\n   分区：{} · 发布：{} UTC",
+            count + 1,
+            post_link(card.id.get(), &card.title),
+            category,
+            card.published_at.format("%Y-%m-%d")
+        );
+        let excerpt = collapse(&card.excerpt);
+        if !excerpt.is_empty() {
+            line.push_str(&format!("\n   {}", truncate(&excerpt, 120)));
+        }
+        let cost = line.chars().count() + usize::from(count > 0);
+        if used + cost > budget {
+            break;
+        }
+        if count > 0 {
+            text.push('\n');
+        }
+        text.push_str(&line);
+        used += cost;
+        count += 1;
+    }
+    (text, count)
 }
 
 /// 评论预览（TOOL-006）：token 转可读文本，压缩空白，截 160；纯图片为「[图片]」。
@@ -434,12 +422,7 @@ pub async fn execute(
         "get_user_info" => user_info(state, ctx, &args).await,
         "get_post_content" => post_content(state, ctx, &args).await,
         "get_post_comments" => post_comments(state, ctx, &args).await,
-        "get_posts_by_author" => posts_by_author(state, ctx, &args).await,
-        "search_posts_by_category" => posts_by_category(state, ctx, &args).await,
-        "get_user_stats" => user_stats(state, ctx, &args).await,
-        "get_related_posts" => related_posts(state, ctx, &args).await,
         "get_category_list" => category_list(state).await,
-        "get_post_engagement" => post_engagement(state, ctx, &args).await,
         _ => user_activity(state, ctx, &args).await,
     };
     match result {
@@ -463,7 +446,6 @@ type Args = serde_json::Map<String, Value>;
 
 const NO_USERNAME: &str = "（未提供用户名）";
 const NO_POST_ID: &str = "（未提供帖子 document_id）";
-const NO_CATEGORY: &str = "（未提供分类标识）";
 
 fn post_not_found(raw: impl std::fmt::Display) -> String {
     format!("没有找到帖子（document_id: {raw}）。")
@@ -608,6 +590,7 @@ async fn search_term(
     state: &AiState,
     ctx: &ToolContext,
     term: &str,
+    category: Option<&str>,
     limit: u32,
 ) -> Result<Vec<PostCard>, Problem> {
     let page = ik_search::service::search_posts(
@@ -615,7 +598,7 @@ async fn search_term(
         None,
         ik_search::dto::PostSearchQuery {
             q: Some(term.to_owned()),
-            category: None,
+            category: category.map(str::to_owned),
             sort: None,
             cursor: None,
             limit: Some(limit),
@@ -642,6 +625,32 @@ async fn search_posts(
             .join("、"),
         _ => arg_str(args, &["query", "q"]).unwrap_or_default(),
     };
+    let category_key = arg_str(args, &["category"]);
+    if let Some(seed) = id_arg(args, &["seed_post_id"]) {
+        if !query.trim().is_empty() || category_key.is_some() {
+            return Ok(ToolOutput::error(
+                "seed_post_id 不能与 query 或 category 同时使用。",
+            ));
+        }
+        return match seed {
+            Ok(id) => related_posts(state, ctx, id, arg_limit(args, 5, 10)).await,
+            Err(raw) => Ok(ToolOutput::error(post_not_found(raw))),
+        };
+    }
+    let category = if let Some(raw) = category_key {
+        match find_category(state, &raw).await? {
+            Ok(category) => Some(category),
+            Err(text) => return Ok(ToolOutput::text(text)),
+        }
+    } else {
+        None
+    };
+    let limit = arg_limit(args, 5, 10);
+    if query.trim().is_empty()
+        && let Some(category) = category.as_ref()
+    {
+        return posts_by_category(state, ctx, category, limit).await;
+    }
     let terms = expand_query(&query);
     if terms.is_empty() {
         return Ok(ToolOutput::text("（未提供有效检索词）"));
@@ -649,7 +658,14 @@ async fn search_posts(
     let mut lists = Vec::with_capacity(terms.len());
     let mut cards: HashMap<i64, PostCard> = HashMap::new();
     for term in &terms {
-        let found = search_term(state, ctx, term, 15).await?;
+        let found = search_term(
+            state,
+            ctx,
+            term,
+            category.as_ref().map(|c| c.slug.as_str()),
+            limit * 3,
+        )
+        .await?;
         lists.push(found.iter().map(|c| c.id.get()).collect::<Vec<_>>());
         for card in found {
             cards.entry(card.id.get()).or_insert(card);
@@ -660,24 +676,24 @@ async fn search_posts(
     let top: Vec<&PostCard> = ranked
         .iter()
         .filter_map(|id| cards.get(id))
-        .take(SEARCH_RESULTS)
+        .take(usize::try_from(limit).unwrap_or(SEARCH_RESULTS))
         .collect();
-    let items = top
-        .iter()
-        .map(|c| (c.id.get(), c.title.clone()))
-        .collect::<Vec<_>>();
+    let (lines, count) = card_lines_budget(&top, MAX_RESULT_CHARS);
     let text = if top.is_empty() {
         format!("没有找到与「{}」相关的帖子。", query.trim())
     } else {
-        card_lines(&top)
+        lines
     };
     Ok(ToolOutput::with(
         text,
-        ToolMeta::Search {
-            query: query.trim().to_owned(),
+        search_meta(
+            category.as_ref().map_or_else(
+                || query.trim().to_owned(),
+                |c| format!("{} · {}", c.name, query.trim()),
+            ),
             hits,
-            items,
-        },
+            &top[..count],
+        ),
     ))
 }
 
@@ -740,33 +756,16 @@ async fn user_info(state: &AiState, ctx: &ToolContext, args: &Args) -> Result<To
     } else {
         truncate(&bio, BIO_MAX_CHARS)
     };
-    Ok(ToolOutput::text(format!(
-        "用户：{name}（@{name}）\n等级：Lv.{}\n丁尼：{denny}\n简介：{bio}",
-        user.level,
-        name = user.username,
-    )))
-}
-
-async fn user_stats(
-    state: &AiState,
-    ctx: &ToolContext,
-    args: &Args,
-) -> Result<ToolOutput, Problem> {
-    let Some(raw) = arg_str(args, &["username", "user"]) else {
-        return Ok(ToolOutput::text(NO_USERNAME));
-    };
-    let user = match find_user(state, ctx, &raw).await? {
-        Ok(user) => user,
-        Err(text) => return Ok(ToolOutput::text(text)),
-    };
-    let denny = denny_of(state, user.id.get()).await?;
     let (posts, likes, views) = user
         .stats
         .as_ref()
         .map_or((0, 0, 0), |s| (s.post_count, s.total_likes, s.total_views));
     Ok(ToolOutput::text(format!(
-        "用户：@{}\n等级：Lv.{}\n丁尼：{denny}\n发帖数：{posts}\n获赞总数：{likes}\n总阅读量：{views}\n粉丝数：{}\n关注数：{}",
-        user.username, user.level, user.follower_count, user.following_count,
+        "用户：{name}（@{name}）\n等级：Lv.{}\n丁尼：{denny}\n简介：{bio}\n发帖数：{posts}\n获赞总数：{likes}\n总阅读量：{views}\n粉丝数：{}\n关注数：{}",
+        user.level,
+        user.follower_count,
+        user.following_count,
+        name = user.username,
     )))
 }
 
@@ -785,38 +784,15 @@ async fn author_cards(state: &AiState, user_id: i64, limit: u32) -> Result<Vec<P
     Ok(page.items.into_iter().filter(|c| !c.is_anonymous).collect())
 }
 
-async fn posts_by_author(
-    state: &AiState,
-    ctx: &ToolContext,
-    args: &Args,
-) -> Result<ToolOutput, Problem> {
-    let Some(raw) = arg_str(args, &["username", "user"]) else {
-        return Ok(ToolOutput::text(NO_USERNAME));
-    };
-    let user = match find_user(state, ctx, &raw).await? {
-        Ok(user) => user,
-        Err(text) => return Ok(ToolOutput::text(text)),
-    };
-    let cards = author_cards(state, user.id.get(), arg_limit(args, 5, 10)).await?;
-    if cards.is_empty() {
-        return Ok(ToolOutput::text(format!(
-            "@{} 还没有公开发布的帖子。",
-            user.username
-        )));
-    }
-    let refs: Vec<&PostCard> = cards.iter().collect();
-    Ok(ToolOutput::text(format!(
-        "@{} 近期发布的帖子：\n{}",
-        user.username,
-        card_lines(&refs)
-    )))
-}
-
 async fn user_activity(
     state: &AiState,
     ctx: &ToolContext,
     args: &Args,
 ) -> Result<ToolOutput, Problem> {
+    let kind = arg_str(args, &["kind"]).unwrap_or_else(|| "all".to_owned());
+    if !matches!(kind.as_str(), "posts" | "comments" | "all") {
+        return Ok(ToolOutput::error("kind 只能是 posts、comments 或 all。"));
+    }
     let Some(raw) = arg_str(args, &["username", "user"]) else {
         return Ok(ToolOutput::text(NO_USERNAME));
     };
@@ -825,19 +801,40 @@ async fn user_activity(
         Err(text) => return Ok(ToolOutput::text(text)),
     };
     let limit = arg_limit(args, 5, 10);
-    let cards = author_cards(state, user.id.get(), limit).await?;
+    let cards = if kind == "comments" {
+        Vec::new()
+    } else {
+        author_cards(state, user.id.get(), limit).await?
+    };
     // 只列发帖与评论，不列点赞、收藏（TOOL-009）。
-    let comments = ik_profile::service::comments(
-        &state.forum.profile,
-        None,
-        user.id.get(),
-        ik_profile::dto::PageQuery {
-            cursor: None,
-            limit: Some(limit),
-        },
-    )
-    .await?
-    .items;
+    let comments = if kind == "posts" {
+        Vec::new()
+    } else {
+        ik_profile::service::comments(
+            &state.forum.profile,
+            None,
+            user.id.get(),
+            ik_profile::dto::PageQuery {
+                cursor: None,
+                limit: Some(limit),
+            },
+        )
+        .await?
+        .items
+    };
+    // 主页评论按游客读取后，批量复核所在帖子对触发者的拉黑可见性。
+    let post_ids: Vec<i64> = comments.iter().map(|c| c.post_id.get()).collect();
+    let visible_ids: HashSet<i64> =
+        ik_content::service::public_cards_in_order(&state.forum.content, None, &post_ids)
+            .await?
+            .into_iter()
+            .filter(|c| ctx.author_visible(&c.author))
+            .map(|c| c.id.get())
+            .collect();
+    let comments: Vec<_> = comments
+        .into_iter()
+        .filter(|c| visible_ids.contains(&c.post_id.get()))
+        .collect();
     if cards.is_empty() && comments.is_empty() {
         return Ok(ToolOutput::text(format!(
             "@{} 暂无公开动态。",
@@ -845,32 +842,77 @@ async fn user_activity(
         )));
     }
     let mut text = format!("@{} 的近期动态：", user.username);
+    // 两种动态都有时各留一半预算，长帖子列表不挤掉评论。
+    let section_budget = if !cards.is_empty() && !comments.is_empty() {
+        (MAX_RESULT_CHARS - 200) / 2
+    } else {
+        MAX_RESULT_CHARS - 200
+    };
     if !cards.is_empty() {
         let refs: Vec<&PostCard> = cards.iter().collect();
-        text.push_str(&format!("\n最新发帖：\n{}", card_lines(&refs)));
+        text.push_str(&format!(
+            "\n最新发帖：\n{}",
+            card_lines_budget(&refs, section_budget - 10).0
+        ));
     }
     if !comments.is_empty() {
-        text.push_str("\n最新评论：");
+        let mut section = String::from("\n最新评论：");
         for (i, c) in comments.iter().enumerate() {
-            text.push_str(&format!(
+            let entry = format!(
                 "\n{}. 在{}中：{}（赞{}）",
                 i + 1,
                 post_link(c.post_id.get(), &c.post_title),
                 comment_preview(&c.body),
                 c.like_count
-            ));
+            );
+            if section.chars().count() + entry.chars().count() > section_budget {
+                break;
+            }
+            section.push_str(&entry);
         }
+        text.push_str(&section);
     }
     Ok(ToolOutput::text(text))
 }
 
 // ----- 帖子 -----
 
+/// 为元信息和续读指示单独留预算，字符偏移不会切开 UTF-8 字符。
+fn body_page(header: &str, body: &str, offset: usize) -> Result<String, String> {
+    let total = body.chars().count();
+    if offset > total {
+        return Err(format!("offset 超出正文范围；正文共 {total} 个字符。"));
+    }
+    let prefix = format!("{header}\n帖子正文：");
+    // usize 的十进制位数与固定文案都包含在这个上界里。
+    let footer_budget = 160;
+    let budget = MAX_RESULT_CHARS.saturating_sub(prefix.chars().count() + footer_budget);
+    let chunk: String = body.chars().skip(offset).take(budget).collect();
+    let end = offset + chunk.chars().count();
+    let continuation = if end < total {
+        format!("truncated: true\nnext_offset: {end}")
+    } else {
+        "truncated: false\nnext_offset: null".to_owned()
+    };
+    Ok(format!(
+        "{prefix}{chunk}\n读取范围：{offset}..{end} / {total} 字符\n{continuation}"
+    ))
+}
+
 async fn post_content(
     state: &AiState,
     ctx: &ToolContext,
     args: &Args,
 ) -> Result<ToolOutput, Problem> {
+    let offset = match args.get("offset") {
+        None => Some(0),
+        Some(Value::Number(n)) => n.as_u64().and_then(|n| usize::try_from(n).ok()),
+        Some(Value::String(s)) => s.trim().parse::<usize>().ok(),
+        _ => None,
+    };
+    let Some(offset) = offset else {
+        return Ok(ToolOutput::error("offset 必须是非负整数。"));
+    };
     let id = match post_id(args) {
         None => return Ok(ToolOutput::text(NO_POST_ID)),
         Some(Err(raw)) => {
@@ -889,17 +931,29 @@ async fn post_content(
     };
     // 匿名帖照样可读，但不输出作者（TOOL 明细表）。
     let cover_ids: Vec<i64> = post.covers.iter().map(|c| c.id.get()).collect();
+    let header = format!(
+        "帖子标题：{}\n帖子链接：{}\n互动：阅读 {} · 点赞 {} · 收藏 {} · 评论 {} · 丁尼 {}",
+        title_or_placeholder(&post.title),
+        post_link(id, &post.title),
+        post.view_count,
+        post.like_count,
+        post.favorite_count,
+        post.comment_count,
+        post.denny_count
+    );
+    let text = match body_page(&header, &post.body, offset) {
+        Ok(text) => text,
+        Err(text) => return Ok(ToolOutput::error(text)),
+    };
     let mut output = ToolOutput::with(
-        format!(
-            "帖子标题：{}\n帖子正文：{}",
-            title_or_placeholder(&post.title),
-            truncate(post.body.trim(), MAX_RESULT_CHARS)
-        ),
+        text,
         ToolMeta::Read {
             post: Some((id, post.title.clone())),
         },
     );
-    output.images = post_images(state, &cover_ids, &post.body).await?;
+    if offset == 0 {
+        output.images = post_images(state, &cover_ids, &post.body).await?;
+    }
     Ok(output)
 }
 
@@ -958,75 +1012,43 @@ async fn post_comments(
     Ok(ToolOutput::with(text, meta))
 }
 
-async fn post_engagement(
-    state: &AiState,
-    ctx: &ToolContext,
-    args: &Args,
-) -> Result<ToolOutput, Problem> {
-    let id = match post_id(args) {
-        None => return Ok(ToolOutput::text(NO_POST_ID)),
-        Some(Err(raw)) => return Ok(ToolOutput::text(post_not_found(raw))),
-        Some(Ok(id)) => id,
-    };
-    let Some(post) = visible_post(state, ctx, id).await? else {
-        return Ok(ToolOutput::text(post_not_found(id)));
-    };
-    Ok(ToolOutput::text(format!(
-        "帖子《{}》互动数据：\n阅读：{}\n点赞：{}\n收藏：{}\n评论：{}\n丁尼：{}",
-        title_or_placeholder(&post.title),
-        post.view_count,
-        post.like_count,
-        post.favorite_count,
-        post.comment_count,
-        post.denny_count
-    )))
-}
-
-/// 相关帖子：用种子帖的标题站内搜索，排除种子本身、查看者自己的帖与匿名帖（本系统没有详情页的
-/// 「相关委托」，按 TOOL 明细表的口径用搜索实现）。
+/// 复用论坛的相关推荐，在候选截断前应用工具的公开实名口径。
 async fn related_posts(
     state: &AiState,
     ctx: &ToolContext,
-    args: &Args,
+    id: i64,
+    limit: u32,
 ) -> Result<ToolOutput, Problem> {
-    let id = match post_id(args) {
-        None => return Ok(ToolOutput::text(NO_POST_ID)),
-        Some(Err(raw)) => return Ok(ToolOutput::text(post_not_found(raw))),
-        Some(Ok(id)) => id,
-    };
     let Some(seed) = visible_post(state, ctx, id).await? else {
         return Ok(ToolOutput::text(post_not_found(id)));
     };
-    let limit = usize::try_from(arg_limit(args, 5, 10)).unwrap_or(5);
-    let terms = expand_query(&seed.title);
-    let mut lists = Vec::new();
-    let mut cards: HashMap<i64, PostCard> = HashMap::new();
-    for term in &terms {
-        let found: Vec<PostCard> = search_term(state, ctx, term, 15)
-            .await?
-            .into_iter()
-            .filter(|c| {
-                c.id.get() != id && c.author.id.is_none_or(|a| Some(a.get()) != ctx.viewer_id)
-            })
-            .collect();
-        lists.push(found.iter().map(|c| c.id.get()).collect::<Vec<_>>());
-        for card in found {
-            cards.entry(card.id.get()).or_insert(card);
-        }
-    }
-    let top: Vec<&PostCard> = merge_ranked(&lists)
+    let cards =
+        ik_content::service::related_named(&state.forum.content, ctx.viewer_id, id, Some(limit))
+            .await?;
+    let top: Vec<&PostCard> = cards
         .iter()
-        .filter_map(|id| cards.get(id))
-        .take(limit)
+        .filter(|c| !c.is_anonymous && ctx.author_visible(&c.author))
+        .filter(|c| c.id.get() != id && c.author.id.is_none_or(|a| Some(a.get()) != ctx.viewer_id))
+        .take(usize::try_from(limit).unwrap_or(SEARCH_RESULTS))
         .collect();
-    if top.is_empty() {
-        return Ok(ToolOutput::text("没有找到相关帖子。"));
-    }
-    Ok(ToolOutput::text(format!(
-        "与《{}》相关的帖子：\n{}",
-        title_or_placeholder(&seed.title),
-        card_lines(&top)
-    )))
+    let header = format!("与《{}》相关的帖子：\n", title_or_placeholder(&seed.title));
+    let (lines, count) = card_lines_budget(
+        &top,
+        MAX_RESULT_CHARS.saturating_sub(header.chars().count()),
+    );
+    let text = if top.is_empty() {
+        "没有找到相关帖子。".to_owned()
+    } else {
+        format!("{header}{lines}")
+    };
+    Ok(ToolOutput::with(
+        text,
+        search_meta(
+            format!("与《{}》相关", seed.title),
+            top.len(),
+            &top[..count],
+        ),
+    ))
 }
 
 // ----- 分区 -----
@@ -1037,6 +1059,35 @@ async fn public_categories(state: &AiState) -> Result<Vec<ik_content::dto::Categ
         .into_iter()
         .filter(|c| !c.admin_only)
         .collect())
+}
+
+async fn find_category(
+    state: &AiState,
+    raw: &str,
+) -> Result<Result<ik_content::dto::CategoryView, String>, Problem> {
+    let key = raw.to_lowercase();
+    let categories = public_categories(state).await?;
+    Ok(categories
+        .iter()
+        .find(|c| c.slug.to_lowercase() == key)
+        .or_else(|| {
+            categories
+                .iter()
+                .find(|c| c.name.to_lowercase().contains(&key))
+        })
+        .cloned()
+        .ok_or_else(|| format!("没有找到分类「{raw}」。")))
+}
+
+fn search_meta(query: String, hits: usize, cards: &[&PostCard]) -> ToolMeta {
+    ToolMeta::Search {
+        query,
+        hits,
+        items: cards
+            .iter()
+            .map(|c| (c.id.get(), c.title.clone()))
+            .collect(),
+    }
 }
 
 async fn category_list(state: &AiState) -> Result<ToolOutput, Problem> {
@@ -1063,25 +1114,9 @@ async fn category_list(state: &AiState) -> Result<ToolOutput, Problem> {
 async fn posts_by_category(
     state: &AiState,
     ctx: &ToolContext,
-    args: &Args,
+    category: &ik_content::dto::CategoryView,
+    limit: u32,
 ) -> Result<ToolOutput, Problem> {
-    let Some(raw) = arg_str(args, &["category", "slug", "name"]) else {
-        return Ok(ToolOutput::text(NO_CATEGORY));
-    };
-    let key = raw.to_lowercase();
-    let categories = public_categories(state).await?;
-    let Some(category) = categories
-        .iter()
-        .find(|c| c.slug.to_lowercase() == key)
-        .or_else(|| {
-            categories
-                .iter()
-                .find(|c| c.name.to_lowercase().contains(&key))
-        })
-    else {
-        return Ok(ToolOutput::text(format!("没有找到分类「{raw}」。")));
-    };
-    let limit = arg_limit(args, 5, 10);
     let page = ik_content::service::feed(
         &state.forum.content,
         None,
@@ -1101,17 +1136,24 @@ async fn posts_by_category(
         .collect();
     cards.sort_by_key(|c| std::cmp::Reverse(c.bumped_at));
     cards.truncate(usize::try_from(limit).unwrap_or(5));
-    if cards.is_empty() {
-        return Ok(ToolOutput::text(format!(
-            "分类「{}」下暂时没有帖子。",
-            category.name
-        )));
-    }
-    Ok(ToolOutput::text(format!(
-        "分类「{}」下的最新帖子：\n{}",
-        category.name,
-        card_lines(&cards)
-    )))
+    let header = format!("分类「{}」下的最新帖子：\n", category.name);
+    let (lines, count) = card_lines_budget(
+        &cards,
+        MAX_RESULT_CHARS.saturating_sub(header.chars().count()),
+    );
+    let text = if cards.is_empty() {
+        format!("分类「{}」下暂时没有帖子。", category.name)
+    } else {
+        format!("{header}{lines}")
+    };
+    Ok(ToolOutput::with(
+        text,
+        search_meta(
+            format!("分区：{}", category.name),
+            cards.len(),
+            &cards[..count],
+        ),
+    ))
 }
 
 #[cfg(test)]
@@ -1122,9 +1164,97 @@ mod tests {
     fn specs_match_the_whitelist() {
         let names: Vec<String> = specs().iter().map(|s| s.name.to_string()).collect();
         assert_eq!(names, TOOL_NAMES.to_vec());
+        assert_eq!(names.len(), 7);
         for spec in specs() {
             assert_eq!(spec.parameters["type"], "object");
         }
+    }
+
+    #[test]
+    fn body_pages_preserve_unicode_and_whitespace_and_report_end() {
+        let body = format!("  {}\n", "汉🙂é".repeat(3000));
+        let mut offset = 0;
+        let mut reconstructed = String::new();
+        loop {
+            let page = body_page("帖子标题：测试\n互动：点赞 9", &body, offset).unwrap();
+            assert!(page.chars().count() <= MAX_RESULT_CHARS);
+            assert!(page.starts_with("帖子标题：测试\n互动：点赞 9\n"));
+            let chunk = page
+                .split_once("\n帖子正文：")
+                .unwrap()
+                .1
+                .rsplit_once("\n读取范围：")
+                .unwrap()
+                .0;
+            reconstructed.push_str(chunk);
+            if page.ends_with("next_offset: null") {
+                assert!(page.contains("truncated: false"));
+                break;
+            }
+            let next: usize = page
+                .lines()
+                .last()
+                .unwrap()
+                .strip_prefix("next_offset: ")
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(next, offset + chunk.chars().count());
+            assert!(next > offset);
+            offset = next;
+        }
+        assert_eq!(reconstructed, body);
+        let at_end = body_page("标题", &body, body.chars().count()).unwrap();
+        assert!(at_end.ends_with("truncated: false\nnext_offset: null"));
+        assert!(body_page("标题", &body, body.chars().count() + 1).is_err());
+    }
+
+    #[test]
+    fn card_budget_keeps_complete_entries_and_matching_citations() {
+        let first = PostCard {
+            id: ik_kernel::Id::new(7),
+            title: "甲".repeat(50),
+            excerpt: "乙".repeat(120),
+            cover: None,
+            video: None,
+            author: AuthorView {
+                id: Some(ik_kernel::Id::new(1)),
+                name: "作者".to_owned(),
+                level: Some(1),
+                anonymous: false,
+                avatar_url: None,
+            },
+            category: None,
+            tags: Vec::new(),
+            is_anonymous: false,
+            is_pinned: false,
+            is_solved: false,
+            view_count: 0,
+            like_count: 0,
+            comment_count: 0,
+            published_at: chrono::Utc::now(),
+            bumped_at: chrono::Utc::now(),
+            edited_at: None,
+            bumped_by_self: false,
+            is_read: false,
+        };
+        let second = PostCard {
+            id: ik_kernel::Id::new(8),
+            ..first.clone()
+        };
+        let (one, _) = card_lines_budget(&[&first], MAX_RESULT_CHARS);
+        let cards = [&first, &second];
+        let (text, count) = card_lines_budget(&cards, one.chars().count() + 5);
+        assert_eq!(text, one);
+        assert_eq!(count, 1);
+        let ToolMeta::Search { hits, items, .. } =
+            search_meta("测试".to_owned(), cards.len(), &cards[..count])
+        else {
+            panic!("expected search metadata");
+        };
+        assert_eq!(hits, 2);
+        assert_eq!(items, vec![(7, first.title)]);
+        assert!(!text.contains("/post/8"));
     }
 
     #[test]

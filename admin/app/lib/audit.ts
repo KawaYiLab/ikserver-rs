@@ -47,6 +47,10 @@ export const auditActionLabel: Record<string, string> = {
   'qq.settings.update': '修改 QQ 设置',
   'qq.bot.update': '修改 QQ 机器人',
   'qq.group.update': '修改 QQ 群设置',
+  'qq.identity.update': '封禁 / 解绑 QQ 身份',
+  'qq.group_memory.create': '新建 QQ 群共享记忆',
+  'qq.group_memory.update': '修改 QQ 群共享记忆',
+  'qq.group_memory.delete': '删除 QQ 群共享记忆',
   'search.reindex': '重建索引',
   'site.settings.update': '修改系统设置',
 }
@@ -69,6 +73,7 @@ export const auditTargetLabel: Record<string, string> = {
   qq_settings: 'QQ 设置',
   qq_bot: 'QQ 机器人',
   qq_group: 'QQ 群',
+  qq_identity: 'QQ 身份',
   search: '搜索',
   site_settings: '系统设置',
 }

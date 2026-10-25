@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM qq_identities\n           WHERE ($1::bigint IS NULL OR user_id = $1) AND ($2::bigint IS NULL OR group_id = $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "96f453436080d2995c27b1628a2e3accac9a45f61ed04b02191bc0ecfd7830c4"
+}

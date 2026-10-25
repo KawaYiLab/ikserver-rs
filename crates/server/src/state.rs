@@ -146,6 +146,7 @@ impl AppState {
             ik_kernel::jobs::Jobs::new(db.clone()),
             ai.clone(),
             config.qqbot.clone(),
+            auth.settings.code_key.clone(),
         )?;
         let admin = AdminState::new(
             content.clone(),

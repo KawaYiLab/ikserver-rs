@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                happened_on, follow_up_on, followed_up_at, created_at, updated_at\n         FROM ai_memories\n         WHERE user_id = $1 AND kind <> 'event' AND (ai_user_id IS NULL OR ai_user_id = $2)\n         ORDER BY pinned DESC, updated_at DESC, id DESC",
+  "query": "SELECT id, user_id, ai_user_id, kind, content, pinned, origin, sensitivity, importance,\n                happened_on, follow_up_on, followed_up_at, created_at, updated_at, source_scope\n         FROM ai_memories\n         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'\n           AND follow_up_on BETWEEN $4 AND $3 AND followed_up_at IS NULL\n         ORDER BY importance DESC, follow_up_on, id\n         LIMIT $5",
   "describe": {
     "columns": [
       {
@@ -156,11 +156,25 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 14,
+        "name": "source_scope",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_memories",
+            "name": "source_scope"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
         "Int8",
+        "Int8",
+        "Date",
+        "Date",
         "Int8"
       ]
     },
@@ -178,8 +192,9 @@
       true,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "6886e6c9717bbb93beeb0f12f77adf24cf1f177fc2cbc98d65d97e9880aabc41"
+  "hash": "ebdc0ff36495dfebe71cb9649f358d339b05fd3b6a237380d9fec81840d83d45"
 }

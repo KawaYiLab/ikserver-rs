@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT t.id,t.execution_key,t.message_id,t.identity_id,t.group_id,t.ai_user_id,t.status,t.reason,t.hold_id,t.quota_day,t.hold_amount,\n        t.guest_reserved,t.guest_token_reserved,t.output,t.segments_sent,t.attempts,m.app_id,i.scene,COALESCE(g.group_openid,i.openid) AS \"openid!\",m.qq_msg_id,m.content,m.created_at AS message_at,\n        COALESCE(g.card_slug,i.card_slug,b.default_card_slug) AS card_slug,\n        (b.enabled AND NOT i.blocked AND i.available AND COALESCE(g.enabled AND NOT g.blocked AND g.left_at IS NULL,TRUE)) AS \"allowed!\",i.user_id\n        FROM qq_turns t JOIN qq_messages m ON m.id=t.message_id JOIN qq_identities i ON i.id=t.identity_id\n        JOIN qq_bots b ON b.app_id=m.app_id LEFT JOIN qq_groups g ON g.id=t.group_id WHERE t.id=$1 FOR UPDATE OF t",
+  "query": "SELECT t.id,t.execution_key,t.message_id,t.identity_id,t.group_id,t.ai_user_id,t.status,t.reason,t.hold_id,t.quota_day,t.hold_amount,\n        t.guest_reserved,t.guest_token_reserved,t.output,t.segments_sent,t.attempts,m.app_id,i.scene,COALESCE(g.group_openid,i.openid) AS \"openid!\",m.qq_msg_id,m.content,m.created_at AS message_at,\n        COALESCE(g.card_slug,i.card_slug,b.default_card_slug) AS card_slug,\n        (b.enabled AND NOT i.blocked AND i.available AND COALESCE(g.enabled AND NOT g.blocked AND g.left_at IS NULL,TRUE)) AS \"allowed!\",i.user_id,t.payer_user_id\n        FROM qq_turns t JOIN qq_messages m ON m.id=t.message_id JOIN qq_identities i ON i.id=t.identity_id\n        JOIN qq_bots b ON b.app_id=m.app_id LEFT JOIN qq_groups g ON g.id=t.group_id WHERE t.id=$1 FOR UPDATE OF t",
   "describe": {
     "columns": [
       {
@@ -262,6 +262,17 @@
             "name": "user_id"
           }
         }
+      },
+      {
+        "ordinal": 25,
+        "name": "payer_user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_turns",
+            "name": "payer_user_id"
+          }
+        }
       }
     ],
     "parameters": {
@@ -294,8 +305,9 @@
       false,
       null,
       null,
+      true,
       true
     ]
   },
-  "hash": "f5816af414b6f7145a21f7f702e3a06face7f5e83fd63145ce60671ed3dd95fd"
+  "hash": "a7a75d38ec0aa926f3f066bbfa4a61ddc5b74f8ee2e8248611e73df5573e8d90"
 }

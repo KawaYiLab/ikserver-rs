@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO qq_group_usage(day,group_id,tokens) VALUES($1,$2,$3) ON CONFLICT(day,group_id) DO UPDATE SET tokens=qq_group_usage.tokens+EXCLUDED.tokens",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Date",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "77253b7915f9fe7546bac489099a69d86c6d3281c637950ea21c775d18b725b3"
+}

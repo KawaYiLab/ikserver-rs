@@ -22,7 +22,7 @@ where
         .layer(DefaultBodyLimit::max(64 * 1024))
 }
 
-#[utoipa::path(post, path="/v1/qq/webhook", tag="qq", responses((status=200, description="QQ event acknowledged"),(status=401, description="Signature rejected")))]
+#[utoipa::path(post, operation_id = "qq_webhook", path="/v1/qq/webhook", tag="qq", responses((status=200, description="QQ event acknowledged"),(status=401, description="Signature rejected")))]
 async fn webhook(
     State(state): State<QqState>,
     headers: HeaderMap,
@@ -204,10 +204,12 @@ mod tests {
     use super::*;
     #[test]
     fn official_signature_vector() {
-        // https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html
+        // 输入与公钥取自官方「签名校验」文档的 DEMO。那页给出的 sig（865ad13a…）用它写明的输入验不过
+        // （Python cryptography 与 ring 一致地算出下面这个），所以签名用独立实现交叉生成：
+        // python: Ed25519PrivateKey.from_private_bytes(seed).sign(b"1725442341" + body)。
         let secret = "naOC0ocQE3shWLAfffVLB1rhYPG7";
         let body = br#"{ "op": 0,"d": {}, "t": "GATEWAY_EVENT_NAME"}"#;
-        let signature = "865ad13a61752ca65e26bde6676459cd36cf1be609375b37bd62af366e1dc25a8dc789ba7f14e017ada3d554c671a911bfdf075ba54835b23391d509579ed002";
+        let signature = "2eb9983ebb8bb209e78fd095942f58e442656656e7975d01e64f9023a84b7c964290fdd40e5500c33867ccfe9563b7e0b6bac0e1d42c13e787b304fd51f71102";
         let mut headers = HeaderMap::new();
         headers.insert("x-signature-timestamp", "1725442341".parse().unwrap());
         headers.insert("x-signature-ed25519", signature.parse().unwrap());
@@ -221,6 +223,19 @@ mod tests {
         );
         headers.insert("x-signature-timestamp", "".parse().unwrap());
         assert!(authenticate(secret, false, &headers, body).is_err());
+        // op=13：签 event_ts + plain_token（同样用 Python 交叉生成）。
+        let challenge =
+            br#"{"op":13,"d":{"plain_token":"Arq0D5A61EgUu4OxUvOp","event_ts":"1725439208"}}"#;
+        let Ok(Authenticated::Validation(reply)) =
+            authenticate(secret, true, &HeaderMap::new(), challenge)
+        else {
+            panic!("op=13 应当返回签名");
+        };
+        assert_eq!(reply["plain_token"], "Arq0D5A61EgUu4OxUvOp");
+        assert_eq!(
+            reply["signature"],
+            "82e076c9ca890e60b38d5f91e2d78eca2772e935bf24424700d834a569af03e26ffc2ae939b5824649d950899013e8a1a4cb7c39cb532955743be1b016681c0c"
+        );
     }
     #[tokio::test]
     async fn invalid_signatures_do_not_consume_application_allowance() {
@@ -254,7 +269,8 @@ mod tests {
             )]),
             ..Default::default()
         };
-        let state = QqState::new(db.clone(), ids, Jobs::new(db), ai, config).unwrap();
+        let state =
+            QqState::new(db.clone(), ids, Jobs::new(db), ai, config, b"key".to_vec()).unwrap();
         let body = br#"{"op":12}"#;
         let mut headers = HeaderMap::new();
         headers.insert("x-bot-appid", "123".parse().unwrap());
@@ -303,7 +319,7 @@ mod tests {
     fn signed_bytes_and_short_seed() {
         let key = signing_key("abc").unwrap();
         let repeated =
-            Ed25519KeyPair::from_seed_unchecked(b"abcabcabcabcabcabcabcabcabcabcabca").unwrap();
+            Ed25519KeyPair::from_seed_unchecked(b"abcabcabcabcabcabcabcabcabcabcab").unwrap();
         assert_eq!(key.public_key().as_ref(), repeated.public_key().as_ref());
         let body = br#"{"op":0,"d":{}}"#;
         let mut bytes = b"time".to_vec();

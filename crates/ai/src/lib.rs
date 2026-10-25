@@ -26,6 +26,7 @@ mod routes;
 pub mod sanitize;
 pub mod service;
 pub mod sessions;
+pub mod shared_memory;
 mod state;
 pub mod toolbox;
 pub mod tools;

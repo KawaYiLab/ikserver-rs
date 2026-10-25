@@ -152,7 +152,7 @@ where
         .routes(routes!(groups))
         .routes(routes!(put_group))
 }
-#[utoipa::path(get,path="/v1/admin/qq/settings",tag="admin",responses((status=200,body=Settings)))]
+#[utoipa::path(get, operation_id = "qq_settings",path="/v1/admin/qq/settings",tag="admin",responses((status=200,body=Settings)))]
 async fn settings(
     State(s): State<QqState>,
     AdminOperator(_): AdminOperator,
@@ -160,7 +160,7 @@ async fn settings(
     let mut conn = s.db.acquire().await?;
     Ok(Json(repo::settings(&mut conn).await?))
 }
-#[utoipa::path(put,path="/v1/admin/qq/settings",tag="admin",request_body=Settings,responses((status=200,body=Settings)))]
+#[utoipa::path(put, operation_id = "qq_put_settings",path="/v1/admin/qq/settings",tag="admin",request_body=Settings,responses((status=200,body=Settings)))]
 async fn put_settings(
     State(s): State<QqState>,
     AdminOperator(op): AdminOperator,
@@ -197,7 +197,7 @@ async fn put_settings(
     s.invalidate().await;
     Ok(Json(input))
 }
-#[utoipa::path(get,path="/v1/admin/qq/bots",tag="admin",responses((status=200,body=BotList)))]
+#[utoipa::path(get, operation_id = "qq_bots",path="/v1/admin/qq/bots",tag="admin",responses((status=200,body=BotList)))]
 async fn bots(
     State(s): State<QqState>,
     AdminOperator(_): AdminOperator,
@@ -207,7 +207,7 @@ async fn bots(
     items.retain(|b| s.config.apps.values().any(|a| a.app_id == b.app_id));
     Ok(Json(BotList { items }))
 }
-#[utoipa::path(get,path="/v1/admin/qq/bots/{appId}",tag="admin",params(("appId"=String,Path)),responses((status=200,body=BotView)))]
+#[utoipa::path(get, operation_id = "qq_bot",path="/v1/admin/qq/bots/{appId}",tag="admin",params(("appId"=String,Path)),responses((status=200,body=BotView)))]
 async fn bot(
     State(s): State<QqState>,
     AdminOperator(_): AdminOperator,
@@ -246,7 +246,7 @@ async fn card(s: &QqState, slug: Option<&str>) -> Result<(), Problem> {
     }
     Ok(())
 }
-#[utoipa::path(put,path="/v1/admin/qq/bots/{appId}",tag="admin",params(("appId"=String,Path)),request_body=UpdateBot,responses((status=200,body=BotView)))]
+#[utoipa::path(put, operation_id = "qq_put_bot",path="/v1/admin/qq/bots/{appId}",tag="admin",params(("appId"=String,Path)),request_body=UpdateBot,responses((status=200,body=BotView)))]
 async fn put_bot(
     State(s): State<QqState>,
     AdminOperator(op): AdminOperator,
@@ -289,7 +289,7 @@ async fn put_bot(
         enabled: input.enabled,
     }))
 }
-#[utoipa::path(get,path="/v1/admin/qq/groups",tag="admin",params(GroupQuery),responses((status=200,body=Paged<GroupView>)))]
+#[utoipa::path(get, operation_id = "qq_groups",path="/v1/admin/qq/groups",tag="admin",params(GroupQuery),responses((status=200,body=Paged<GroupView>)))]
 async fn groups(
     State(s): State<QqState>,
     AdminOperator(_): AdminOperator,
@@ -308,7 +308,7 @@ async fn groups(
         limit,
     }))
 }
-#[utoipa::path(put,path="/v1/admin/qq/groups/{id}",tag="admin",params(("id"=String,Path)),request_body=UpdateGroup,responses((status=200,body=GroupView)))]
+#[utoipa::path(put, operation_id = "qq_put_group",path="/v1/admin/qq/groups/{id}",tag="admin",params(("id"=String,Path)),request_body=UpdateGroup,responses((status=200,body=GroupView)))]
 async fn put_group(
     State(s): State<QqState>,
     AdminOperator(op): AdminOperator,

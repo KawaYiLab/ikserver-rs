@@ -693,10 +693,10 @@ async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
         RunOutcome::Completed
     );
 
-    // 第一轮带 12 个论坛工具与 3 个记忆工具（ADR 0007）；第二轮回灌了工具调用与结果（LLM-005）。
+    // 第一轮带 7 个论坛工具与 3 个记忆工具（ADR 0007）；第二轮回灌了工具调用与结果（LLM-005）。
     let requests = h.fake.requests();
     assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].tools.len(), 15);
+    assert_eq!(requests[0].tools.len(), 10);
     let second = &requests[1].messages;
     // 思考模式：带工具调用的那一轮把思考原文回传给上游（LLM-013），否则 DeepSeek 返回 400。
     assert!(matches!(

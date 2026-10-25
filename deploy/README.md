@@ -174,7 +174,7 @@ cargo run --release -p ik-server -- story call --source /path/to/corpus \
 
 ## QQ 官方机器人（ADR 0008）
 
-第 1 期提供游客对话、后台设置和群管理。默认关闭；绑定与共享记忆按后续阶段上线。
+提供游客对话、站内绑定（个人额度与记忆）、群共享记忆和后台管理。默认关闭。
 
 1. QQ 开放平台建立官方机器人，选择 Webhook，登记服务器调用 OpenAPI 的出口 IP；准备沙箱群。
 2. 按 `ik-server.env.example` 配置 `IK_QQBOT__APPS__MAIN__APP_ID` 与 `SECRET`，启用 `IK_QQBOT__ENABLED=true`。
@@ -184,6 +184,7 @@ cargo run --release -p ik-server -- story call --source /path/to/corpus \
 4. 仅在填写/修改回调地址的几分钟内开启 `IK_QQBOT__ALLOW_VALIDATION=true` 并重启；平台验证完成后立即改回 false 并重启。
    无签名验证只接受数字时间戳和字母数字 token；不要放宽格式去签任意文本。
 5. 后台「AI 助手」给角色打开 QQ，后台「QQ 机器人」选机器人的默认角色并开启机器人、全站 QQ 开关。
+   绑定码与验证码共用 `IK_SECRETS__CODE_HMAC_KEY`（多实例必须相同，否则一个实例发的码另一个实例认不出）。
    群入站后自动进入群列表，可填展示名、覆盖角色、封禁或重置群上下文。
 6. 先使用默认 `linkMode=strip`；要试 domain，先在开放平台「开发设置 → 消息 URL 配置」登记 interk.net，
    实测通过才开启。QQ 返回 URL 拒绝时客户端会去链接重发一次。

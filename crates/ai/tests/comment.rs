@@ -479,7 +479,7 @@ async fn comment_replies_can_use_tools_but_keep_only_the_final_answer(db: PgPool
         Step::Emit(ik_ai::llm::StreamEvent::ToolCallDelta {
             index: 0,
             id: Some("call_1".into()),
-            name: Some("get_post_engagement".into()),
+            name: Some("get_post_content".into()),
             arguments: Some(format!(r#"{{"document_id":"{post}"}}"#)),
         }),
         usage(50, 5),
@@ -487,7 +487,7 @@ async fn comment_replies_can_use_tools_but_keep_only_the_final_answer(db: PgPool
     h.answer("目前阅读还不多，欢迎大家来看。");
     assert_eq!(h.run(trigger).await, RunOutcome::Completed);
     let requests = h.fake.requests();
-    assert_eq!(requests[0].tools.len(), 12);
+    assert_eq!(requests[0].tools.len(), 7);
     let (_, _, body) = h.reply(trigger).await.unwrap();
     // 只用最后一轮（不把「我查一下」发到评论区）。
     assert_eq!(
@@ -611,5 +611,5 @@ async fn comments_only_use_public_memories(db: PgPool) {
     assert!(system.contains("这里是公开的评论区"), "{system}");
     assert!(system.contains("- 对方最喜欢的角色是艾莲"), "{system}");
     assert!(!system.contains("考研"), "{system}");
-    assert_eq!(request.tools.len(), 12);
+    assert_eq!(request.tools.len(), 7);
 }

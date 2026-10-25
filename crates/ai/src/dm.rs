@@ -478,7 +478,14 @@ async fn prepare(
     // 记忆（ADR 0007）：全站开关在管理后台（MEM-030）。
     let memory_on = catalog.memory.enabled;
     if memory_on {
-        toolbox = toolbox.with_memory(job.ai_user_id, conversation_id);
+        toolbox = toolbox.with_memory(
+            job.quota_user_id,
+            job.ai_user_id,
+            memory::MemoryScope {
+                conversation_id: Some(conversation_id),
+                ..memory::MemoryScope::default()
+            },
+        );
     }
     toolbox.annotate_system(&mut messages);
     let mut follow_ups = Vec::new();
@@ -621,6 +628,7 @@ pub async fn run_job(
             prepared.job.quota_user_id,
             prepared.job.ai_user_id,
             query,
+            None,
         )
         .await
     {

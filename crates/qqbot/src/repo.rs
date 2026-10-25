@@ -40,21 +40,7 @@ pub(crate) async fn groups(
         .map(|r| GroupView {
             id: Id::new(r.id),
             app_id: r.app_id,
-            display_name: if r.display_name.is_empty() {
-                format!(
-                    "QQ 群 #{}",
-                    r.group_openid
-                        .chars()
-                        .rev()
-                        .take(4)
-                        .collect::<String>()
-                        .chars()
-                        .rev()
-                        .collect::<String>()
-                )
-            } else {
-                r.display_name
-            },
+            display_name: group_name(r.display_name, &r.group_openid),
             card_slug: r.card_slug,
             enabled: r.enabled,
             blocked: r.blocked,
@@ -64,6 +50,16 @@ pub(crate) async fn groups(
             today_tokens: r.tokens,
         })
         .collect())
+}
+
+/// 群的展示名：管理员没填时用「QQ 群 #<openid 后四位>」。
+pub(crate) fn group_name(display_name: String, group_openid: &str) -> String {
+    if display_name.is_empty() {
+        let tail: Vec<char> = group_openid.chars().rev().take(4).collect();
+        format!("QQ 群 #{}", tail.into_iter().rev().collect::<String>())
+    } else {
+        display_name
+    }
 }
 
 pub(crate) async fn ingest(
@@ -201,13 +197,16 @@ pub(crate) struct Turn {
     pub message_at: DateTime<Utc>,
     pub card_slug: Option<String>,
     pub allowed: bool,
+    /// 发消息的 QQ 身份绑定的绳网账号。
     pub user_id: Option<i64>,
+    /// 这次按谁的额度计（预占时写入）：绑定用户为本人，游客为空（只计全站与游客额度）。
+    pub payer_user_id: Option<i64>,
 }
 pub(crate) async fn turn(c: &mut PgConnection, id: i64) -> Result<Option<Turn>, Problem> {
     Ok(sqlx::query_as!(Turn,r#"SELECT t.id,t.execution_key,t.message_id,t.identity_id,t.group_id,t.ai_user_id,t.status,t.reason,t.hold_id,t.quota_day,t.hold_amount,
         t.guest_reserved,t.guest_token_reserved,t.output,t.segments_sent,t.attempts,m.app_id,i.scene,COALESCE(g.group_openid,i.openid) AS "openid!",m.qq_msg_id,m.content,m.created_at AS message_at,
         COALESCE(g.card_slug,i.card_slug,b.default_card_slug) AS card_slug,
-        (b.enabled AND NOT i.blocked AND i.available AND COALESCE(g.enabled AND NOT g.blocked AND g.left_at IS NULL,TRUE)) AS "allowed!",i.user_id
+        (b.enabled AND NOT i.blocked AND i.available AND COALESCE(g.enabled AND NOT g.blocked AND g.left_at IS NULL,TRUE)) AS "allowed!",i.user_id,t.payer_user_id
         FROM qq_turns t JOIN qq_messages m ON m.id=t.message_id JOIN qq_identities i ON i.id=t.identity_id
         JOIN qq_bots b ON b.app_id=m.app_id LEFT JOIN qq_groups g ON g.id=t.group_id WHERE t.id=$1 FOR UPDATE OF t"#,id).fetch_optional(c).await?)
 }
@@ -233,6 +232,7 @@ pub(crate) async fn history(
         WHERE (($1::bigint IS NOT NULL AND m.group_id=$1) OR ($1 IS NULL AND m.identity_id=$2 AND (m.ai_user_id=$3 OR m.id=$4)))
         AND m.created_at>=$5 AND (m.created_at,m.id)<=($6,$4)
         AND m.created_at>=COALESCE(CASE WHEN $1 IS NOT NULL THEN g.context_reset_at ELSE i.context_reset_at END,'-infinity'::timestamptz)
+        AND (m.id=$4 OR (left(m.content,1)<>'/' AND (m.direction='in' OR m.ai_user_id IS NOT NULL)))
         ORDER BY m.created_at DESC,m.id DESC LIMIT $7"#,t.group_id,t.identity_id,ai_user_id,t.message_id,cutoff,t.message_at,i64::from(limit)).fetch_all(c).await?;
     rows.reverse();
     let mut names = std::collections::BTreeMap::<i64, usize>::new();
@@ -307,4 +307,9 @@ pub(crate) async fn notify_once(
 ) -> Result<bool, Problem> {
     let row=sqlx::query!("INSERT INTO qq_guest_usage(day,identity_id,notified) VALUES($1,$2,TRUE) ON CONFLICT(day,identity_id) DO UPDATE SET notified=TRUE WHERE NOT qq_guest_usage.notified RETURNING identity_id",day,t.identity_id).fetch_optional(c).await?;
     Ok(row.is_some())
+}
+
+/// 群在记忆里的场合键（ADR 0008）：群里说的个人记忆只在这个群用，群共享记忆也按它存。
+pub fn group_scope(group_id: i64) -> String {
+    format!("qq:group:{group_id}")
 }

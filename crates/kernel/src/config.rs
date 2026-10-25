@@ -126,7 +126,9 @@ impl Qqbot {
     pub fn validate(&self) -> Result<(), ConfigError> {
         let mut ids = std::collections::BTreeSet::new();
         if self.enabled && self.apps.is_empty() {
-            return Err(ConfigError::Missing("IK_QQBOT__APPS（启用时至少配置一个机器人）"));
+            return Err(ConfigError::Missing(
+                "IK_QQBOT__APPS（启用时至少配置一个机器人）",
+            ));
         }
         for app in self.apps.values() {
             if app.app_id.is_empty()
@@ -136,7 +138,8 @@ impl Qqbot {
                 || !ids.insert(&app.app_id)
             {
                 return Err(ConfigError::Invalid(
-                    "qqbot.apps 的 app_id 必须是唯一的数字字符串（≤32 位），secret 不能为空".to_owned(),
+                    "qqbot.apps 的 app_id 必须是唯一的数字字符串（≤32 位），secret 不能为空"
+                        .to_owned(),
                 ));
             }
         }
@@ -789,8 +792,10 @@ fn env_path(name: &str) -> String {
 /// 值是自由文本、不能按数字或布尔解析的配置项（密码、密钥、账号名、发件人）。
 fn is_free_text(path: &str) -> bool {
     let last = path.rsplit('.').next().unwrap_or(path);
-    matches!(last, "password" | "username" | "from" | "reply_to" | "secret" | "app_id")
-        || last.ends_with("key")
+    matches!(
+        last,
+        "password" | "username" | "from" | "reply_to" | "secret" | "app_id"
+    ) || last.ends_with("key")
 }
 
 impl Config {
@@ -1036,7 +1041,10 @@ mod tests {
         assert_eq!(config.webhook_rate_per_second, 50);
         config.enabled = true;
         assert!(config.validate().is_err());
-        let app = QqbotApp { app_id: "00123".to_owned(), secret: Secret::new("secret") };
+        let app = QqbotApp {
+            app_id: "00123".to_owned(),
+            secret: Secret::new("secret"),
+        };
         config.apps.insert("main".to_owned(), app.clone());
         assert!(config.validate().is_ok());
         assert!(!format!("{config:?}").contains("\"secret\""));

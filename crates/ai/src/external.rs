@@ -11,16 +11,29 @@ use crate::AiState;
 use crate::catalog::{Model, OutputMode, RoleCard};
 use crate::generate::{self, End, StreamCtx};
 use crate::llm::{ChatMessage, Providers, Usage};
+use crate::memory::{self, MemoryScope};
 use crate::quota::{self, Limits};
 use crate::toolbox::Toolbox;
 use crate::tools::ToolContext;
 use crate::{dm, immersion, sanitize, workflow};
+use chrono::Utc;
 
 /// 已由渠道按时间排序并去掉真实身份的历史；只允许用户和助手角色。
 #[derive(Debug, Clone)]
 pub struct ExternalLine {
     pub assistant: bool,
     pub content: String,
+}
+
+/// 绑定了站内账号的提问者的个人记忆（ADR 0008）：读写的是与站内私信同一份记忆。
+#[derive(Debug, Clone)]
+pub struct ExternalMemory {
+    /// 站内账号（可信：来自渠道的绑定关系，不来自消息）。
+    pub user_id: i64,
+    /// 公开场合的键（QQ 群：`qq:group:<id>`）；私下场合（QQ 单聊）为空。
+    pub public: Option<String>,
+    /// 这次是不是开场（隔了很久或刚开始聊），可以问起到期的待跟进。只在私下场合有用。
+    pub opening: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +48,10 @@ pub struct ExternalTurn {
     pub system_note: String,
     pub max_chars: usize,
     pub timeout_secs: u64,
+    /// 个人记忆；游客为空（不读不写）。
+    pub memory: Option<ExternalMemory>,
+    /// 这个场合的共享记忆（QQ 群共享记忆）：放进 system prompt；有 `memory` 时还能用 remember 写它。
+    pub shared_scope: Option<String>,
 }
 
 /// 固定本次角色、工具和模型快照，保证预估与生成使用同一配置。
@@ -53,6 +70,8 @@ pub struct PreparedTurn {
     max_chars: usize,
     budget: Duration,
     estimate: i64,
+    /// 这次提起的待跟进，回复完成后标记已问起。
+    follow_ups: Vec<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,8 +163,61 @@ pub async fn prepare(state: &AiState, turn: ExternalTurn) -> Result<PreparedTurn
         .ok_or_else(|| Problem::field("model", "unavailable", "角色没有可用的模型"))?
         .clone();
     let default_model = catalog.default_model().filter(available).cloned();
-    let toolbox = Toolbox::for_card(state, &catalog, card, &state.mcp);
-    let messages = messages(card, &turn, &toolbox);
+    // 记忆（ADR 0007、0008）：全站开关在管理后台。游客没有个人记忆，也不能写共享记忆。
+    let memory_on = catalog.memory.enabled;
+    let mut toolbox = Toolbox::for_card(state, &catalog, card, &state.mcp);
+    if memory_on && let Some(memory) = &turn.memory {
+        toolbox = toolbox.with_memory(
+            memory.user_id,
+            card.bound_user_id,
+            MemoryScope {
+                conversation_id: None,
+                public: memory.public.clone(),
+                shared: turn.shared_scope.clone(),
+            },
+        );
+    }
+    let mut messages = messages(card, &turn, &toolbox);
+    let mut follow_ups = Vec::new();
+    if memory_on {
+        let mut conn = state.db.acquire().await?;
+        if let Some(memory) = &turn.memory {
+            let (note, due) = memory::external_note(
+                &mut conn,
+                memory.user_id,
+                card.bound_user_id,
+                memory.public.as_deref(),
+                memory.opening,
+                Utc::now(),
+            )
+            .await?;
+            if let Some(note) = note {
+                memory::append_system(&mut messages, &note);
+            }
+            follow_ups = due;
+        }
+        if let Some(scope) = turn.shared_scope.as_deref()
+            && let Some(note) =
+                crate::shared_memory::note(&mut conn, scope, card.bound_user_id).await?
+        {
+            memory::append_system(&mut messages, &note);
+        }
+        drop(conn);
+        // 相关往事（MEM-052）：用当前提问检索；公开场合只找在这里说过的。
+        if let Some(memory) = &turn.memory
+            && let Some(query) = turn.history.iter().rev().find(|line| !line.assistant)
+            && let Some(note) = memory::recall_events(
+                state,
+                memory.user_id,
+                card.bound_user_id,
+                &query.content,
+                memory.public.as_deref(),
+            )
+            .await
+        {
+            memory::append_system(&mut messages, &note);
+        }
+    }
     let tools = match turn.viewer {
         Some(viewer) => ToolContext::new(state, viewer).await?,
         None => ToolContext::guest(),
@@ -189,6 +261,7 @@ pub async fn prepare(state: &AiState, turn: ExternalTurn) -> Result<PreparedTurn
         max_chars: turn.max_chars,
         budget: Duration::from_secs(turn.timeout_secs.min(state.config.reply_timeout_secs)),
         estimate,
+        follow_ups,
     })
 }
 
@@ -262,6 +335,16 @@ pub async fn reply(state: &AiState, turn: &PreparedTurn, job_id: i64) -> Externa
         End::TooLarge => RunOutcome::Failed("upstream_output_too_large".to_owned()),
         End::Stopped => RunOutcome::Failed("stopped".to_owned()),
     };
+    // 待跟进问过了（MEM-056）：只在回复完成时标记，失败了下次还会问。
+    if outcome == RunOutcome::Completed && !turn.follow_ups.is_empty() {
+        let marked = match state.db.acquire().await {
+            Ok(mut conn) => memory::mark_followed_up(&mut conn, &turn.follow_ups, Utc::now()).await,
+            Err(error) => Err(error.into()),
+        };
+        if let Err(problem) = marked {
+            tracing::warn!(?problem, job = job_id, "标记待跟进已问起失败");
+        }
+    }
     ExternalReply {
         segments,
         usage: streamed.charged,

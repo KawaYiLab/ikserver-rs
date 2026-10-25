@@ -117,7 +117,7 @@ async fn memory_on(state: &AiState) -> bool {
 }
 
 /// 非流式地调一次模型（内部收集流），返回正文与用量。
-async fn complete(
+pub(crate) async fn complete(
     state: &AiState,
     system: String,
     user: String,
@@ -128,7 +128,8 @@ async fn complete(
         .memory
         .model_key
         .as_deref()
-        .and_then(|key| catalog.model(key))
+        // 专用记忆模型不要求启用；启用状态仍限制普通聊天的模型选择。
+        .and_then(|key| catalog.models.iter().find(|m| m.key == key))
         .filter(usable)
         .or_else(|| catalog.default_model().filter(usable))
         .ok_or_else(|| "没有可用的记忆模型".to_owned())?;
@@ -166,6 +167,29 @@ async fn complete(
     Ok(collected)
 }
 
+/// 外部渠道（QQ，ADR 0008）交来提炼的一行对话。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptLine {
+    /// AI 说的。
+    pub from_ai: bool,
+    /// 说话人的称呼（群共享记忆的提炼要分清是谁说的）；为空时写「对方」。
+    pub speaker: Option<String>,
+    pub at: DateTime<Utc>,
+    pub text: String,
+}
+
+/// 一行转写：`[日期] 说话人：正文`，正文压成一行、截到 [`LINE_MAX_CHARS`]。
+fn transcript_line(at: DateTime<Utc>, who: &str, text: &str) -> String {
+    let text: String = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(LINE_MAX_CHARS)
+        .collect();
+    format!("[{}] {who}：{text}", beijing_date(at))
+}
+
 /// 对话转成「对方：…」「你：…」的文本。
 fn transcript(items: &[HistoryItem], ai_user_id: i64) -> String {
     items
@@ -176,18 +200,27 @@ fn transcript(items: &[HistoryItem], ai_user_id: i64) -> String {
             } else {
                 "对方"
             };
-            let mut text: String = item
-                .content
-                .split_whitespace()
-                .collect::<Vec<_>>()
-                .join(" ")
-                .chars()
-                .take(LINE_MAX_CHARS)
-                .collect();
+            let mut text = item.content.clone();
             if !item.image_ids.is_empty() {
                 text.push_str(" [图片]");
             }
-            format!("[{}] {who}：{text}", beijing_date(item.created_at))
+            transcript_line(item.created_at, who, &text)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 外部渠道的对话转成文本。
+pub(crate) fn external_transcript(lines: &[TranscriptLine]) -> String {
+    lines
+        .iter()
+        .map(|line| {
+            let who = if line.from_ai {
+                "你"
+            } else {
+                line.speaker.as_deref().unwrap_or("对方")
+            };
+            transcript_line(line.at, who, &line.text)
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -473,14 +506,70 @@ pub async fn extract(state: &AiState, conversation_id: i64) -> Result<Extracted,
             .map_err(|e| e.to_string())?;
         return Ok(Extracted::default());
     }
-    let mut existing = repo::memories_for(&mut conn, session.user_id, session.ai_user_id)
+    drop(conn);
+    let target = Target {
+        user_id: session.user_id,
+        ai_user_id: session.ai_user_id,
+        conversation_id: Some(session.conversation_id),
+        scope: None,
+    };
+    extract_into(
+        state,
+        &target,
+        &transcript(&batch, session.ai_user_id),
+        Some(until),
+    )
+    .await
+}
+
+/// 提炼写到谁的记忆里、记下什么来源（ADR 0007、0008）。
+struct Target<'a> {
+    user_id: i64,
+    ai_user_id: i64,
+    /// 站内私信会话：记作来源会话，并推进它的提炼进度。
+    conversation_id: Option<i64>,
+    /// 公开场合（QQ 群）：新记下的记作在这个场合说的。
+    scope: Option<&'a str>,
+}
+
+/// 外部渠道（QQ，ADR 0008）的提炼入口：`lines` 是这个用户与这个角色的一段新对话（只含他自己的话和 AI 回他的话）。
+/// 进度由调用方保存；重复提炼同一段只会被已有记忆去重。`scope` 是公开场合的键，私下场合为空。
+pub async fn extract_external(
+    state: &AiState,
+    user_id: i64,
+    ai_user_id: i64,
+    scope: Option<&str>,
+    lines: &[TranscriptLine],
+) -> Result<Extracted, String> {
+    if !memory_on(state).await || lines.iter().all(|line| line.from_ai) {
+        return Ok(Extracted::default());
+    }
+    let target = Target {
+        user_id,
+        ai_user_id,
+        conversation_id: None,
+        scope,
+    };
+    extract_into(state, &target, &external_transcript(lines), None).await
+}
+
+/// 拿已有记忆与新对话调模型，执行它给出的增删改。
+async fn extract_into(
+    state: &AiState,
+    target: &Target<'_>,
+    conversation: &str,
+    until: Option<DateTime<Utc>>,
+) -> Result<Extracted, String> {
+    let now = Utc::now();
+    let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
+    let mut existing = repo::memories_for(&mut conn, target.user_id, target.ai_user_id)
         .await
         .map_err(|e| e.to_string())?;
     existing.extend(
         repo::recent_events(
             &mut conn,
-            session.user_id,
-            session.ai_user_id,
+            target.user_id,
+            target.ai_user_id,
             now - chrono::Duration::days(RECENT_EVENT_DAYS),
             RECENT_EVENTS,
         )
@@ -500,25 +589,25 @@ pub async fn extract(state: &AiState, conversation_id: i64) -> Result<Extracted,
         input.push_str(&listed(i, row));
     }
     input.push_str("\n新的对话：\n");
-    input.push_str(&transcript(&batch, session.ai_user_id));
+    input.push_str(conversation);
     let (text, _) = complete(state, EXTRACT_PROMPT.to_owned(), input).await?;
     let Some(ops) = parse_ops(&text, existing.len()) else {
         return Err("记忆提炼的输出不是合法的 JSON".to_owned());
     };
-    let result = apply(state, &session, &existing, ops, until)
+    let result = apply(state, target, &existing, ops, until)
         .await
         .map_err(|p| format!("{p:?}"))?;
-    memory::embed_missing(state, session.user_id, session.ai_user_id).await;
+    memory::embed_missing(state, target.user_id, target.ai_user_id).await;
     Ok(result)
 }
 
 /// 在一个事务里执行操作并推进进度（MEM-023）：置顶的不改不删。
 async fn apply(
     state: &AiState,
-    session: &repo::SessionRow,
+    session: &Target<'_>,
     existing: &[repo::MemoryRow],
     ops: Vec<Op>,
-    until: DateTime<Utc>,
+    until: Option<DateTime<Utc>>,
 ) -> Result<Extracted, Problem> {
     let now = Utc::now();
     let mut result = Extracted::default();
@@ -547,7 +636,8 @@ async fn apply(
                         importance: fact.importance,
                         happened_on: fact.happened_on,
                         follow_up_on: fact.follow_up_on,
-                        source_conversation_id: Some(session.conversation_id),
+                        source_conversation_id: session.conversation_id,
+                        source_scope: session.scope,
                         now,
                     },
                 )
@@ -611,7 +701,9 @@ async fn apply(
             .await?
             .len();
     }
-    repo::advance_memory_until(&mut tx, session.conversation_id, until).await?;
+    if let (Some(conversation_id), Some(until)) = (session.conversation_id, until) {
+        repo::advance_memory_until(&mut tx, conversation_id, until).await?;
+    }
     tx.commit().await?;
     Ok(result)
 }
@@ -926,6 +1018,7 @@ async fn apply_plan(
                 happened_on,
                 follow_up_on: None,
                 source_conversation_id: None,
+                source_scope: None,
                 now,
             },
         )
@@ -948,6 +1041,7 @@ async fn apply_plan(
                 happened_on: None,
                 follow_up_on: None,
                 source_conversation_id: None,
+                source_scope: None,
                 now,
             },
         )

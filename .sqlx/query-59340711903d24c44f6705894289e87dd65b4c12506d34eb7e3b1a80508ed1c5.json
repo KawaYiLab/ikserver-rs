@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE qq_bind_codes SET used_at=$2,used_by_identity_id=$3 WHERE code_hash=$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bytea",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59340711903d24c44f6705894289e87dd65b4c12506d34eb7e3b1a80508ed1c5"
+}

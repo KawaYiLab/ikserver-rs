@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.id, i.scene, i.bound_at, i.last_active_at, g.display_name AS \"display_name?\", g.group_openid AS \"group_openid?\"\n           FROM qq_identities i LEFT JOIN qq_groups g ON g.id = i.group_id\n           WHERE i.user_id = $1 ORDER BY i.bound_at DESC NULLS LAST, i.id DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "scene",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "scene"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "bound_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "bound_at"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "last_active_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "last_active_at"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "display_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "group_openid?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "group_openid"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "13e3b91af57d0c451613c710f723d2039bca47e8db9225da3425246fff3e771c"
+}

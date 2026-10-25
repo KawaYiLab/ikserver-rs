@@ -1,0 +1,175 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT i.id, i.app_id, i.scene, i.group_id, i.openid, i.nickname, i.user_id, i.bound_at, i.blocked,\n                  i.available, i.last_active_at, g.display_name AS \"display_name?\", g.group_openid AS \"group_openid?\"\n           FROM qq_identities i LEFT JOIN qq_groups g ON g.id = i.group_id\n           WHERE ($1::bigint IS NULL OR i.user_id = $1) AND ($2::bigint IS NULL OR i.group_id = $2)\n           ORDER BY i.last_active_at DESC, i.id DESC LIMIT $3 OFFSET $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "app_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "app_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "scene",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "scene"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "group_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "group_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "openid",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "openid"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "nickname",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "nickname"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "bound_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "bound_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "blocked",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "blocked"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "available",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "available"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "last_active_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "qq_identities",
+            "name": "last_active_at"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "display_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "display_name"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "group_openid?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "qq_groups",
+            "name": "group_openid"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7137034906b3e83497202330756c783f30e62bde13c6cb0beffebdc02a305de0"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM qq_bind_codes WHERE expires_at<$1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b665f896a92484b32d3d82ee390a17a68d9443153ee4f3f91df9fd353a613515"
+}

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM qq_turns\n           WHERE ($1::text IS NULL OR status = $1) AND ($2::bigint IS NULL OR group_id = $2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "544a43ab2a1dc81f9caf04f3eeabf56bffb0cc2ad3956614fc4a2cab8bcf51e6"
+}

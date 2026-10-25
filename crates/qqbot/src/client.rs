@@ -14,7 +14,15 @@ const MAX_BODY: usize = 64 * 1024;
 struct Token {
     value: String,
     expires_at: Instant,
+    fetched_at: Instant,
 }
+
+/// 离过期还有这么久就开始尝试换新（平台在过期前 60 秒内才发新 token，之前拿到的还是同一个）。
+const REFRESH_AHEAD: Duration = Duration::from_secs(300);
+/// 刷新窗口里两次取 token 至少隔这么久，避免每发一条消息都打一次 token 接口（会被限频 100001）。
+const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+/// 剩余有效期短于这个就不再用缓存，必须重取。
+const EXPIRY_MARGIN: Duration = Duration::from_secs(5);
 
 struct App {
     secret: Secret,
@@ -141,7 +149,10 @@ impl ApiClient {
         // 每个 AppID 独立串行刷新，避免并发请求同时刷新。不是数据库锁。
         let mut cached = app.token.lock().await;
         if let Some(token) = cached.as_ref() {
-            let fresh = token.expires_at > Instant::now() + Duration::from_secs(300);
+            let now = Instant::now();
+            let fresh = token.expires_at > now + REFRESH_AHEAD
+                || (token.expires_at > now + EXPIRY_MARGIN
+                    && now.duration_since(token.fetched_at) < REFRESH_INTERVAL);
             let replaced =
                 rejected.is_some_and(|old| old != token.value) && token.expires_at > Instant::now();
             if (rejected.is_none() && fresh) || replaced {
@@ -165,9 +176,11 @@ impl ApiClient {
         let expires = number(&body["expires_in"])
             .filter(|n| *n > 0 && *n <= 86400)
             .ok_or(SendError::Protocol)? as u64;
+        let now = Instant::now();
         *cached = Some(Token {
             value: value.clone(),
-            expires_at: Instant::now() + Duration::from_secs(expires),
+            expires_at: now + Duration::from_secs(expires),
+            fetched_at: now,
         });
         Ok(value)
     }

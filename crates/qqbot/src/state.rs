@@ -18,6 +18,8 @@ pub struct QqState {
     pub ai: AiState,
     pub config: Arc<Qqbot>,
     pub(crate) client: Arc<ApiClient>,
+    /// 绑定码的 HMAC 密钥（与验证码同一把，`IK_SECRETS__CODE_HMAC_KEY`）。
+    pub(crate) code_key: Arc<Vec<u8>>,
     settings: Cache<(), Arc<Settings>>,
     rates: Arc<Mutex<BTreeMap<String, (Instant, u32)>>>,
 }
@@ -35,6 +37,7 @@ impl QqState {
         jobs: Jobs,
         ai: AiState,
         config: Qqbot,
+        code_key: Vec<u8>,
     ) -> Result<Self, Problem> {
         let client = Arc::new(ApiClient::new(&config)?);
         Ok(Self {
@@ -44,6 +47,7 @@ impl QqState {
             ai,
             config: Arc::new(config),
             client,
+            code_key: Arc::new(code_key),
             settings: Cache::builder()
                 .max_capacity(1)
                 .time_to_live(Duration::from_secs(60))

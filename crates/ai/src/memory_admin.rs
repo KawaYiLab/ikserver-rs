@@ -170,7 +170,7 @@ pub async fn update_settings(
 }
 
 /// 按 id 或用户名找用户（用户名不区分大小写、完全匹配）。
-async fn find_user(state: &AiState, query: &str) -> Result<(i64, String), Problem> {
+pub async fn find_user(state: &AiState, query: &str) -> Result<(i64, String), Problem> {
     let query = query.trim().trim_start_matches('@');
     if let Ok(id) = query.parse::<i64>()
         && let Some(author) = ik_auth::service::authors(&state.db, &[id])

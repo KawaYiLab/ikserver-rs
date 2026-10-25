@@ -2,7 +2,7 @@
 //! 私信里还有记忆工具（ADR 0007）。
 //!
 //! 按角色卡在准备阶段组装（随配置快照走，AI-002）；白名单就是本次组装出的名字，名字不在里面的
-//! 一律回 `未知工具`（TOOL-001）。没有启用剧情库与站外服务的角色卡，工具清单与以前完全一样。
+//! 一律回 `未知工具`（TOOL-001）。论坛工具固定提供精简后的 7 个入口。
 //!
 //! 站外工具的约束（ADR 0004 第 3.4 节）：参数只有模型生成的内容，不注入任何用户身份（TOOL-004）；
 //! 单次调用有超时且不超过本次回复的总预算；结果截到每服务的上限；出错只告诉模型
@@ -22,7 +22,7 @@ use crate::mcp_client::{Endpoint, McpClient};
 use crate::quota;
 use crate::tools::{self, ToolContext, ToolMeta, ToolOutput};
 
-/// 单次提供给模型的工具总数上限（论坛 12 + 剧情 6 + 站外最多 14）。
+/// 单次提供给模型的工具总数上限（论坛最多 7 + 记忆最多 3 + 剧情最多 6 + 站外工具）。
 pub const MAX_TOOLS: usize = 32;
 /// 剧情库结果的上限：比论坛工具宽，原文较长。
 pub const STORY_MAX_RESULT_CHARS: usize = 12_000;
@@ -44,10 +44,12 @@ enum Source {
         server: Arc<McpServer>,
         tool: String,
     },
-    /// 记忆工具（ADR 0007）：只在私信里提供，写的是触发者与这个 AI 的记忆。
+    /// 记忆工具（ADR 0007、0008）：写的是 `owner`（可信的触发者，TOOL-004）与这个 AI 的记忆。
+    /// 不用工具的查看者：QQ 群里论坛工具按游客视角，记忆仍归提问者本人。
     Memory {
+        owner: i64,
         ai_user_id: i64,
-        conversation_id: i64,
+        scope: crate::memory::MemoryScope,
     },
 }
 
@@ -181,23 +183,36 @@ impl Toolbox {
         toolbox
     }
 
-    /// 加上记忆工具 remember / forget / recall_history（私信、且记忆开着时，MEM-014/015/095），排在论坛工具之后。
+    /// 加上记忆工具 remember / forget / recall_history（记忆开着时，MEM-014/015/095），排在论坛工具之后。
+    /// 公开场合（`scope.public`）不提供 recall_history（ADR 0008）。
     #[must_use]
-    pub fn with_memory(mut self, ai_user_id: i64, conversation_id: i64) -> Self {
+    pub fn with_memory(
+        mut self,
+        owner: i64,
+        ai_user_id: i64,
+        scope: crate::memory::MemoryScope,
+    ) -> Self {
         let at = self
             .entries
             .iter()
             .take_while(|e| matches!(e.source, Source::Forum))
             .count();
-        let memory = crate::memory::tool_specs().into_iter().map(|spec| Entry {
-            label: crate::memory::tool_title(&spec.name).map(str::to_owned),
-            spec,
-            source: Source::Memory {
-                ai_user_id,
-                conversation_id,
-            },
-        });
+        let memory = crate::memory::tool_specs(&scope)
+            .into_iter()
+            .map(|spec| Entry {
+                label: crate::memory::tool_title(&spec.name).map(str::to_owned),
+                spec,
+                source: Source::Memory {
+                    owner,
+                    ai_user_id,
+                    scope: scope.clone(),
+                },
+            });
         self.entries.splice(at..at, memory);
+        if self.entries.len() > MAX_TOOLS {
+            tracing::warn!("加入记忆工具后超过工具数上限，末尾的站外工具没有提供");
+            self.entries.truncate(MAX_TOOLS);
+        }
         self
     }
 
@@ -302,21 +317,12 @@ impl Toolbox {
             Source::Forum => tools::execute(state, ctx, name, arguments).await,
             Source::Story => story(state, name, arguments).await,
             Source::Memory {
+                owner,
                 ai_user_id,
-                conversation_id,
+                scope,
             } => {
-                let Some(viewer_id) = ctx.viewer_id else {
-                    return error_output("游客不能使用记忆工具".to_owned());
-                };
-                crate::memory::execute_tool(
-                    state,
-                    viewer_id,
-                    *ai_user_id,
-                    *conversation_id,
-                    name,
-                    arguments,
-                )
-                .await
+                crate::memory::execute_tool(state, *owner, *ai_user_id, scope, name, arguments)
+                    .await
             }
             Source::Remote { server, tool } => {
                 let remaining = deadline.saturating_duration_since(Instant::now());
@@ -433,5 +439,63 @@ mod tests {
         let mut messages = vec![ChatMessage::system("人格")];
         toolbox.annotate_system(&mut messages);
         assert_eq!(messages[0].text(), "人格");
+    }
+
+    #[test]
+    fn adding_memory_keeps_builtins_and_caps_remote_tools() {
+        let server = Arc::new(McpServer {
+            id: 1,
+            name: "test".into(),
+            display_name: "测试".into(),
+            url: "https://example.invalid/mcp".into(),
+            auth_header: String::new(),
+            timeout: Duration::from_secs(1),
+            max_result_chars: 4000,
+            tools: Vec::new(),
+        });
+        let mut toolbox = Toolbox::forum();
+        toolbox
+            .entries
+            .extend(STORY_SPECS.iter().map(|(spec, title)| Entry {
+                spec: spec.clone(),
+                label: title.clone(),
+                source: Source::Story,
+            }));
+        let remote_count = MAX_TOOLS - toolbox.entries.len();
+        for index in 0..remote_count {
+            toolbox.entries.push(Entry {
+                spec: ToolSpec {
+                    name: Cow::Owned(format!("test__{index}")),
+                    description: Cow::Borrowed("测试"),
+                    parameters: serde_json::json!({"type":"object"}),
+                },
+                label: None,
+                source: Source::Remote {
+                    server: server.clone(),
+                    tool: index.to_string(),
+                },
+            });
+        }
+        let toolbox = toolbox.with_memory(
+            5,
+            7,
+            crate::memory::MemoryScope {
+                conversation_id: Some(9),
+                ..crate::memory::MemoryScope::default()
+            },
+        );
+        assert_eq!(toolbox.entries.len(), MAX_TOOLS);
+        let names = toolbox.names();
+        for name in tools::TOOL_NAMES {
+            assert!(names.contains(&name));
+        }
+        for (spec, _) in STORY_SPECS.iter() {
+            assert!(names.contains(&spec.name.as_ref()));
+        }
+        for name in ["remember", "forget", "recall_history"] {
+            assert!(names.contains(&name));
+        }
+        assert!(names.contains(&"test__0"));
+        assert!(!names.contains(&format!("test__{}", remote_count - 1).as_str()));
     }
 }

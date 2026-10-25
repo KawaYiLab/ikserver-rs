@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, content, pinned, importance, happened_on, updated_at, embedding, embedding_model\n         FROM ai_memories\n         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'\n         ORDER BY updated_at DESC, id DESC\n         LIMIT $3",
+  "query": "SELECT id, content, pinned, importance, happened_on, updated_at, embedding, embedding_model\n         FROM ai_memories\n         WHERE user_id = $1 AND ai_user_id = $2 AND kind = 'event'\n           AND ($4::text IS NULL OR source_scope = $4)\n         ORDER BY updated_at DESC, id DESC\n         LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -96,7 +96,8 @@
       "Left": [
         "Int8",
         "Int8",
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -110,5 +111,5 @@
       true
     ]
   },
-  "hash": "af5e9d9e833bde5eacb1be32f952db55469c55554515624bd68a22ef35fed470"
+  "hash": "beb4e6ab2ec0c57f275364d8375c4159b9c30472b97c4998972dc38e5ca2e31c"
 }

@@ -549,6 +549,60 @@ fn settings_input(enabled: bool) -> MemorySettingsInput {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn memory_jobs_use_disabled_models_and_fall_back_when_unavailable(db: PgPool) {
+    let h = harness(db).await;
+    insert_user(&h.db, ADMIN, false).await;
+    sqlx::query(
+        "INSERT INTO ai_models (id, key, display_name, provider, provider_model, enabled)
+         VALUES (2, 'memory-only', '记忆专用', 'fake', 'fake-memory', false)",
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+
+    // 后台可以保存停用的专用模型，但用户的可选模型列表仍只显示启用模型。
+    let mut input = settings_input(true);
+    input.model_key = Some("memory-only".into());
+    let saved = memory_admin::update_settings(&h.state, &admin_operator(), input)
+        .await
+        .unwrap();
+    assert_eq!(saved.model_key.as_deref(), Some("memory-only"));
+    let visible = service::models(&h.state).await.unwrap();
+    assert_eq!(visible.items.len(), 1);
+    assert_eq!(visible.items[0].key, "base");
+
+    let conversation = h.session("fairy").await;
+    for (change, expected_model) in [
+        (None, "fake-memory"),
+        (
+            Some("UPDATE ai_models SET provider = 'missing' WHERE key = 'memory-only'"),
+            "fake-base",
+        ),
+        (
+            Some("DELETE FROM ai_models WHERE key = 'memory-only'"),
+            "fake-base",
+        ),
+    ] {
+        if let Some(sql) = change {
+            sqlx::query(sql).execute(&h.db).await.unwrap();
+            h.state.catalog.invalidate().await;
+        }
+        // 普通聊天始终用全站默认模型；提炼优先用专用模型，仅在提供方不可用或模型被删时回退。
+        let reply = h.turn(conversation, "我喜欢看书", "最近读了什么？").await;
+        assert_eq!(reply.model, "fake-base");
+        let calls = h.fake.requests().len();
+        h.fake.push(vec![content(r#"{"ops":[]}"#)]);
+        assert_eq!(
+            memory_jobs::extract(&h.state, conversation).await.unwrap(),
+            Extracted::default()
+        );
+        let requests = h.fake.requests();
+        assert_eq!(requests.len(), calls + 1);
+        assert_eq!(requests.last().unwrap().model, expected_model);
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
     let h = harness(db).await;
     insert_user(&h.db, ADMIN, false).await;
@@ -608,7 +662,7 @@ async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
     let conversation = h.session("fairy").await;
     let request = h.turn(conversation, "你还记得我吗", "当然").await;
     assert!(!system_of(&request).contains("【记忆】"));
-    assert_eq!(request.tools.len(), 12);
+    assert_eq!(request.tools.len(), 7);
     assert_eq!(h.queued(format!("ai-memory:{conversation}")).await, 0);
     let calls = h.fake.requests().len();
     assert_eq!(
@@ -623,7 +677,7 @@ async fn admins_manage_settings_and_each_users_memories(db: PgPool) {
         .unwrap();
     let request = h.turn(conversation, "现在呢", "记得").await;
     assert!(system_of(&request).contains("- 对方叫阿哲"));
-    assert_eq!(request.tools.len(), 15);
+    assert_eq!(request.tools.len(), 10);
 
     // 按 id 或用户名（不区分大小写，可带 @）查某个用户的记忆。
     h.insert_memory(2, Some(FAIRY), "relation", "你叫对方阿哲")
@@ -984,4 +1038,74 @@ async fn nightly_forgets_small_old_things_and_consolidates_the_rest(db: PgPool) 
     );
     // 整理过的一周内不再排。
     assert_eq!(memory_jobs::nightly(&h.state).await.unwrap(), (0, 0));
+}
+
+/// QQ 群里的记忆工具（ADR 0008）：记下的个人记忆带上来源群，`about = group` 写进群共享记忆，
+/// forget 只能删这个群里看得见的记忆，不能翻私下的聊天记录。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn memory_tools_in_a_public_place_keep_to_that_place(db: PgPool) {
+    use ik_ai::memory::MemoryScope;
+    use ik_ai::toolbox::Toolbox;
+    use ik_ai::tools::ToolContext;
+    let h = harness(db).await;
+    let scope = "qq:group:42".to_owned();
+    let toolbox = Toolbox::forum().with_memory(
+        HUMAN,
+        FAIRY,
+        MemoryScope {
+            conversation_id: None,
+            public: Some(scope.clone()),
+            shared: Some(scope.clone()),
+        },
+    );
+    assert!(!toolbox.names().contains(&"recall_history"));
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    // 群里论坛工具按游客视角；记忆仍归提问者本人。
+    let ctx = ToolContext::guest();
+    let run = |name: &'static str, args: &'static str| {
+        toolbox.execute(&h.state, &ctx, &h.state.mcp, name, args, deadline)
+    };
+    let out = run("remember", r#"{"content":"对方在准备考研","about":"user"}"#).await;
+    assert!(!out.is_error, "{}", out.text);
+    let scoped: Option<String> = sqlx::query_scalar(
+        "SELECT source_scope FROM ai_memories WHERE user_id = $1 AND content = '对方在准备考研'",
+    )
+    .bind(HUMAN)
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(scoped.as_deref(), Some("qq:group:42"));
+    let out = run(
+        "remember",
+        r#"{"content":"这个群周五一起打本","about":"group"}"#,
+    )
+    .await;
+    assert!(out.text.contains("共同记忆"), "{}", out.text);
+    let shared: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ai_shared_memories WHERE scope = 'qq:group:42' AND ai_user_id = $1 AND origin = 'told'",
+    )
+    .bind(FAIRY)
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(shared, 1);
+    // 私下说的记忆在群里忘不掉，也不会被念出来。
+    sqlx::query(
+        "INSERT INTO ai_memories (id, user_id, kind, content, origin, sensitivity) VALUES (77, $1, 'profile', '对方住在上海', 'told', 'private')",
+    )
+    .bind(HUMAN)
+    .execute(&h.db)
+    .await
+    .unwrap();
+    let out = run("forget", r#"{"content":"住在上海"}"#).await;
+    assert!(!out.text.contains("上海"), "{}", out.text);
+    let kept: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_memories WHERE id = 77")
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(kept, 1);
+    let out = run("forget", r#"{"content":"周五一起打本","about":"group"}"#).await;
+    assert!(out.text.contains("忘掉"), "{}", out.text);
+    let out = run("recall_history", r#"{"query":"上海"}"#).await;
+    assert!(out.is_error);
 }

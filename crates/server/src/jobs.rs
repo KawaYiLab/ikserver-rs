@@ -70,6 +70,8 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_ai::memory_jobs::ConsolidateMemories>()
         .define_job::<ik_qqbot::jobs::Reply>()
         .define_job::<ik_qqbot::jobs::Prune>()
+        .define_job::<ik_qqbot::memory_jobs::ExtractMemories>()
+        .define_job::<ik_qqbot::memory_jobs::ExtractGroupMemories>()
         .add_extension(state.mihoyo.clone())
         .add_extension(state.ai.clone())
         .add_extension(state.qqbot.clone())

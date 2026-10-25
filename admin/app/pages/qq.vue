@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Pencil, RotateCcw } from '@lucide/vue'
+import { Ban, Brain, Pencil, Pin, Plus, RotateCcw, Trash2, Unlink } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,6 +20,8 @@ definePageMeta({ admin: true })
 type Settings = Schemas['QqSettings']
 type Bot = Schemas['QqBotView']
 type Group = Schemas['QqGroupView']
+type Identity = Schemas['QqIdentityView']
+type SharedMemory = Schemas['SharedMemoryView']
 
 const NONE = 'none'
 const { run, failure } = useNotify()
@@ -176,9 +178,139 @@ async function resetGroup(group: Group) {
   if (saved) await groupList.refresh()
 }
 
+// ---------- 绑定身份（ADR 0008 第二期） ----------
+
+const identityList = useListQuery({
+  filters: { user: '' },
+  text: ['user'],
+  pageKey: 'identityPage',
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/qq/identities', {
+    params: { query: { user: optional(f.user), page, limit: 20 } },
+  })),
+})
+const identities = computed(() => identityList.result.value?.items ?? [])
+
+async function toggleIdentityBlock(identity: Identity) {
+  const ok = await confirm({
+    title: identity.blocked ? '解封这个 QQ 身份？' : '封禁这个 QQ 身份？',
+    description: identity.blocked ? '解封后机器人会照常回复。' : '封禁后机器人不再回复这个身份（不影响站内账号）。',
+    confirmLabel: identity.blocked ? '解封' : '封禁',
+  })
+  if (!ok) return
+  const done = await run(() => unwrap(api.PUT('/v1/admin/qq/identities/{id}', {
+    params: { path: { id: identity.id } },
+    body: { blocked: !identity.blocked, unbind: false },
+  })).then(() => true), identity.blocked ? '已解封' : '已封禁')
+  if (done) await identityList.refresh()
+}
+
+async function unbindIdentity(identity: Identity) {
+  const ok = await confirm({
+    title: '强制解绑这个 QQ 身份？',
+    description: '解绑后按游客的免费次数使用，机器人不再读写这个账号的记忆。已有的记忆不受影响。',
+    confirmLabel: '解绑',
+  })
+  if (!ok) return
+  const done = await run(() => unwrap(api.PUT('/v1/admin/qq/identities/{id}', {
+    params: { path: { id: identity.id } },
+    body: { blocked: identity.blocked, unbind: true },
+  })).then(() => true), '已解绑')
+  if (done) await identityList.refresh()
+}
+
+// ---------- 回复记录 ----------
+
+const turnList = useListQuery({
+  filters: { status: 'all' },
+  pageKey: 'turnPage',
+  fetch: (f, page) => unwrap(api.GET('/v1/admin/qq/turns', {
+    params: { query: { status: optional(f.status), page, limit: 20 } },
+  })),
+})
+const turns = computed(() => turnList.result.value?.items ?? [])
+const turnStatus: Record<string, string> = {
+  queued: '排队中',
+  processing: '处理中',
+  completed: '已回复',
+  failed: '失败',
+  skipped: '跳过',
+}
+
+// ---------- 群共享记忆（ADR 0008 第三期） ----------
+
+const memoryGroup = ref<Group | null>(null)
+const memories = ref<SharedMemory[]>([])
+const memoriesLoading = ref(false)
+const memoryDraft = ref({ character: NONE, content: '' })
+const memoryEdit = ref<{ id: string, content: string } | null>(null)
+
+async function openMemories(group: Group) {
+  memoryGroup.value = group
+  memoryDraft.value = { character: group.cardSlug ?? qqCharacters.value[0]?.slug ?? NONE, content: '' }
+  memoryEdit.value = null
+  await loadMemories()
+}
+
+async function loadMemories() {
+  const group = memoryGroup.value
+  if (!group) return
+  memoriesLoading.value = true
+  try {
+    memories.value = (await unwrap(api.GET('/v1/admin/qq/groups/{id}/memories', { params: { path: { id: group.id } } }))).items
+  }
+  catch (error) {
+    failure(error)
+  }
+  finally {
+    memoriesLoading.value = false
+  }
+}
+
+async function addMemory() {
+  const group = memoryGroup.value
+  const draft = memoryDraft.value
+  if (!group || !draft.content.trim() || draft.character === NONE) return
+  const saved = await run(() => unwrap(api.POST('/v1/admin/qq/groups/{id}/memories', {
+    params: { path: { id: group.id } },
+    body: { character: draft.character, content: draft.content.trim(), pinned: false },
+  })), '已记下')
+  if (saved) {
+    memoryDraft.value.content = ''
+    await loadMemories()
+  }
+}
+
+async function saveMemory(memory: SharedMemory, body: { content?: string, pinned?: boolean }) {
+  const group = memoryGroup.value
+  if (!group) return
+  const saved = await run(() => unwrap(api.PUT('/v1/admin/qq/groups/{id}/memories/{memoryId}', {
+    params: { path: { id: group.id, memoryId: memory.id } },
+    body,
+  })), '已保存')
+  if (saved) {
+    memoryEdit.value = null
+    await loadMemories()
+  }
+}
+
+async function deleteMemory(memory: SharedMemory) {
+  const group = memoryGroup.value
+  if (!group) return
+  const ok = await confirm({ title: '删除这条群共享记忆？', description: memory.content, confirmLabel: '删除', destructive: true })
+  if (!ok) return
+  const done = await run(() => unwrap(api.DELETE('/v1/admin/qq/groups/{id}/memories/{memoryId}', {
+    params: { path: { id: group.id, memoryId: memory.id } },
+  })).then(() => true), '已删除')
+  if (done) await loadMemories()
+}
+
+const memoryOrigin: Record<string, string> = { extracted: '自动提炼', told: '群友让记的', manual: '管理员' }
+
 function refresh() {
   load()
   groupList.refresh()
+  identityList.refresh()
+  turnList.refresh()
 }
 </script>
 
@@ -192,6 +324,8 @@ function refresh() {
       <TabsList>
         <TabsTrigger value="settings">设置与机器人</TabsTrigger>
         <TabsTrigger value="groups">群管理</TabsTrigger>
+        <TabsTrigger value="identities">绑定身份</TabsTrigger>
+        <TabsTrigger value="turns">回复记录</TabsTrigger>
       </TabsList>
 
       <TabsContent value="settings" class="space-y-4">
@@ -336,6 +470,7 @@ function refresh() {
                   <TableCell>
                     <AdminRowActions :actions="[
                       { label: '编辑群设置', icon: Pencil, onSelect: () => editGroup(group) },
+                      { label: '群共享记忆', icon: Brain, onSelect: () => openMemories(group) },
                       { label: '重置上下文', icon: RotateCcw, onSelect: () => resetGroup(group) },
                     ]" />
                   </TableCell>
@@ -347,7 +482,131 @@ function refresh() {
           </CardContent>
         </Card>
       </TabsContent>
+
+      <TabsContent value="identities">
+        <Card>
+          <CardHeader>
+            <CardTitle>绑定身份</CardTitle>
+            <CardDescription>同一个人在每个群、单聊都是独立的 QQ 身份，各绑一次。openid 只显示后 6 位。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div class="mb-4 max-w-sm"><Input v-model="identityList.filters.user" placeholder="按绳网用户 ID 或用户名筛选" /></div>
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>场景</TableHead><TableHead>群昵称 / openid</TableHead><TableHead>绑定账号</TableHead><TableHead>状态</TableHead><TableHead>最后活跃</TableHead><TableHead class="w-12" /></TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="identity in identities" :key="identity.id">
+                  <TableCell>{{ identity.scene === 'group' ? (identity.groupName ?? '群') : '单聊' }}</TableCell>
+                  <TableCell><div>{{ identity.nickname || '—' }}</div><div class="font-mono text-xs text-muted-foreground">…{{ identity.openidTail }}</div></TableCell>
+                  <TableCell>
+                    <span v-if="identity.userId" class="font-mono text-xs">{{ identity.userId }}</span>
+                    <span v-else class="text-muted-foreground">游客</span>
+                    <div v-if="identity.boundAt" class="text-xs text-muted-foreground">{{ formatTime(identity.boundAt) }} 绑定</div>
+                  </TableCell>
+                  <TableCell>
+                    <div class="flex flex-wrap gap-1">
+                      <Badge v-if="identity.blocked" variant="destructive">已封禁</Badge>
+                      <Badge v-if="!identity.available" variant="outline">已删好友</Badge>
+                    </div>
+                  </TableCell>
+                  <TableCell class="text-sm text-muted-foreground">{{ formatTime(identity.lastActiveAt) }}</TableCell>
+                  <TableCell>
+                    <AdminRowActions :actions="[
+                      { label: identity.blocked ? '解封' : '封禁', icon: Ban, onSelect: () => toggleIdentityBlock(identity) },
+                      ...(identity.userId ? [{ label: '强制解绑', icon: Unlink, onSelect: () => unbindIdentity(identity) }] : []),
+                    ]" />
+                  </TableCell>
+                </TableRow>
+                <AdminListState :colspan="6" :loading="identityList.loading.value" :empty="!identities.length" :failed="identityList.failed.value" empty-text="没有 QQ 身份。" @retry="identityList.refresh" />
+              </TableBody>
+            </Table>
+            <AdminPager v-if="identityList.result.value" :page="identityList.page.value" :limit="identityList.result.value.limit" :total="identityList.result.value.total" unit="个身份" @change="identityList.setPage" />
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="turns">
+        <Card>
+          <CardHeader>
+            <CardTitle>回复记录</CardTitle>
+            <CardDescription>每条触发的消息一条记录，用于排查「机器人没反应」。不含消息正文。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div class="mb-4 max-w-xs">
+              <Select v-model="turnList.filters.status">
+                <SelectTrigger class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem v-for="(label, key) in turnStatus" :key="key" :value="key">{{ label }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow><TableHead>时间</TableHead><TableHead>场景</TableHead><TableHead>计费</TableHead><TableHead>状态 / 原因</TableHead><TableHead>模型</TableHead><TableHead class="text-right">token</TableHead></TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="turn in turns" :key="turn.id">
+                  <TableCell class="text-sm text-muted-foreground">{{ formatTime(turn.createdAt) }}</TableCell>
+                  <TableCell>{{ turn.scene === 'group' ? '群' : '单聊' }}</TableCell>
+                  <TableCell>{{ turn.payerUserId ? '个人额度' : '游客' }}</TableCell>
+                  <TableCell><Badge :variant="turn.status === 'failed' ? 'destructive' : 'secondary'">{{ turnStatus[turn.status] ?? turn.status }}</Badge><span v-if="turn.reason" class="ml-2 font-mono text-xs text-muted-foreground">{{ turn.reason }}</span></TableCell>
+                  <TableCell class="font-mono text-xs">{{ turn.modelKey ?? '—' }}</TableCell>
+                  <TableCell class="text-right tabular-nums">{{ formatNumber(turn.promptTokens + turn.completionTokens) }}</TableCell>
+                </TableRow>
+                <AdminListState :colspan="6" :loading="turnList.loading.value" :empty="!turns.length" :failed="turnList.failed.value" empty-text="还没有回复记录。" @retry="turnList.refresh" />
+              </TableBody>
+            </Table>
+            <AdminPager v-if="turnList.result.value" :page="turnList.page.value" :limit="turnList.result.value.limit" :total="turnList.result.value.total" unit="条" @change="turnList.setPage" />
+          </CardContent>
+        </Card>
+      </TabsContent>
     </Tabs>
+
+    <Dialog :open="!!memoryGroup" @update:open="v => { if (!v) memoryGroup = null }">
+      <DialogScrollContent v-if="memoryGroup" class="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>群共享记忆：{{ memoryGroup.displayName }}</DialogTitle>
+          <DialogDescription>这个群大家共同的事（群规、约定、常聊的话题）。只在这个群里用，绑定用户提问时带上；置顶的不会被自动整理改掉。</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3">
+          <Skeleton v-if="memoriesLoading && !memories.length" class="h-24 w-full" />
+          <p v-else-if="!memories.length" class="text-sm text-muted-foreground">还没有共享记忆。</p>
+          <div v-for="memory in memories" :key="memory.id" class="rounded-md border p-3">
+            <div v-if="memoryEdit?.id === memory.id" class="space-y-2">
+              <Textarea v-model="memoryEdit.content" rows="2" maxlength="200" />
+              <div class="flex justify-end gap-2">
+                <Button variant="outline" size="sm" @click="memoryEdit = null">取消</Button>
+                <Button size="sm" @click="saveMemory(memory, { content: memoryEdit.content })">保存</Button>
+              </div>
+            </div>
+            <div v-else class="flex items-start justify-between gap-3">
+              <div>
+                <div class="text-sm">{{ memory.content }}</div>
+                <div class="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
+                  <Badge v-if="memory.pinned" variant="secondary">置顶</Badge>
+                  <span>{{ characterName(memory.character) }} · {{ memoryOrigin[memory.origin] ?? memory.origin }} · {{ formatTime(memory.updatedAt) }}</span>
+                </div>
+              </div>
+              <AdminRowActions :actions="[
+                { label: '编辑', icon: Pencil, onSelect: () => { memoryEdit = { id: memory.id, content: memory.content } } },
+                { label: memory.pinned ? '取消置顶' : '置顶', icon: Pin, onSelect: () => saveMemory(memory, { pinned: !memory.pinned }) },
+                { label: '删除', icon: Trash2, onSelect: () => deleteMemory(memory) },
+              ]" />
+            </div>
+          </div>
+          <form class="grid gap-2 border-t pt-3 sm:grid-cols-[10rem_1fr_auto]" @submit.prevent="addMemory">
+            <Select v-model="memoryDraft.character">
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem v-for="c in qqCharacters" :key="c.slug" :value="c.slug">{{ c.displayName }}</SelectItem></SelectContent>
+            </Select>
+            <Input v-model="memoryDraft.content" maxlength="200" placeholder="例如：这个群周五晚上一起打本" />
+            <Button type="submit" :disabled="!memoryDraft.content.trim() || memoryDraft.character === NONE"><Plus class="size-4" />记下</Button>
+          </form>
+        </div>
+      </DialogScrollContent>
+    </Dialog>
 
     <Dialog :open="!!botDraft" @update:open="v => { if (!v && !botSaving) botDraft = null }">
       <DialogScrollContent v-if="botDraft">

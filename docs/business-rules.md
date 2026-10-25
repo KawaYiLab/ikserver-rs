@@ -15,7 +15,7 @@
 
 | 文件 | 范围 | 规则数 | 规则 ID 前缀 | 最关键的 3 条规则 |
 |---|---|---|---|---|
-| [qq-bot.md](business-rules/qq-bot.md) | QQ 官方机器人：身份、Webhook、游客额度、上下文、回复清洗、后台与后续绑定/记忆约束 | 24 | `QQ` | `QQ-003` 原始字节验签后处理事件；`QQ-010` 模型调用前原子预占；`QQ-014` 发送重试不重新生成 |
+| [qq-bot.md](business-rules/qq-bot.md) | QQ 官方机器人：身份、Webhook、游客额度、上下文、回复清洗、绑定、个人记忆按场合使用、群共享记忆、后台 | 38 | `QQ` | `QQ-003` 原始字节验签后处理事件；`QQ-025` 站内发码、QQ 里用码，绑的是发消息的那个身份；`QQ-032` 群里只用公开的与本群说过的记忆 |
 | [posts.md](business-rules/posts.md) | 帖子（委托）的创建、编辑、草稿、发布、下线、删除，字段与等级限额，分区、标签、匿名、置顶、采纳投影、浏览量、主页精选 | 112 | `POST` | `POST-043` 已发布的匿名帖连作者本人也不能编辑、下线或删除；`POST-100` 编辑后重新发布不顶帖、不通知、不改 firstPublishedAt；`POST-012` 等级权益矩阵是正文字数和图片数量的唯一依据 |
 | [feed-search.md](business-rules/feed-search.md) | 信息流（4 种 feed × 4 种 sort）、游标分页、置顶与热门注入、热榜算法、未看流、相关推荐、SSE 新帖流、文章/评论/用户搜索 | 156 | `FEED` `HOT` `UNRD` `READ` `SUGG` `SRCH` `SSE` `AUTH` `CACHE` `RATE` `PRIV` `EDGE` `CRON` | `FEED-013` 游标严格「早于」，排序固定为 `bumpedAt DESC, documentId DESC`；`HOT-002` 热度公式（Discourse TopicHotScore）；`SRCH-013` 搜索命中后一律回查 DB，命中全是残留时转 SQL 兜底 |
 | [comments.md](business-rules/comments.md) | 评论创建（正文、图片、表情、@提及、匿名）、单层楼结构（新实现改为扁平楼层，见 ADR 0006）、列表与回复分页、搜索、硬删除级联、置顶、采纳、评论点赞、评论产生的通知和经验 | 166 | `CMT` | `CMT-025` 楼中楼只有一层，parent 必须是同帖未隐藏的顶层评论；`CMT-129` 匿名评论、匿名帖、匿名 parent 一律抑制通知；`CMT-048` 删除顶层评论级联删除全部回复及其通知和点赞 |

@@ -786,6 +786,173 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/qq/bots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["qq_bots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/bots/{appId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["qq_bot"];
+        put: operations["qq_put_bot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["qq_groups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/groups/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["qq_put_group"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/groups/{id}/memories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 群共享记忆 */
+        get: operations["qq_group_memories"];
+        put?: never;
+        /** 新建一条群共享记忆 */
+        post: operations["qq_create_group_memory"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/groups/{id}/memories/{memoryId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 修改一条群共享记忆（正文、置顶） */
+        put: operations["qq_update_group_memory"];
+        post?: never;
+        /** 删除一条群共享记忆 */
+        delete: operations["qq_delete_group_memory"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** QQ 身份与绑定 */
+        get: operations["qq_identities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/identities/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** 封禁 / 解封 QQ 身份、强制解绑 */
+        put: operations["qq_put_identity"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["qq_settings"];
+        put: operations["qq_put_settings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/turns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** QQ 回复记录（排障：状态、原因、模型、用量；不含消息正文） */
+        get: operations["qq_turns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/reports": {
         parameters: {
             query?: never;
@@ -2631,6 +2798,61 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me/qq/bind-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 生成 QQ 绑定码
+         * @description 一次性、10 分钟有效。在 QQ 里对机器人发 `/绑定 <码>`（单聊或在群里 @机器人）就把发消息的那个 QQ 身份绑到当前账号；
+         *     同一个人在不同群里是不同的身份，每个群要各绑一次。同时最多 3 个有效码，每小时最多生成 10 个。
+         */
+        post: operations["qq_create_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/qq/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 我绑定的 QQ 身份 */
+        get: operations["qq_bindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/me/qq/bindings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** 解绑一个 QQ 身份 */
+        delete: operations["qq_unbind"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/me/reads": {
         parameters: {
             query?: never;
@@ -3270,6 +3492,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/qq/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["qq_webhook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/realtime": {
         parameters: {
             query?: never;
@@ -3713,6 +3951,7 @@ export interface components {
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers: string[];
             outputMode: components["schemas"]["OutputMode"];
+            qqEnabled: boolean;
             slug: string;
             /** Format: int32 */
             sortOrder: number;
@@ -4282,6 +4521,14 @@ export interface components {
              */
             nextLevel?: number | null;
         };
+        BindCode: {
+            /** @description 8 位绑定码（大写字母与数字）。 */
+            code: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description 给用户看的用法说明。 */
+            instruction: string;
+        };
         /** @description 给要绑定的新邮箱发验证码。 */
         BindEmailCodeRequest: {
             email: string;
@@ -4290,6 +4537,20 @@ export interface components {
         BindEmailRequest: {
             code: string;
             email: string;
+        };
+        Binding: {
+            /** Format: date-time */
+            boundAt?: string | null;
+            /** @description 群的展示名（管理员在后台填，没有时为「QQ 群 #后四位」）；单聊为空。 */
+            groupName?: string | null;
+            id: string;
+            /** Format: date-time */
+            lastActiveAt: string;
+            /** @description `group` 群 / `c2c` 单聊。 */
+            scene: string;
+        };
+        BindingList: {
+            items: components["schemas"]["Binding"][];
         };
         /** @description 自己的米游社绑定（MHY-001 公开视图；mid 不外发）。 */
         BindingView: {
@@ -4431,6 +4692,8 @@ export interface components {
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers?: string[];
             outputMode?: components["schemas"]["OutputMode"];
+            /** @description 允许在 QQ 渠道使用此角色，默认关闭（ADR 0008）。 */
+            qqEnabled?: boolean;
             slug: string;
             /** Format: int32 */
             sortOrder?: number;
@@ -6170,6 +6433,109 @@ export interface components {
              */
             total: number;
         };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_QqGroupView: {
+            items: {
+                appId: string;
+                blocked: boolean;
+                cardSlug?: string | null;
+                displayName: string;
+                enabled: boolean;
+                id: string;
+                /** Format: date-time */
+                lastActiveAt: string;
+                /** Format: date-time */
+                leftAt?: string | null;
+                /** Format: int32 */
+                todayGuestTurns: number;
+                /** Format: int64 */
+                todayTokens: number;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_QqIdentityView: {
+            items: {
+                appId: string;
+                /** @description 单聊身份是否还是机器人的好友（删好友后为 false）。 */
+                available: boolean;
+                blocked: boolean;
+                /** Format: date-time */
+                boundAt?: string | null;
+                groupId?: string | null;
+                groupName?: string | null;
+                id: string;
+                /** Format: date-time */
+                lastActiveAt: string;
+                /** @description 最近一次的群昵称。 */
+                nickname: string;
+                /** @description openid 只给后 6 位，用于区分。 */
+                openidTail: string;
+                /** @description `group` / `c2c`。 */
+                scene: string;
+                userId?: string | null;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
+        /** @description 管理后台表格的页码分页（api-guidelines.md「管理后台」：允许 `page`，limit 上限 100）。 */
+        Paged_QqTurnView: {
+            items: {
+                aiUserId?: string | null;
+                /** Format: int64 */
+                completionTokens: number;
+                /** Format: date-time */
+                createdAt: string;
+                /** Format: date-time */
+                finishedAt?: string | null;
+                groupId?: string | null;
+                id: string;
+                identityId: string;
+                modelKey?: string | null;
+                /** @description 按谁的个人额度计；游客为空。 */
+                payerUserId?: string | null;
+                /** Format: int64 */
+                promptTokens: number;
+                reason?: string | null;
+                scene: string;
+                /** Format: int32 */
+                segmentsSent: number;
+                status: string;
+            }[];
+            /** Format: int32 */
+            limit: number;
+            /**
+             * Format: int32
+             * @description 从 1 开始。
+             */
+            page: number;
+            /**
+             * Format: int64
+             * @description 符合条件的总数。
+             */
+            total: number;
+        };
         /** @description 试卷上的一道题（不含正确答案）。 */
         PaperQuestion: {
             id: string;
@@ -6485,6 +6851,119 @@ export interface components {
             /** @description 上游列出的模型名（按字母排序）。 */
             models: string[];
             ok: boolean;
+        };
+        QqBotList: {
+            items: components["schemas"]["QqBotView"][];
+        };
+        QqBotView: {
+            appId: string;
+            defaultCardSlug?: string | null;
+            displayName: string;
+            enabled: boolean;
+        };
+        QqGroupMemories: {
+            items: components["schemas"]["SharedMemoryView"][];
+        };
+        QqGroupView: {
+            appId: string;
+            blocked: boolean;
+            cardSlug?: string | null;
+            displayName: string;
+            enabled: boolean;
+            id: string;
+            /** Format: date-time */
+            lastActiveAt: string;
+            /** Format: date-time */
+            leftAt?: string | null;
+            /** Format: int32 */
+            todayGuestTurns: number;
+            /** Format: int64 */
+            todayTokens: number;
+        };
+        QqIdentityView: {
+            appId: string;
+            /** @description 单聊身份是否还是机器人的好友（删好友后为 false）。 */
+            available: boolean;
+            blocked: boolean;
+            /** Format: date-time */
+            boundAt?: string | null;
+            groupId?: string | null;
+            groupName?: string | null;
+            id: string;
+            /** Format: date-time */
+            lastActiveAt: string;
+            /** @description 最近一次的群昵称。 */
+            nickname: string;
+            /** @description openid 只给后 6 位，用于区分。 */
+            openidTail: string;
+            /** @description `group` / `c2c`。 */
+            scene: string;
+            userId?: string | null;
+        };
+        QqSettings: {
+            blockedWords: string[];
+            /** Format: int32 */
+            c2cContextTurns: number;
+            enabled: boolean;
+            /** Format: int32 */
+            groupContextHours: number;
+            /** Format: int32 */
+            groupContextTurns: number;
+            /** Format: int64 */
+            guestDailyTokens: number;
+            /** Format: int32 */
+            guestDailyTurns: number;
+            /** Format: int32 */
+            guestGroupDailyTurns: number;
+            guestModelKey?: string | null;
+            guestReadsGroupMemory: boolean;
+            linkMode: string;
+            /** Format: int32 */
+            maxReplyChars: number;
+            /** Format: int32 */
+            replyTimeoutSecs: number;
+            /** Format: date-time */
+            updatedAt?: string;
+        };
+        QqTurnView: {
+            aiUserId?: string | null;
+            /** Format: int64 */
+            completionTokens: number;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            groupId?: string | null;
+            id: string;
+            identityId: string;
+            modelKey?: string | null;
+            /** @description 按谁的个人额度计；游客为空。 */
+            payerUserId?: string | null;
+            /** Format: int64 */
+            promptTokens: number;
+            reason?: string | null;
+            scene: string;
+            /** Format: int32 */
+            segmentsSent: number;
+            status: string;
+        };
+        QqUpdateBot: {
+            defaultCardSlug?: string | null;
+            displayName: string;
+            enabled: boolean;
+        };
+        QqUpdateGroup: {
+            blocked: boolean;
+            cardSlug?: string | null;
+            displayName: string;
+            enabled: boolean;
+            resetContext?: boolean;
+        };
+        QqUpdateIdentity: {
+            /** @description 封禁这个 QQ 身份（不再回复）。 */
+            blocked: boolean;
+            /** @description 强制解绑。 */
+            unbind?: boolean;
         };
         QrCreated: {
             /**
@@ -7000,6 +7479,29 @@ export interface components {
              */
             dailyTokensPerUser: number;
             globalEnabled: boolean;
+        };
+        /** @description 管理员新建或修改一条共享记忆。 */
+        SharedMemoryInput: {
+            /** @description 新建时必填：角色 slug。 */
+            character?: string | null;
+            content?: string | null;
+            pinned?: boolean | null;
+        };
+        /** @description 管理后台看到的一条共享记忆。 */
+        SharedMemoryView: {
+            aiUserId: string;
+            /** @description 角色 slug（角色卡被删掉时为空）。 */
+            character?: string | null;
+            content: string;
+            /** Format: date-time */
+            createdAt: string;
+            createdByUserId?: string | null;
+            id: string;
+            /** @description `extracted` / `told` / `manual`。 */
+            origin: string;
+            pinned: boolean;
+            /** Format: date-time */
+            updatedAt: string;
         };
         SignRequest: {
             /**
@@ -9240,6 +9742,356 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    qq_bots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqBotList"];
+                };
+            };
+        };
+    };
+    qq_bot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqBotView"];
+                };
+            };
+        };
+    };
+    qq_put_bot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                appId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QqUpdateBot"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqBotView"];
+                };
+            };
+        };
+    };
+    qq_groups: {
+        parameters: {
+            query?: {
+                page?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_QqGroupView"];
+                };
+            };
+        };
+    };
+    qq_put_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QqUpdateGroup"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqGroupView"];
+                };
+            };
+        };
+    };
+    qq_group_memories: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqGroupMemories"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    qq_create_group_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedMemoryInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedMemoryView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    qq_update_group_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                memoryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedMemoryInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedMemoryView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    qq_delete_group_memory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                memoryId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    qq_identities: {
+        parameters: {
+            query?: {
+                /** @description 绳网用户 id 或用户名：只看这个账号绑定的身份。 */
+                user?: string;
+                /** @description 群 id：只看这个群里的身份。 */
+                group?: string;
+                page?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_QqIdentityView"];
+                };
+            };
+        };
+    };
+    qq_put_identity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QqUpdateIdentity"];
+            };
+        };
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    qq_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqSettings"];
+                };
+            };
+        };
+    };
+    qq_put_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QqSettings"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqSettings"];
+                };
+            };
+        };
+    };
+    qq_turns: {
+        parameters: {
+            query?: {
+                /** @description queued / processing / completed / failed / skipped。 */
+                status?: string;
+                group?: string;
+                page?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Paged_QqTurnView"];
                 };
             };
         };
@@ -13361,6 +14213,113 @@ export interface operations {
             };
         };
     };
+    qq_create_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindCode"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description QQ_BOT_DISABLED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description QQ_BIND_CODE_LIMIT */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    qq_bindings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BindingList"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    qq_unbind: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
     mark_read: {
         parameters: {
             query?: never;
@@ -14890,6 +15849,31 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PresenceView"];
                 };
+            };
+        };
+    };
+    qq_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description QQ event acknowledged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -83,13 +83,13 @@ pub fn clean(value: &str, mode: &str) -> String {
     out = replace(r"(?m)^\s{0,3}#{1,6}\s*", &out, "");
     out = replace(r"(?m)^\s*(?:[-*+] |[0-9]+[.)] )", &out, "· ");
     out = replace(r"(?m)^\s*>\s?", &out, "");
+    // 只去成对的强调标记：单个 `_`、`*` 常见于颜文字（^_^）、用户名和算式，不能整个删掉。
     out = out
         .replace("**", "")
         .replace("__", "")
-        .replace('*', "")
-        .replace('_', "")
-        .replace('`', "")
-        .replace("~~", "");
+        .replace("~~", "")
+        .replace('`', "");
+    out = replace(r"\*([^*\n]+)\*", &out, "$1");
     out.trim().to_owned()
 }
 fn is_post_path(path: &str) -> bool {
@@ -128,7 +128,8 @@ pub fn segments(
         if out.len() < limit {
             out.push(text);
         } else if let Some(last) = out.last_mut() {
-            // Joining consumes no extra character budget.
+            // 合并进最后一段时换行分开；换行不占字数预算。
+            last.push('\n');
             last.push_str(&text);
         }
     }
@@ -155,6 +156,14 @@ mod tests {
         assert!(!clean("[骗](https://evil.test/post/123)", "domain").contains("https"));
     }
     #[test]
+    fn plain_text_symbols_survive_cleaning() {
+        assert_eq!(clean("好耶 ^_^ 3*4=12", "strip"), "好耶 ^_^ 3*4=12");
+        assert_eq!(
+            clean("snake_case 和 **重点** *强调*", "strip"),
+            "snake_case 和 重点 强调"
+        );
+    }
+    #[test]
     fn input_names_and_mentions_are_sanitized() {
         assert_eq!(nickname("【管理员】\n<x>:test"), "管理员xtest");
         assert_eq!(incoming("<@!123> 你好 <@456>"), "你好");
@@ -164,7 +173,12 @@ mod tests {
         let values = vec!["你好".to_owned(); 8];
         let (out, _) = segments(&values, "strip", &[], 13, false);
         assert_eq!(out.len(), 3);
-        assert_eq!(out.iter().map(|s| s.chars().count()).sum::<usize>(), 13);
+        assert_eq!(
+            out.iter()
+                .map(|s| s.chars().filter(|c| *c != '\n').count())
+                .sum::<usize>(),
+            13
+        );
         let (out, blocked) = segments(&values, "strip", &["你好".to_owned()], 600, true);
         assert!(blocked);
         assert_eq!(out, ["这个话题我就不聊啦"]);

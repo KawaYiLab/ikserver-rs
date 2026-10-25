@@ -423,9 +423,9 @@
 - `ai_memory_pairs`（ik-ai）：每个（用户, AI）上次整理的时刻，主键 `(user_id, ai_user_id)` 兼作 `user_id` 外键索引，
   `ai_user_id` 另有索引；用户或 AI 账号删除时级联删除。
 
-## QQ 机器人（`20261116000001_qq_bot.sql`）
+## QQ 机器人（`20261117000001_qq_bot.sql`、`20261117000002_qq_lifecycle_receipts.sql`、`20261117000003_qq_binding_memory.sql`）
 
-表归 `ik-qqbot`；AppSecret 只放部署配置。第一期包含：
+`qq_*` 表归 `ik-qqbot`，`ai_*` 的改动归 `ik-ai`；AppSecret 只放部署配置。第一期：
 
 | 表 | 用途与约束 |
 |---|---|
@@ -441,7 +441,18 @@
 
 `ai_role_cards.qq_enabled` 默认 false，由 `ik-ai` 维护。计数以北京时间 04:00 为日界。
 QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群消息、30 天前游客消息及 90 天前计数。
-绑定码、记忆进度、个人记忆来源群列和群共享记忆表按 ADR 第 2、3 期增加。
+`qq_lifecycle_receipts` 记加群 / 退群 / 加删好友事件的哈希，平台重放旧的加群事件不会盖掉之后的退群。
+
+第二、三期（`20261117000003_qq_binding_memory.sql`）：
+
+| 表 / 列 | 用途与约束 |
+|---|---|
+| `qq_bind_codes`（ik-qqbot） | 绑定码的 HMAC 主键、发码账号（级联删除）、过期与使用时刻、用掉它的身份；`(user_id, created_at)` 索引服务每人有效码与每小时限次；过期一天以上的每天清理 |
+| `qq_identities.user_id` / `bound_at` | 第一期预留，第二期启用：绑定的账号（账号删除置空）与绑定时刻 |
+| `ai_memories.source_scope`（ik-ai） | 记忆是在哪个公开场合说的（不透明的键，QQ 群为 `qq:group:<id>`，1–64 字）；为空是私下说的。公开场合只用 public 的与同场合的记忆；部分索引 `(user_id, source_scope)` |
+| `qq_memory_progress`（ik-qqbot） | （用户, 角色）的 QQ 个人记忆提炼进度，只前进；账号删除级联 |
+| `ai_shared_memories`（ik-ai） | 按场合共享的记忆（QQ 群共享记忆）：场合键、角色、正文 1–200 字、来源（extracted / told / manual）、置顶、写入者（账号删除置空）；每场合每角色最多 40 条，`(scope, ai_user_id, updated_at)` 索引 |
+| `qq_group_memory_progress`（ik-qqbot） | （群, 角色）的群共享记忆提炼进度；群删除级联 |
 
 ## 管理后台审计（`20261031000001_admin_audit.sql`）
 
