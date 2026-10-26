@@ -454,6 +454,23 @@ QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群�
 | `ai_shared_memories`（ik-ai） | 按场合共享的记忆（QQ 群共享记忆）：场合键、角色、正文 1–200 字、来源（extracted / told / manual）、置顶、写入者（账号删除置空）；每场合每角色最多 40 条，`(scope, ai_user_id, updated_at)` 索引 |
 | `qq_group_memory_progress`（ik-qqbot） | （群, 角色）的群共享记忆提炼进度；群删除级联 |
 
+基础设施升级（`20261118000001_qq_dispatch.sql`、`20261118000002_qq_identity_memory.sql`、`20261118000003_qq_lifecycle_order.sql`）：
+
+| 表 / 列 | 约束与用途 |
+|---|---|
+| `qq_conversations` | AppID + scene + target_id 唯一；next_seq、active_turn、lease_epoch/lease_until 与 wake_version/wake_at 是会话顺序和唤醒的权威状态 |
+| `qq_turns` 新列 | conversation_id/seq 唯一、protocol_version、phase、生成/发送/平台绝对截止、成本/游客次数结算标记；旧 output/segments_sent 保持兼容汇总 |
+| `qq_reply_segments` | (turn_id,msg_seq) 主键；最终正文、payload_version/hash、状态、尝试数、重试时间、修正标记、成功回执时间 |
+| `qq_send_attempts` | (turn_id,msg_seq,attempt_no) 唯一；租约 epoch、正文 hash、起止时间、结果、HTTP、code/err_code、格式异常标记、Trace ID；不存 HTTP 原始正文 |
+| `qq_app_delivery_limits` | AppID 行锁协调多实例消息 POST 速率和 Retry-After；在途数量由有效发送 attempt 与租约计算 |
+| `qq_settings.dispatch_paused` | 独立暂停生成/发送，回调入库照常，截止不变 |
+| `qq_identities.binding_version` | 真实绑定变更递增；旧身份从 1 起，旧消息不反填归属 |
+| `qq_messages.owner_user_id/binding_version` | 首次执行冻结，出站引用入站继承；NULL version 为历史未知或尚未执行 |
+| `qq_turns.*_memory_processed_at` | 个人/群提炼标记，完整 turn 为单位；时间只用于排序，旧 progress 表退役，不再作为扫描下限 |
+| `qq_groups/qq_identities.lifecycle_event_at` | 最近可识别平台生命周期时间，只忽略严格更旧的状态更新 |
+
+注销是软删除，不能依赖外键触发清理：生命周期 hook 清正文和授权，保留正在结算的计费元数据。历史终态在迁移中标记已处理，不依据当前绑定倒推旧 owner。
+
 ## 管理后台审计（`20261031000001_admin_audit.sql`）
 
 - `admin_audit_log`（ik-auth）：每个 `/v1/admin/*` 写操作与业务写入同一事务记一行：`actor_id`（账号删除后置空）、

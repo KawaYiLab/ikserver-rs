@@ -69,7 +69,7 @@ pub(crate) async fn run(
                 sqlx::query!(
                     "UPDATE qq_identities SET context_reset_at=$2 WHERE id=$1",
                     t.identity_id,
-                    Utc::now()
+                    t.message_at
                 )
                 .execute(&mut *tx)
                 .await?;
@@ -189,19 +189,24 @@ async fn bind(
             "bind_failed",
         ));
     }
-    let active = ik_auth::interop::user_statuses(tx, &[row.user_id])
+    // Binding introduces a new owner after locking this previously guest identity.
+    // NOWAIT avoids reversing the deletion hook's user -> identity lock order;
+    // a concurrent deletion causes the whole command transaction to retry.
+    let active = ik_auth::interop::try_lock_user_status(tx, row.user_id)
         .await?
-        .get(&row.user_id)
-        .is_some_and(|user| user.status == "active");
+        .as_deref()
+        == Some("active");
     if !active {
         return Ok(invalid());
     }
-    let changed = sqlx::query!(
-        "UPDATE qq_identities SET user_id=$2,bound_at=$3 WHERE id=$1 AND user_id IS NULL",
-        t.identity_id,
-        row.user_id,
-        now
+    let changed = sqlx::query(
+        "UPDATE qq_identities SET user_id=$2,bound_at=$3,
+             binding_version=binding_version+1,context_reset_at=NULL
+         WHERE id=$1 AND user_id IS NULL",
     )
+    .bind(t.identity_id)
+    .bind(row.user_id)
+    .bind(now)
     .execute(&mut *tx)
     .await?
     .rows_affected();

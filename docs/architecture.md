@@ -140,15 +140,19 @@ flowchart LR
 - `notify` 同理位于 content 之下：各域在自己的事务里经 `ik_notify::interop` 写通知（帖子标题、评论摘要存快照），
   实时推送随调用方的 `Effects` 在提交后发出。
 - `qqbot`：QQ 官方 Webhook 与 OpenAPI、渠道身份、游客额度、短期上下文、后台配置与回复任务。
-  回调按 AppID 验签，入站消息、去重 turn 与 `qq.reply` 在同一事务落库后 ACK；不在 HTTP 请求里调用模型。
+  回调按 AppID 验签，入站消息、去重 turn、会话序号与 `qq.dispatch` 在同一事务落库后 ACK；不在 HTTP 请求里调用模型。
   `ik_ai::external` 提供渠道无关的生成与额度预估，qqbot 自己预占和结算。游客仅记全站额度一次；锁顺序为
   全站 → 游客合计 → 群 → 身份。生成结果先持久化，再在事务外按 `msg_id + msg_seq` 发送，发送重试不重复生成。
-  各实例每 60 秒刷新 QQ 设置；Webhook 单独按配置 AppID 限流，免于通用按 IP 的桶。
+  PostgreSQL 会话租约与 epoch 保证 FIFO 和结果栅栏；`qq.reconcile` 恢复丢失的唤醒与失效租约。
+  每段最终正文与每次发送 attempt 独立持久化，不确定回执不冒充成功。AppID 发送速率共用 PG 闸门，Token 合并与冷却在进程内。
+  各实例每 60 秒刷新普通 QQ 设置，执行前直接复核授权和调度暂停；Webhook 单独按配置 AppID 限流，免于通用按 IP 的桶。
   绑定：站内 `/v1/me/qq/*` 发一次性码，QQ 里 `/绑定` 消费，绑定成功经 `ik_notify::interop::system` 发站内通知。
   绑定用户经 `ik_ai::quota::reserve` 用个人额度，记忆读写走 `ik_ai::external`（`ExternalMemory` 指明公开场合的键）；
-  提炼由 qqbot 的 `qq.extract_memories` / `qq.extract_group_memories` 取自己的消息，交给
-  `ik_ai::memory_jobs::extract_external` 与 `ik_ai::shared_memory::extract`。记忆按场合使用的规则（`ai_memories.source_scope`、
+  首次 FIFO 执行冻结 owner/version，撤销授权后私有读取、工具写入、发送和提炼停止；AI 接收渠道中立授权 guard。
+  提炼由 qqbot 的 `qq.extract_memories` / `qq.extract_group_memories` 取完整终态 turn，
+  AI 在事务外生成操作计划，再由 QQ 事务应用计划并写 processed 标记。记忆按场合使用的规则（`ai_memories.source_scope`、
   `ai_shared_memories`）在 ik-ai 里，ik-ai 不认识 QQ，只认场合键。
+  账号注销经 auth 的生命周期接口调用 server 注入的 QQ/AI 清理实现，account 不反向依赖 qqbot。
 - `server` 组装一切：路由合并、中间件栈、任务注册、优雅停机。
 
 ## 请求处理流

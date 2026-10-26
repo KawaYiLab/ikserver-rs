@@ -85,6 +85,7 @@ pub async fn delete_account(
     ik_mihoyo::interop::remove_binding(&mut tx, user_id).await?;
     ik_profile::interop::clear_for_deletion(&mut tx, user_id).await?;
     ik_auth::interop::anonymize_deleted(&mut tx, user_id, now).await?;
+    state.lifecycle.deleting(&mut tx, user_id, now).await?;
     tx.commit().await?;
 
     let mut effects = Effects::new();

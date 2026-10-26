@@ -148,6 +148,8 @@ impl AppState {
             config.qqbot.clone(),
             auth.settings.code_key.clone(),
         )?;
+        auth.lifecycle
+            .install(Arc::new(ik_qqbot::identity::AccountDeletionHook));
         let admin = AdminState::new(
             content.clone(),
             exam.clone(),

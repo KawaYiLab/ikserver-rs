@@ -29,6 +29,14 @@ pub fn crontabs() -> anyhow::Result<Vec<Crontab>> {
             .payload(ik_ai::jobs::ReclaimQuotaHolds::default())?
             .max_attempts(1)
             .build(),
+        Cron::every_minute::<ik_qqbot::jobs::Reconcile>()
+            .payload(ik_qqbot::jobs::Reconcile::default())?
+            .max_attempts(1)
+            .build(),
+        Cron::every_minute::<ik_qqbot::memory_jobs::RecoverMemoryBacklog>()
+            .payload(ik_qqbot::memory_jobs::RecoverMemoryBacklog::default())?
+            .max_attempts(1)
+            .build(),
         Cron::hourly_at::<ik_ai::mcp::RefreshMcpTools>(53)
             .map_err(invalid)?
             .payload(ik_ai::mcp::RefreshMcpTools::default())?
@@ -69,9 +77,12 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_ai::memory_jobs::NightlyMemory>()
         .define_job::<ik_ai::memory_jobs::ConsolidateMemories>()
         .define_job::<ik_qqbot::jobs::Reply>()
+        .define_job::<ik_qqbot::jobs::Dispatch>()
+        .define_job::<ik_qqbot::jobs::Reconcile>()
         .define_job::<ik_qqbot::jobs::Prune>()
         .define_job::<ik_qqbot::memory_jobs::ExtractMemories>()
         .define_job::<ik_qqbot::memory_jobs::ExtractGroupMemories>()
+        .define_job::<ik_qqbot::memory_jobs::RecoverMemoryBacklog>()
         .add_extension(state.mihoyo.clone())
         .add_extension(state.ai.clone())
         .add_extension(state.qqbot.clone())
@@ -101,7 +112,7 @@ mod tests {
     #[test]
     fn cron_payloads_decode_into_their_tasks() {
         let crontabs = crontabs().unwrap();
-        assert_eq!(crontabs.len(), 7);
+        assert_eq!(crontabs.len(), 9);
         for crontab in &crontabs {
             assert!(
                 decodes::<ik_media::jobs::SweepStaging>(crontab)
@@ -110,7 +121,9 @@ mod tests {
                     && decodes::<ik_ai::jobs::ReclaimQuotaHolds>(crontab)
                     && decodes::<ik_ai::mcp::RefreshMcpTools>(crontab)
                     && decodes::<ik_ai::memory_jobs::NightlyMemory>(crontab)
-                    && decodes::<ik_qqbot::jobs::Prune>(crontab),
+                    && decodes::<ik_qqbot::jobs::Prune>(crontab)
+                    && decodes::<ik_qqbot::jobs::Reconcile>(crontab)
+                    && decodes::<ik_qqbot::memory_jobs::RecoverMemoryBacklog>(crontab),
                 "{} 的 payload 解不出任务结构体",
                 crontab.task_identifier
             );

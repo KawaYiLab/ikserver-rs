@@ -141,6 +141,9 @@ impl StreamCtx<'_> {
     }
 
     async fn stop_requested(&self) -> bool {
+        if !self.toolbox.authorized(self.state).await {
+            return true;
+        }
         if self.live.is_none() {
             return false;
         }
@@ -190,6 +193,10 @@ async fn stream_round(
         end: End::Finished,
     };
     let first_deadline = first_delta.map(|d| (Instant::now() + d).min(deadline));
+    if !ctx.toolbox.authorized(ctx.state).await {
+        out.end = End::Stopped;
+        return out;
+    }
     let opened = tokio::time::timeout_at(deadline, provider.stream(request)).await;
     let mut stream = match opened {
         Ok(Ok(stream)) => stream,

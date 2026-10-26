@@ -532,17 +532,25 @@ struct Target<'a> {
     scope: Option<&'a str>,
 }
 
-/// 外部渠道（QQ，ADR 0008）的提炼入口：`lines` 是这个用户与这个角色的一段新对话（只含他自己的话和 AI 回他的话）。
-/// 进度由调用方保存；重复提炼同一段只会被已有记忆去重。`scope` 是公开场合的键，私下场合为空。
-pub async fn extract_external(
+/// 模型给出的提炼方案。调用方在自己的事务中应用并推进渠道进度。
+pub struct ExtractionPlan {
+    user_id: i64,
+    ai_user_id: i64,
+    scope: Option<String>,
+    existing: Vec<repo::MemoryRow>,
+    ops: Vec<Op>,
+}
+
+pub async fn prepare_external(
     state: &AiState,
     user_id: i64,
     ai_user_id: i64,
     scope: Option<&str>,
     lines: &[TranscriptLine],
-) -> Result<Extracted, String> {
-    if !memory_on(state).await || lines.iter().all(|line| line.from_ai) {
-        return Ok(Extracted::default());
+) -> Result<Option<ExtractionPlan>, String> {
+    let catalog = state.catalog.get().await.map_err(|e| format!("{e:?}"))?;
+    if !catalog.memory.enabled || lines.iter().all(|line| line.from_ai) {
+        return Ok(None);
     }
     let target = Target {
         user_id,
@@ -550,16 +558,76 @@ pub async fn extract_external(
         conversation_id: None,
         scope,
     };
-    extract_into(state, &target, &external_transcript(lines), None).await
+    prepare_plan(state, &target, &external_transcript(lines))
+        .await
+        .map(Some)
 }
 
-/// 拿已有记忆与新对话调模型，执行它给出的增删改。
+pub async fn apply_external(
+    conn: &mut PgConnection,
+    state: &AiState,
+    plan: ExtractionPlan,
+) -> Result<Extracted, Problem> {
+    let target = Target {
+        user_id: plan.user_id,
+        ai_user_id: plan.ai_user_id,
+        conversation_id: None,
+        scope: plan.scope.as_deref(),
+    };
+    apply_in(conn, state, &target, &plan.existing, plan.ops, None).await
+}
+
+/// 事务内复核总开关；没有设置行时沿用默认开启。
+pub async fn enabled_in(conn: &mut PgConnection) -> Result<bool, Problem> {
+    Ok(sqlx::query_scalar(
+        "SELECT COALESCE((SELECT enabled FROM ai_memory_settings WHERE id=1),TRUE)",
+    )
+    .fetch_one(conn)
+    .await?)
+}
+
+pub async fn refresh_external_embeddings(state: &AiState, user_id: i64, ai_user_id: i64) {
+    memory::embed_missing(state, user_id, ai_user_id).await;
+}
+
+pub async fn extract_external(
+    state: &AiState,
+    user_id: i64,
+    ai_user_id: i64,
+    scope: Option<&str>,
+    lines: &[TranscriptLine],
+) -> Result<Extracted, String> {
+    let Some(plan) = prepare_external(state, user_id, ai_user_id, scope, lines).await? else {
+        return Ok(Extracted::default());
+    };
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    let result = apply_external(&mut tx, state, plan)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    memory::embed_missing(state, user_id, ai_user_id).await;
+    Ok(result)
+}
+
 async fn extract_into(
     state: &AiState,
     target: &Target<'_>,
     conversation: &str,
     until: Option<DateTime<Utc>>,
 ) -> Result<Extracted, String> {
+    let plan = prepare_plan(state, target, conversation).await?;
+    let result = apply(state, target, &plan.existing, plan.ops, until)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    memory::embed_missing(state, target.user_id, target.ai_user_id).await;
+    Ok(result)
+}
+
+async fn prepare_plan(
+    state: &AiState,
+    target: &Target<'_>,
+    conversation: &str,
+) -> Result<ExtractionPlan, String> {
     let now = Utc::now();
     let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
     let mut existing = repo::memories_for(&mut conn, target.user_id, target.ai_user_id)
@@ -577,6 +645,7 @@ async fn extract_into(
         .map_err(|e| e.to_string())?,
     );
     drop(conn);
+    existing.retain(|row| memory::visible_in(row, target.scope));
 
     let mut input = format!(
         "今天是 {}。\n\n已有记忆：\n",
@@ -586,19 +655,27 @@ async fn extract_into(
         input.push_str("（无）\n");
     }
     for (i, row) in existing.iter().enumerate() {
+        if row.source_scope.as_deref() != target.scope {
+            input.push_str("[只读参考，不可更新或删除] ");
+        }
         input.push_str(&listed(i, row));
     }
     input.push_str("\n新的对话：\n");
     input.push_str(conversation);
-    let (text, _) = complete(state, EXTRACT_PROMPT.to_owned(), input).await?;
+    let prompt = format!(
+        "{EXTRACT_PROMPT}\n只读参考来自别的场合，不可更新或删除。新的事实需要单独 add，public 依据新对话判定，不能继承参考条目的公开标记。"
+    );
+    let (text, _) = complete(state, prompt, input).await?;
     let Some(ops) = parse_ops(&text, existing.len()) else {
         return Err("记忆提炼的输出不是合法的 JSON".to_owned());
     };
-    let result = apply(state, target, &existing, ops, until)
-        .await
-        .map_err(|p| format!("{p:?}"))?;
-    memory::embed_missing(state, target.user_id, target.ai_user_id).await;
-    Ok(result)
+    Ok(ExtractionPlan {
+        user_id: target.user_id,
+        ai_user_id: target.ai_user_id,
+        scope: target.scope.map(str::to_owned),
+        existing,
+        ops,
+    })
 }
 
 /// 在一个事务里执行操作并推进进度（MEM-023）：置顶的不改不删。
@@ -609,17 +686,31 @@ async fn apply(
     ops: Vec<Op>,
     until: Option<DateTime<Utc>>,
 ) -> Result<Extracted, Problem> {
+    let mut tx = state.db.begin().await?;
+    let result = apply_in(&mut tx, state, session, existing, ops, until).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+async fn apply_in(
+    tx: &mut PgConnection,
+    state: &AiState,
+    session: &Target<'_>,
+    existing: &[repo::MemoryRow],
+    ops: Vec<Op>,
+    until: Option<DateTime<Utc>>,
+) -> Result<Extracted, Problem> {
     let now = Utc::now();
     let mut result = Extracted::default();
-    let mut tx = state.db.begin().await?;
-    repo::lock_memories(&mut tx, session.user_id).await?;
+    memory::require_active(tx, session.user_id).await?;
+    repo::lock_memories(&mut *tx, session.user_id).await?;
     let mut deleted = Vec::new();
     for op in ops {
         match op {
             Op::Add(fact) => {
                 let ai_user_id = (fact.kind != memory::PROFILE).then_some(session.ai_user_id);
                 let (_, created) = memory::store(
-                    &mut tx,
+                    &mut *tx,
                     state,
                     &NewMemory {
                         id: 0,
@@ -645,13 +736,21 @@ async fn apply(
                 result.added += usize::from(created);
             }
             Op::Update { index, change } => {
-                let Some(row) = existing.get(index).filter(|r| !r.pinned) else {
+                let Some(row) = existing
+                    .get(index)
+                    .filter(|r| !r.pinned && r.source_scope.as_deref() == session.scope)
+                else {
                     continue;
                 };
                 // 期间被用户删了或置顶了：不动。
-                if !repo::lock_memory(&mut tx, row.id)
+                if !repo::lock_memory(&mut *tx, row.id)
                     .await?
-                    .is_some_and(|current| !current.pinned)
+                    .is_some_and(|current| {
+                        !current.pinned
+                            && current.updated_at == row.updated_at
+                            && current.source_scope == row.source_scope
+                            && current.user_id == session.user_id
+                    })
                 {
                     continue;
                 }
@@ -675,11 +774,14 @@ async fn apply(
                 if unchanged {
                     continue;
                 }
-                repo::update_memory(&mut tx, row.id, &patch, now).await?;
+                repo::update_memory(&mut *tx, row.id, &patch, now).await?;
                 result.updated += 1;
             }
             Op::Delete { index } => {
-                if let Some(row) = existing.get(index).filter(|r| !r.pinned) {
+                if let Some(row) = existing
+                    .get(index)
+                    .filter(|r| !r.pinned && r.source_scope.as_deref() == session.scope)
+                {
                     deleted.push(row.id);
                 }
             }
@@ -689,22 +791,25 @@ async fn apply(
         // 期间被用户置顶的不删。
         let mut keep = Vec::new();
         for id in &deleted {
-            if repo::lock_memory(&mut tx, *id)
-                .await?
-                .is_some_and(|row| row.pinned)
-            {
+            let original = existing.iter().find(|row| row.id == *id);
+            let current = repo::lock_memory(&mut *tx, *id).await?;
+            if !current.as_ref().zip(original).is_some_and(|(row, old)| {
+                !row.pinned
+                    && row.user_id == session.user_id
+                    && row.source_scope.as_deref() == session.scope
+                    && row.updated_at == old.updated_at
+            }) {
                 keep.push(*id);
             }
         }
         deleted.retain(|id| !keep.contains(id));
-        result.deleted = repo::delete_memories(&mut tx, session.user_id, &deleted)
+        result.deleted = repo::delete_memories(&mut *tx, session.user_id, &deleted)
             .await?
             .len();
     }
     if let (Some(conversation_id), Some(until)) = (session.conversation_id, until) {
-        repo::advance_memory_until(&mut tx, conversation_id, until).await?;
+        repo::advance_memory_until(&mut *tx, conversation_id, until).await?;
     }
-    tx.commit().await?;
     Ok(result)
 }
 
@@ -931,41 +1036,79 @@ pub async fn consolidate(
         .map_err(|e| e.to_string())?;
     drop(conn);
 
-    let mut input = format!(
-        "今天是 {}。\n\n已有档案与关系：\n",
-        memory::beijing_today(now).format("%Y-%m-%d")
-    );
-    if known.is_empty() {
-        input.push_str("（无）\n");
+    // 输出的来源编号不能证明生成文本只用了那些来源；模型输入本身必须按场合隔离。
+    let mut scopes = std::collections::BTreeMap::<Option<String>, Vec<repo::MemoryRow>>::new();
+    for row in events {
+        scopes
+            .entry(row.source_scope.clone())
+            .or_default()
+            .push(row);
     }
-    for row in &known {
-        input.push_str(&format!("- [{}] {}\n", row.kind, row.content));
+    let mut plans = Vec::new();
+    for (scope, events) in scopes {
+        if events.len() < 2 {
+            continue;
+        }
+        let visible: Vec<_> = known
+            .iter()
+            .filter(|row| memory::visible_in(row, scope.as_deref()))
+            .collect();
+        let mut input = format!(
+            "今天是 {}。\n\n已有档案与关系：\n",
+            memory::beijing_today(now).format("%Y-%m-%d")
+        );
+        if visible.is_empty() {
+            input.push_str("（无）\n");
+        }
+        for row in visible {
+            input.push_str(&format!("- [{}] {}\n", row.kind, row.content));
+        }
+        input.push_str("\n旧事件：\n");
+        for (i, row) in events.iter().enumerate() {
+            let date = row
+                .happened_on
+                .map_or_else(|| "日期不详".to_owned(), |d| d.to_string());
+            input.push_str(&format!(
+                "e{} [{date}，重要 {}] {}\n",
+                i + 1,
+                row.importance,
+                row.content
+            ));
+        }
+        let (text, _) = complete(state, CONSOLIDATE_PROMPT.to_owned(), input).await?;
+        let Some(plan) = parse_plan(&text, events.len()) else {
+            return Err("记忆整理的输出不是合法的 JSON".to_owned());
+        };
+        plans.push((events, plan));
     }
-    input.push_str("\n旧事件：\n");
-    for (i, row) in events.iter().enumerate() {
-        let date = row
-            .happened_on
-            .map_or_else(|| "日期不详".to_owned(), |d| d.to_string());
-        input.push_str(&format!(
-            "e{} [{date}，重要 {}] {}\n",
-            i + 1,
-            row.importance,
-            row.content
-        ));
-    }
-    let (text, _) = complete(state, CONSOLIDATE_PROMPT.to_owned(), input).await?;
-    let Some(plan) = parse_plan(&text, events.len()) else {
-        return Err("记忆整理的输出不是合法的 JSON".to_owned());
-    };
-    let result = apply_plan(state, user_id, ai_user_id, &events, plan)
+    // 所有场合准备完成后才写入；中途失败不能提前把整个用户/角色标记为本周已整理。
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    memory::require_active(&mut tx, user_id)
         .await
         .map_err(|p| format!("{p:?}"))?;
+    repo::lock_memories(&mut tx, user_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut result = Consolidated::default();
+    for (events, plan) in plans {
+        let done = apply_plan(&mut tx, state, user_id, ai_user_id, &events, plan)
+            .await
+            .map_err(|p| format!("{p:?}"))?;
+        result.merged += done.merged;
+        result.insights += done.insights;
+        result.dropped += done.dropped;
+    }
+    repo::mark_consolidated(&mut tx, user_id, ai_user_id, now)
+        .await
+        .map_err(|e| e.to_string())?;
+    tx.commit().await.map_err(|e| e.to_string())?;
     memory::embed_missing(state, user_id, ai_user_id).await;
     Ok(result)
 }
 
 /// 在一个事务里执行整理方案（MEM-083）：来源里有一条在期间被删、被置顶、被改过，这个合并或丢弃就跳过。
 async fn apply_plan(
+    tx: &mut PgConnection,
     state: &AiState,
     user_id: i64,
     ai_user_id: i64,
@@ -974,12 +1117,10 @@ async fn apply_plan(
 ) -> Result<Consolidated, Problem> {
     let now = Utc::now();
     let mut result = Consolidated::default();
-    let mut tx = state.db.begin().await?;
-    repo::lock_memories(&mut tx, user_id).await?;
     // 还是当初给模型看的那条（没删、没置顶、没改过）。
     let mut intact = Vec::with_capacity(events.len());
     for row in events {
-        let current = repo::lock_memory(&mut tx, row.id).await?;
+        let current = repo::lock_memory(&mut *tx, row.id).await?;
         intact.push(current.is_some_and(|c| !c.pinned && c.updated_at == row.updated_at));
     }
     for merge in plan.merges {
@@ -987,6 +1128,13 @@ async fn apply_plan(
             continue;
         }
         let sources: Vec<&repo::MemoryRow> = merge.sources.iter().map(|i| &events[*i]).collect();
+        let source_scope = sources.first().and_then(|row| row.source_scope.as_deref());
+        if !sources
+            .iter()
+            .all(|row| row.source_scope.as_deref() == source_scope)
+        {
+            continue;
+        }
         let importance = sources
             .iter()
             .map(|r| r.importance)
@@ -996,15 +1144,10 @@ async fn apply_plan(
         let happened_on = merge
             .happened_on
             .or_else(|| sources.iter().filter_map(|r| r.happened_on).min());
-        let sensitivity = if sources.iter().all(|r| r.sensitivity == memory::PUBLIC) {
-            memory::PUBLIC
-        } else {
-            memory::PRIVATE
-        };
         let ids: Vec<i64> = sources.iter().map(|r| r.id).collect();
-        repo::delete_memories(&mut tx, user_id, &ids).await?;
+        repo::delete_memories(&mut *tx, user_id, &ids).await?;
         memory::store(
-            &mut tx,
+            &mut *tx,
             state,
             &NewMemory {
                 id: 0,
@@ -1013,21 +1156,29 @@ async fn apply_plan(
                 kind: memory::EVENT,
                 content: &merge.content,
                 origin: EXTRACTED,
-                sensitivity,
+                // 新文本也可能使用本批的私密档案，不能继承所列事件的 public 标记。
+                sensitivity: memory::PRIVATE,
                 importance,
                 happened_on,
                 follow_up_on: None,
                 source_conversation_id: None,
-                source_scope: None,
+                source_scope,
                 now,
             },
         )
         .await?;
         result.merged += 1;
     }
+    let insight_scope = events.first().and_then(|row| row.source_scope.as_deref());
+    let one_scope = events
+        .iter()
+        .all(|row| row.source_scope.as_deref() == insight_scope);
     for (kind, content) in plan.insights {
+        if !one_scope {
+            continue;
+        }
         let (_, created) = memory::store(
-            &mut tx,
+            &mut *tx,
             state,
             &NewMemory {
                 id: 0,
@@ -1041,7 +1192,7 @@ async fn apply_plan(
                 happened_on: None,
                 follow_up_on: None,
                 source_conversation_id: None,
-                source_scope: None,
+                source_scope: insight_scope,
                 now,
             },
         )
@@ -1054,9 +1205,9 @@ async fn apply_plan(
         .filter(|i| intact[*i])
         .map(|i| events[i].id)
         .collect();
-    result.dropped = repo::delete_memories(&mut tx, user_id, &drops).await?.len();
-    repo::mark_consolidated(&mut tx, user_id, ai_user_id, now).await?;
-    tx.commit().await?;
+    result.dropped = repo::delete_memories(&mut *tx, user_id, &drops)
+        .await?
+        .len();
     Ok(result)
 }
 

@@ -955,6 +955,94 @@ async fn coming_back_after_a_week_is_a_reunion(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn consolidation_keeps_group_inputs_and_generated_memories_within_their_scope(db: PgPool) {
+    let h = harness(db).await;
+    sqlx::query("INSERT INTO ai_memories(id,user_id,ai_user_id,kind,content,origin,sensitivity,source_scope,created_at,updated_at) VALUES
+        (9201,100,200,'event','A 群旧事件一','extracted','public','qq:group:a',now()-interval '40 days',now()-interval '40 days'),
+        (9202,100,200,'event','A 群旧事件二','extracted','public','qq:group:a',now()-interval '40 days',now()-interval '40 days'),
+        (9203,100,200,'event','B 群私密事件一','extracted','private','qq:group:b',now()-interval '40 days',now()-interval '40 days'),
+        (9204,100,200,'event','B 群私密事件二','extracted','private','qq:group:b',now()-interval '40 days',now()-interval '40 days')")
+        .execute(&h.db).await.unwrap();
+    sqlx::query(
+        "INSERT INTO ai_memories(id,user_id,kind,content,origin,sensitivity,source_scope) VALUES
+        (9211,100,'profile','A 群私密档案','told','private','qq:group:a'),
+        (9212,100,'profile','B 群私密档案','told','private','qq:group:b'),
+        (9213,100,'profile','B 群公开档案','told','public','qq:group:b'),
+        (9214,100,'profile','仅单聊可见的档案','told','private',NULL)",
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    let a_plan = r#"{"merge":[{"ids":["e1","e2"],"content":"结合 A 群私密档案整理的旧事"}],"insights":[{"kind":"relation","content":"A 群整理出的认识"}],"drop":[]}"#;
+    h.fake.push(vec![content(a_plan)]);
+    h.fake.push(vec![content("不是合法的整理方案")]);
+    assert!(
+        memory_jobs::consolidate(&h.state, HUMAN, FAIRY)
+            .await
+            .is_err()
+    );
+    let marked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ai_memory_pairs WHERE consolidated_at IS NOT NULL",
+    )
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(marked, 0, "后续场合失败不能把整个用户/角色标记为已整理");
+    let originals: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ai_memories WHERE id BETWEEN 9201 AND 9204")
+            .fetch_one(&h.db)
+            .await
+            .unwrap();
+    assert_eq!(originals, 4, "所有场合准备完成前保留原有事件");
+    h.fake.push(vec![content(a_plan)]);
+    h.fake.push(vec![content(
+        r#"{"merge":[{"ids":["e1","e2"],"content":"B 群整理后的旧事"}],"insights":[{"kind":"relation","content":"B 群整理出的认识"}],"drop":[]}"#,
+    )]);
+    let done = memory_jobs::consolidate(&h.state, HUMAN, FAIRY)
+        .await
+        .unwrap();
+    let requests = h.fake.requests();
+    assert_eq!(requests.len(), 4, "两次尝试都应为每个场合准备独立输入");
+    let a = requests[2].messages[1].text();
+    assert!(a.contains("A 群旧事件一") && a.contains("A 群私密档案"));
+    assert!(a.contains("B 群公开档案"));
+    assert!(!a.contains("B 群私密") && !a.contains("仅单聊可见"));
+    let b = requests[3].messages[1].text();
+    assert!(b.contains("B 群私密事件一") && b.contains("B 群私密档案"));
+    assert!(b.contains("B 群公开档案"));
+    assert!(!b.contains("A 群") && !b.contains("仅单聊可见"));
+    assert_eq!(
+        done,
+        memory_jobs::Consolidated {
+            merged: 2,
+            insights: 2,
+            dropped: 0,
+        }
+    );
+    let generated: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT content,source_scope,sensitivity FROM ai_memories WHERE origin='extracted' ORDER BY content",
+    )
+    .fetch_all(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(generated.len(), 4);
+    for (content, scope, sensitivity) in generated {
+        assert_eq!(
+            scope,
+            if content.contains("A 群") {
+                "qq:group:a"
+            } else {
+                "qq:group:b"
+            }
+        );
+        assert_eq!(
+            sensitivity, "private",
+            "合并公开事件时不能公开同批私密输入产生的新文本"
+        );
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn nightly_forgets_small_old_things_and_consolidates_the_rest(db: PgPool) {
     let h = harness(db).await;
     // 25 条一个多月前提炼的普通事件，加一条半年多前、从没被想起的小事，再加一条重要的老事。
@@ -1108,4 +1196,66 @@ async fn memory_tools_in_a_public_place_keep_to_that_place(db: PgPool) {
     assert!(out.text.contains("忘掉"), "{}", out.text);
     let out = run("recall_history", r#"{"query":"上海"}"#).await;
     assert!(out.is_error);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn external_plans_filter_sources_preserve_read_only_public_rows_and_apply_in_callers_transaction(
+    db: PgPool,
+) {
+    let h = harness(db).await;
+    sqlx::query("INSERT INTO ai_memories(id,user_id,kind,content,origin,sensitivity,source_scope) VALUES(9101,100,'profile','只在 B 群说过的私事','told','private','qq:group:b'),(9102,100,'profile','对方喜欢下雨天','told','public','qq:group:b')")
+        .execute(&h.db).await.unwrap();
+    let lines = [memory_jobs::TranscriptLine {
+        from_ai: false,
+        speaker: None,
+        at: chrono::Utc::now(),
+        text: "我在 A 群补充自己的近况".to_owned(),
+    }];
+    h.fake.push(vec![content(r#"{"ops":[{"op":"update","id":"m1","content":"新事实不能继承旧 public"},{"op":"delete","id":"m1"},{"op":"add","kind":"profile","content":"对方喜欢下雨天","public":false}]}"#)]);
+    let plan = memory_jobs::prepare_external(&h.state, HUMAN, FAIRY, Some("qq:group:a"), &lines)
+        .await
+        .unwrap()
+        .unwrap();
+    let requests = h.fake.requests();
+    let prompt = requests
+        .last()
+        .unwrap()
+        .messages
+        .iter()
+        .map(|m| m.text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!prompt.contains("只在 B 群说过的私事"));
+    assert!(prompt.contains("只读参考"));
+    let mut tx = h.db.begin().await.unwrap();
+    let changed = memory_jobs::apply_external(&mut tx, &h.state, plan)
+        .await
+        .unwrap();
+    assert_eq!((changed.added, changed.updated, changed.deleted), (1, 0, 0));
+    // 源相同文本不会吞掉新场合的事实；新记录的可见性来自新事实，不继承旧 public。
+    let new: (String, String) = sqlx::query_as(
+        "SELECT source_scope,sensitivity FROM ai_memories WHERE source_scope='qq:group:a'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(new, ("qq:group:a".into(), "private".into()));
+    let outside: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ai_memories WHERE source_scope='qq:group:a'")
+            .fetch_one(&h.db)
+            .await
+            .unwrap();
+    assert_eq!(outside, 0, "调用方提交之前，记忆不得先行提交");
+    tx.rollback().await.unwrap();
+    let old: (String, String) =
+        sqlx::query_as("SELECT content,sensitivity FROM ai_memories WHERE id=9102")
+            .fetch_one(&h.db)
+            .await
+            .unwrap();
+    assert_eq!(old, ("对方喜欢下雨天".into(), "public".into()));
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_memories")
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(count, 2, "回滚应用方案同时回滚所有新记忆");
 }

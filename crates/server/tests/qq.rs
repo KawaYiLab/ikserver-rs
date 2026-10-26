@@ -269,4 +269,45 @@ async fn admins_manage_identities_and_group_memories(db: PgPool) {
     let (status, body) = call(&app, ADMIN, "GET", "/v1/admin/qq/turns", Value::Null).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["total"], 0);
+
+    let (status, mut settings) =
+        call(&app, ADMIN, "GET", "/v1/admin/qq/settings", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    settings["dispatchPaused"] = json!(true);
+    let (status, _) = call(&app, ADMIN, "PUT", "/v1/admin/qq/settings", settings).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, state) = call(&app, ADMIN, "GET", "/v1/admin/qq/dispatch", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(state["paused"], true);
+    assert_eq!(state["activeLeases"], 0);
+
+    sqlx::raw_sql("INSERT INTO qq_messages(id,app_id,identity_id,group_id,direction,content) VALUES(50,'123',20,10,'in','do-not-leak-input');
+        INSERT INTO qq_conversations(id,app_id,scene,target_id,next_seq) VALUES(51,'123','group',10,1);
+        INSERT INTO qq_turns(id,execution_key,message_id,identity_id,group_id,conversation_id,conversation_seq,status,phase,finished_at)
+        VALUES(52,'detail-test',50,20,10,51,1,'failed','terminal',now());
+        INSERT INTO qq_reply_segments(turn_id,msg_seq,content,payload_hash,status,attempt_count)
+        VALUES(52,1,'do-not-leak-output',sha256('payload'::bytea),'unknown',1);
+        INSERT INTO qq_send_attempts(id,turn_id,msg_seq,attempt_no,lease_epoch,payload_hash,payload_version,result,endpoint,http_status,code,err_code,trace_id)
+        VALUES(53,52,1,1,1,sha256('payload'::bytea),1,'rejected','group',401,11201,40012001,'trace_example')")
+        .execute(&db).await.unwrap();
+    let (status, detail) = call(&app, ADMIN, "GET", "/v1/admin/qq/turns/52", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["segments"][0]["status"], "unknown");
+    assert_eq!(detail["attempts"][0]["code"], 11201);
+    assert_eq!(detail["attempts"][0]["errCode"], 40012001);
+    assert_eq!(detail["attempts"][0]["traceId"], "trace_example");
+    assert!(!detail.to_string().contains("do-not-leak"));
+    assert!(!detail.to_string().contains("member-openid"));
+    assert_eq!(
+        call(&app, USER, "GET", "/v1/admin/qq/turns/52", Value::Null)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(&app, ADMIN, "GET", "/v1/admin/qq/turns/999", Value::Null)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
 }

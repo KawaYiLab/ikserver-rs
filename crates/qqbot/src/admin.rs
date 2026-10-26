@@ -14,11 +14,14 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, sqlx::FromRow)]
 #[schema(as = QqSettings)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub enabled: bool,
+    /// 暂停领取新的生成和发送工作；回调继续入库，原有截止时间不延长。
+    #[serde(default)]
+    pub dispatch_paused: bool,
     pub guest_daily_turns: i32,
     pub guest_group_daily_turns: i32,
     pub guest_daily_tokens: i64,
@@ -180,6 +183,15 @@ async fn put_settings(
     input.updated_at = Utc::now();
     let mut tx = s.db.begin().await?;
     repo::save_settings(&mut tx, &input).await?;
+    if !input.dispatch_paused {
+        s.jobs
+            .enqueue(
+                &mut tx,
+                crate::jobs::Reconcile::default(),
+                Default::default(),
+            )
+            .await?;
+    }
     record(
         &mut tx,
         &s.ids,
@@ -320,7 +332,9 @@ async fn put_group(
         return Err(Problem::field("displayName", "TOO_LONG", "最多 64 字"));
     }
     let mut tx = s.db.begin().await?;
-    let now = Utc::now();
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut *tx)
+        .await?;
     let display_name = text::truncate(&input.display_name, 64);
     let changed=sqlx::query!("UPDATE qq_groups SET display_name=$2,card_slug=$3,enabled=$4,blocked=$5,context_reset_at=CASE WHEN $6 THEN $7 ELSE context_reset_at END WHERE id=$1",id.get(),display_name,input.card_slug,input.enabled,input.blocked,input.reset_context,now).execute(&mut *tx).await?;
     if changed.rows_affected() == 0 {

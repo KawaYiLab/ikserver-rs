@@ -71,6 +71,7 @@ pub struct ToolLabel<'a> {
 #[derive(Debug, Clone)]
 pub struct Toolbox {
     entries: Vec<Entry>,
+    authorization: crate::authorization::Guard,
 }
 
 /// 剧情库工具的清单（`ik_story` 的 MCP 定义转成函数调用格式，启动后只算一次）。
@@ -127,6 +128,7 @@ impl Toolbox {
     /// 只有论坛工具。
     pub fn forum() -> Self {
         Self {
+            authorization: None,
             entries: tools::specs()
                 .into_iter()
                 .map(|spec| Entry {
@@ -135,6 +137,27 @@ impl Toolbox {
                     source: Source::Forum,
                 })
                 .collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_authorization(
+        mut self,
+        guard: Arc<dyn crate::authorization::Authorization>,
+    ) -> Self {
+        self.authorization = Some(guard);
+        self
+    }
+
+    pub(crate) async fn authorized(&self, state: &AiState) -> bool {
+        if self.authorization.is_none() {
+            return true;
+        }
+        match state.db.acquire().await {
+            Ok(mut conn) => crate::authorization::check(&mut conn, &self.authorization)
+                .await
+                .unwrap_or(false),
+            Err(_) => false,
         }
     }
 
@@ -310,6 +333,9 @@ impl Toolbox {
         arguments: &str,
         deadline: Instant,
     ) -> ToolOutput {
+        if !self.authorized(state).await {
+            return error_output("对话授权已变更".to_owned());
+        }
         let Some(entry) = self.entry(name) else {
             return error_output(format!("未知工具：{name}"));
         };
@@ -321,8 +347,16 @@ impl Toolbox {
                 ai_user_id,
                 scope,
             } => {
-                crate::memory::execute_tool(state, *owner, *ai_user_id, scope, name, arguments)
-                    .await
+                crate::memory::execute_tool_authorized(
+                    state,
+                    *owner,
+                    *ai_user_id,
+                    scope,
+                    name,
+                    arguments,
+                    &self.authorization,
+                )
+                .await
             }
             Source::Remote { server, tool } => {
                 let remaining = deadline.saturating_duration_since(Instant::now());

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Ban, Brain, Pencil, Pin, Plus, RotateCcw, Trash2, Unlink } from '@lucide/vue'
+import { Ban, Brain, Eye, Pencil, Pin, Plus, RotateCcw, Trash2, Unlink } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -37,6 +37,7 @@ const guestModel = ref(NONE)
 const bots = ref<Bot[]>([])
 const characters = ref<Schemas['AdminCharacter'][]>([])
 const models = ref<Schemas['AdminModel'][]>([])
+const dispatch = ref<Schemas['QqDispatchStatus'] | null>(null)
 const qqCharacters = computed(() => characters.value.filter(c => c.enabled && c.qqEnabled))
 
 function fillForm(value: Settings) {
@@ -49,16 +50,18 @@ function fillForm(value: Settings) {
 async function load() {
   loading.value = true
   try {
-    const [s, b, c, m] = await Promise.all([
+    const [s, b, c, m, d] = await Promise.all([
       unwrap(api.GET('/v1/admin/qq/settings')),
       unwrap(api.GET('/v1/admin/qq/bots')),
       unwrap(api.GET('/v1/admin/ai/characters')),
       unwrap(api.GET('/v1/admin/ai/models')),
+      unwrap(api.GET('/v1/admin/qq/dispatch')),
     ])
     fillForm(s)
     bots.value = b.items
     characters.value = c
     models.value = m
+    dispatch.value = d
     failed.value = false
   }
   catch (error) {
@@ -81,7 +84,10 @@ async function saveSettings() {
   saving.value = true
   try {
     const saved = await run(() => unwrap(api.PUT('/v1/admin/qq/settings', { body: input })), 'QQ 设置已保存')
-    if (saved) fillForm(saved)
+    if (saved) {
+      fillForm(saved)
+      dispatch.value = await unwrap(api.GET('/v1/admin/qq/dispatch'))
+    }
   }
   finally {
     saving.value = false
@@ -228,6 +234,27 @@ const turnList = useListQuery({
   })),
 })
 const turns = computed(() => turnList.result.value?.items ?? [])
+const detailId = ref<string | null>(null)
+const detail = ref<Schemas['QqTurnDetail'] | null>(null)
+const detailLoading = ref(false)
+const detailFailed = ref(false)
+async function openTurn(id: string) {
+  detailId.value = id
+  detail.value = null
+  detailLoading.value = true
+  detailFailed.value = false
+  try {
+    const result = await unwrap(api.GET('/v1/admin/qq/turns/{id}', { params: { path: { id } } }))
+    if (detailId.value === id) detail.value = result
+  }
+  catch (error) {
+    detailFailed.value = true
+    failure(error)
+  }
+  finally {
+    detailLoading.value = false
+  }
+}
 const turnStatus: Record<string, string> = {
   queued: '排队中',
   processing: '处理中',
@@ -332,7 +359,7 @@ function refresh() {
         <Card>
           <CardHeader>
             <CardTitle>对话设置</CardTitle>
-            <CardDescription>游客不读写记忆；成功发送回复才计一次，生成的 token 同时计入全站 AI 额度。</CardDescription>
+            <CardDescription>游客不读写记忆；至少一段取得平台成功回执才计一次，实际生成的 token 计入全站 AI 额度。</CardDescription>
           </CardHeader>
           <CardContent>
             <div v-if="failed && !form" class="flex items-center gap-3 text-sm text-muted-foreground">
@@ -345,6 +372,16 @@ function refresh() {
                 启用 QQ 对话
                 <Switch v-model="form.enabled" />
               </label>
+              <div class="max-w-xl space-y-2">
+                <label class="flex items-center justify-between gap-4 text-sm font-medium">
+                  暂停生成和发送
+                  <Switch v-model="form.dispatchPaused" />
+                </label>
+                <p class="text-xs text-muted-foreground">回调继续接收；在途生成保存结果后等待恢复。排队消息的回复期限不会延长。</p>
+                <p v-if="dispatch" class="text-xs text-muted-foreground">
+                  当前{{ dispatch.paused ? '已暂停' : '运行中' }} · 排队 {{ dispatch.queued }} · 生成 {{ dispatch.generating }} · 待发 {{ dispatch.delivering }} · 执行中 {{ dispatch.activeLeases }}
+                </p>
+              </div>
               <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">每个游客每日次数</span>
@@ -544,7 +581,7 @@ function refresh() {
             </div>
             <Table>
               <TableHeader>
-                <TableRow><TableHead>时间</TableHead><TableHead>场景</TableHead><TableHead>计费</TableHead><TableHead>状态 / 原因</TableHead><TableHead>模型</TableHead><TableHead class="text-right">token</TableHead></TableRow>
+                <TableRow><TableHead>时间</TableHead><TableHead>场景</TableHead><TableHead>计费</TableHead><TableHead>状态 / 原因</TableHead><TableHead>模型</TableHead><TableHead class="text-right">token</TableHead><TableHead class="w-12" /></TableRow>
               </TableHeader>
               <TableBody>
                 <TableRow v-for="turn in turns" :key="turn.id">
@@ -554,8 +591,9 @@ function refresh() {
                   <TableCell><Badge :variant="turn.status === 'failed' ? 'destructive' : 'secondary'">{{ turnStatus[turn.status] ?? turn.status }}</Badge><span v-if="turn.reason" class="ml-2 font-mono text-xs text-muted-foreground">{{ turn.reason }}</span></TableCell>
                   <TableCell class="font-mono text-xs">{{ turn.modelKey ?? '—' }}</TableCell>
                   <TableCell class="text-right tabular-nums">{{ formatNumber(turn.promptTokens + turn.completionTokens) }}</TableCell>
+                  <TableCell><AdminRowActions :actions="[{ label: '查看发送详情', icon: Eye, onSelect: () => openTurn(turn.id) }]" /></TableCell>
                 </TableRow>
-                <AdminListState :colspan="6" :loading="turnList.loading.value" :empty="!turns.length" :failed="turnList.failed.value" empty-text="还没有回复记录。" @retry="turnList.refresh" />
+                <AdminListState :colspan="7" :loading="turnList.loading.value" :empty="!turns.length" :failed="turnList.failed.value" empty-text="还没有回复记录。" @retry="turnList.refresh" />
               </TableBody>
             </Table>
             <AdminPager v-if="turnList.result.value" :page="turnList.page.value" :limit="turnList.result.value.limit" :total="turnList.result.value.total" unit="条" @change="turnList.setPage" />
@@ -563,6 +601,45 @@ function refresh() {
         </Card>
       </TabsContent>
     </Tabs>
+
+    <Dialog :open="!!detailId" @update:open="v => { if (!v) detailId = null }">
+      <DialogScrollContent class="sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>发送详情</DialogTitle>
+          <DialogDescription>成功回执表示平台已接受。待审核与结果不确定的分段不会自动补发。</DialogDescription>
+        </DialogHeader>
+        <Skeleton v-if="detailLoading" class="h-40 w-full" />
+        <div v-else-if="detailFailed" class="flex items-center gap-3 text-sm">
+          详情加载失败。<Button v-if="detailId" variant="outline" size="sm" @click="openTurn(detailId)">重试</Button>
+        </div>
+        <div v-else-if="detail" class="min-w-0 space-y-5">
+          <dl class="grid gap-2 text-sm sm:grid-cols-2">
+            <div><dt class="text-muted-foreground">阶段 / 原因</dt><dd>{{ detail.phase }} / {{ detail.turn.reason ?? '—' }}</dd></div>
+            <div><dt class="text-muted-foreground">会话序号</dt><dd>{{ detail.conversationSeq ?? '—' }}</dd></div>
+            <div><dt class="text-muted-foreground">平台回复截止</dt><dd>{{ formatTime(detail.platformDeadlineAt) }}</dd></div>
+            <div><dt class="text-muted-foreground">发送截止</dt><dd>{{ formatTime(detail.deliveryDeadlineAt) }}</dd></div>
+            <div><dt class="text-muted-foreground">模型成本结算</dt><dd>{{ formatTime(detail.costFinalizedAt) }}</dd></div>
+            <div><dt class="text-muted-foreground">游客次数结算</dt><dd>{{ formatTime(detail.quotaFinalizedAt) }}</dd></div>
+          </dl>
+          <Table>
+            <TableHeader><TableRow><TableHead>分段</TableHead><TableHead>状态</TableHead><TableHead>正文版本</TableHead><TableHead>尝试次数</TableHead><TableHead>下一次尝试</TableHead></TableRow></TableHeader>
+            <TableBody>
+              <TableRow v-for="segment in detail.segments" :key="segment.msgSeq">
+                <TableCell>{{ segment.msgSeq }}</TableCell><TableCell>{{ segment.status }}</TableCell><TableCell>{{ segment.payloadVersion }}{{ segment.urlCorrected ? '（已去链接）' : '' }}</TableCell><TableCell>{{ segment.attemptCount }}</TableCell><TableCell>{{ formatTime(segment.retryAt) }}</TableCell>
+              </TableRow>
+              <TableRow v-if="!detail.segments.length"><TableCell :colspan="5" class="text-muted-foreground">尚无发送分段。</TableCell></TableRow>
+            </TableBody>
+          </Table>
+          <div v-for="attempt in detail.attempts" :key="`${attempt.msgSeq}:${attempt.attemptNo}`" class="space-y-1 rounded-md border p-3 text-xs">
+            <p class="font-medium">第 {{ attempt.msgSeq }} 段 · 第 {{ attempt.attemptNo }} 次 · {{ attempt.result }}</p>
+            <p>{{ formatTime(attempt.startedAt) }} → {{ formatTime(attempt.finishedAt) }}</p>
+            <p>HTTP {{ attempt.httpStatus ?? '—' }} · code {{ attempt.code ?? '—' }} · err_code {{ attempt.errCode ?? '—' }}</p>
+            <p class="break-all font-mono">Trace ID：{{ attempt.traceId ?? '—' }}</p>
+            <p class="break-all font-mono text-muted-foreground">正文校验值：{{ attempt.payloadHash }}</p>
+          </div>
+        </div>
+      </DialogScrollContent>
+    </Dialog>
 
     <Dialog :open="!!memoryGroup" @update:open="v => { if (!v) memoryGroup = null }">
       <DialogScrollContent v-if="memoryGroup" class="sm:max-w-2xl">

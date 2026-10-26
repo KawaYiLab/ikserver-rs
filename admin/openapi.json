@@ -3139,6 +3139,26 @@
         }
       }
     },
+    "/v1/admin/qq/dispatch": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "调度暂停和排空进度。只读，不包含消息正文或平台身份。",
+        "operationId": "qq_dispatch_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqDispatchStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/admin/qq/groups": {
       "get": {
         "tags": [
@@ -3562,6 +3582,37 @@
               }
             }
           }
+        }
+      }
+    },
+    "/v1/admin/qq/turns/{id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "一轮回复的截止时间、分段状态与每次发送结果。正文、token、openid 不返回。",
+        "operationId": "qq_turn_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QqTurnDetail"
+                }
+              }
+            }
+          },
+          "404": {}
         }
       }
     },
@@ -22544,6 +22595,76 @@
           }
         }
       },
+      "QqAttemptView": {
+        "type": "object",
+        "required": [
+          "msgSeq",
+          "attemptNo",
+          "payloadHash",
+          "startedAt",
+          "result"
+        ],
+        "properties": {
+          "attemptNo": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "code": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "endpoint": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "errCode": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "httpStatus": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "msgSeq": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "payloadHash": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "traceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "QqBotList": {
         "type": "object",
         "required": [
@@ -22580,6 +22701,37 @@
           },
           "enabled": {
             "type": "boolean"
+          }
+        }
+      },
+      "QqDispatchStatus": {
+        "type": "object",
+        "required": [
+          "paused",
+          "queued",
+          "generating",
+          "delivering",
+          "activeLeases"
+        ],
+        "properties": {
+          "activeLeases": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "delivering": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "generating": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "paused": {
+            "type": "boolean"
+          },
+          "queued": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -22721,6 +22873,58 @@
           }
         }
       },
+      "QqSegmentView": {
+        "type": "object",
+        "required": [
+          "msgSeq",
+          "status",
+          "payloadVersion",
+          "payloadHash",
+          "attemptCount",
+          "authCorrected",
+          "urlCorrected"
+        ],
+        "properties": {
+          "acceptedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "attemptCount": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "authCorrected": {
+            "type": "boolean"
+          },
+          "msgSeq": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "payloadHash": {
+            "type": "string"
+          },
+          "payloadVersion": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "retryAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "urlCorrected": {
+            "type": "boolean"
+          }
+        }
+      },
       "QqSettings": {
         "type": "object",
         "required": [
@@ -22747,6 +22951,10 @@
           "c2cContextTurns": {
             "type": "integer",
             "format": "int32"
+          },
+          "dispatchPaused": {
+            "type": "boolean",
+            "description": "暂停领取新的生成和发送工作；回调继续入库，原有截止时间不延长。"
           },
           "enabled": {
             "type": "boolean"
@@ -22794,6 +23002,77 @@
           "updatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "QqTurnDetail": {
+        "type": "object",
+        "required": [
+          "turn",
+          "phase",
+          "segments",
+          "attempts"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QqAttemptView"
+            }
+          },
+          "conversationSeq": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "costFinalizedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "deliveryDeadlineAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "generationDeadlineAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "platformDeadlineAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "quotaFinalizedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QqSegmentView"
+            }
+          },
+          "turn": {
+            "$ref": "#/components/schemas/QqTurnView"
           }
         }
       },

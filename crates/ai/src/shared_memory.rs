@@ -121,14 +121,16 @@ async fn store(
 }
 
 /// remember 的 `about = group`：记成这个群大家共同的事。`user_id` 是可信的触发者（TOOL-004）。
-pub(crate) async fn remember(
+pub(crate) async fn remember_authorized(
     state: &AiState,
     scope: &str,
     ai_user_id: i64,
     user_id: i64,
     content: &str,
+    authorization: &crate::authorization::Guard,
 ) -> Result<ToolOutput, Problem> {
     let mut tx = state.db.begin().await?;
+    crate::authorization::require(&mut tx, authorization).await?;
     repo::lock_shared_memories(&mut tx, scope).await?;
     let (row, _) = store(
         &mut tx,
@@ -155,13 +157,15 @@ pub(crate) async fn remember(
 }
 
 /// forget 的 `about = group`：删掉这个群里与这句话相关的共同记忆（置顶的不删）。
-pub(crate) async fn forget(
+pub(crate) async fn forget_authorized(
     state: &AiState,
     scope: &str,
     ai_user_id: i64,
     needle: &str,
+    authorization: &crate::authorization::Guard,
 ) -> Result<ToolOutput, Problem> {
     let mut tx = state.db.begin().await?;
+    crate::authorization::require(&mut tx, authorization).await?;
     repo::lock_shared_memories(&mut tx, scope).await?;
     let ids: Vec<i64> = repo::shared_memories(&mut tx, scope, Some(ai_user_id))
         .await?
@@ -187,19 +191,22 @@ pub(crate) async fn forget(
 
 /// 从一段群对话里提炼共同记忆。`lines` 只应包含绑定用户的发言与机器人的回复（调用方筛过）。
 /// 进度由调用方保存；记忆总开关关着时什么都不做。
-pub async fn extract(
+pub struct ExtractionPlan {
+    scope: String,
+    ai_user_id: i64,
+    existing: Vec<SharedMemoryRow>,
+    ops: Vec<Op>,
+}
+
+pub async fn prepare_extract(
     state: &AiState,
     scope: &str,
     ai_user_id: i64,
     lines: &[TranscriptLine],
-) -> Result<Extracted, String> {
-    let on = state
-        .catalog
-        .get()
-        .await
-        .is_ok_and(|catalog| catalog.memory.enabled);
-    if !on || lines.iter().all(|line| line.from_ai) {
-        return Ok(Extracted::default());
+) -> Result<Option<ExtractionPlan>, String> {
+    let catalog = state.catalog.get().await.map_err(|e| format!("{e:?}"))?;
+    if !catalog.memory.enabled || lines.iter().all(|line| line.from_ai) {
+        return Ok(None);
     }
     let existing = {
         let mut conn = state.db.acquire().await.map_err(|e| e.to_string())?;
@@ -225,12 +232,49 @@ pub async fn extract(
     let Some(ops) = memory_jobs::parse_ops(&text, existing.len()) else {
         return Err("群记忆提炼的输出不是合法的 JSON".to_owned());
     };
-    apply(state, scope, ai_user_id, &existing, ops)
-        .await
-        .map_err(|p| format!("{p:?}"))
+    Ok(Some(ExtractionPlan {
+        scope: scope.to_owned(),
+        ai_user_id,
+        existing,
+        ops,
+    }))
 }
 
-async fn apply(
+pub async fn apply_extract(
+    conn: &mut sqlx::PgConnection,
+    state: &AiState,
+    plan: ExtractionPlan,
+) -> Result<Extracted, Problem> {
+    apply_in(
+        conn,
+        state,
+        &plan.scope,
+        plan.ai_user_id,
+        &plan.existing,
+        plan.ops,
+    )
+    .await
+}
+
+pub async fn extract(
+    state: &AiState,
+    scope: &str,
+    ai_user_id: i64,
+    lines: &[TranscriptLine],
+) -> Result<Extracted, String> {
+    let Some(plan) = prepare_extract(state, scope, ai_user_id, lines).await? else {
+        return Ok(Extracted::default());
+    };
+    let mut tx = state.db.begin().await.map_err(|e| e.to_string())?;
+    let result = apply_extract(&mut tx, state, plan)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(result)
+}
+
+async fn apply_in(
+    tx: &mut sqlx::PgConnection,
     state: &AiState,
     scope: &str,
     ai_user_id: i64,
@@ -239,22 +283,21 @@ async fn apply(
 ) -> Result<Extracted, Problem> {
     let now = Utc::now();
     let mut result = Extracted::default();
-    let mut tx = state.db.begin().await?;
-    repo::lock_shared_memories(&mut tx, scope).await?;
+    repo::lock_shared_memories(&mut *tx, scope).await?;
     // 期间被管理员删掉或置顶的不动：按 id 重新读一遍当前状态。
-    let current: std::collections::HashMap<i64, bool> =
-        repo::shared_memories(&mut tx, scope, Some(ai_user_id))
+    let current: std::collections::HashMap<i64, (bool, chrono::DateTime<Utc>)> =
+        repo::shared_memories(&mut *tx, scope, Some(ai_user_id))
             .await?
             .into_iter()
-            .map(|row| (row.id, row.pinned))
+            .map(|row| (row.id, (row.pinned, row.updated_at)))
             .collect();
-    let editable = |row: &SharedMemoryRow| current.get(&row.id) == Some(&false);
+    let editable = |row: &SharedMemoryRow| current.get(&row.id) == Some(&(false, row.updated_at));
     let mut deleted = Vec::new();
     for op in ops {
         match op {
             Op::Add(fact) => {
                 let (_, created) = store(
-                    &mut tx,
+                    &mut *tx,
                     state,
                     &NewSharedMemory {
                         id: 0,
@@ -277,8 +320,16 @@ async fn apply(
                 let Some(content) = change.content.filter(|c| *c != row.content) else {
                     continue;
                 };
-                repo::update_shared_memory(&mut tx, scope, row.id, Some(&content), None, None, now)
-                    .await?;
+                repo::update_shared_memory(
+                    &mut *tx,
+                    scope,
+                    row.id,
+                    Some(&content),
+                    None,
+                    None,
+                    now,
+                )
+                .await?;
                 result.updated += 1;
             }
             Op::Delete { index } => {
@@ -288,10 +339,9 @@ async fn apply(
             }
         }
     }
-    result.deleted = repo::delete_shared_memories(&mut tx, scope, &deleted)
+    result.deleted = repo::delete_shared_memories(&mut *tx, scope, &deleted)
         .await?
         .len();
-    tx.commit().await?;
     Ok(result)
 }
 

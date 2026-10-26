@@ -818,6 +818,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/qq/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 调度暂停和排空进度。只读，不包含消息正文或平台身份。 */
+        get: operations["qq_dispatch_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/qq/groups": {
         parameters: {
             query?: never;
@@ -945,6 +962,23 @@ export interface paths {
         };
         /** QQ 回复记录（排障：状态、原因、模型、用量；不含消息正文） */
         get: operations["qq_turns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/qq/turns/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一轮回复的截止时间、分段状态与每次发送结果。正文、token、openid 不返回。 */
+        get: operations["qq_turn_detail"];
         put?: never;
         post?: never;
         delete?: never;
@@ -6852,6 +6886,26 @@ export interface components {
             models: string[];
             ok: boolean;
         };
+        QqAttemptView: {
+            /** Format: int32 */
+            attemptNo: number;
+            /** Format: int64 */
+            code?: number | null;
+            endpoint?: string | null;
+            /** Format: int64 */
+            errCode?: number | null;
+            /** Format: date-time */
+            finishedAt?: string | null;
+            /** Format: int32 */
+            httpStatus?: number | null;
+            /** Format: int32 */
+            msgSeq: number;
+            payloadHash: string;
+            result: string;
+            /** Format: date-time */
+            startedAt: string;
+            traceId?: string | null;
+        };
         QqBotList: {
             items: components["schemas"]["QqBotView"][];
         };
@@ -6860,6 +6914,17 @@ export interface components {
             defaultCardSlug?: string | null;
             displayName: string;
             enabled: boolean;
+        };
+        QqDispatchStatus: {
+            /** Format: int64 */
+            activeLeases: number;
+            /** Format: int64 */
+            delivering: number;
+            /** Format: int64 */
+            generating: number;
+            paused: boolean;
+            /** Format: int64 */
+            queued: number;
         };
         QqGroupMemories: {
             items: components["schemas"]["SharedMemoryView"][];
@@ -6900,10 +6965,28 @@ export interface components {
             scene: string;
             userId?: string | null;
         };
+        QqSegmentView: {
+            /** Format: date-time */
+            acceptedAt?: string | null;
+            /** Format: int32 */
+            attemptCount: number;
+            authCorrected: boolean;
+            /** Format: int32 */
+            msgSeq: number;
+            payloadHash: string;
+            /** Format: int32 */
+            payloadVersion: number;
+            /** Format: date-time */
+            retryAt?: string | null;
+            status: string;
+            urlCorrected: boolean;
+        };
         QqSettings: {
             blockedWords: string[];
             /** Format: int32 */
             c2cContextTurns: number;
+            /** @description 暂停领取新的生成和发送工作；回调继续入库，原有截止时间不延长。 */
+            dispatchPaused?: boolean;
             enabled: boolean;
             /** Format: int32 */
             groupContextHours: number;
@@ -6924,6 +7007,24 @@ export interface components {
             replyTimeoutSecs: number;
             /** Format: date-time */
             updatedAt?: string;
+        };
+        QqTurnDetail: {
+            attempts: components["schemas"]["QqAttemptView"][];
+            /** Format: int64 */
+            conversationSeq?: number | null;
+            /** Format: date-time */
+            costFinalizedAt?: string | null;
+            /** Format: date-time */
+            deliveryDeadlineAt?: string | null;
+            /** Format: date-time */
+            generationDeadlineAt?: string | null;
+            phase: string;
+            /** Format: date-time */
+            platformDeadlineAt?: string | null;
+            /** Format: date-time */
+            quotaFinalizedAt?: string | null;
+            segments: components["schemas"]["QqSegmentView"][];
+            turn: components["schemas"]["QqTurnView"];
         };
         QqTurnView: {
             aiUserId?: string | null;
@@ -9811,6 +9912,25 @@ export interface operations {
             };
         };
     };
+    qq_dispatch_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqDispatchStatus"];
+                };
+            };
+        };
+    };
     qq_groups: {
         parameters: {
             query?: {
@@ -10093,6 +10213,33 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Paged_QqTurnView"];
                 };
+            };
+        };
+    };
+    qq_turn_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QqTurnDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

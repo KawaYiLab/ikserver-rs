@@ -326,6 +326,32 @@ pub async fn anonymize_deleted(
     Ok(())
 }
 
+/// 在调用方事务中锁住账号状态，防止授权检查与业务写入之间发生注销/封禁。
+pub async fn lock_user_status(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Option<String>, Problem> {
+    Ok(
+        sqlx::query_scalar("SELECT status FROM users WHERE id=$1 FOR SHARE")
+            .bind(user_id)
+            .fetch_optional(conn)
+            .await?,
+    )
+}
+
+/// 绑定命令已持有旧身份锁时，只允许立即取得新账号锁；与注销竞争时回滚重试。
+pub async fn try_lock_user_status(
+    conn: &mut PgConnection,
+    user_id: i64,
+) -> Result<Option<String>, Problem> {
+    Ok(
+        sqlx::query_scalar("SELECT status FROM users WHERE id=$1 FOR SHARE NOWAIT")
+            .bind(user_id)
+            .fetch_optional(conn)
+            .await?,
+    )
+}
+
 // ---------- 审核（moderation） ----------
 
 /// 账号状态（审核用）。

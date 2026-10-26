@@ -17,6 +17,41 @@ use ik_kernel::{
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
 
+mod delivery;
+mod dispatch;
+pub(crate) use dispatch::enqueue_turn;
+pub use dispatch::{reconcile, run_dispatch};
+
+static GENERATIONS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dispatch {
+    pub conversation_id: i64,
+}
+impl TaskHandler for Dispatch {
+    const IDENTIFIER: &'static str = "qq.dispatch";
+    async fn run(self, ctx: WorkerContext) -> impl IntoTaskHandlerResult {
+        let Some(s) = ctx.get_ext::<QqState>() else {
+            return Err("执行器没有注册 QqState".to_owned());
+        };
+        run_dispatch(s, self.conversation_id)
+            .await
+            .map_err(|p| format!("{p:?}"))
+    }
+}
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Reconcile {}
+impl TaskHandler for Reconcile {
+    const IDENTIFIER: &'static str = "qq.reconcile";
+    async fn run(self, ctx: WorkerContext) -> impl IntoTaskHandlerResult {
+        let Some(s) = ctx.get_ext::<QqState>() else {
+            return Err("执行器没有注册 QqState".to_owned());
+        };
+        reconcile(s).await.map_err(|p| format!("{p:?}"))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Reply {
@@ -43,16 +78,6 @@ impl TaskHandler for Prune {
         };
         prune(state).await.map_err(|p| format!("{p:?}"))
     }
-}
-fn window(t: &Turn) -> Duration {
-    if t.group_id.is_some() {
-        Duration::minutes(5)
-    } else {
-        Duration::minutes(60)
-    }
-}
-fn expired(t: &Turn, reserve_secs: i64) -> bool {
-    Utc::now() + Duration::seconds(reserve_secs) >= t.message_at + window(t)
 }
 fn hold(t: &Turn) -> Option<Hold> {
     Some(Hold {
@@ -91,14 +116,63 @@ async fn account(c: &mut PgConnection, t: &Turn) -> Result<Account, Problem> {
     }
 }
 
-/// Public for integration testing with fake AI and QQ HTTP providers.
+/// Explicitly drive a conversation; Graphile's legacy qq.reply handler uses this too.
 pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
+    let mut tx = s.db.begin().await?;
+    let attached: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT conversation_id FROM qq_turns WHERE id=$1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(attached) = attached else {
+        return Ok(());
+    };
+    if attached.is_none() {
+        dispatch::attach_legacy_turn(s, &mut tx, id).await?;
+    }
+    let conversation: Option<i64> =
+        sqlx::query_scalar("SELECT conversation_id FROM qq_turns WHERE id=$1")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await?;
+    tx.commit().await?;
+    if let Some(conversation) = conversation {
+        run_dispatch(s, conversation).await?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) async fn test_heartbeat<F>(s: &QqState, turn_id: i64, future: F) -> Result<(), Problem>
+where
+    F: std::future::Future<Output = Result<(), Problem>>,
+{
+    let (conversation_id, epoch): (i64, i64) = sqlx::query_as("SELECT c.id,c.lease_epoch FROM qq_conversations c JOIN qq_turns t ON t.conversation_id=c.id WHERE t.id=$1")
+        .bind(turn_id).fetch_one(&s.db).await?;
+    dispatch::heartbeat(
+        s,
+        &dispatch::Lease {
+            conversation_id,
+            turn_id,
+            epoch,
+        },
+        future,
+    )
+    .await
+}
+
+async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
+    let id = lease.turn_id;
     let settings = s.settings().await?;
     let mut tx = s.db.begin().await?;
+    crate::identity::lock_turn_identity(&mut tx, id).await?;
     let Some(mut t) = repo::turn(&mut tx, id).await? else {
         return Ok(());
     };
     if matches!(t.status.as_str(), "completed" | "failed" | "skipped") {
+        return Ok(());
+    }
+    if !dispatch::valid(&mut tx, lease).await? {
         return Ok(());
     }
     if !s.config.enabled
@@ -107,45 +181,46 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         || !s.config.apps.values().any(|app| app.app_id == t.app_id)
     {
         abandon(&mut tx, &t, "disabled_or_blocked").await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     }
-    if expired(
-        &t,
-        if t.output.is_some() {
-            0
-        } else {
-            i64::from(settings.reply_timeout_secs) + 15
-        },
-    ) {
+    let metadata = dispatch::meta(&mut tx, id).await?;
+    let time = dispatch::now(&mut tx).await?;
+    let budget = (metadata.platform_deadline_at - time - Duration::seconds(15))
+        .num_seconds()
+        .min(i64::from(settings.reply_timeout_secs));
+    if budget < 10 && !t.content.starts_with('/') {
         abandon(&mut tx, &t, "window_expired").await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     }
-    if t.status == "processing" && t.output.is_none() {
-        // A worker died after claiming the turn. Never issue a second billable generation.
-        // Its first request may already have incurred cost (QUOTA-019).
-        finalize_cost(&mut tx, &t, t.hold_amount.max(t.guest_token_reserved)).await?;
-        refund_turn(&mut tx, &t).await?;
-        repo::terminal(&mut tx, t.id, "failed", "generation_interrupted").await?;
-        tx.commit().await?;
-        return Ok(());
-    }
+    let _permit = if t.content.starts_with('/') {
+        None
+    } else {
+        match GENERATIONS.try_acquire() {
+            Ok(p) => Some(p),
+            Err(_) => {
+                dispatch::reschedule(s, &mut tx, lease, time + Duration::seconds(1)).await?;
+                tx.commit().await?;
+                return Ok(());
+            }
+        }
+    };
     t.attempts += 1;
-    sqlx::query!(
-        "UPDATE qq_turns SET attempts=$2 WHERE id=$1",
-        id,
-        t.attempts
+    sqlx::query(
+        "UPDATE qq_turns SET attempts=$2,phase='preparing',generation_deadline_at=$3 WHERE id=$1",
     )
+    .bind(id)
+    .bind(t.attempts)
+    .bind(time + Duration::seconds(budget.max(1)))
     .execute(&mut *tx)
     .await?;
-    if t.output.is_some() {
-        tx.commit().await?;
-        return deliver(s, t).await;
-    }
     let account = account(&mut tx, &t).await?;
     if matches!(account, Account::Blocked) {
         repo::terminal(&mut tx, id, "skipped", "account_blocked").await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     }
@@ -155,18 +230,29 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     };
     if t.content.starts_with('/') {
         let reply = crate::commands::run(s, &mut tx, &t, bound, &settings).await?;
-        t.output = Some(vec![reply.text]);
+        t.output = Some(vec![text::truncate(&reply.text, 4000)]);
+        crate::identity::freeze(&mut tx, t.message_id).await?;
         t.reason = reply.reason.map(str::to_owned);
         save_output(&mut tx, &t).await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         reply.effects.dispatch(s.ai.bus.as_ref());
-        return deliver(s, t).await;
+        return delivery::deliver(s, lease).await;
+    }
+    let snapshot = crate::identity::freeze(&mut tx, t.message_id).await?;
+    if !crate::authorization::validate(&mut tx, &snapshot).await? {
+        repo::terminal(&mut tx, id, "skipped", "authorization_changed").await?;
+        dispatch::fence(&mut tx, lease).await?;
+        tx.commit().await?;
+        return Ok(());
     }
     let Some(slug) = t.card_slug.clone() else {
         repo::terminal(&mut tx, id, "skipped", "no_role_card").await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     };
+    dispatch::fence(&mut tx, lease).await?;
     tx.commit().await?;
     let catalog = s.ai.catalog.get().await?;
     let Some(card) = catalog
@@ -176,6 +262,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     else {
         let mut tx = s.db.begin().await?;
         repo::terminal(&mut tx, id, "skipped", "role_disabled").await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     };
@@ -190,7 +277,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     let scope = t.group_id.map(repo::group_scope);
     // 开场（这段上下文里还没有回复过）：私下场合可以问起到期的待跟进。
     let opening = !history.iter().any(|line| line.assistant);
-    let prepared = match external::prepare(
+    let prepared = match external::prepare_authorized(
         &s.ai,
         ExternalTurn {
             channel: "qq",
@@ -206,7 +293,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
             history,
             system_note: note.to_owned(),
             max_chars: settings.max_reply_chars as usize,
-            timeout_secs: settings.reply_timeout_secs as u64,
+            timeout_secs: budget.max(1) as u64,
             memory: bound.map(|user_id| ExternalMemory {
                 user_id,
                 public: scope.clone(),
@@ -216,6 +303,9 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
                 .clone()
                 .filter(|_| bound.is_some() || settings.guest_reads_group_memory),
         },
+        std::sync::Arc::new(
+            crate::authorization::QqAuthorization::new(snapshot.clone()).with_role(slug.clone()),
+        ),
     )
     .await
     {
@@ -223,6 +313,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         Err(p) => {
             let mut tx = s.db.begin().await?;
             repo::terminal(&mut tx, id, "skipped", "ai_unavailable").await?;
+            dispatch::fence(&mut tx, lease).await?;
             tx.commit().await?;
             tracing::warn!(
                 turn_id = id,
@@ -234,18 +325,34 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     };
     let estimate = external::estimate(&prepared);
     let mut tx = s.db.begin().await?;
+    let authorized = crate::authorization::validate(&mut tx, &snapshot).await?;
     let Some(mut t) = repo::turn(&mut tx, id).await? else {
         return Ok(());
     };
     if t.status != "queued" {
         return Ok(());
     }
-    if !t.allowed
+    let paused: bool =
+        sqlx::query_scalar("SELECT dispatch_paused FROM qq_settings WHERE singleton")
+            .fetch_one(&mut *tx)
+            .await?;
+    if paused {
+        dispatch::fence(&mut tx, lease).await?;
+        sqlx::query("UPDATE qq_conversations SET lease_until=NULL,wake_at=NULL WHERE id=$1")
+            .bind(lease.conversation_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        return Ok(());
+    }
+    if !authorized
+        || !t.allowed
         || t.user_id != bound
         || t.card_slug.as_deref() != Some(&slug)
-        || expired(&t, i64::from(settings.reply_timeout_secs) + 15)
+        || dispatch::now(&mut tx).await? >= metadata.platform_deadline_at - Duration::seconds(15)
     {
         repo::terminal(&mut tx, id, "skipped", "state_changed").await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     }
@@ -274,9 +381,11 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
                     "你今天的 AI 额度已用完，04:00 重置。",
                 )
                 .await?;
+                dispatch::fence(&mut tx, lease).await?;
                 tx.commit().await?;
+                drop(_permit);
                 return if t.output.is_some() {
-                    deliver(s, t).await
+                    delivery::deliver(s, lease).await
                 } else {
                     Ok(())
                 };
@@ -297,9 +406,11 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
                         "今天的 AI 额度已用完，04:00 重置。",
                     )
                     .await?;
+                    dispatch::fence(&mut tx, lease).await?;
                     tx.commit().await?;
+                    drop(_permit);
                     return if t.output.is_some() {
-                        deliver(s, t).await
+                        delivery::deliver(s, lease).await
                     } else {
                         Ok(())
                     };
@@ -309,9 +420,11 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         {
             quota::settle(&mut tx, &site_hold, &t.execution_key, 0, now).await?;
             quota_notice(&mut tx,&mut t,reason,&format!("今天的免费次数或游客额度用完了（每天 {} 次，04:00 重置）。在绳网「设置 → 绑定 QQ」绑定后按个人额度使用，还能让我记住你。发送 /帮助 查看绑定方法。",settings.guest_daily_turns)).await?;
+            dispatch::fence(&mut tx, lease).await?;
             tx.commit().await?;
+            drop(_permit);
             return if t.output.is_some() {
-                deliver(s, t).await
+                delivery::deliver(s, lease).await
             } else {
                 Ok(())
             };
@@ -327,7 +440,11 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     t.guest_reserved = guest;
     t.guest_token_reserved = guest_tokens;
     t.ai_user_id = Some(prepared.ai_user_id);
-    sqlx::query!("UPDATE qq_turns SET status='processing',ai_user_id=$2,hold_id=$3,quota_day=$4,hold_amount=$5,guest_reserved=$6,guest_token_reserved=$7,model_key=$8,payer_user_id=$9 WHERE id=$1",id,prepared.ai_user_id,hold.id,hold.day,hold.amount,guest,guest_tokens,prepared.model_key,bound).execute(&mut *tx).await?;
+    if !prepared.memory_enabled() {
+        sqlx::query("UPDATE qq_turns SET personal_memory_processed_at=COALESCE(personal_memory_processed_at,clock_timestamp()),group_memory_processed_at=COALESCE(group_memory_processed_at,clock_timestamp()) WHERE id=$1").bind(id).execute(&mut *tx).await?;
+    }
+    sqlx::query("UPDATE qq_turns SET phase='generating',status='processing',ai_user_id=$2,hold_id=$3,quota_day=$4,hold_amount=$5,guest_reserved=$6,guest_token_reserved=$7,model_key=$8,payer_user_id=$9 WHERE id=$1")
+        .bind(id).bind(prepared.ai_user_id).bind(hold.id).bind(hold.day).bind(hold.amount).bind(guest).bind(guest_tokens).bind(&prepared.model_key).bind(bound).execute(&mut *tx).await?;
     sqlx::query!(
         "UPDATE qq_messages SET ai_user_id=$2 WHERE id=$1",
         t.message_id,
@@ -335,11 +452,47 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
     )
     .execute(&mut *tx)
     .await?;
+    dispatch::fence(&mut tx, lease).await?;
     tx.commit().await?;
 
-    let reply = external::reply(&s.ai, &prepared, id).await;
+    let mut conn = s.db.acquire().await?;
+    let generation_deadline = dispatch::meta(&mut conn, id)
+        .await?
+        .generation_deadline_at
+        .unwrap_or(metadata.platform_deadline_at - Duration::seconds(15));
+    let remaining = (generation_deadline - dispatch::now(&mut conn).await?)
+        .to_std()
+        .unwrap_or_default();
+    drop(conn);
+    let reply = tokio::time::timeout(remaining, external::reply(&s.ai, &prepared, id)).await;
+    // Delivery has its own AppID capacity; a slow POST must not occupy a model slot.
+    drop(_permit);
+    let reply = match reply {
+        Ok(reply) => reply,
+        Err(_) => {
+            let mut tx = s.db.begin().await?;
+            crate::identity::lock_turn_identity(&mut tx, id).await?;
+            if let Some(t) = repo::turn(&mut tx, id).await? {
+                finalize_cost(
+                    &mut tx,
+                    &t,
+                    if remaining.is_zero() {
+                        0
+                    } else {
+                        hold.amount.max(estimate)
+                    },
+                )
+                .await?;
+                dispatch::finish(s, &mut tx, lease, &t, "failed", "generation_timeout").await?;
+            }
+            tx.commit().await?;
+            return Ok(());
+        }
+    };
     let actual = reply.charge(hold.amount.max(estimate));
     let mut tx = s.db.begin().await?;
+    let authorized = crate::authorization::validate(&mut tx, &snapshot).await?
+        && delivery::role_enabled(&mut tx, Some(prepared.ai_user_id)).await?;
     let Some(mut t) = repo::turn(&mut tx, id).await? else {
         return Ok(());
     };
@@ -364,14 +517,16 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         settings.max_reply_chars as usize,
         t.group_id.is_some(),
     );
+    let window_expired = dispatch::now(&mut tx).await? >= metadata.platform_deadline_at;
     if reply.outcome != RunOutcome::Completed
         || segments.is_empty()
-        || expired(&t, 0)
+        || window_expired
         || !t.allowed
         || t.user_id != bound
+        || !authorized
     {
         refund_turn(&mut tx, &t).await?;
-        let reason = if expired(&t, 0) {
+        let reason = if window_expired {
             "window_expired"
         } else if !t.allowed || t.user_id != bound {
             "disabled_or_blocked"
@@ -379,6 +534,7 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
             "generation_failed"
         };
         repo::terminal(&mut tx, id, "failed", reason).await?;
+        dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         return Ok(());
     }
@@ -387,16 +543,14 @@ pub async fn run_reply(s: &QqState, id: i64) -> Result<(), Problem> {
         t.reason = Some("blocked_word".to_owned());
     }
     save_output(&mut tx, &t).await?;
-    // 绑定用户的对话停下来以后提炼记忆（MEM-020 的去抖：同一个任务键，每次往后推）。
-    if let Some(user_id) = bound
-        && catalog.memory.enabled
-    {
-        let run_at = Utc::now() + Duration::seconds(catalog.memory.extract_delay_secs);
-        crate::memory_jobs::enqueue(s, &mut tx, user_id, prepared.ai_user_id, t.group_id, run_at)
-            .await?;
-    }
+    sqlx::query("UPDATE qq_turns SET follow_up_ids=$2 WHERE id=$1")
+        .bind(id)
+        .bind(prepared.follow_up_ids())
+        .execute(&mut *tx)
+        .await?;
+    dispatch::fence(&mut tx, lease).await?;
     tx.commit().await?;
-    deliver(s, t).await
+    delivery::deliver(s, lease).await
 }
 
 async fn reserve_guest(
@@ -462,17 +616,27 @@ async fn quota_notice(
     }
 }
 async fn save_output(c: &mut PgConnection, t: &Turn) -> Result<(), Problem> {
-    sqlx::query!(
-        "UPDATE qq_turns SET status='processing',output=$2,reason=$3 WHERE id=$1",
-        t.id,
-        t.output.as_deref(),
-        t.reason
-    )
-    .execute(c)
-    .await?;
+    sqlx::query("UPDATE qq_turns SET status='processing',phase='delivering',output=$2,reason=$3,delivery_deadline_at=LEAST(platform_deadline_at-interval '2 seconds',clock_timestamp()+interval '60 seconds') WHERE id=$1")
+        .bind(t.id).bind(t.output.as_deref()).bind(&t.reason).execute(&mut *c).await?;
+    for (i, content) in t.output.iter().flatten().enumerate() {
+        let hash = ring::digest::digest(&ring::digest::SHA256, content.as_bytes())
+            .as_ref()
+            .to_vec();
+        sqlx::query("INSERT INTO qq_reply_segments(turn_id,msg_seq,content,payload_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING")
+            .bind(t.id).bind(i as i32+1).bind(content).bind(hash).execute(&mut *c).await?;
+    }
     Ok(())
 }
+
 async fn finalize_cost(c: &mut PgConnection, t: &Turn, actual: i64) -> Result<(), Problem> {
+    let finalized: bool =
+        sqlx::query_scalar("SELECT cost_finalized_at IS NOT NULL FROM qq_turns WHERE id=$1")
+            .bind(t.id)
+            .fetch_one(&mut *c)
+            .await?;
+    if finalized {
+        return Ok(());
+    }
     let Some(h) = hold(t) else {
         return Ok(());
     };
@@ -480,6 +644,10 @@ async fn finalize_cost(c: &mut PgConnection, t: &Turn, actual: i64) -> Result<()
         quota::settle(c, &h, &t.execution_key, actual, Utc::now()).await?,
         quota::Settled::Duplicate
     ) {
+        sqlx::query("UPDATE qq_turns SET cost_finalized_at=clock_timestamp() WHERE id=$1")
+            .bind(t.id)
+            .execute(c)
+            .await?;
         return Ok(());
     }
     // 游客合计只记游客的用量；绑定用户的用量已经记在个人与全站计数上。
@@ -504,10 +672,7 @@ async fn finalize_cost(c: &mut PgConnection, t: &Turn, actual: i64) -> Result<()
         .execute(&mut *c)
         .await?;
     }
-    sqlx::query!(
-        "UPDATE qq_turns SET guest_token_reserved=0 WHERE id=$1",
-        t.id
-    )
+    sqlx::query("UPDATE qq_turns SET guest_token_reserved=0,cost_finalized_at=clock_timestamp() WHERE id=$1").bind(t.id)
     .execute(c)
     .await?;
     Ok(())
@@ -552,102 +717,8 @@ async fn abandon(c: &mut PgConnection, t: &Turn, reason: &str) -> Result<(), Pro
     repo::terminal(c, t.id, "skipped", reason).await
 }
 
-async fn deliver(s: &QqState, mut t: Turn) -> Result<(), Problem> {
-    let output = t.output.clone().unwrap_or_default();
-    let Some(msg_id) = t.qq_msg_id.as_deref() else {
-        return Err(Problem::internal());
-    };
-    for (index, content) in output.iter().enumerate().skip(t.segments_sent as usize) {
-        let deadline = t.message_at + window(&t);
-        let remaining = (deadline - Utc::now()).to_std().unwrap_or_default();
-        let mut accepted = content.clone();
-        let error = if remaining.is_zero() {
-            Some(("window_expired", false))
-        } else {
-            match tokio::time::timeout(
-                remaining,
-                s.client.send_rendered(
-                    &t.app_id,
-                    &t.scene,
-                    &t.openid,
-                    msg_id,
-                    index as i32 + 1,
-                    content,
-                ),
-            )
-            .await
-            {
-                Ok(Ok(rendered)) => {
-                    accepted = rendered;
-                    None
-                }
-                Ok(Err(e)) => {
-                    // SendError 的 Display 只含 HTTP 状态与平台错误码，不含 token、openid、正文。
-                    tracing::warn!(turn_id = t.id, error = %e, "QQ 发送失败");
-                    Some((e.reason(), e.retryable()))
-                }
-                Err(_) => Some(("window_expired", false)),
-            }
-        };
-        if let Some((reason, retryable)) = error {
-            if retryable && t.attempts < 2 && !expired(&t, 10) {
-                tracing::warn!(
-                    turn_id = t.id,
-                    reason,
-                    "QQ send will retry using the same msg_id and msg_seq"
-                );
-                return Err(Problem::service_unavailable());
-            }
-            let mut tx = s.db.begin().await?;
-            if let Some(current) = repo::turn(&mut tx, t.id).await? {
-                refund_turn(&mut tx, &current).await?;
-                repo::terminal(&mut tx, t.id, "failed", reason).await?;
-            }
-            tx.commit().await?;
-            return Ok(());
-        }
-        let mut tx = s.db.begin().await?;
-        let Some(current) = repo::turn(&mut tx, t.id).await? else {
-            return Ok(());
-        };
-        if current.segments_sent <= index as i32 {
-            sqlx::query!("INSERT INTO qq_messages(id,app_id,identity_id,group_id,ai_user_id,direction,content,reply_to_id) VALUES($1,$2,$3,$4,$5,'out',$6,$7)",s.ids.next_raw(),t.app_id,t.identity_id,t.group_id,t.ai_user_id,accepted,t.message_id).execute(&mut *tx).await?;
-            sqlx::query!(
-                "UPDATE qq_turns SET segments_sent=$2 WHERE id=$1",
-                t.id,
-                index as i32 + 1
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-        tx.commit().await?;
-        t.segments_sent = index as i32 + 1;
-    }
-    tracing::info!(turn_id = t.id, segments = output.len(), "QQ 回复已发送");
-    let mut tx = s.db.begin().await?;
-    sqlx::query!(
-        "UPDATE qq_turns SET status='completed',finished_at=$2 WHERE id=$1",
-        t.id,
-        Utc::now()
-    )
-    .execute(&mut *tx)
-    .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
 pub async fn prune(s: &QqState) -> Result<(), Problem> {
-    // Drain expired turns before deleting their messages, so guest reservations cannot leak.
-    let ids=sqlx::query_scalar!("SELECT t.id FROM qq_turns t JOIN qq_messages m ON m.id=t.message_id WHERE t.status IN ('queued','processing') AND m.created_at < $1 ORDER BY t.id LIMIT 500",Utc::now()-Duration::hours(1)).fetch_all(&s.db).await?;
-    for id in ids {
-        let mut tx = s.db.begin().await?;
-        if let Some(t) = repo::turn(&mut tx, id).await?
-            && matches!(t.status.as_str(), "queued" | "processing")
-        {
-            abandon(&mut tx, &t, "window_expired").await?;
-        }
-        tx.commit().await?;
-    }
+    reconcile(s).await?;
     let mut tx = s.db.begin().await?;
     sqlx::query!("DELETE FROM qq_messages m USING qq_identities i WHERE i.id=m.identity_id AND ((m.direction='in' AND m.group_id IS NOT NULL AND NOT m.mentioned AND m.created_at < $1) OR (i.user_id IS NULL AND m.created_at < $2) OR m.created_at < $3) AND NOT EXISTS (SELECT 1 FROM qq_turns t WHERE t.message_id=m.id AND t.status IN ('queued','processing'))",Utc::now()-Duration::days(3),Utc::now()-Duration::days(30),Utc::now()-Duration::days(180)).execute(&mut *tx).await?;
     let before = ik_kernel::time::biz_day(Utc::now()) - Duration::days(90);

@@ -6,14 +6,20 @@ use crate::{
     webhook::{Incoming, mentioned},
 };
 use chrono::{DateTime, NaiveDate, Utc};
-use ik_kernel::{Id, Problem, jobs::JobSpec};
+use ik_kernel::{Id, Problem};
 use sqlx::PgConnection;
 
 pub(crate) async fn settings(c: &mut PgConnection) -> Result<Settings, Problem> {
-    Ok(sqlx::query_as!(Settings,"SELECT enabled,guest_daily_turns,guest_group_daily_turns,guest_daily_tokens,guest_model_key,group_context_turns,group_context_hours,c2c_context_turns,reply_timeout_secs,max_reply_chars,link_mode,blocked_words,guest_reads_group_memory,updated_at FROM qq_settings WHERE singleton").fetch_one(c).await?)
+    Ok(sqlx::query_as::<_, Settings>("SELECT enabled,dispatch_paused,guest_daily_turns,guest_group_daily_turns,guest_daily_tokens,guest_model_key,group_context_turns,group_context_hours,c2c_context_turns,reply_timeout_secs,max_reply_chars,link_mode,blocked_words,guest_reads_group_memory,updated_at FROM qq_settings WHERE singleton").fetch_one(c).await?)
 }
 pub(crate) async fn save_settings(c: &mut PgConnection, s: &Settings) -> Result<(), Problem> {
-    sqlx::query!("UPDATE qq_settings SET enabled=$1,guest_daily_turns=$2,guest_group_daily_turns=$3,guest_daily_tokens=$4,guest_model_key=$5,group_context_turns=$6,group_context_hours=$7,c2c_context_turns=$8,reply_timeout_secs=$9,max_reply_chars=$10,link_mode=$11,blocked_words=$12,guest_reads_group_memory=$13,updated_at=$14 WHERE singleton",s.enabled,s.guest_daily_turns,s.guest_group_daily_turns,s.guest_daily_tokens,s.guest_model_key,s.group_context_turns,s.group_context_hours,s.c2c_context_turns,s.reply_timeout_secs,s.max_reply_chars,s.link_mode,&s.blocked_words,s.guest_reads_group_memory,s.updated_at).execute(c).await?;
+    sqlx::query("UPDATE qq_settings SET enabled=$1,guest_daily_turns=$2,guest_group_daily_turns=$3,guest_daily_tokens=$4,guest_model_key=$5,group_context_turns=$6,group_context_hours=$7,c2c_context_turns=$8,reply_timeout_secs=$9,max_reply_chars=$10,link_mode=$11,blocked_words=$12,guest_reads_group_memory=$13,updated_at=$14,dispatch_paused=$15 WHERE singleton")
+        .bind(s.enabled).bind(s.guest_daily_turns).bind(s.guest_group_daily_turns)
+        .bind(s.guest_daily_tokens).bind(&s.guest_model_key).bind(s.group_context_turns)
+        .bind(s.group_context_hours).bind(s.c2c_context_turns).bind(s.reply_timeout_secs)
+        .bind(s.max_reply_chars).bind(&s.link_mode).bind(&s.blocked_words)
+        .bind(s.guest_reads_group_memory).bind(s.updated_at).bind(s.dispatch_paused)
+        .execute(c).await?;
     Ok(())
 }
 pub(crate) async fn bots(c: &mut PgConnection) -> Result<Vec<BotView>, Problem> {
@@ -81,10 +87,12 @@ pub(crate) async fn ingest(
     .filter(|v| !v.is_empty() && v.len() <= 256)
     .ok_or_else(|| Problem::field("author", "INVALID", "缺少身份"))?;
     let trigger = !group || mentioned(&m, app_id, event);
-    let now = Utc::now();
-    // 被动回复窗口从消息时间算：没有时间或时间在未来（时钟偏差）时按收到的时刻，不能借此延长窗口。
-    let sent_at = m.timestamp.filter(|t| *t <= now).unwrap_or(now);
     let mut tx = s.db.begin().await?;
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut *tx)
+        .await?;
+    // 平台消息时间仍宽松解析；缺失/未来时用接收时刻。与调度共用 DB 时钟，避免宿主偏差扩大窗口。
+    let sent_at = m.timestamp.filter(|t| *t <= now).unwrap_or(now);
     let group_id = if group {
         let group_openid = m
             .group_openid
@@ -121,21 +129,7 @@ pub(crate) async fn ingest(
         let turn_id = s.ids.next_raw();
         let execution_key = format!("qq:{app_id}:{}", m.id);
         sqlx::query!("INSERT INTO qq_turns(id,execution_key,message_id,identity_id,group_id) VALUES($1,$2,$3,$4,$5)",turn_id,execution_key,message_id,identity_id,group_id).execute(&mut *tx).await?;
-        s.jobs
-            .enqueue(
-                &mut tx,
-                crate::jobs::Reply { turn_id },
-                JobSpec {
-                    max_attempts: Some(2),
-                    job_key: Some(execution_key),
-                    queue_name: Some(format!(
-                        "qq:{app_id}:{scene}:{}",
-                        group_id.unwrap_or(identity_id)
-                    )),
-                    ..JobSpec::default()
-                },
-            )
-            .await?;
+        crate::jobs::enqueue_turn(s, &mut tx, turn_id).await?;
     }
     tx.commit().await?;
     Ok(())
@@ -159,7 +153,27 @@ pub(crate) async fn lifecycle(
     if inserted == 0 {
         return Ok(());
     }
-    let now = Utc::now();
+    let now: DateTime<Utc> = sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(&mut *tx)
+        .await?;
+    // 官方事件 timestamp 为 Unix 秒；缺失/异常不拒收，仍按到达顺序应用。
+    let event_at = d
+        .get("timestamp")
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str()?.parse::<i64>().ok())
+        })
+        .and_then(|seconds| DateTime::from_timestamp(seconds, 0));
+    if event_at.is_none() {
+        tracing::info!(
+            app_id,
+            event,
+            stage = "lifecycle",
+            ordering = "receipt",
+            "QQ 生命周期事件无可用时间，按接收顺序处理"
+        );
+    }
     if event.starts_with("GROUP_") {
         if let Some(openid) = d
             .get("group_openid")
@@ -171,7 +185,21 @@ pub(crate) async fn lifecycle(
             } else {
                 None
             };
-            sqlx::query!("INSERT INTO qq_groups(id,app_id,group_openid,left_at,last_active_at) VALUES($1,$2,$3,$4,$5) ON CONFLICT(app_id,group_openid) DO UPDATE SET left_at=EXCLUDED.left_at,last_active_at=EXCLUDED.last_active_at",s.ids.next_raw(),app_id,openid,left,now).execute(&mut *tx).await?;
+            let previous: Option<DateTime<Utc>> = sqlx::query_scalar(
+                "SELECT lifecycle_event_at FROM qq_groups WHERE app_id=$1 AND group_openid=$2",
+            )
+            .bind(app_id)
+            .bind(openid)
+            .fetch_optional(&mut *tx)
+            .await?
+            .flatten();
+            let changed = sqlx::query("INSERT INTO qq_groups(id,app_id,group_openid,left_at,last_active_at,lifecycle_event_at) VALUES($1,$2,$3,$4,$5,$6)
+                ON CONFLICT(app_id,group_openid) DO UPDATE SET left_at=EXCLUDED.left_at,last_active_at=EXCLUDED.last_active_at,
+                    lifecycle_event_at=COALESCE(EXCLUDED.lifecycle_event_at,qq_groups.lifecycle_event_at)
+                WHERE EXCLUDED.lifecycle_event_at IS NULL OR qq_groups.lifecycle_event_at IS NULL OR EXCLUDED.lifecycle_event_at>=qq_groups.lifecycle_event_at")
+                .bind(s.ids.next_raw()).bind(app_id).bind(openid).bind(left).bind(now).bind(event_at)
+                .execute(&mut *tx).await?.rows_affected();
+            lifecycle_order_log(app_id, event, event_at, previous, changed);
         }
     } else if let Some(openid) = d
         .get("openid")
@@ -180,10 +208,44 @@ pub(crate) async fn lifecycle(
         .filter(|v| !v.is_empty() && v.len() <= 256)
     {
         let available = event == "FRIEND_ADD";
-        sqlx::query!("INSERT INTO qq_identities(id,app_id,scene,openid,available,last_active_at) VALUES($1,$2,'c2c',$3,$4,$5) ON CONFLICT(app_id,scene,openid,group_id) DO UPDATE SET available=EXCLUDED.available,last_active_at=EXCLUDED.last_active_at",s.ids.next_raw(),app_id,openid,available,now).execute(&mut *tx).await?;
+        let previous: Option<DateTime<Utc>> = sqlx::query_scalar("SELECT lifecycle_event_at FROM qq_identities WHERE app_id=$1 AND scene='c2c' AND openid=$2 AND group_id IS NULL")
+            .bind(app_id).bind(openid).fetch_optional(&mut *tx).await?.flatten();
+        let changed = sqlx::query("INSERT INTO qq_identities(id,app_id,scene,openid,available,last_active_at,lifecycle_event_at) VALUES($1,$2,'c2c',$3,$4,$5,$6)
+            ON CONFLICT(app_id,scene,openid,group_id) DO UPDATE SET available=EXCLUDED.available,last_active_at=EXCLUDED.last_active_at,
+                lifecycle_event_at=COALESCE(EXCLUDED.lifecycle_event_at,qq_identities.lifecycle_event_at)
+            WHERE EXCLUDED.lifecycle_event_at IS NULL OR qq_identities.lifecycle_event_at IS NULL OR EXCLUDED.lifecycle_event_at>=qq_identities.lifecycle_event_at")
+            .bind(s.ids.next_raw()).bind(app_id).bind(openid).bind(available).bind(now).bind(event_at)
+            .execute(&mut *tx).await?.rows_affected();
+        lifecycle_order_log(app_id, event, event_at, previous, changed);
     }
     tx.commit().await?;
     Ok(())
+}
+
+fn lifecycle_order_log(
+    app_id: &str,
+    event: &str,
+    event_at: Option<DateTime<Utc>>,
+    previous: Option<DateTime<Utc>>,
+    changed: u64,
+) {
+    if changed == 0 {
+        tracing::info!(
+            app_id,
+            event,
+            stage = "lifecycle",
+            outcome = "older_ignored",
+            "忽略较旧的 QQ 生命周期状态"
+        );
+    } else if event_at.is_some() && event_at == previous {
+        tracing::info!(
+            app_id,
+            event,
+            stage = "lifecycle",
+            ordering = "same_second_receipt",
+            "QQ 同秒生命周期事件按接收顺序处理"
+        );
+    }
 }
 
 #[derive(Debug)]
@@ -242,13 +304,44 @@ pub(crate) async fn history(
     } else {
         settings.c2c_context_turns
     };
-    let mut rows=sqlx::query!(r#"SELECT m.identity_id,m.direction,m.content,m.mentioned,i.nickname,m.id
-        FROM qq_messages m JOIN qq_identities i ON i.id=m.identity_id LEFT JOIN qq_groups g ON g.id=m.group_id
-        WHERE (($1::bigint IS NOT NULL AND m.group_id=$1) OR ($1 IS NULL AND m.identity_id=$2 AND (m.ai_user_id=$3 OR m.id=$4)))
-        AND m.created_at>=$5 AND (m.created_at,m.id)<=($6,$4)
-        AND m.created_at>=COALESCE(CASE WHEN $1 IS NOT NULL THEN g.context_reset_at ELSE i.context_reset_at END,'-infinity'::timestamptz)
-        AND (m.id=$4 OR (left(m.content,1)<>'/' AND (m.direction='in' OR m.ai_user_id IS NOT NULL)))
-        ORDER BY m.created_at DESC,m.id DESC LIMIT $7"#,t.group_id,t.identity_id,ai_user_id,t.message_id,cutoff,t.message_at,i64::from(limit)).fetch_all(c).await?;
+    #[derive(sqlx::FromRow)]
+    struct HistoryLine {
+        identity_id: i64,
+        direction: String,
+        content: String,
+        mentioned: bool,
+        nickname: String,
+        id: i64,
+    }
+    // 输入仍截止触发消息；前一轮已确认的输出按会话序号加入，即使它晚于本轮入站。
+    // 出站只在取得成功回执后写入 qq_messages，并通过 reply_to_id 继承授权快照。
+    let mut rows = sqlx::query_as::<_, HistoryLine>(r#"
+        SELECT m.identity_id,m.direction,m.content,m.mentioned,i.nickname,m.id
+        FROM qq_messages m
+        JOIN qq_messages source ON source.id=CASE WHEN m.direction='in' THEN m.id ELSE m.reply_to_id END
+        JOIN qq_identities i ON i.id=m.identity_id
+        LEFT JOIN qq_groups g ON g.id=m.group_id
+        LEFT JOIN qq_turns previous ON previous.message_id=source.id
+        JOIN qq_turns current ON current.id=$8
+        JOIN qq_messages trigger ON trigger.id=$4
+        WHERE (($1::bigint IS NOT NULL AND m.group_id=$1
+                   AND (source.owner_user_id IS NULL OR (source.owner_user_id=i.user_id AND source.binding_version=i.binding_version)))
+            OR ($1 IS NULL AND m.identity_id=$2 AND (m.ai_user_id=$3 OR m.id=$4)
+                   AND source.binding_version=trigger.binding_version
+                   AND source.owner_user_id IS NOT DISTINCT FROM trigger.owner_user_id))
+          AND source.created_at>=$5
+          AND (m.id=$4 OR source.created_at>=COALESCE(CASE WHEN $1 IS NOT NULL THEN g.context_reset_at ELSE i.context_reset_at END,'-infinity'::timestamptz))
+          AND (m.id=$4 OR left(source.content,1)<>'/')
+          AND ((m.direction='in' AND (m.created_at,m.id)<=($6,$4))
+            OR (m.direction='out' AND source.binding_version IS NOT NULL
+                AND previous.conversation_id=current.conversation_id
+                AND previous.conversation_seq<current.conversation_seq
+                AND EXISTS(SELECT 1 FROM qq_reply_segments segment WHERE segment.turn_id=previous.id AND segment.status='accepted')))
+        ORDER BY source.created_at DESC,source.id DESC,(m.direction='out') DESC,m.created_at DESC,m.id DESC LIMIT $7
+        "#)
+        .bind(t.group_id).bind(t.identity_id).bind(ai_user_id).bind(t.message_id)
+        .bind(cutoff).bind(t.message_at).bind(i64::from(limit)).bind(t.id)
+        .fetch_all(c).await?;
     rows.reverse();
     let mut names = std::collections::BTreeMap::<i64, usize>::new();
     Ok(rows

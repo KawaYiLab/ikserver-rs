@@ -6,6 +6,7 @@
 //! （`ik_kernel::config::Ai`，同名时以部署配置为准）。
 
 pub mod admin;
+pub mod authorization;
 pub mod catalog;
 pub mod comment;
 pub mod dm;

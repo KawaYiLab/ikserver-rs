@@ -13,6 +13,7 @@ use ik_kernel::{
     extract::{Json, Path, Query},
 };
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -103,6 +104,65 @@ pub struct TurnQuery {
     pub limit: Option<u32>,
 }
 
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+#[schema(as = QqDispatchStatus)]
+#[serde(rename_all = "camelCase")]
+pub struct DispatchStatus {
+    pub paused: bool,
+    pub queued: i64,
+    pub generating: i64,
+    pub delivering: i64,
+    pub active_leases: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = QqTurnDetail)]
+#[serde(rename_all = "camelCase")]
+pub struct TurnDetail {
+    pub turn: TurnView,
+    pub phase: String,
+    pub conversation_seq: Option<i64>,
+    pub platform_deadline_at: Option<DateTime<Utc>>,
+    pub generation_deadline_at: Option<DateTime<Utc>>,
+    pub delivery_deadline_at: Option<DateTime<Utc>>,
+    pub cost_finalized_at: Option<DateTime<Utc>>,
+    pub quota_finalized_at: Option<DateTime<Utc>>,
+    pub segments: Vec<SegmentView>,
+    pub attempts: Vec<AttemptView>,
+}
+
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+#[schema(as = QqSegmentView)]
+#[serde(rename_all = "camelCase")]
+pub struct SegmentView {
+    pub msg_seq: i32,
+    pub status: String,
+    pub payload_version: i32,
+    pub payload_hash: String,
+    pub attempt_count: i32,
+    pub retry_at: Option<DateTime<Utc>>,
+    pub auth_corrected: bool,
+    pub url_corrected: bool,
+    pub accepted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+#[schema(as = QqAttemptView)]
+#[serde(rename_all = "camelCase")]
+pub struct AttemptView {
+    pub msg_seq: i32,
+    pub attempt_no: i32,
+    pub payload_hash: String,
+    pub started_at: DateTime<Utc>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub result: String,
+    pub endpoint: Option<String>,
+    pub http_status: Option<i32>,
+    pub code: Option<i64>,
+    pub err_code: Option<i64>,
+    pub trace_id: Option<String>,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[schema(as = QqGroupMemories)]
 pub struct GroupMemories {
@@ -119,6 +179,8 @@ where
         .routes(routes!(identities))
         .routes(routes!(put_identity))
         .routes(routes!(turns))
+        .routes(routes!(turn_detail))
+        .routes(routes!(dispatch_status))
         .routes(routes!(group_memories, create_group_memory))
         .routes(routes!(update_group_memory, delete_group_memory))
 }
@@ -285,6 +347,83 @@ async fn turns(
         total,
         page,
         limit,
+    }))
+}
+
+/// 调度暂停和排空进度。只读，不包含消息正文或平台身份。
+#[utoipa::path(get, operation_id = "qq_dispatch_status", path = "/v1/admin/qq/dispatch", tag = "admin",
+    responses((status = 200, body = DispatchStatus)))]
+async fn dispatch_status(
+    State(s): State<QqState>,
+    AdminOperator(_): AdminOperator,
+) -> Result<Json<DispatchStatus>, Problem> {
+    let status = sqlx::query_as::<_, DispatchStatus>("SELECT dispatch_paused AS paused,
+        (SELECT count(*) FROM qq_turns WHERE status='queued') AS queued,
+        (SELECT count(*) FROM qq_turns WHERE phase='generating' AND status='processing') AS generating,
+        (SELECT count(*) FROM qq_turns WHERE phase='delivering' AND status='processing') AS delivering,
+        (SELECT count(*) FROM qq_conversations WHERE lease_until>clock_timestamp()) AS active_leases
+        FROM qq_settings WHERE singleton")
+        .fetch_one(&s.db).await?;
+    Ok(Json(status))
+}
+
+/// 一轮回复的截止时间、分段状态与每次发送结果。正文、token、openid 不返回。
+#[utoipa::path(get, operation_id = "qq_turn_detail", path = "/v1/admin/qq/turns/{id}", tag = "admin", params(("id" = String, Path)),
+    responses((status = 200, body = TurnDetail), (status = 404)))]
+async fn turn_detail(
+    State(s): State<QqState>,
+    AdminOperator(_): AdminOperator,
+    Path(id): Path<Id>,
+) -> Result<Json<TurnDetail>, Problem> {
+    // A single consistent snapshot prevents a detail page combining old segment
+    // status with newer attempts while the sender commits its result.
+    let mut tx = s.db.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let r = sqlx::query("SELECT t.id,i.scene,t.group_id,t.identity_id,t.ai_user_id,t.payer_user_id,t.status,t.reason,
+        t.model_key,t.prompt_tokens,t.completion_tokens,t.segments_sent,t.created_at,t.finished_at,
+        t.phase,t.conversation_seq,t.platform_deadline_at,t.generation_deadline_at,t.delivery_deadline_at,t.cost_finalized_at,t.quota_finalized_at
+        FROM qq_turns t JOIN qq_identities i ON i.id=t.identity_id WHERE t.id=$1")
+        .bind(id.get()).fetch_optional(&mut *tx).await?.ok_or_else(Problem::not_found)?;
+    let segments = sqlx::query_as::<_, SegmentView>("SELECT msg_seq,status,payload_version,encode(payload_hash,'hex') AS payload_hash,
+        attempt_count,retry_at,auth_corrected,url_corrected,accepted_at FROM qq_reply_segments WHERE turn_id=$1 ORDER BY msg_seq")
+        .bind(id.get()).fetch_all(&mut *tx).await?;
+    let attempts = sqlx::query_as::<_, AttemptView>(
+        "SELECT msg_seq,attempt_no,encode(payload_hash,'hex') AS payload_hash,
+        started_at,finished_at,result,endpoint,http_status,code,err_code,trace_id
+        FROM qq_send_attempts WHERE turn_id=$1 ORDER BY msg_seq,attempt_no",
+    )
+    .bind(id.get())
+    .fetch_all(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(Json(TurnDetail {
+        turn: TurnView {
+            id,
+            scene: r.try_get("scene")?,
+            group_id: r.try_get::<Option<i64>, _>("group_id")?.map(Id::new),
+            identity_id: Id::new(r.try_get("identity_id")?),
+            ai_user_id: r.try_get::<Option<i64>, _>("ai_user_id")?.map(Id::new),
+            payer_user_id: r.try_get::<Option<i64>, _>("payer_user_id")?.map(Id::new),
+            status: r.try_get("status")?,
+            reason: r.try_get("reason")?,
+            model_key: r.try_get("model_key")?,
+            prompt_tokens: r.try_get("prompt_tokens")?,
+            completion_tokens: r.try_get("completion_tokens")?,
+            segments_sent: r.try_get("segments_sent")?,
+            created_at: r.try_get("created_at")?,
+            finished_at: r.try_get("finished_at")?,
+        },
+        phase: r.try_get("phase")?,
+        conversation_seq: r.try_get("conversation_seq")?,
+        platform_deadline_at: r.try_get("platform_deadline_at")?,
+        generation_deadline_at: r.try_get("generation_deadline_at")?,
+        delivery_deadline_at: r.try_get("delivery_deadline_at")?,
+        cost_finalized_at: r.try_get("cost_finalized_at")?,
+        quota_finalized_at: r.try_get("quota_finalized_at")?,
+        segments,
+        attempts,
     }))
 }
 

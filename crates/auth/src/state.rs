@@ -24,6 +24,7 @@ pub struct AuthState {
     pub settings: Arc<AuthSettings>,
     /// 会话被吊销时发布内部事件（实时网关据此断开连接）。
     pub bus: Arc<dyn EventBus>,
+    pub lifecycle: crate::lifecycle::LifecycleHooks,
     pub(crate) limiter: Arc<DefaultKeyedRateLimiter<String>>,
 }
 
@@ -41,6 +42,7 @@ impl AuthState {
             mailer,
             settings: Arc::new(settings),
             bus,
+            lifecycle: crate::lifecycle::LifecycleHooks::default(),
             limiter: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 AUTH_REQUESTS_PER_MINUTE,
             ))),

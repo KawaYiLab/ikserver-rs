@@ -3,6 +3,7 @@
 //! 本模块不拥有渠道的消息、任务或额度事务，也不为游客读取或写入记忆。调用方必须在成功预占后
 //! 才调用 [`reply`]，且无论生成结果如何都结算 [`ExternalReply::charge`]，保留已发生的模型成本。
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use ik_kernel::Problem;
@@ -72,6 +73,7 @@ pub struct PreparedTurn {
     estimate: i64,
     /// 这次提起的待跟进，回复完成后标记已问起。
     follow_ups: Vec<i64>,
+    memory_enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -124,6 +126,26 @@ fn messages(card: &RoleCard, turn: &ExternalTurn, toolbox: &Toolbox) -> Vec<Chat
 
 /// 在调用方的预占事务之前准备；这里只读配置与账号，不调用模型或写入记忆。
 pub async fn prepare(state: &AiState, turn: ExternalTurn) -> Result<PreparedTurn, Problem> {
+    prepare_inner(state, turn, None).await
+}
+
+pub async fn prepare_authorized(
+    state: &AiState,
+    turn: ExternalTurn,
+    authorization: Arc<dyn crate::authorization::Authorization>,
+) -> Result<PreparedTurn, Problem> {
+    prepare_inner(state, turn, Some(authorization)).await
+}
+
+async fn prepare_inner(
+    state: &AiState,
+    turn: ExternalTurn,
+    authorization: crate::authorization::Guard,
+) -> Result<PreparedTurn, Problem> {
+    if authorization.is_some() {
+        let mut conn = state.db.acquire().await?;
+        crate::authorization::require(&mut conn, &authorization).await?;
+    }
     if turn.max_chars == 0 || turn.max_chars > 4000 || turn.timeout_secs == 0 {
         return Err(Problem::field(
             "turn",
@@ -167,6 +189,9 @@ pub async fn prepare(state: &AiState, turn: ExternalTurn) -> Result<PreparedTurn
     // 记忆（ADR 0007、0008）：全站开关在管理后台。游客没有个人记忆，也不能写共享记忆。
     let memory_on = catalog.memory.enabled;
     let mut toolbox = Toolbox::for_card(state, &catalog, card, &state.mcp);
+    if let Some(guard) = authorization.clone() {
+        toolbox = toolbox.with_authorization(guard);
+    }
     if memory_on && let Some(memory) = &turn.memory {
         toolbox = toolbox.with_memory(
             memory.user_id,
@@ -263,11 +288,40 @@ pub async fn prepare(state: &AiState, turn: ExternalTurn) -> Result<PreparedTurn
         budget: Duration::from_secs(turn.timeout_secs.min(state.config.reply_timeout_secs)),
         estimate,
         follow_ups,
+        memory_enabled: memory_on,
     })
 }
 
 pub fn estimate(turn: &PreparedTurn) -> i64 {
     turn.estimate
+}
+
+impl PreparedTurn {
+    pub fn follow_up_ids(&self) -> &[i64] {
+        &self.follow_ups
+    }
+    pub fn memory_enabled(&self) -> bool {
+        self.memory_enabled
+    }
+}
+
+pub async fn role_enabled_in(conn: &mut sqlx::PgConnection, slug: &str) -> Result<bool, Problem> {
+    Ok(sqlx::query_scalar(
+        "SELECT enabled AND qq_enabled FROM ai_role_cards WHERE slug=$1 FOR SHARE",
+    )
+    .bind(slug)
+    .fetch_optional(conn)
+    .await?
+    .unwrap_or(false))
+}
+
+/// 仅在渠道确认至少一段已送达后，与渠道送达记录同事务标记待跟进。
+pub async fn mark_delivered(
+    conn: &mut sqlx::PgConnection,
+    ids: &[i64],
+    now: chrono::DateTime<Utc>,
+) -> Result<(), Problem> {
+    memory::mark_followed_up(conn, ids, now).await
 }
 
 fn clean_segments(text: &str, max_chars: usize) -> Vec<String> {
@@ -336,16 +390,6 @@ pub async fn reply(state: &AiState, turn: &PreparedTurn, job_id: i64) -> Externa
         End::TooLarge => RunOutcome::Failed("upstream_output_too_large".to_owned()),
         End::Stopped => RunOutcome::Failed("stopped".to_owned()),
     };
-    // 待跟进问过了（MEM-056）：只在回复完成时标记，失败了下次还会问。
-    if outcome == RunOutcome::Completed && !turn.follow_ups.is_empty() {
-        let marked = match state.db.acquire().await {
-            Ok(mut conn) => memory::mark_followed_up(&mut conn, &turn.follow_ups, Utc::now()).await,
-            Err(error) => Err(error.into()),
-        };
-        if let Err(problem) = marked {
-            tracing::warn!(?problem, job = job_id, "标记待跟进已问起失败");
-        }
-    }
     ExternalReply {
         segments,
         usage: streamed.charged,

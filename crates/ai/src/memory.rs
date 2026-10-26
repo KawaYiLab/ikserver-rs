@@ -658,10 +658,9 @@ pub(crate) async fn store(
     let wanted = fingerprint(memory.content);
     let existing =
         repo::scope_memories(conn, memory.user_id, memory.ai_user_id, memory.kind).await?;
-    if let Some(row) = existing
-        .into_iter()
-        .find(|row| fingerprint(&row.content) == wanted)
-    {
+    if let Some(row) = existing.into_iter().find(|row| {
+        row.source_scope.as_deref() == memory.source_scope && fingerprint(&row.content) == wanted
+    }) {
         return Ok((row, false));
     }
     let row = repo::insert_memory(
@@ -787,13 +786,14 @@ pub(crate) fn tool_title(name: &str) -> Option<&'static str> {
 }
 
 /// 执行 remember / forget / recall_history。`user_id` 来自可信的执行上下文（触发者，TOOL-004），不从参数里读。
-pub(crate) async fn execute_tool(
+pub(crate) async fn execute_tool_authorized(
     state: &AiState,
     user_id: i64,
     ai_user_id: i64,
     scope: &MemoryScope,
     name: &str,
     arguments: &str,
+    authorization: &crate::authorization::Guard,
 ) -> ToolOutput {
     let args = tools::parse_args(arguments);
     let text = |key: &str| args.get(key).and_then(Value::as_str).unwrap_or_default();
@@ -821,10 +821,25 @@ pub(crate) async fn execute_tool(
     let shared = scope.shared.as_deref().filter(|_| text("about") == "group");
     let outcome = match (name, shared) {
         (REMEMBER_TOOL, Some(shared)) => {
-            crate::shared_memory::remember(state, shared, ai_user_id, user_id, &content).await
+            crate::shared_memory::remember_authorized(
+                state,
+                shared,
+                ai_user_id,
+                user_id,
+                &content,
+                authorization,
+            )
+            .await
         }
         (FORGET_TOOL, Some(shared)) => {
-            crate::shared_memory::forget(state, shared, ai_user_id, &content).await
+            crate::shared_memory::forget_authorized(
+                state,
+                shared,
+                ai_user_id,
+                &content,
+                authorization,
+            )
+            .await
         }
         (REMEMBER_TOOL, None) => {
             let (kind, ai) = match text("about") {
@@ -848,7 +863,7 @@ pub(crate) async fn execute_tool(
                 source_scope: scope.public.as_deref(),
                 now: Utc::now(),
             };
-            remember(state, &memory).await
+            remember(state, &memory, authorization).await
         }
         (FORGET_TOOL, None) => {
             forget(
@@ -857,6 +872,7 @@ pub(crate) async fn execute_tool(
                 ai_user_id,
                 &content,
                 scope.public.as_deref(),
+                authorization,
             )
             .await
         }
@@ -962,8 +978,14 @@ fn error_output(text: String) -> ToolOutput {
     }
 }
 
-async fn remember(state: &AiState, memory: &NewMemory<'_>) -> Result<ToolOutput, Problem> {
+async fn remember(
+    state: &AiState,
+    memory: &NewMemory<'_>,
+    authorization: &crate::authorization::Guard,
+) -> Result<ToolOutput, Problem> {
     let mut tx = state.db.begin().await?;
+    crate::authorization::require(&mut tx, authorization).await?;
+    require_active(&mut tx, memory.user_id).await?;
     repo::lock_memories(&mut tx, memory.user_id).await?;
     let (row, _) = store(&mut tx, state, memory).await?;
     tx.commit().await?;
@@ -990,8 +1012,11 @@ async fn forget(
     ai_user_id: i64,
     needle: &str,
     public: Option<&str>,
+    authorization: &crate::authorization::Guard,
 ) -> Result<ToolOutput, Problem> {
     let mut tx = state.db.begin().await?;
+    crate::authorization::require(&mut tx, authorization).await?;
+    require_active(&mut tx, user_id).await?;
     repo::lock_memories(&mut tx, user_id).await?;
     let mut candidates = repo::memories_for(&mut tx, user_id, ai_user_id).await?;
     candidates.extend(repo::scope_memories(&mut tx, user_id, Some(ai_user_id), EVENT).await?);
@@ -1027,6 +1052,44 @@ fn character_not_found() -> Problem {
         "AI_CHARACTER_NOT_FOUND",
         "AI 角色不存在",
     )
+}
+
+/// 账号是软删除，因此显式清个人记忆、摘要与整理进度；保留已有计费任务完成结算。
+pub async fn clear_for_deletion(
+    conn: &mut sqlx::PgConnection,
+    user_id: i64,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    repo::lock_memories(conn, user_id).await?;
+    sqlx::query("DELETE FROM ai_memories WHERE user_id=$1")
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("DELETE FROM ai_memory_pairs WHERE user_id=$1")
+        .bind(user_id)
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("UPDATE ai_sessions SET summary=NULL,summary_until=NULL,summary_epoch=NULL,memory_until=$2,context_epoch=context_epoch+1,context_from=$2 WHERE user_id=$1")
+        .bind(user_id).bind(now).execute(&mut *conn).await?;
+    sqlx::query("UPDATE ai_jobs SET stop_requested_at=$2 WHERE quota_user_id=$1 AND status IN ('queued','processing')")
+        .bind(user_id).bind(now).execute(conn).await?;
+    Ok(())
+}
+
+pub(crate) async fn require_active(
+    conn: &mut sqlx::PgConnection,
+    user_id: i64,
+) -> Result<(), Problem> {
+    let active = ik_auth::interop::lock_user_status(conn, user_id).await?;
+    if active.as_deref() == Some("active") {
+        Ok(())
+    } else {
+        Err(Problem::new(
+            StatusCode::FORBIDDEN,
+            "ACCOUNT_UNAVAILABLE",
+            "账号已不可用",
+        ))
+    }
 }
 
 fn view(row: MemoryRow, catalog: &Catalog) -> MemoryView {

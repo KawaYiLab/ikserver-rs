@@ -21,6 +21,14 @@ use std::sync::{
 };
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+#[path = "delivery_fault_tests.rs"]
+mod delivery_fault_tests;
+#[path = "jobs_dispatch_tests.rs"]
+mod dispatch_tests;
+#[path = "infrastructure_tests.rs"]
+mod infrastructure_tests;
+#[path = "memory_integrity_tests.rs"]
+mod memory_integrity_tests;
 #[derive(Default)]
 struct FakeAi {
     calls: AtomicUsize,
@@ -88,9 +96,17 @@ async fn transient_send_retry_reuses_output_sequence_and_charge(db: PgPool) {
     let turn = enqueue(&s, "retry", "alice", None, "你好", Duration::zero())
         .await
         .unwrap();
-    assert!(jobs::run_reply(&s, turn).await.is_err());
-    assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     jobs::run_reply(&s, turn).await.unwrap();
+    assert_eq!(
+        count(
+            &s,
+            "SELECT count(*) FROM qq_reply_segments WHERE status='pending'"
+        )
+        .await,
+        1
+    );
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+    drive_reply(&s, turn).await.unwrap();
     assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     assert_eq!(qq.sent.lock().unwrap().len(), 1);
     let attempts = qq.attempts.lock().unwrap().clone();
@@ -215,6 +231,24 @@ async fn count(s: &QqState, sql: &'static str) -> i64 {
         .unwrap()
 }
 
+/// Existing end-to-end cases wait for durable deferrals instead of assuming that
+/// a single job wake can ignore the AppID rate gate and retry schedule.
+async fn drive_reply(s: &QqState, turn: i64) -> Result<(), ik_kernel::Problem> {
+    tokio::time::timeout(std::time::Duration::from_secs(120), async {
+        loop {
+            jobs::run_reply(s, turn).await?;
+            let (status, wake): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+                "SELECT t.status,c.wake_at FROM qq_turns t LEFT JOIN qq_conversations c ON c.id=t.conversation_id WHERE t.id=$1"
+            ).bind(turn).fetch_one(&s.db).await?;
+            if matches!(status.as_str(), "completed"|"failed"|"skipped") { return Ok(()); }
+            let wait = wake.and_then(|at| (at-Utc::now()).to_std().ok())
+                .unwrap_or(std::time::Duration::from_millis(100))
+                .min(std::time::Duration::from_secs(2));
+            tokio::time::sleep(wait).await;
+        }
+    }).await.map_err(|_| ik_kernel::Problem::internal())?
+}
+
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn guest_tenth_turn_succeeds_eleventh_notifies_once_and_events_deduplicate(db: PgPool) {
     let (s, llm, qq, server) = setup(db).await;
@@ -256,8 +290,8 @@ async fn guest_tenth_turn_succeeds_eleventh_notifies_once_and_events_deduplicate
                 Some(turn)
             );
         }
-        jobs::run_reply(&s, turn).await.unwrap();
-        jobs::run_reply(&s, turn).await.unwrap();
+        drive_reply(&s, turn).await.unwrap();
+        drive_reply(&s, turn).await.unwrap();
     }
     assert_eq!(llm.calls.load(Ordering::SeqCst), 10);
     assert_eq!(qq.sent.lock().unwrap().len(), 11);
@@ -291,7 +325,7 @@ async fn failure_refunds_turns_but_retains_spend_and_expired_messages_never_gene
     let id = enqueue(&s, "sendfail", "alice", None, "你好", Duration::zero())
         .await
         .unwrap();
-    jobs::run_reply(&s, id).await.unwrap();
+    drive_reply(&s, id).await.unwrap();
     assert_eq!(
         count(&s, "SELECT sum(turns)::bigint FROM qq_guest_usage").await,
         0
@@ -311,18 +345,20 @@ async fn failure_refunds_turns_but_retains_spend_and_expired_messages_never_gene
         "alice",
         Some("group"),
         "<@123> 你好",
-        Duration::minutes(4),
+        Duration::minutes(6),
     )
     .await
     .unwrap();
-    jobs::run_reply(&s, expired).await.unwrap();
+    sqlx::query("UPDATE qq_turns SET platform_deadline_at=clock_timestamp()-interval '1 second' WHERE id=$1")
+        .bind(expired).execute(&s.db).await.unwrap();
+    drive_reply(&s, expired).await.unwrap();
     assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     assert!(qq.sent.lock().unwrap().is_empty());
     llm.fail.store(true, Ordering::SeqCst);
     let failed = enqueue(&s, "modelfail", "alice", None, "你好", Duration::zero())
         .await
         .unwrap();
-    jobs::run_reply(&s, failed).await.unwrap();
+    drive_reply(&s, failed).await.unwrap();
     assert_eq!(
         count(&s, "SELECT sum(turns)::bigint FROM qq_guest_usage").await,
         0
@@ -349,7 +385,7 @@ async fn independent_guest_guards_and_context_privacy(db: PgPool) {
     )
     .await
     .unwrap();
-    jobs::run_reply(&s, first).await.unwrap();
+    drive_reply(&s, first).await.unwrap();
     let second = enqueue(
         &s,
         "b1",
@@ -360,7 +396,7 @@ async fn independent_guest_guards_and_context_privacy(db: PgPool) {
     )
     .await
     .unwrap();
-    jobs::run_reply(&s, second).await.unwrap();
+    drive_reply(&s, second).await.unwrap();
     assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     sqlx::query("UPDATE qq_settings SET guest_daily_tokens=20")
         .execute(&s.db)
@@ -370,7 +406,7 @@ async fn independent_guest_guards_and_context_privacy(db: PgPool) {
     let third = enqueue(&s, "c1", "charlie", None, "你好", Duration::zero())
         .await
         .unwrap();
-    jobs::run_reply(&s, third).await.unwrap();
+    drive_reply(&s, third).await.unwrap();
     assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     // Different groups and C2C are separate identities even if the upstream openid string coincides.
     enqueue(
@@ -449,7 +485,7 @@ async fn say(s: &QqState, id: &str, openid: &str, group: Option<&str>, content: 
     let turn = enqueue(s, id, openid, group, content, Duration::zero())
         .await
         .unwrap();
-    jobs::run_reply(s, turn).await.unwrap();
+    drive_reply(s, turn).await.unwrap();
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -583,7 +619,7 @@ async fn a_code_sniffed_from_the_group_cannot_win_the_race(db: PgPool) {
         "抢先的旁观者绑不上"
     );
     // 码已作废，Alice 也要重新生成（不会被绑到旁观者那边）。
-    jobs::run_reply(&s, alice).await.unwrap();
+    drive_reply(&s, alice).await.unwrap();
     assert!(last_sent(&qq).contains("无效"));
     assert_eq!(
         count(
@@ -881,7 +917,7 @@ async fn signed_group_event_goes_through_the_webhook(db: PgPool) {
         .await
         .unwrap();
     // 消息时间在过去（测试数据是固定时刻），被动窗口已过：不调用模型，也不发送。
-    jobs::run_reply(&s, turn).await.unwrap();
+    drive_reply(&s, turn).await.unwrap();
     assert_eq!(llm.calls.load(Ordering::SeqCst), 0);
     assert!(qq.sent.lock().unwrap().is_empty());
     // 字段对不上的事件：ACK，不入库，也不报 4xx（否则平台反复重推）。
@@ -926,7 +962,7 @@ async fn an_at_event_after_the_full_mode_copy_still_gets_a_reply(db: PgPool) {
         .fetch_one(&s.db)
         .await
         .unwrap();
-    jobs::run_reply(&s, turn).await.unwrap();
+    drive_reply(&s, turn).await.unwrap();
     assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     assert_eq!(qq.sent.lock().unwrap().len(), 1);
     // 全量模式里 @ 机器人：mentions 带 bot=true（没有 is_you）也算。

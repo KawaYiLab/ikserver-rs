@@ -254,12 +254,13 @@ pub(crate) async fn release(
     identity_id: i64,
     owner: Option<i64>,
 ) -> Result<bool, Problem> {
-    Ok(sqlx::query!(
-        "UPDATE qq_identities SET user_id = NULL, bound_at = NULL
+    Ok(sqlx::query(
+        "UPDATE qq_identities SET user_id = NULL, bound_at = NULL,
+             binding_version = binding_version + 1, context_reset_at = NULL
          WHERE id = $1 AND user_id IS NOT NULL AND ($2::bigint IS NULL OR user_id = $2)",
-        identity_id,
-        owner
     )
+    .bind(identity_id)
+    .bind(owner)
     .execute(conn)
     .await?
     .rows_affected()

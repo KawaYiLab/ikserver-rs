@@ -1,32 +1,66 @@
-//! QQ OpenAPI：按 AppID 缓存凭据；所有 HTTP 调用必须在数据库事务之外。
+//! QQ OpenAPI. Platform IO runs outside database transactions.
+mod response;
+
+pub use response::{ApiEndpoint, ApiMetadata, ErrorClass, SendAttempt, SendOutcome};
+
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use ik_kernel::{
     Problem,
     config::{Qqbot, Secret},
 };
-use reqwest13::{Client, StatusCode, Url};
-use serde_json::{Value, json};
+use reqwest13::{Client, Url};
+use ring::rand::SecureRandom;
+use serde_json::json;
 use tokio::{sync::Mutex, time::Instant};
 
-const MAX_BODY: usize = 64 * 1024;
+use response::{number, read_response};
+
+// Local refresh policy. QQ returns the same credential until its final 60 seconds:
+// https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/access-token.html
+const REFRESH_AHEAD: Duration = Duration::from_secs(300);
+const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
+const EXPIRY_MARGIN: Duration = Duration::from_secs(5);
+const ERROR_COOLDOWN: Duration = Duration::from_secs(300);
 
 struct Token {
     value: String,
     expires_at: Instant,
     fetched_at: Instant,
+    generation: u64,
+    rejected: bool,
 }
 
-/// 离过期还有这么久就开始尝试换新（平台在过期前 60 秒内才发新 token，之前拿到的还是同一个）。
-const REFRESH_AHEAD: Duration = Duration::from_secs(300);
-/// 刷新窗口里两次取 token 至少隔这么久，避免每发一条消息都打一次 token 接口（会被限频 100001）。
-const REFRESH_INTERVAL: Duration = Duration::from_secs(30);
-/// 剩余有效期短于这个就不再用缓存，必须重取。
-const EXPIRY_MARGIN: Duration = Duration::from_secs(5);
+#[derive(Default)]
+struct TokenState {
+    cached: Option<Token>,
+    generation: u64,
+    retry_not_before: Option<Instant>,
+    failures: u32,
+    last_failure: Option<SendAttempt>,
+    fallback_allowed: bool,
+}
+
+struct TokenLease {
+    value: String,
+    generation: u64,
+}
+
+impl TokenState {
+    fn usable(&self, now: Instant) -> Option<TokenLease> {
+        self.cached
+            .as_ref()
+            .filter(|token| !token.rejected && token.expires_at > now + EXPIRY_MARGIN)
+            .map(|token| TokenLease {
+                value: token.value.clone(),
+                generation: token.generation,
+            })
+    }
+}
 
 struct App {
     secret: Secret,
-    token: Mutex<Option<Token>>,
+    token: Mutex<TokenState>,
 }
 
 pub struct ApiClient {
@@ -36,7 +70,7 @@ pub struct ApiClient {
     apps: BTreeMap<String, App>,
 }
 
-/// 不保留上游响应正文、URL、token 或 openid，避免任务错误日志泄露凭据与身份。
+/// Compatibility error for `send`/`send_rendered`; durable delivery uses `SendAttempt`.
 #[derive(Debug, thiserror::Error)]
 pub enum SendError {
     #[error("QQ transport failed")]
@@ -45,43 +79,28 @@ pub enum SendError {
     Protocol,
     #[error("QQ app is not configured")]
     AppMissing,
+    #[error("QQ message was accepted for asynchronous processing")]
+    Pending,
     #[error("QQ API failed (HTTP {status}, code {code})")]
     Api { status: u16, code: i64 },
 }
 
 impl SendError {
-    fn token_expired(&self) -> bool {
-        matches!(
-            self,
-            Self::Api { status: 401, .. }
-                | Self::Api {
-                    code: 40014 | 40001 | 11244,
-                    ..
-                }
-        )
-    }
-
-    fn url_rejected(&self) -> bool {
-        matches!(
-            self,
-            Self::Api {
-                code: 304003 | 40034028,
-                ..
-            }
-        )
-    }
-
     pub fn reason(&self) -> &'static str {
-        if self.token_expired() {
-            return "qq_token_rejected";
-        }
-        if self.url_rejected() {
-            return "qq_url_rejected";
-        }
         match self {
             Self::Transport => "qq_transport_failed",
             Self::Protocol => "qq_invalid_response",
             Self::AppMissing => "qq_app_missing",
+            Self::Pending => "qq_pending",
+            Self::Api { status: 401, .. }
+            | Self::Api {
+                code: 40014 | 40001 | 11244 | 11201 | 40012001,
+                ..
+            } => "qq_token_rejected",
+            Self::Api {
+                code: 304003 | 40034028 | 40054010,
+                ..
+            } => "qq_url_rejected",
             Self::Api { status: 429, .. } => "qq_rate_limited",
             Self::Api {
                 status: 500..=599, ..
@@ -105,6 +124,8 @@ impl SendError {
 impl ApiClient {
     pub fn new(config: &Qqbot) -> Result<Self, Problem> {
         config.validate().map_err(|_| Problem::internal())?;
+        let token_url = endpoint(&config.token_url)?;
+        let api_base = endpoint(config.api_base())?;
         let roots = rustls::RootCertStore {
             roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
         };
@@ -115,15 +136,16 @@ impl ApiClient {
         .map_err(|_| Problem::internal())?
         .with_root_certificates(roots)
         .with_no_client_auth();
-        let http = Client::builder()
+        let mut builder = Client::builder()
             .tls_backend_preconfigured(tls)
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(10))
-            .redirect(reqwest13::redirect::Policy::none())
-            .build()
-            .map_err(|_| Problem::internal())?;
-        let token_url = endpoint(&config.token_url)?;
-        let api_base = endpoint(config.api_base())?;
+            .redirect(reqwest13::redirect::Policy::none());
+        // Loopback endpoints are the supported local HTTP test transport, never a proxy target.
+        if local(&token_url) && local(&api_base) {
+            builder = builder.no_proxy();
+        }
+        let http = builder.build().map_err(|_| Problem::internal())?;
         Ok(Self {
             http,
             token_url,
@@ -136,7 +158,7 @@ impl ApiClient {
                         app.app_id.clone(),
                         App {
                             secret: app.secret.clone(),
-                            token: Mutex::new(None),
+                            token: Mutex::new(TokenState::default()),
                         },
                     )
                 })
@@ -144,49 +166,234 @@ impl ApiClient {
         })
     }
 
-    async fn token(&self, app_id: &str, rejected: Option<&str>) -> Result<String, SendError> {
-        let app = self.apps.get(app_id).ok_or(SendError::AppMissing)?;
-        // 每个 AppID 独立串行刷新，避免并发请求同时刷新。不是数据库锁。
-        let mut cached = app.token.lock().await;
-        if let Some(token) = cached.as_ref() {
-            let now = Instant::now();
-            let fresh = token.expires_at > now + REFRESH_AHEAD
-                || (token.expires_at > now + EXPIRY_MARGIN
-                    && now.duration_since(token.fetched_at) < REFRESH_INTERVAL);
-            let replaced =
-                rejected.is_some_and(|old| old != token.value) && token.expires_at > Instant::now();
-            if (rejected.is_none() && fresh) || replaced {
-                return Ok(token.value.clone());
-            }
+    /// Reject only the generation used by this request; a late 401 cannot invalidate a newer token.
+    /// This does not fetch a token. The next `send_once` acquires one, respecting failed-refresh cooldown.
+    pub async fn invalidate_token(&self, app_id: &str, generation: u64) -> bool {
+        let Some(app) = self.apps.get(app_id) else {
+            return false;
+        };
+        let mut state = app.token.lock().await;
+        if let Some(token) = state
+            .cached
+            .as_mut()
+            .filter(|token| token.generation == generation)
+        {
+            token.rejected = true;
+            true
+        } else {
+            false
         }
+    }
+
+    async fn token(&self, app_id: &str) -> Result<TokenLease, SendAttempt> {
+        let app = self
+            .apps
+            .get(app_id)
+            .ok_or_else(|| SendAttempt::local(ApiEndpoint::Token, ErrorClass::AppMissing))?;
+        // One in-flight refresh and one shared failure/cooldown per AppID, including cancellation.
+        let mut state = app.token.lock().await;
+        let now = Instant::now();
+        if let Some(until) = state.retry_not_before.filter(|until| *until > now) {
+            if state.fallback_allowed
+                && let Some(token) = state.usable(now)
+            {
+                return Ok(token);
+            }
+            let mut failure = state
+                .last_failure
+                .clone()
+                .unwrap_or_else(|| SendAttempt::local(ApiEndpoint::Token, ErrorClass::Transient));
+            failure.meta.retry_after = Some(until - now);
+            return Err(failure);
+        }
+        if let Some(token) = state.usable(now)
+            && state.cached.as_ref().is_some_and(|cached| {
+                cached.expires_at > now + REFRESH_AHEAD
+                    || now.duration_since(cached.fetched_at) < REFRESH_INTERVAL
+            })
+        {
+            return Ok(token);
+        }
+        // If this future is cancelled, waiting requests still observe the attempt guard.
+        state.retry_not_before = Some(now + REFRESH_INTERVAL);
+        state.fallback_allowed = true;
+        state.last_failure = Some(SendAttempt::local(
+            ApiEndpoint::Token,
+            ErrorClass::Transient,
+        ));
+        let fetched = self.fetch_token(app_id, &app.secret).await;
+        let now = Instant::now();
+        let failure = match fetched {
+            Ok((value, expires, mut attempt)) => {
+                if state
+                    .cached
+                    .as_ref()
+                    .is_some_and(|old| old.rejected && old.value == value)
+                {
+                    // A successful token endpoint call does not make a rejected token usable again.
+                    attempt.outcome = SendOutcome::Rejected;
+                    attempt.class = ErrorClass::Auth;
+                    attempt.meta.retry_after = Some(REFRESH_INTERVAL);
+                    attempt
+                } else {
+                    // A refresh returning the same credential is the same generation: a late
+                    // rejection of that credential must still invalidate the current cache.
+                    if !state.cached.as_ref().is_some_and(|old| old.value == value) {
+                        state.generation = state.generation.wrapping_add(1).max(1);
+                    }
+                    let generation = state.generation;
+                    state.cached = Some(Token {
+                        value: value.clone(),
+                        expires_at: now + Duration::from_secs(expires),
+                        fetched_at: now,
+                        generation,
+                        rejected: false,
+                    });
+                    state.failures = 0;
+                    state.retry_not_before = None;
+                    state.last_failure = None;
+                    state.fallback_allowed = false;
+                    return Ok(TokenLease { value, generation });
+                }
+            }
+            Err(failure) => failure,
+        };
+        state.failures = state.failures.saturating_add(1);
+        let recoverable = matches!(
+            failure.class,
+            ErrorClass::Transient | ErrorClass::RateLimited
+        ) || (failure.meta.malformed
+            && failure
+                .meta
+                .http_status
+                .is_some_and(|status| (200..300).contains(&status))
+            && failure.meta.code.unwrap_or(0) == 0
+            && failure.meta.err_code.unwrap_or(0) == 0);
+        let delay = if recoverable {
+            backoff(state.failures)
+        } else if failure.class == ErrorClass::Auth {
+            REFRESH_INTERVAL
+        } else {
+            ERROR_COOLDOWN
+        }
+        .max(failure.meta.retry_after.unwrap_or_default());
+        let until = now.checked_add(delay).unwrap_or(now + ERROR_COOLDOWN);
+        state.retry_not_before = Some(until);
+        state.fallback_allowed = recoverable;
+        let mut failure = failure;
+        failure.meta.retry_after = Some(until - now);
+        state.last_failure = Some(failure.clone());
+        tracing::warn!(
+            app_id,
+            reason = failure.reason(),
+            status = failure.meta.http_status,
+            code = failure.meta.code,
+            err_code = failure.meta.err_code,
+            retry_secs = delay.as_secs(),
+            "QQ token refresh failed; sharing cooldown"
+        );
+        if recoverable && let Some(token) = state.usable(now) {
+            return Ok(token);
+        }
+        Err(failure)
+    }
+
+    async fn fetch_token(
+        &self,
+        app_id: &str,
+        secret: &Secret,
+    ) -> Result<(String, u64, SendAttempt), SendAttempt> {
         let response = self
             .http
             .post(self.token_url.clone())
-            .json(&json!({"appId":app_id,"clientSecret":app.secret.expose()}))
+            .json(&json!({"appId":app_id,"clientSecret":secret.expose()}))
             .send()
             .await
-            .map_err(|_| SendError::Transport)?;
-        let body = response_json(response).await?;
-        let value = body
-            .get("access_token")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .ok_or(SendError::Protocol)?
-            .to_owned();
-        let expires = number(&body["expires_in"])
-            .filter(|n| *n > 0 && *n <= 86400)
-            .ok_or(SendError::Protocol)? as u64;
-        let now = Instant::now();
-        *cached = Some(Token {
-            value: value.clone(),
-            expires_at: now + Duration::from_secs(expires),
-            fetched_at: now,
+            .map_err(|_| SendAttempt::local(ApiEndpoint::Token, ErrorClass::Transient))?;
+        let decoded = read_response(response, ApiEndpoint::Token).await;
+        let mut attempt = decoded.attempt();
+        if attempt.outcome != SendOutcome::Accepted {
+            // An unconfirmed credential response never means a message was attempted or accepted.
+            attempt.outcome = SendOutcome::Rejected;
+            return Err(attempt);
+        }
+        let token = decoded.body.as_ref().and_then(|body| {
+            let value = body
+                .get("access_token")?
+                .as_str()
+                .filter(|v| !v.is_empty())?;
+            let expires = number(body.get("expires_in")?).filter(|n| *n > 0 && *n <= 86400)?;
+            Some((value.to_owned(), expires as u64))
         });
-        Ok(value)
+        match token {
+            Some((value, expires)) => Ok((value, expires, attempt)),
+            None => {
+                // These two fields are actually needed to authenticate; other token fields are optional.
+                attempt.outcome = SendOutcome::Rejected;
+                attempt.class = ErrorClass::Unknown;
+                attempt.meta.malformed = true;
+                Err(attempt)
+            }
+        }
     }
 
-    /// 被动回复的 msg_id 与 msg_seq 由持久化 turn 提供，重试沿用同一组值。
-    /// 调用方必须在被动回复的绝对截止时刻取消此 future。
+    /// At most one message POST. No token-rejection or URL retry, and no content rewriting.
+    /// The durable caller persists text/sequence and cancels this future at its passive-reply deadline.
+    pub async fn send_once(
+        &self,
+        app_id: &str,
+        scene: &str,
+        openid: &str,
+        msg_id: &str,
+        seq: i32,
+        text: &str,
+    ) -> SendAttempt {
+        let (collection, endpoint) = match scene {
+            "group" => ("groups", ApiEndpoint::GroupMessage),
+            "c2c" => ("users", ApiEndpoint::C2cMessage),
+            _ => return SendAttempt::local(ApiEndpoint::Message, ErrorClass::Permanent),
+        };
+        if openid.is_empty() || msg_id.is_empty() || seq < 1 {
+            return SendAttempt::local(endpoint, ErrorClass::Permanent);
+        }
+        let mut url = self.api_base.clone();
+        match url.path_segments_mut() {
+            Ok(mut parts) => {
+                parts
+                    .pop_if_empty()
+                    .extend(["v2", collection, openid, "messages"]);
+            }
+            Err(_) => return SendAttempt::local(endpoint, ErrorClass::Permanent),
+        }
+        let token = match self.token(app_id).await {
+            Ok(token) => token,
+            Err(failure) => return failure,
+        };
+        let response = self
+            .http
+            .post(url)
+            .header("Authorization", format!("QQBot {}", token.value))
+            .header("X-Union-Appid", app_id)
+            .json(&json!({"msg_type":0,"content":text,"msg_id":msg_id,"msg_seq":seq}))
+            .send()
+            .await;
+        let mut attempt = match response {
+            Ok(response) => read_response(response, endpoint).await.attempt(),
+            Err(error) => {
+                let mut failure = SendAttempt::local(endpoint, ErrorClass::Transient);
+                // A connect error never reached the send endpoint; other transport errors may have.
+                failure.message_attempted = !error.is_connect();
+                if failure.message_attempted {
+                    failure.outcome = SendOutcome::Unknown;
+                }
+                failure
+            }
+        };
+        attempt.token_generation = Some(token.generation);
+        attempt
+    }
+
+    /// Compatibility convenience API. Durable delivery must use `send_once` instead.
     pub async fn send(
         &self,
         app_id: &str,
@@ -201,7 +408,7 @@ impl ApiClient {
             .map(|_| ())
     }
 
-    /// 返回平台实际接受的正文，供渠道保存上下文（URL 降级时与原稿可能不同）。
+    /// Preserves the old bounded auth/URL recovery behavior for existing callers.
     pub async fn send_rendered(
         &self,
         app_id: &str,
@@ -211,58 +418,88 @@ impl ApiClient {
         seq: i32,
         text: &str,
     ) -> Result<String, SendError> {
-        let collection = match scene {
-            "group" => "groups",
-            "c2c" => "users",
-            _ => return Err(SendError::Protocol),
-        };
-        if openid.is_empty() || msg_id.is_empty() || seq < 1 {
-            return Err(SendError::Protocol);
-        }
-        let mut url = self.api_base.clone();
-        url.path_segments_mut()
-            .map_err(|_| SendError::Protocol)?
-            .pop_if_empty()
-            .extend(["v2", collection, openid, "messages"]);
-        let mut token = self.token(app_id, None).await?;
-        let mut text = text.to_owned();
+        let mut rendered = text.to_owned();
         let mut refreshed = false;
         let mut stripped = false;
         loop {
-            let response = self
-                .http
-                .post(url.clone())
-                .header("Authorization", format!("QQBot {token}"))
-                .header("X-Union-Appid", app_id)
-                .json(&json!({"msg_type":0,"content":text,"msg_id":msg_id,"msg_seq":seq}))
-                .send()
-                .await
-                .map_err(|_| SendError::Transport)?;
-            match response_json(response).await {
-                Ok(_) => return Ok(text),
-                Err(error) if error.token_expired() && !refreshed => {
-                    token = self.token(app_id, Some(&token)).await?;
-                    refreshed = true;
-                }
-                Err(error) if error.url_rejected() && !stripped => {
-                    let clean = crate::text::clean(&text, "strip");
-                    if clean.trim().is_empty() || clean == text {
-                        return Err(error);
-                    }
-                    text = clean;
-                    stripped = true;
-                }
-                Err(error) => return Err(error),
+            let attempt = self
+                .send_once(app_id, scene, openid, msg_id, seq, &rendered)
+                .await;
+            if attempt.outcome == SendOutcome::Accepted {
+                return Ok(rendered);
             }
+            if attempt.outcome == SendOutcome::Rejected && attempt.meta.endpoint.is_message() {
+                if attempt.class == ErrorClass::Auth && !refreshed {
+                    if let Some(generation) = attempt.token_generation {
+                        self.invalidate_token(app_id, generation).await;
+                        refreshed = true;
+                        continue;
+                    }
+                }
+                if attempt.class == ErrorClass::Url && !stripped {
+                    let clean = crate::text::clean(&rendered, "strip");
+                    if !clean.trim().is_empty() && clean != rendered {
+                        rendered = clean;
+                        stripped = true;
+                        continue;
+                    }
+                }
+            }
+            return Err(compatibility_error(&attempt));
         }
     }
 }
 
+fn compatibility_error(attempt: &SendAttempt) -> SendError {
+    if attempt.class == ErrorClass::AppMissing {
+        return SendError::AppMissing;
+    }
+    if attempt.outcome == SendOutcome::Pending {
+        return SendError::Pending;
+    }
+    if attempt.class == ErrorClass::Unknown
+        && attempt.meta.malformed
+        && attempt.meta.code.unwrap_or(0) == 0
+        && attempt.meta.err_code.unwrap_or(0) == 0
+        && attempt
+            .meta
+            .http_status
+            .is_some_and(|status| (200..300).contains(&status))
+    {
+        return SendError::Protocol;
+    }
+    if let Some(status) = attempt.meta.http_status {
+        let code = attempt
+            .meta
+            .code
+            .filter(|code| *code != 0)
+            .or(attempt.meta.err_code)
+            .unwrap_or(0);
+        return SendError::Api { status, code };
+    }
+    if attempt.class == ErrorClass::Transient {
+        SendError::Transport
+    } else {
+        SendError::Protocol
+    }
+}
+
+fn backoff(failures: u32) -> Duration {
+    let seconds = (30u64 << failures.saturating_sub(1).min(4)).min(300);
+    let mut random = [0u8; 2];
+    let _ = ring::rand::SystemRandom::new().fill(&mut random);
+    // Positive 0–20% jitter prevents synchronized refresh retries between instances.
+    let extra_millis = seconds * 1000 * u64::from(u16::from_le_bytes(random) % 2001) / 10000;
+    Duration::from_millis(seconds * 1000 + extra_millis)
+}
+
+fn local(url: &Url) -> bool {
+    matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"))
+}
+
 fn endpoint(value: &str) -> Result<Url, Problem> {
     let url = Url::parse(value).map_err(|_| Problem::internal())?;
-    // HTTP 只供本地桩服务器；生产凭据与消息必须通过 HTTPS 传输。
-    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-    if !(url.scheme() == "https" || url.scheme() == "http" && local)
+    if !(url.scheme() == "https" || url.scheme() == "http" && local(&url))
         || !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
@@ -271,51 +508,4 @@ fn endpoint(value: &str) -> Result<Url, Problem> {
         return Err(Problem::internal());
     }
     Ok(url)
-}
-
-fn number(value: &Value) -> Option<i64> {
-    value.as_i64().or_else(|| value.as_str()?.parse().ok())
-}
-
-async fn response_json(mut response: reqwest13::Response) -> Result<Value, SendError> {
-    let status = response.status();
-    if response
-        .content_length()
-        .is_some_and(|n| n > MAX_BODY as u64)
-    {
-        return Err(SendError::Protocol);
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| SendError::Transport)? {
-        if bytes.len() + chunk.len() > MAX_BODY {
-            return Err(SendError::Protocol);
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    let body: Value = match serde_json::from_slice(&bytes) {
-        Ok(value) => value,
-        Err(_) if !status.is_success() => {
-            return Err(SendError::Api {
-                status: status.as_u16(),
-                code: 0,
-            });
-        }
-        Err(_) => return Err(SendError::Protocol),
-    };
-    // 腾讯的 token 接口出错也可能 HTTP 200，必须同时检查业务 code。
-    let code = if let Some(value) = body.get("code") {
-        number(value).ok_or(SendError::Protocol)?
-    } else {
-        0
-    };
-    if !status.is_success() || code != 0 {
-        return Err(SendError::Api {
-            status: status.as_u16(),
-            code,
-        });
-    }
-    if !body.is_object() || status == StatusCode::NO_CONTENT {
-        return Err(SendError::Protocol);
-    }
-    Ok(body)
 }

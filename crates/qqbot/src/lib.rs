@@ -1,8 +1,10 @@
 //! QQ official bot channel (ADR 0008). All platform IO runs outside transactions.
 mod admin;
 mod admin_ext;
+mod authorization;
 pub mod client;
 mod commands;
+pub mod identity;
 #[cfg(test)]
 mod integration;
 pub mod jobs;

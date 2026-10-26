@@ -28,6 +28,7 @@ async fn webhook(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<Value>, Problem> {
+    let started = std::time::Instant::now();
     // 生产日志级别下 HTTP 请求本身不打印，这里的每个出口都要留一条，否则「机器人不回复」无从排查。
     // 不记 openid、正文、签名与密钥。
     if !state.config.enabled {
@@ -76,7 +77,7 @@ async fn webhook(
                 let message: Incoming = match serde_json::from_value(envelope.d) {
                     Ok(message) => message,
                     Err(error) => {
-                        tracing::warn!(app_id, event = %envelope.t, %error, "QQ 消息事件字段无法解析，已忽略");
+                        tracing::warn!(app_id, event = %envelope.t, stage = "webhook", outcome = "ignored_ack", elapsed_ms = started.elapsed().as_millis() as u64, %error, "QQ 消息事件字段无法解析，已忽略");
                         return Ok(Json(json!({"op":12,"d":0})));
                     }
                 };
@@ -86,7 +87,7 @@ async fn webhook(
                         Ok(()) => {}
                         // 消息本身不合规（缺 id、缺身份）：记下后 ACK，重推也不会变好。
                         Err(problem) if problem.status() == StatusCode::BAD_REQUEST => {
-                            tracing::warn!(app_id, event = %envelope.t, ?problem, "QQ 消息事件缺少必要字段，已忽略");
+                            tracing::warn!(app_id, event = %envelope.t, stage = "ingest", outcome = "ignored_ack", ?problem, "QQ 消息事件缺少必要字段，已忽略");
                         }
                         // 数据库等临时故障：返回 5xx 让平台重推。
                         Err(problem) => {
@@ -106,6 +107,7 @@ async fn webhook(
     } else {
         tracing::info!(app_id, op = envelope.op, "忽略非事件的 QQ 回调");
     }
+    tracing::info!(app_id, event = %envelope.t, stage = "webhook", outcome = "ack", elapsed_ms = started.elapsed().as_millis() as u64, "QQ 回调已确认");
     Ok(Json(json!({"op":12,"d":0})))
 }
 
