@@ -38,7 +38,9 @@ async fn harness(db: PgPool) -> (AiState, Arc<Scripted>) {
             {"key":"allowed", "displayName":"角色模型", "provider":"fake", "providerModel":"allowed", "costWeight":2}
         ],
         "characters":[{"slug":"fairy", "displayName":"Fairy", "username":"external_fairy", "enabled":true,
-            "qqEnabled":true, "systemPrompt":"你是 Fairy。", "allowedModelKeys":["allowed"]}]
+            "qqEnabled":true, "systemPrompt":"你是 Fairy。用户询问人物档案时，完整说明背景、经历和关系。",
+            "examples":[{"user":"介绍一下六分街。", "assistant":"六分街的档案已调取。"}],
+            "allowedModelKeys":["allowed"]}]
     })).unwrap()).await.unwrap();
     (state, fake)
 }
@@ -53,7 +55,6 @@ fn turn() -> ExternalTurn {
             assistant: false,
             content: "群友 A：今天玩什么？".into(),
         }],
-        system_note: "\n这是 QQ 群聊，只用公开资料。".into(),
         max_chars: 600,
         output_mode: ik_ai::catalog::OutputMode::Plain,
         timeout_secs: 1,
@@ -90,7 +91,9 @@ async fn external_guest_uses_character_tools_and_returns_usage_on_timeout(db: Pg
             .any(|tool| matches!(tool.name.as_ref(), "remember" | "forget" | "recall_history"))
     );
     let prompt = serde_json::to_string(&requests[0].messages).unwrap();
-    assert!(prompt.contains("站内私信或其他群"));
+    assert!(prompt.contains("你是 Fairy。用户询问人物档案时，完整说明背景、经历和关系。"));
+    assert!(prompt.contains("六分街的档案已调取。"));
+    assert!(!prompt.contains("【外部聊天】"));
     assert!(!prompt.contains("external_fairy"));
 
     fake.push(vec![usage(10, 5), Step::Hang]);
@@ -149,7 +152,8 @@ async fn qq_output_mode_is_frozen_and_markdown_reaches_presentation_intact(db: P
     let requests = fake.requests();
     let markdown = serde_json::to_string(&requests[0].messages).unwrap();
     let plain = serde_json::to_string(&requests[1].messages).unwrap();
-    assert!(markdown.contains("适量使用一、二级标题"));
+    assert!(markdown.contains("可以使用 Markdown（标题、列表、代码块、链接）"));
+    assert!(!markdown.contains("不要使用代码块、表格或 HTML"));
     assert!(!markdown.contains("只输出纯文本"));
     assert!(plain.contains("只输出纯文本"));
 }
