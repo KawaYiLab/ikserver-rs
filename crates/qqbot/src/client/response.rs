@@ -36,6 +36,7 @@ pub enum ErrorClass {
     None,
     Auth,
     Url,
+    Markdown,
     RateLimited,
     Transient,
     Deduplicated,
@@ -74,6 +75,7 @@ impl SendAttempt {
         match self.class {
             ErrorClass::Auth => "qq_token_rejected",
             ErrorClass::Url => "qq_url_rejected",
+            ErrorClass::Markdown => "qq_markdown_rejected",
             ErrorClass::RateLimited => "qq_rate_limited",
             ErrorClass::Transient if self.meta.http_status.is_none() => "qq_transport_failed",
             ErrorClass::Transient => "qq_unavailable",
@@ -338,6 +340,7 @@ fn classify_code(endpoint: ApiEndpoint, code: i64) -> ErrorClass {
         // 40054010: current group API; 304003: official common codes;
         // 40034028: retained legacy compatibility.
         304003 | 40034028 => C::Url,
+        40034011 | 40034124 | 304036 | 40034127 => C::Markdown,
         40054010 if endpoint == ApiEndpoint::GroupMessage => C::Url,
         40054005 => C::Deduplicated,
         50055001 | 50055006 if endpoint == ApiEndpoint::GroupMessage => C::Transient,

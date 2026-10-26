@@ -4,6 +4,7 @@ use super::{
     *,
 };
 use crate::client::{ApiEndpoint, ApiMetadata, ErrorClass, SendAttempt, SendOutcome};
+use crate::message::{Message, MessageFormat};
 use chrono::{DateTime, Utc};
 use sqlx::Row;
 use std::time::Duration as StdDuration;
@@ -16,6 +17,7 @@ const APP_IN_FLIGHT: i64 = 4;
 struct Segment {
     msg_seq: i32,
     content: String,
+    format: MessageFormat,
     payload_hash: Vec<u8>,
     payload_version: i32,
     status: String,
@@ -130,7 +132,7 @@ pub(super) async fn deliver(s: &QqState, l: &Lease) -> Result<(), Problem> {
         }
         // The send deadline limits further requests, not completion of receipts
         // already committed before a worker stopped.
-        let segment:Option<Segment>=sqlx::query_as("SELECT msg_seq,content,payload_hash,payload_version,status,attempt_count,retry_at,auth_corrected,url_corrected FROM qq_reply_segments WHERE turn_id=$1 AND status<>'accepted' ORDER BY msg_seq LIMIT 1 FOR UPDATE")
+        let segment:Option<Segment>=sqlx::query_as("SELECT msg_seq,content,format,payload_hash,payload_version,status,attempt_count,retry_at,auth_corrected,url_corrected FROM qq_reply_segments WHERE turn_id=$1 AND status<>'accepted' ORDER BY msg_seq LIMIT 1 FOR UPDATE")
             .bind(t.id).fetch_optional(&mut *tx).await?;
         let Some(segment) = segment else {
             dispatch::finish(
@@ -203,8 +205,8 @@ pub(super) async fn deliver(s: &QqState, l: &Lease) -> Result<(), Problem> {
         let attempt_id = s.ids.next_raw();
         sqlx::query("UPDATE qq_reply_segments SET status='sending',attempt_count=$3,attempt_epoch=$4,retry_at=NULL,updated_at=clock_timestamp() WHERE turn_id=$1 AND msg_seq=$2")
             .bind(t.id).bind(segment.msg_seq).bind(reserved_count).bind(l.epoch).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO qq_send_attempts(id,turn_id,msg_seq,attempt_no,lease_epoch,payload_hash,payload_version) VALUES($1,$2,$3,$4,$5,$6,$7)")
-            .bind(attempt_id).bind(t.id).bind(segment.msg_seq).bind(attempt_no).bind(l.epoch).bind(&segment.payload_hash).bind(segment.payload_version).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO qq_send_attempts(id,turn_id,msg_seq,attempt_no,lease_epoch,payload_hash,payload_version,format) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
+            .bind(attempt_id).bind(t.id).bind(segment.msg_seq).bind(attempt_no).bind(l.epoch).bind(&segment.payload_hash).bind(segment.payload_version).bind(segment.format).execute(&mut *tx).await?;
         dispatch::fence(&mut tx, l).await?;
         tx.commit().await?;
 
@@ -215,13 +217,13 @@ pub(super) async fn deliver(s: &QqState, l: &Lease) -> Result<(), Problem> {
             .min(StdDuration::from_secs(10));
         let attempt = tokio::time::timeout(
             timeout,
-            s.client.send_once(
+            s.client.send_message_once(
                 &t.app_id,
                 &t.scene,
                 &t.openid,
                 t.qq_msg_id.as_deref().unwrap_or_default(),
                 segment.msg_seq,
-                &segment.content,
+                Message::new(segment.format, &segment.content),
             ),
         )
         .await
@@ -334,16 +336,33 @@ pub(super) async fn deliver(s: &QqState, l: &Lease) -> Result<(), Problem> {
             correction = true;
         }
         if attempt.class == ErrorClass::Url
+            && attempt.outcome == SendOutcome::Rejected
             && !segment.url_corrected
             && !uncertain(&mut tx, t.id).await?
         {
-            let clean = crate::text::clean(&segment.content, "strip");
+            let clean = crate::text::without_links(&segment.content, segment.format);
             if !clean.trim().is_empty() && clean != segment.content {
-                let hash = ring::digest::digest(&ring::digest::SHA256, clean.as_bytes())
-                    .as_ref()
-                    .to_vec();
+                let hash = segment.format.hash(&clean);
                 sqlx::query("UPDATE qq_reply_segments SET content=$3,payload_hash=$4,payload_version=payload_version+1,url_corrected=TRUE WHERE turn_id=$1 AND msg_seq=$2")
                     .bind(t.id).bind(segment.msg_seq).bind(clean).bind(hash).execute(&mut *tx).await?;
+                correction = true;
+            }
+        }
+        if attempt.class == ErrorClass::Markdown
+            && attempt.outcome == SendOutcome::Rejected
+            && segment.format == MessageFormat::Markdown
+            && !uncertain(&mut tx, t.id).await?
+        {
+            let plain = crate::text::format_content(
+                &segment.content,
+                "allow",
+                MessageFormat::Plain,
+                segment.content.chars().count(),
+            );
+            if !plain.trim().is_empty() {
+                let hash = MessageFormat::Plain.hash(&plain);
+                sqlx::query("UPDATE qq_reply_segments SET content=$3,format='plain',payload_hash=$4,payload_version=payload_version+1 WHERE turn_id=$1 AND msg_seq=$2")
+                    .bind(t.id).bind(segment.msg_seq).bind(plain).bind(hash).execute(&mut *tx).await?;
                 correction = true;
             }
         }

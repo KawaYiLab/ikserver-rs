@@ -3507,7 +3507,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/QqSettings"
+                "$ref": "#/components/schemas/QqUpdateSettings"
               }
             }
           },
@@ -22599,7 +22599,9 @@
         "type": "object",
         "required": [
           "msgSeq",
+          "format",
           "attemptNo",
+          "payloadVersion",
           "payloadHash",
           "startedAt",
           "result"
@@ -22636,6 +22638,9 @@
             ],
             "format": "date-time"
           },
+          "format": {
+            "$ref": "#/components/schemas/QqMessageFormat"
+          },
           "httpStatus": {
             "type": [
               "integer",
@@ -22649,6 +22654,10 @@
           },
           "payloadHash": {
             "type": "string"
+          },
+          "payloadVersion": {
+            "type": "integer",
+            "format": "int32"
           },
           "result": {
             "type": "string"
@@ -22873,10 +22882,18 @@
           }
         }
       },
+      "QqMessageFormat": {
+        "type": "string",
+        "enum": [
+          "plain",
+          "markdown"
+        ]
+      },
       "QqSegmentView": {
         "type": "object",
         "required": [
           "msgSeq",
+          "format",
           "status",
           "payloadVersion",
           "payloadHash",
@@ -22898,6 +22915,9 @@
           },
           "authCorrected": {
             "type": "boolean"
+          },
+          "format": {
+            "$ref": "#/components/schemas/QqMessageFormat"
           },
           "msgSeq": {
             "type": "integer",
@@ -22937,6 +22957,7 @@
           "c2cContextTurns",
           "replyTimeoutSecs",
           "maxReplyChars",
+          "replyFormat",
           "linkMode",
           "blockedWords",
           "guestReadsGroupMemory"
@@ -22994,6 +23015,9 @@
           "maxReplyChars": {
             "type": "integer",
             "format": "int32"
+          },
+          "replyFormat": {
+            "$ref": "#/components/schemas/QqMessageFormat"
           },
           "replyTimeoutSecs": {
             "type": "integer",
@@ -23219,6 +23243,92 @@
           "unbind": {
             "type": "boolean",
             "description": "强制解绑。"
+          }
+        }
+      },
+      "QqUpdateSettings": {
+        "type": "object",
+        "description": "Older admin clients omit replyFormat; preserve the stored choice in the update transaction.",
+        "required": [
+          "enabled",
+          "guestDailyTurns",
+          "guestGroupDailyTurns",
+          "guestDailyTokens",
+          "groupContextTurns",
+          "groupContextHours",
+          "c2cContextTurns",
+          "replyTimeoutSecs",
+          "maxReplyChars",
+          "linkMode",
+          "blockedWords",
+          "guestReadsGroupMemory"
+        ],
+        "properties": {
+          "blockedWords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "c2cContextTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dispatchPaused": {
+            "type": "boolean"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "groupContextHours": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "groupContextTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "guestDailyTokens": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "guestDailyTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "guestGroupDailyTurns": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "guestModelKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "guestReadsGroupMemory": {
+            "type": "boolean"
+          },
+          "linkMode": {
+            "type": "string"
+          },
+          "maxReplyChars": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "replyFormat": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QqMessageFormat"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replyTimeoutSecs": {
+            "type": "integer",
+            "format": "int32"
           }
         }
       },

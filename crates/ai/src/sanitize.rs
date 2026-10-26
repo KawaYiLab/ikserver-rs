@@ -40,7 +40,8 @@ static SAFE: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         rule(r"(?m)^[ \t]*【工具记录】[^\n]*(?:\n|$)", ""),
         rule(r"(?i)\[(?:reference|citation|ref|source)[:\s]*\d+\]", ""),
         rule(r"\s*doc_[A-Za-z0-9_-]+\b", ""),
-        rule(r"</?[a-zA-Z][^>]*>", ""),
+        // An autolink such as <https://example.com> is not an HTML tag.
+        rule(r"</?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*|/?)>", ""),
         rule(
             r"@\[([^\[\]\n]{1,40})\]\((?:user:|author:)?[A-Za-z0-9]{1,32}\)",
             "@$1",

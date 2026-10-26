@@ -126,6 +126,7 @@ governor = "0.10"
 validator = { version = "0.21", features = ["derive"] }
 unicode-normalization = "0.1"
 regex = "1"
+pulldown-cmark = { version = "0.13", default-features = false }
 parking_lot = "0.12"
 
 # 测试

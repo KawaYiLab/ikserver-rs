@@ -437,7 +437,7 @@
 | `qq_guest_usage` | day + identity_id 主键，游客预占/成功次数与当日超额提示标志 |
 | `qq_group_usage` | day + group_id 主键，游客次数与真实加权 token |
 | `qq_guest_tokens` | 配额日主键，全部游客的已用 token（含在飞预占） |
-| `qq_settings` | 单行设置；关闭为默认值，游客 10 次/人、100 次/群、200 万 token；上下文、90 秒预算、600 字、strip 链接模式 |
+| `qq_settings` | 单行设置；关闭为默认值，游客 10 次/人、100 次/群、200 万 token；上下文、90 秒预算、600 字；reply_format 默认 markdown（可选 plain），link_mode 默认 allow（可选 strip/domain） |
 
 `ai_role_cards.qq_enabled` 默认 false，由 `ik-ai` 维护。计数以北京时间 04:00 为日界。
 QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群消息、30 天前游客消息及 90 天前计数。
@@ -460,8 +460,8 @@ QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群�
 |---|---|
 | `qq_conversations` | AppID + scene + target_id 唯一；next_seq、active_turn、lease_epoch/lease_until 与 wake_version/wake_at 是会话顺序和唤醒的权威状态 |
 | `qq_turns` 新列 | conversation_id/seq 唯一、protocol_version、phase、生成/发送/平台绝对截止、成本/游客次数结算标记；旧 output/segments_sent 保持兼容汇总 |
-| `qq_reply_segments` | (turn_id,msg_seq) 主键；最终正文、payload_version/hash、状态、尝试数、重试时间、修正标记、成功回执时间 |
-| `qq_send_attempts` | (turn_id,msg_seq,attempt_no) 唯一；租约 epoch、正文 hash、起止时间、结果、HTTP、code/err_code、格式异常标记、Trace ID；不存 HTTP 原始正文 |
+| `qq_reply_segments` | (turn_id,msg_seq) 主键；最终正文、format（plain/markdown）、payload_version/hash（新段摘要覆盖格式与正文）、状态、尝试数、重试时间、修正标记、成功回执时间；历史段默认 plain，保留旧摘要 |
+| `qq_send_attempts` | (turn_id,msg_seq,attempt_no) 唯一；租约 epoch、format、payload_version/hash、起止时间、结果、HTTP、code/err_code、响应格式异常标记、Trace ID；不存 HTTP 原始正文 |
 | `qq_app_delivery_limits` | AppID 行锁协调多实例消息 POST 速率和 Retry-After；在途数量由有效发送 attempt 与租约计算 |
 | `qq_settings.dispatch_paused` | 独立暂停生成/发送，回调入库照常，截止不变 |
 | `qq_identities.binding_version` | 真实绑定变更递增；旧身份从 1 起，旧消息不反填归属 |

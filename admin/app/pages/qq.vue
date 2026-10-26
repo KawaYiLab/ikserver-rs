@@ -431,15 +431,27 @@ function refresh() {
               </div>
               <div class="grid gap-4 lg:grid-cols-2">
                 <label class="grid content-start gap-2">
+                  <span class="text-sm font-medium">回复格式</span>
+                  <Select v-model="form.replyFormat">
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="markdown">Markdown（默认）</SelectItem>
+                      <SelectItem value="plain">纯文本</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span class="text-xs text-muted-foreground">用于群聊和单聊，独立于角色卡的站内格式。指令和错误提示使用纯文本。</span>
+                </label>
+                <label class="grid content-start gap-2">
                   <span class="text-sm font-medium">回复里的链接</span>
                   <Select v-model="form.linkMode">
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="strip">移除链接（默认）</SelectItem>
+                      <SelectItem value="allow">允许网页外链（默认）</SelectItem>
+                      <SelectItem value="strip">移除链接</SelectItem>
                       <SelectItem value="domain">仅保留绳网帖子链接</SelectItem>
                     </SelectContent>
                   </Select>
-                  <span class="text-xs text-muted-foreground">保留链接前，需在 QQ 开放平台登记 interk.net 并确认能正常发送。</span>
+                  <span class="text-xs text-muted-foreground">允许 HTTP/HTTPS 链接；QQ 明确拒绝 URL 时自动去链接重试。</span>
                 </label>
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">敏感词（每行一个）</span>
@@ -622,20 +634,21 @@ function refresh() {
             <div><dt class="text-muted-foreground">游客次数结算</dt><dd>{{ formatTime(detail.quotaFinalizedAt) }}</dd></div>
           </dl>
           <Table>
-            <TableHeader><TableRow><TableHead>分段</TableHead><TableHead>状态</TableHead><TableHead>正文版本</TableHead><TableHead>尝试次数</TableHead><TableHead>下一次尝试</TableHead></TableRow></TableHeader>
+            <TableHeader><TableRow><TableHead>分段</TableHead><TableHead>状态</TableHead><TableHead>格式</TableHead><TableHead>载荷版本</TableHead><TableHead>尝试次数</TableHead><TableHead>下一次尝试</TableHead></TableRow></TableHeader>
             <TableBody>
               <TableRow v-for="segment in detail.segments" :key="segment.msgSeq">
-                <TableCell>{{ segment.msgSeq }}</TableCell><TableCell>{{ segment.status }}</TableCell><TableCell>{{ segment.payloadVersion }}{{ segment.urlCorrected ? '（已去链接）' : '' }}</TableCell><TableCell>{{ segment.attemptCount }}</TableCell><TableCell>{{ formatTime(segment.retryAt) }}</TableCell>
+                <TableCell>{{ segment.msgSeq }}</TableCell><TableCell>{{ segment.status }}</TableCell><TableCell>{{ segment.format === 'markdown' ? 'Markdown' : '纯文本' }}</TableCell><TableCell>{{ segment.payloadVersion }}{{ segment.urlCorrected ? '（已去链接）' : '' }}</TableCell><TableCell>{{ segment.attemptCount }}</TableCell><TableCell>{{ formatTime(segment.retryAt) }}</TableCell>
               </TableRow>
-              <TableRow v-if="!detail.segments.length"><TableCell :colspan="5" class="text-muted-foreground">尚无发送分段。</TableCell></TableRow>
+              <TableRow v-if="!detail.segments.length"><TableCell :colspan="6" class="text-muted-foreground">尚无发送分段。</TableCell></TableRow>
             </TableBody>
           </Table>
           <div v-for="attempt in detail.attempts" :key="`${attempt.msgSeq}:${attempt.attemptNo}`" class="space-y-1 rounded-md border p-3 text-xs">
             <p class="font-medium">第 {{ attempt.msgSeq }} 段 · 第 {{ attempt.attemptNo }} 次 · {{ attempt.result }}</p>
+            <p>{{ attempt.format === 'markdown' ? 'Markdown' : '纯文本' }} · 载荷版本 {{ attempt.payloadVersion }}</p>
             <p>{{ formatTime(attempt.startedAt) }} → {{ formatTime(attempt.finishedAt) }}</p>
             <p>HTTP {{ attempt.httpStatus ?? '—' }} · code {{ attempt.code ?? '—' }} · err_code {{ attempt.errCode ?? '—' }}</p>
             <p class="break-all font-mono">Trace ID：{{ attempt.traceId ?? '—' }}</p>
-            <p class="break-all font-mono text-muted-foreground">正文校验值：{{ attempt.payloadHash }}</p>
+            <p class="break-all font-mono text-muted-foreground">载荷校验值：{{ attempt.payloadHash }}</p>
           </div>
         </div>
       </DialogScrollContent>

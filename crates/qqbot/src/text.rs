@@ -1,5 +1,8 @@
-//! QQ presentation rules. Identity labels are data, never trusted instructions.
-use regex::{Captures, Regex};
+//! QQ presentation: parse first, then apply link policy and a budget on the actual wire text.
+use crate::message::MessageFormat;
+use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
+use regex::Regex;
+use std::sync::LazyLock;
 
 fn replace(pattern: &str, input: &str, replacement: &str) -> String {
     Regex::new(pattern)
@@ -28,85 +31,391 @@ pub fn incoming(value: &str) -> String {
     truncate(replace(r"<@!?[^>]+>", value, "").trim(), 4000)
 }
 
-/// Strip markdown and all remote links; domain mode only retains canonical site posts.
-pub fn clean(value: &str, mode: &str) -> String {
-    let mut out = value.to_owned();
-    if let Ok(links) = Regex::new(r"!?\[([^\]]*)\]\(([^\s)]+)\)") {
-        out = links
-            .replace_all(&out, |caps: &Captures<'_>| {
-                let label = &caps[1];
-                let path = caps[2]
-                    .strip_prefix("https://interk.net")
-                    .unwrap_or(&caps[2]);
-                if is_post_path(path) {
-                    if mode == "domain" {
-                        format!("{label} https://interk.net{path}")
-                    } else if label.is_empty() {
-                        "（在绳网搜索帖子）".to_owned()
-                    } else {
-                        format!("（在绳网搜《{label}》）")
-                    }
-                } else {
-                    label.to_owned()
-                }
-            })
-            .into_owned();
+#[derive(Debug)]
+enum Node<'a> {
+    Branch(Tag<'a>, Vec<Node<'a>>),
+    Text(CowStr<'a>),
+    Break,
+    Rule,
+}
+fn nodes<'a>(events: &mut impl Iterator<Item = Event<'a>>) -> Vec<Node<'a>> {
+    let mut out = Vec::new();
+    while let Some(event) = events.next() {
+        match event {
+            Event::Start(tag) => out.push(Node::Branch(tag, nodes(events))),
+            Event::End(_) => break,
+            Event::Text(s) | Event::Code(s) => out.push(Node::Text(s)),
+            Event::SoftBreak | Event::HardBreak => out.push(Node::Break),
+            Event::Rule => out.push(Node::Rule),
+            // Images are parsed as containers, so their alt text survives; raw HTML does not.
+            _ => {}
+        }
     }
-    if let Ok(urls) = Regex::new(r"(?i)(?:https?://|www\.)[^\s<>）)]+") {
-        out = urls
-            .replace_all(&out, |caps: &Captures<'_>| {
-                let url = &caps[0];
-                if mode == "domain"
-                    && url
-                        .strip_prefix("https://interk.net")
-                        .is_some_and(is_post_path)
-                {
-                    url.to_owned()
-                } else {
-                    String::new()
-                }
-            })
-            .into_owned();
-    }
-    if let Ok(paths) = Regex::new(r"(^|\s)(/post/[0-9]+)") {
-        out = paths
-            .replace_all(&out, |caps: &Captures<'_>| {
-                if mode == "domain" {
-                    format!("{}https://interk.net{}", &caps[1], &caps[2])
-                } else {
-                    format!("{}（在绳网搜索帖子）", &caps[1])
-                }
-            })
-            .into_owned();
-    }
-    out = replace(r"(?m)^\s*```[^\n]*$", &out, "");
-    out = replace(r"(?m)^\s{0,3}#{1,6}\s*", &out, "");
-    out = replace(r"(?m)^\s*(?:[-*+] |[0-9]+[.)] )", &out, "· ");
-    out = replace(r"(?m)^\s*>\s?", &out, "");
-    // 只去成对的强调标记：单个 `_`、`*` 常见于颜文字（^_^）、用户名和算式，不能整个删掉。
-    out = out
-        .replace("**", "")
-        .replace("__", "")
-        .replace("~~", "")
-        .replace('`', "");
-    out = replace(r"\*([^*\n]+)\*", &out, "$1");
-    out.trim().to_owned()
+    out
+}
+
+#[derive(Debug, Clone)]
+enum Piece {
+    Text(String),
+    Syntax(String),
+    Wrap(String, Vec<Piece>, String),
+    Link(Vec<Piece>, String, bool),
+}
+fn syntax(s: &str) -> Piece {
+    Piece::Syntax(s.to_owned())
 }
 fn is_post_path(path: &str) -> bool {
     path.strip_prefix("/post/")
         .is_some_and(|id| !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit()))
 }
+fn post_path(url: &str) -> Option<&str> {
+    let path = url.strip_prefix("https://interk.net").unwrap_or(url);
+    is_post_path(path).then_some(path)
+}
+fn link(label: Vec<Piece>, url: &str, automatic: bool, mode: &str) -> Vec<Piece> {
+    let post = post_path(url);
+    let resolved = post.map_or_else(|| url.to_owned(), |p| format!("https://interk.net{p}"));
+    let web =
+        reqwest13::Url::parse(&resolved).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
+    let plain_label = render(&label, MessageFormat::Plain, usize::MAX);
+    let automatic = automatic || plain_label == url || plain_label == resolved;
+    if web && (mode == "allow" || (mode == "domain" && post.is_some())) {
+        // Parentheses and angle brackets must not terminate a Markdown destination.
+        let url = resolved
+            .replace('(', "%28")
+            .replace(')', "%29")
+            .replace('<', "%3C")
+            .replace('>', "%3E")
+            .replace(' ', "%20");
+        return vec![Piece::Link(label, url, automatic)];
+    }
+    if post.is_some() {
+        if automatic && url.contains("://") {
+            return vec![];
+        }
+        if automatic || label.is_empty() {
+            return vec![Piece::Text("（在绳网搜索帖子）".into())];
+        }
+        let mut out = vec![Piece::Text("（在绳网搜《".into())];
+        out.extend(label);
+        out.push(Piece::Text("》）".into()));
+        return out;
+    }
+    if automatic { vec![] } else { label }
+}
 
-/// The total length, not just each bubble, is limited. Merge excess bubbles into the last one.
+static URLS: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"(?i)(?:[a-z][a-z0-9+.-]*://|www\.)[^\s<>]+|/post/[0-9]+").ok());
+fn text_pieces(value: &str, mode: &str) -> Vec<Piece> {
+    let Some(re) = &*URLS else {
+        return vec![Piece::Text(value.to_owned())];
+    };
+    let mut out = Vec::new();
+    let mut cursor = 0;
+    for found in re.find_iter(value) {
+        out.push(Piece::Text(value[cursor..found.start()].to_owned()));
+        let url = found.as_str().trim_end_matches([
+            '。', '，', '！', '？', '、', '；', '：', '）', ')', ']', '}', '.', ',', '!', '?', ';',
+        ]);
+        out.extend(link(vec![Piece::Text(url.to_owned())], url, true, mode));
+        cursor = found.start() + url.len();
+    }
+    out.push(Piece::Text(value[cursor..].to_owned()));
+    out
+}
+
+fn join(parts: impl IntoIterator<Item = Vec<Piece>>, separator: &str) -> Vec<Piece> {
+    let mut out = Vec::new();
+    for part in parts {
+        if part.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(syntax(separator));
+        }
+        out.extend(part);
+    }
+    out
+}
+fn children(nodes: &[Node<'_>], mode: &str, format: MessageFormat) -> Vec<Piece> {
+    nodes.iter().flat_map(|n| pieces(n, mode, format)).collect()
+}
+// Indentation belongs to each physical line, including nested lists and quotes.
+fn indent(parts: Vec<Piece>, prefix: &str) -> Vec<Piece> {
+    parts
+        .into_iter()
+        .map(|part| match part {
+            Piece::Text(s) => Piece::Text(s.replace('\n', &format!("\n{prefix}"))),
+            Piece::Syntax(s) => Piece::Syntax(s.replace('\n', &format!("\n{prefix}"))),
+            Piece::Wrap(a, inner, b) => Piece::Wrap(a, indent(inner, prefix), b),
+            other => other,
+        })
+        .collect()
+}
+fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
+    let md = format == MessageFormat::Markdown;
+    match node {
+        Node::Text(s) => text_pieces(s, mode),
+        Node::Break => vec![syntax("\n")],
+        Node::Rule => vec![syntax(if md { "---" } else { "——" })],
+        Node::Branch(tag, inner) => match tag {
+            Tag::Heading { level, .. } => vec![Piece::Wrap(
+                if md {
+                    if *level == pulldown_cmark::HeadingLevel::H1 {
+                        "# "
+                    } else {
+                        "## "
+                    }
+                } else {
+                    ""
+                }
+                .into(),
+                children(inner, mode, format),
+                String::new(),
+            )],
+            Tag::Emphasis | Tag::Strong | Tag::Strikethrough => {
+                let marker = if !md {
+                    ""
+                } else {
+                    match tag {
+                        Tag::Emphasis => "*",
+                        Tag::Strong => "**",
+                        _ => "~~",
+                    }
+                };
+                vec![Piece::Wrap(
+                    marker.into(),
+                    children(inner, mode, format),
+                    marker.into(),
+                )]
+            }
+            Tag::Link {
+                dest_url,
+                link_type,
+                ..
+            } => {
+                let automatic = matches!(
+                    link_type,
+                    pulldown_cmark::LinkType::Autolink | pulldown_cmark::LinkType::Email
+                );
+                // Link labels must not themselves be recognized as bare URLs.
+                let label = label_pieces(inner, format);
+                link(label, dest_url, automatic, mode)
+            }
+            Tag::Image { .. } => label_pieces(inner, format),
+            Tag::List(start) => join(
+                inner.iter().enumerate().map(|(index, item)| {
+                    let marker = start.map_or_else(
+                        || {
+                            if md {
+                                "- ".to_owned()
+                            } else {
+                                "· ".to_owned()
+                            }
+                        },
+                        |n| format!("{}. ", n + index as u64),
+                    );
+                    let continuation = " ".repeat(marker.chars().count());
+                    vec![Piece::Wrap(
+                        marker,
+                        indent(pieces(item, mode, format), &continuation),
+                        String::new(),
+                    )]
+                }),
+                "\n",
+            ),
+            Tag::Item => join(inner.iter().map(|n| pieces(n, mode, format)), "\n"),
+            Tag::BlockQuote(_) => {
+                let body = join(inner.iter().map(|n| pieces(n, mode, format)), "\n\n");
+                if md {
+                    vec![Piece::Wrap("> ".into(), indent(body, "> "), String::new())]
+                } else {
+                    body
+                }
+            }
+            Tag::Table(_) => join(inner.iter().map(|n| pieces(n, mode, format)), "\n"),
+            Tag::TableHead | Tag::TableRow => {
+                join(inner.iter().map(|n| pieces(n, mode, format)), " ｜ ")
+            }
+            _ => children(inner, mode, format),
+        },
+    }
+}
+fn label_pieces(nodes: &[Node<'_>], format: MessageFormat) -> Vec<Piece> {
+    nodes
+        .iter()
+        .flat_map(|node| match node {
+            Node::Text(s) => vec![Piece::Text(s.to_string())],
+            Node::Break => vec![Piece::Text(" ".into())],
+            Node::Branch(Tag::Emphasis | Tag::Strong | Tag::Strikethrough, _) => {
+                pieces(node, "strip", format)
+            }
+            Node::Branch(_, inner) => label_pieces(inner, format),
+            _ => vec![],
+        })
+        .collect()
+}
+fn escape(c: char, format: MessageFormat) -> String {
+    if format == MessageFormat::Markdown
+        && matches!(
+            c,
+            '\\' | '`'
+                | '*'
+                | '_'
+                | '{'
+                | '}'
+                | '['
+                | ']'
+                | '<'
+                | '>'
+                | '#'
+                | '+'
+                | '-'
+                | '.'
+                | '!'
+                | '|'
+                | '~'
+        )
+    {
+        format!("\\{c}")
+    } else {
+        c.to_string()
+    }
+}
+
+/// Each escaped character and complete link is indivisible; wrappers reserve their closing markers.
+fn render(parts: &[Piece], format: MessageFormat, max: usize) -> String {
+    let mut out = String::new();
+    let mut remaining = max;
+    for part in parts {
+        let value = match part {
+            Piece::Text(s) => {
+                let mut text = String::new();
+                for c in s.chars() {
+                    let atom = escape(c, format);
+                    let size = atom.chars().count();
+                    if size > remaining {
+                        return format!("{out}{text}");
+                    }
+                    remaining -= size;
+                    text.push_str(&atom);
+                }
+                out.push_str(&text);
+                continue;
+            }
+            Piece::Syntax(s) => s.clone(),
+            Piece::Wrap(open, inner, close) => {
+                let overhead = open.chars().count() + close.chars().count();
+                if overhead >= remaining {
+                    render(inner, format, remaining)
+                } else {
+                    let body = render(inner, format, remaining - overhead);
+                    if body.trim().is_empty() {
+                        String::new()
+                    } else {
+                        format!("{open}{}{close}", body.trim_end())
+                    }
+                }
+            }
+            Piece::Link(label, url, automatic) => {
+                let title = render(label, format, usize::MAX);
+                let full = if format == MessageFormat::Markdown {
+                    format!("[{title}]({url})")
+                } else if *automatic {
+                    url.clone()
+                } else {
+                    format!("{title} {url}")
+                };
+                if full.chars().count() <= remaining {
+                    full
+                } else if *automatic {
+                    render(&[Piece::Text("网页链接".into())], format, remaining)
+                } else {
+                    render(label, format, remaining)
+                }
+            }
+        };
+        let size = value.chars().count();
+        if size > remaining {
+            break;
+        }
+        remaining -= size;
+        out.push_str(&value);
+        if remaining == 0 {
+            break;
+        }
+    }
+    out
+}
+
+fn blocks(value: &str, mode: &str, format: MessageFormat) -> Vec<Vec<Piece>> {
+    let root = nodes(&mut Parser::new_ext(
+        value,
+        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
+    ));
+    root.iter()
+        .flat_map(|node| {
+            // Preserve the existing status-sentence bubbles, but never split inside Markdown syntax.
+            if let Node::Branch(Tag::Paragraph, inner) = node
+                && inner.iter().all(|n| matches!(n, Node::Text(_)))
+            {
+                let raw: String = inner
+                    .iter()
+                    .filter_map(|n| {
+                        if let Node::Text(s) = n {
+                            Some(s.as_ref())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !raw.contains("://") {
+                    return ik_ai::workflow::split_segments(&raw)
+                        .iter()
+                        .map(|s| text_pieces(s, mode))
+                        .collect();
+                }
+            }
+            vec![pieces(node, mode, format)]
+        })
+        .collect()
+}
+
+pub fn clean(value: &str, mode: &str) -> String {
+    format_content(value, mode, MessageFormat::Plain, usize::MAX)
+}
+pub fn format_content(value: &str, mode: &str, format: MessageFormat, max: usize) -> String {
+    render(&join(blocks(value, mode, format), "\n\n"), format, max)
+        .trim()
+        .to_owned()
+}
+
+/// A persisted plain payload has already been rendered; its literal symbols are not Markdown.
+pub fn without_links(value: &str, format: MessageFormat) -> String {
+    if format == MessageFormat::Markdown {
+        format_content(value, "strip", format, value.chars().count())
+    } else {
+        render(&text_pieces(value, "strip"), format, value.chars().count())
+            .trim()
+            .to_owned()
+    }
+}
+
+/// The total includes every format marker, URL and newline, including merged bubbles.
 pub fn segments(
     values: &[String],
     mode: &str,
+    format: MessageFormat,
     blocked: &[String],
     max_chars: usize,
     group: bool,
 ) -> (Vec<String>, bool) {
-    let cleaned: Vec<String> = values.iter().map(|v| clean(v, mode)).collect();
-    let joined = format!("{}\n{}", values.join("\n"), cleaned.join("\n")).to_lowercase();
+    let visible = values
+        .iter()
+        .map(|v| clean(v, "allow"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let joined = format!("{}\n{visible}", values.join("\n")).to_lowercase();
     if blocked
         .iter()
         .any(|w| !w.trim().is_empty() && joined.contains(&w.to_lowercase()))
@@ -116,20 +425,25 @@ pub fn segments(
     let mut remaining = max_chars;
     let mut out: Vec<String> = Vec::new();
     let limit = if group { 4 } else { 3 };
-    for value in &cleaned {
-        if remaining == 0 {
+    let chunks: Vec<_> = values
+        .iter()
+        .flat_map(|v| blocks(v, mode, format))
+        .collect();
+    for chunk in chunks {
+        let separator = if out.len() >= limit { "\n\n" } else { "" };
+        let budget = remaining.saturating_sub(separator.len());
+        if budget == 0 {
             break;
         }
-        let text = truncate(value, remaining);
+        let text = render(&chunk, format, budget).trim().to_owned();
         if text.is_empty() {
             continue;
         }
-        remaining = remaining.saturating_sub(text.chars().count());
+        remaining -= text.chars().count() + separator.len();
         if out.len() < limit {
             out.push(text);
         } else if let Some(last) = out.last_mut() {
-            // 合并进最后一段时换行分开；换行不占字数预算。
-            last.push('\n');
+            last.push_str(separator);
             last.push_str(&text);
         }
     }
@@ -139,8 +453,9 @@ pub fn segments(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use MessageFormat::{Markdown, Plain};
     #[test]
-    fn links_never_escape_allowed_site() {
+    fn links_obey_all_three_policies() {
         assert_eq!(clean("[攻略](/post/123)", "strip"), "（在绳网搜《攻略》）");
         assert_eq!(
             clean("[攻略](/post/123)", "domain"),
@@ -153,15 +468,46 @@ mod tests {
             ),
             ""
         );
-        assert!(!clean("[骗](https://evil.test/post/123)", "domain").contains("https"));
+        assert_eq!(
+            format_content("[攻略](/post/123)", "allow", Markdown, 600),
+            "[攻略](https://interk.net/post/123)"
+        );
+        assert_eq!(
+            clean(
+                "[外链](https://example.com) [邮件](mailto:a@b.com)",
+                "allow"
+            ),
+            "外链 https://example.com 邮件"
+        );
+        assert!(
+            format_content("<https://example.com>", "allow", Markdown, 600)
+                .contains("](https://example.com)")
+        );
+        assert_eq!(clean("<https://example.com>", "strip"), "");
     }
     #[test]
     fn plain_text_symbols_survive_cleaning() {
-        assert_eq!(clean("好耶 ^_^ 3*4=12", "strip"), "好耶 ^_^ 3*4=12");
         assert_eq!(
-            clean("snake_case 和 **重点** *强调*", "strip"),
-            "snake_case 和 重点 强调"
+            clean("好耶 ^_^ 3*4=12 snake_case", "strip"),
+            "好耶 ^_^ 3*4=12 snake_case"
         );
+        assert_eq!(clean("**重点** *强调* ~~旧~~", "strip"), "重点 强调 旧");
+        let md = format_content("好耶 ^_^ 3*4=12", "allow", Markdown, 600);
+        assert_eq!(clean(&md, "allow"), "好耶 ^_^ 3*4=12");
+    }
+    #[test]
+    fn supported_structures_and_readable_fallbacks() {
+        let raw = "### 标题\n\n**重点** *强调* ~~旧~~\n\n- 第一\n  - 第二\n    1. 第三\n\n> 引用\n> 下一行\n\n---\n\n```rs\nlet x = 1;\n```\n\n| 名字 | 值 |\n| --- | --- |\n| 甲 | 乙 |\n\n![图片说明](https://img.test/a.png)";
+        let out = format_content(raw, "allow", Markdown, 600);
+        assert!(out.starts_with("## 标题"));
+        assert!(out.contains("**重点** *强调* ~~旧~~"));
+        assert!(out.contains("- 第一\n  - 第二\n    1. 第三"), "{out}");
+        assert!(out.contains("> 引用\n> 下一行"));
+        assert!(out.contains("---"));
+        assert!(out.contains("let x = 1;"));
+        assert!(out.contains("甲 ｜ 乙"));
+        assert!(out.ends_with("图片说明"));
+        assert!(!out.contains("```"));
     }
     #[test]
     fn input_names_and_mentions_are_sanitized() {
@@ -169,18 +515,69 @@ mod tests {
         assert_eq!(incoming("<@!123> 你好 <@456>"), "你好");
     }
     #[test]
-    fn segment_limits_and_blocked_words() {
-        let values = vec!["你好".to_owned(); 8];
-        let (out, _) = segments(&values, "strip", &[], 13, false);
-        assert_eq!(out.len(), 3);
-        assert_eq!(
-            out.iter()
-                .map(|s| s.chars().filter(|c| *c != '\n').count())
-                .sum::<usize>(),
-            13
+    fn budgets_count_markers_links_and_merged_newlines() {
+        for format in [Plain, Markdown] {
+            for group in [false, true] {
+                let values = vec!["**你好**".to_owned(); 8];
+                let (out, _) = segments(&values, "allow", format, &[], 30, group);
+                assert!(out.len() <= if group { 4 } else { 3 });
+                assert!(out.iter().map(|s| s.chars().count()).sum::<usize>() <= 30);
+                for part in out {
+                    assert_eq!(part.matches("**").count() % 2, 0);
+                }
+            }
+        }
+        let long = format!(
+            "**中文[攻略](https://example.com/{})继续**",
+            "长".repeat(500)
         );
-        let (out, blocked) = segments(&values, "strip", &["你好".to_owned()], 600, true);
-        assert!(blocked);
-        assert_eq!(out, ["这个话题我就不聊啦"]);
+        for max in 1..80 {
+            let out = format_content(&long, "allow", Markdown, max);
+            assert!(out.chars().count() <= max);
+            assert!(!out.contains("https"));
+            assert_eq!(out.matches("**").count() % 2, 0, "{max}: {out}");
+            assert!(!out.ends_with('\\'));
+        }
+        assert_eq!(
+            format_content("[攻略](https://example.com/long)", "allow", Markdown, 2),
+            "攻略"
+        );
+    }
+    #[test]
+    fn blocked_words_match_visible_text_and_link_destinations() {
+        for raw in ["敏**感**词", "[普通](https://example.com/敏感词)"] {
+            let (out, blocked) = segments(
+                &[raw.into()],
+                "strip",
+                Markdown,
+                &["敏感词".into()],
+                600,
+                true,
+            );
+            assert!(blocked);
+            assert_eq!(out, ["这个话题我就不聊啦"]);
+        }
+    }
+
+    #[test]
+    fn automatic_links_never_leave_truncated_urls() {
+        for raw in ["<https://example.com/a(b)c>", "/post/1234567890123456789"] {
+            for format in [Plain, Markdown] {
+                assert_eq!(format_content(raw, "allow", format, 8), "网页链接");
+            }
+        }
+        assert_eq!(clean("/post/123", "allow"), "https://interk.net/post/123");
+    }
+
+    #[test]
+    fn url_correction_preserves_already_rendered_plain_symbols() {
+        assert_eq!(
+            without_links("*原样* _符号_ https://example.com", Plain),
+            "*原样* _符号_"
+        );
+        assert_eq!(
+            without_links("**重点** [网页](https://example.com)", Markdown),
+            "**重点** 网页"
+        );
     }
 }

@@ -26,6 +26,7 @@ reqwest13.workspace = true
 rustls.workspace = true
 webpki-roots.workspace = true
 regex.workspace = true
+pulldown-cmark.workspace = true
 moka.workspace = true
 parking_lot.workspace = true
 thiserror.workspace = true

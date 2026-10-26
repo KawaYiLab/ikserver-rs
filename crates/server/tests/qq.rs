@@ -311,3 +311,26 @@ async fn admins_manage_identities_and_group_memories(db: PgPool) {
         StatusCode::NOT_FOUND
     );
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn reply_format_defaults_and_legacy_settings_updates(db: PgPool) {
+    let app = setup(&db).await;
+    let (status, mut settings) =
+        call(&app, ADMIN, "GET", "/v1/admin/qq/settings", Value::Null).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(settings["replyFormat"], "markdown");
+    assert_eq!(settings["linkMode"], "allow");
+    settings["replyFormat"] = json!("plain");
+    let (status, mut saved) = call(&app, ADMIN, "PUT", "/v1/admin/qq/settings", settings).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["replyFormat"], "plain");
+    saved.as_object_mut().unwrap().remove("replyFormat");
+    saved["linkMode"] = json!("domain");
+    let (status, mut saved) = call(&app, ADMIN, "PUT", "/v1/admin/qq/settings", saved).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["replyFormat"], "plain");
+    assert_eq!(saved["linkMode"], "domain");
+    saved["replyFormat"] = json!("html");
+    let (status, _) = call(&app, ADMIN, "PUT", "/v1/admin/qq/settings", saved).await;
+    assert!(status.is_client_error());
+}

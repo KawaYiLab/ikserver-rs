@@ -865,3 +865,39 @@ async fn a_truncated_http_success_stays_unknown_and_keeps_transport_semantics() 
     assert!(!result.meta.malformed);
     broken.await.unwrap();
 }
+
+#[tokio::test]
+async fn explicit_formats_use_mutually_exclusive_bodies_in_both_scenes() {
+    use ik_qqbot::message::Message;
+    let server = FakeApi::start(Calls::default()).await;
+    let client = ApiClient::new(&server.config).unwrap();
+    for scene in ["group", "c2c"] {
+        for message in [
+            Message::Plain("普通 ^_^"),
+            Message::Markdown("**标题** [外链](https://example.com)"),
+        ] {
+            let attempt = client
+                .send_message_once(APP, scene, "target", "incoming", 2, message)
+                .await;
+            assert_eq!(attempt.outcome, SendOutcome::Accepted);
+        }
+    }
+    let calls = server.calls.lock().await;
+    assert_eq!(calls.messages.len(), 4);
+    for (i, (collection, _, _, body)) in calls.messages.iter().enumerate() {
+        assert_eq!(collection, if i < 2 { "groups" } else { "users" });
+        assert_eq!(body["msg_id"], "incoming");
+        assert_eq!(body["msg_seq"], 2);
+        if i % 2 == 0 {
+            assert_eq!(
+                *body,
+                json!({"msg_type":0,"content":"普通 ^_^","msg_id":"incoming","msg_seq":2})
+            );
+        } else {
+            assert_eq!(
+                *body,
+                json!({"msg_type":2,"markdown":{"content":"**标题** [外链](https://example.com)"},"msg_id":"incoming","msg_seq":2})
+            );
+        }
+    }
+}

@@ -238,7 +238,7 @@ async fn deletion_during_an_in_flight_send_keeps_receipt_and_charge_without_rest
     .unwrap();
     assert_eq!(wire.state.attempts.lock().unwrap().len(), 1);
     assert_eq!(
-        wire.state.attempts.lock().unwrap()[0]["content"],
+        wire.state.attempts.lock().unwrap()[0]["markdown"]["content"],
         "收到请求。"
     );
     assert_eq!(count(&s, "SELECT count(*) FROM qq_reply_segments").await, 2);
@@ -482,8 +482,13 @@ async fn url_correction_is_persisted_before_retry_and_keeps_sequence(db: PgPool)
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0]["msg_id"], attempts[1]["msg_id"]);
     assert_eq!(attempts[0]["msg_seq"], attempts[1]["msg_seq"]);
-    assert_ne!(attempts[0]["content"], attempts[1]["content"]);
-    assert_eq!(attempts[1]["content"], content);
+    assert_eq!(attempts[0]["msg_type"], 2);
+    assert_eq!(attempts[1]["msg_type"], 2);
+    assert_ne!(
+        attempts[0]["markdown"]["content"],
+        attempts[1]["markdown"]["content"]
+    );
+    assert_eq!(attempts[1]["markdown"]["content"], content);
     let versions: Vec<i32> = sqlx::query_scalar(
         "SELECT payload_version FROM qq_send_attempts WHERE turn_id=$1 ORDER BY attempt_no",
     )
@@ -724,5 +729,233 @@ async fn failed_database_confirmation_recovers_without_regeneration_or_duplicate
         count(&s, "SELECT used FROM ai_quota_counters WHERE user_id=0").await,
         20
     );
+    original.abort();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn markdown_rejections_preserve_sequence_cost_and_only_record_delivered_text(db: PgPool) {
+    let codes = [40034011, 40034124, 304036, 40034127];
+    let replies = codes
+        .into_iter()
+        .flat_map(|code| [WireReply::Reject(code), WireReply::Accept])
+        .collect();
+    let (s, llm, wire, original) =
+        fault_setup(db, "**攻略** [网页](https://example.com)", replies).await;
+    for index in 0..4 {
+        let id = enqueue(
+            &s,
+            &format!("markdown-{index}"),
+            "alice",
+            if index % 2 == 0 { Some("group") } else { None },
+            "<@123> 给我攻略",
+            Duration::zero(),
+        )
+        .await
+        .unwrap();
+        finish_due(&s, id).await;
+        let (format, content, version, status): (String, String, i32, String) = sqlx::query_as(
+            "SELECT format,content,payload_version,status FROM qq_reply_segments WHERE turn_id=$1",
+        )
+        .bind(id)
+        .fetch_one(&s.db)
+        .await
+        .unwrap();
+        assert_eq!(
+            (format.as_str(), version, status.as_str()),
+            ("plain", 2, "accepted")
+        );
+        assert_eq!(content, "攻略 网页 https://example.com");
+        let formats: Vec<String> = sqlx::query_scalar(
+            "SELECT format FROM qq_send_attempts WHERE turn_id=$1 ORDER BY attempt_no",
+        )
+        .bind(id)
+        .fetch_all(&s.db)
+        .await
+        .unwrap();
+        assert_eq!(formats, ["markdown", "plain"]);
+        let history: Vec<String> = sqlx::query_scalar("SELECT m.content FROM qq_messages m JOIN qq_turns t ON m.reply_to_id=t.message_id WHERE t.id=$1 AND m.direction='out'").bind(id).fetch_all(&s.db).await.unwrap();
+        assert_eq!(history, [content]);
+    }
+    let attempts = wire.state.attempts.lock().unwrap().clone();
+    for pair in attempts.chunks_exact(2) {
+        assert_eq!(pair[0]["msg_type"], 2);
+        assert_eq!(pair[1]["msg_type"], 0);
+        assert_eq!(pair[0]["msg_seq"], pair[1]["msg_seq"]);
+        assert_eq!(pair[0]["msg_id"], pair[1]["msg_id"]);
+    }
+    assert_eq!(attempts.len(), 8);
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 4);
+    assert_eq!(
+        count(&s, "SELECT used FROM ai_quota_counters WHERE user_id=0").await,
+        80
+    );
+    assert_eq!(
+        count(&s, "SELECT sum(turns)::bigint FROM qq_guest_usage").await,
+        4
+    );
+    original.abort();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn format_and_url_corrections_share_three_attempt_budget(db: PgPool) {
+    let (s, llm, wire, original) = fault_setup(
+        db,
+        "**攻略** [网页](https://example.com)",
+        vec![
+            WireReply::Reject(40034011),
+            WireReply::Reject(304003),
+            WireReply::Accept,
+            WireReply::Reject(304003),
+            WireReply::Reject(304036),
+            WireReply::Accept,
+            WireReply::Reject(40034124),
+            WireReply::Reject(40034124),
+        ],
+    )
+    .await;
+    for index in 0..3 {
+        let id = enqueue(
+            &s,
+            &format!("correction-{index}"),
+            "alice",
+            None,
+            "攻略",
+            Duration::zero(),
+        )
+        .await
+        .unwrap();
+        finish_due(&s, id).await;
+    }
+    let attempts = wire.state.attempts.lock().unwrap().clone();
+    assert_eq!(attempts.len(), 8);
+    assert_eq!(
+        attempts
+            .iter()
+            .map(|v| v["msg_type"].as_i64().unwrap())
+            .collect::<Vec<_>>(),
+        [2, 0, 0, 2, 2, 0, 2, 0]
+    );
+    assert_eq!(attempts[2]["content"], "攻略 网页");
+    assert_eq!(attempts[4]["markdown"]["content"], "**攻略** 网页");
+    assert_eq!(attempts[5]["content"], "攻略 网页");
+    assert_eq!(
+        count(&s, "SELECT count(*) FROM qq_messages WHERE direction='out'").await,
+        2
+    );
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        count(&s, "SELECT used FROM ai_quota_counters WHERE user_id=0").await,
+        60
+    );
+    original.abort();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn uncertain_markdown_payload_cannot_change_after_format_or_url_rejection(db: PgPool) {
+    let (s, _, wire, original) = fault_setup(
+        db,
+        "**攻略** [网页](https://example.com)",
+        vec![
+            WireReply::TruncatedAcceptance,
+            WireReply::Reject(40034011),
+            WireReply::TruncatedAcceptance,
+            WireReply::Reject(304003),
+        ],
+    )
+    .await;
+    for index in 0..2 {
+        let id = enqueue(
+            &s,
+            &format!("uncertain-markdown-{index}"),
+            "alice",
+            None,
+            "攻略",
+            Duration::zero(),
+        )
+        .await
+        .unwrap();
+        finish_due(&s, id).await;
+        let (format, version, reason): (String, i32, String) = sqlx::query_as("SELECT p.format,p.payload_version,t.reason FROM qq_reply_segments p JOIN qq_turns t ON t.id=p.turn_id WHERE t.id=$1").bind(id).fetch_one(&s.db).await.unwrap();
+        assert_eq!(
+            (format.as_str(), version, reason.as_str()),
+            ("markdown", 1, "delivery_unknown")
+        );
+    }
+    let attempts = wire.state.attempts.lock().unwrap().clone();
+    assert_eq!(attempts.len(), 4);
+    assert_eq!(attempts[0], attempts[1]);
+    assert_eq!(attempts[2], attempts[3]);
+    assert_eq!(
+        count(&s, "SELECT count(*) FROM qq_messages WHERE direction='out'").await,
+        0
+    );
+    original.abort();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn retry_uses_saved_format_and_legacy_plain_segments_remain_plain(db: PgPool) {
+    let (s, llm, wire, original) = fault_setup(
+        db,
+        "**攻略** [网页](https://example.com)",
+        vec![
+            WireReply::Limited("1"),
+            WireReply::Accept,
+            WireReply::Accept,
+        ],
+    )
+    .await;
+    let id = enqueue(
+        &s,
+        "saved-markdown",
+        "alice",
+        None,
+        "攻略",
+        Duration::zero(),
+    )
+    .await
+    .unwrap();
+    jobs::run_reply(&s, id).await.unwrap();
+    sqlx::query("UPDATE qq_settings SET reply_format='plain',link_mode='strip'")
+        .execute(&s.db)
+        .await
+        .unwrap();
+    s.invalidate().await;
+    finish_due(&s, id).await;
+    let attempts = wire.state.attempts.lock().unwrap().clone();
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0], attempts[1]);
+    assert_eq!(attempts[1]["msg_type"], 2);
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
+
+    // A pre-upgrade row has no format field in the INSERT and a body-only legacy hash.
+    let legacy = enqueue(
+        &s,
+        "legacy-plain",
+        "alice",
+        None,
+        "旧消息",
+        Duration::zero(),
+    )
+    .await
+    .unwrap();
+    let mut tx = s.db.begin().await.unwrap();
+    let turn = repo::turn(&mut tx, legacy).await.unwrap().unwrap();
+    crate::identity::freeze(&mut tx, turn.message_id)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE qq_turns SET status='processing',phase='delivering',output=ARRAY['**原样纯文本**'],delivery_deadline_at=clock_timestamp()+interval '60 seconds',cost_finalized_at=clock_timestamp() WHERE id=$1").bind(legacy).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO qq_reply_segments(turn_id,msg_seq,content,payload_hash) VALUES($1,1,'**原样纯文本**',sha256(convert_to('**原样纯文本**','UTF8')))").bind(legacy).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    sqlx::query("UPDATE qq_settings SET reply_format='markdown',link_mode='allow'")
+        .execute(&s.db)
+        .await
+        .unwrap();
+    s.invalidate().await;
+    finish_due(&s, legacy).await;
+    let attempts = wire.state.attempts.lock().unwrap().clone();
+    assert_eq!(attempts.len(), 3);
+    assert_eq!(attempts[2]["content"], "**原样纯文本**");
+    assert_eq!(attempts[2]["msg_type"], 0);
+    assert_eq!(llm.calls.load(Ordering::SeqCst), 1);
     original.abort();
 }

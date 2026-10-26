@@ -10,6 +10,7 @@ mod integration;
 pub mod jobs;
 mod me;
 pub mod memory_jobs;
+pub mod message;
 mod repo;
 mod state;
 pub mod text;

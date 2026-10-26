@@ -55,6 +55,7 @@ fn turn() -> ExternalTurn {
         }],
         system_note: "\n这是 QQ 群聊，只用公开资料。".into(),
         max_chars: 600,
+        output_mode: ik_ai::catalog::OutputMode::Plain,
         timeout_secs: 1,
         memory: None,
         shared_scope: None,
@@ -126,4 +127,29 @@ fn external_charge_keeps_unknown_spend_and_guest_context_has_no_account() {
     let guest = ik_ai::tools::ToolContext::guest();
     assert_eq!(guest.viewer_id, None);
     assert!(guest.excluded.is_empty());
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn qq_output_mode_is_frozen_and_markdown_reaches_presentation_intact(db: PgPool) {
+    let (state, fake) = harness(db.clone()).await;
+    for mode in [
+        ik_ai::catalog::OutputMode::Markdown,
+        ik_ai::catalog::OutputMode::Plain,
+    ] {
+        let mut input = turn();
+        input.output_mode = mode;
+        input.max_chars = 8;
+        let prepared = external::prepare(&state, input).await.unwrap();
+        let raw = "## 标题\n\n**重点** [攻略](/post/123) <https://example.com/long/path>";
+        fake.push(vec![content(raw), usage(10, 10)]);
+        let reply = external::reply(&state, &prepared, 1).await;
+        assert_eq!(reply.segments, [raw]);
+        assert_eq!(reply.outcome, RunOutcome::Completed);
+    }
+    let requests = fake.requests();
+    let markdown = serde_json::to_string(&requests[0].messages).unwrap();
+    let plain = serde_json::to_string(&requests[1].messages).unwrap();
+    assert!(markdown.contains("适量使用一、二级标题"));
+    assert!(!markdown.contains("只输出纯文本"));
+    assert!(plain.contains("只输出纯文本"));
 }

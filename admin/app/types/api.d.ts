@@ -6896,11 +6896,14 @@ export interface components {
             errCode?: number | null;
             /** Format: date-time */
             finishedAt?: string | null;
+            format: components["schemas"]["QqMessageFormat"];
             /** Format: int32 */
             httpStatus?: number | null;
             /** Format: int32 */
             msgSeq: number;
             payloadHash: string;
+            /** Format: int32 */
+            payloadVersion: number;
             result: string;
             /** Format: date-time */
             startedAt: string;
@@ -6965,12 +6968,15 @@ export interface components {
             scene: string;
             userId?: string | null;
         };
+        /** @enum {string} */
+        QqMessageFormat: "plain" | "markdown";
         QqSegmentView: {
             /** Format: date-time */
             acceptedAt?: string | null;
             /** Format: int32 */
             attemptCount: number;
             authCorrected: boolean;
+            format: components["schemas"]["QqMessageFormat"];
             /** Format: int32 */
             msgSeq: number;
             payloadHash: string;
@@ -7003,6 +7009,7 @@ export interface components {
             linkMode: string;
             /** Format: int32 */
             maxReplyChars: number;
+            replyFormat: components["schemas"]["QqMessageFormat"];
             /** Format: int32 */
             replyTimeoutSecs: number;
             /** Format: date-time */
@@ -7065,6 +7072,32 @@ export interface components {
             blocked: boolean;
             /** @description 强制解绑。 */
             unbind?: boolean;
+        };
+        /** @description Older admin clients omit replyFormat; preserve the stored choice in the update transaction. */
+        QqUpdateSettings: {
+            blockedWords: string[];
+            /** Format: int32 */
+            c2cContextTurns: number;
+            dispatchPaused?: boolean;
+            enabled: boolean;
+            /** Format: int32 */
+            groupContextHours: number;
+            /** Format: int32 */
+            groupContextTurns: number;
+            /** Format: int64 */
+            guestDailyTokens: number;
+            /** Format: int32 */
+            guestDailyTurns: number;
+            /** Format: int32 */
+            guestGroupDailyTurns: number;
+            guestModelKey?: string | null;
+            guestReadsGroupMemory: boolean;
+            linkMode: string;
+            /** Format: int32 */
+            maxReplyChars: number;
+            replyFormat?: components["schemas"]["QqMessageFormat"] | null;
+            /** Format: int32 */
+            replyTimeoutSecs: number;
         };
         QrCreated: {
             /**
@@ -10177,7 +10210,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["QqSettings"];
+                "application/json": components["schemas"]["QqUpdateSettings"];
             };
         };
         responses: {

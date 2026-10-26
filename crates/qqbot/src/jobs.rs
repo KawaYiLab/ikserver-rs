@@ -233,7 +233,7 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
         t.output = Some(vec![text::truncate(&reply.text, 4000)]);
         crate::identity::freeze(&mut tx, t.message_id).await?;
         t.reason = reply.reason.map(str::to_owned);
-        save_output(&mut tx, &t).await?;
+        save_output(&mut tx, &t, crate::message::MessageFormat::Plain).await?;
         dispatch::fence(&mut tx, lease).await?;
         tx.commit().await?;
         reply.effects.dispatch(s.ai.bus.as_ref());
@@ -270,9 +270,14 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
     let history = repo::history(&mut conn, &t, &settings, card.bound_user_id).await?;
     drop(conn);
     let note = if t.group_id.is_some() {
-        "\n【场合】群聊，在场的有多位群友；回答标着「当前提问者」的那条，一般不超过 200 字。不要输出链接或 markdown。不要谈论对方绑定的绳网身份、私信、其他群的事。"
+        "\n【场合】群聊，在场的有多位群友；回答标着「当前提问者」的那条，一般不超过 200 字。不要谈论对方绑定的绳网身份、私信、其他群的事。"
     } else {
-        "\n【场合】一对一私聊，简短回答，不要输出链接或 markdown。"
+        "\n【场合】一对一私聊，简短回答。"
+    };
+    let link_note = match settings.link_mode.as_str() {
+        "allow" => "可以给出 HTTP/HTTPS 网页链接，引用绳网帖子时用 /post/{id}。",
+        "domain" => "只给出绳网帖子链接（/post/{id}），其他网页只写名称。",
+        _ => "不要输出链接；提到帖子时只写标题。",
     };
     let scope = t.group_id.map(repo::group_scope);
     // 开场（这段上下文里还没有回复过）：私下场合可以问起到期的待跟进。
@@ -291,8 +296,9 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
             // 群是公开场合，论坛工具一律按游客视角（不按某个人的权限去读）；单聊里绑定用户用自己的身份（TOOL-004）。
             viewer: bound.filter(|_| t.group_id.is_none()),
             history,
-            system_note: note.to_owned(),
+            system_note: format!("{note}{link_note}"),
             max_chars: settings.max_reply_chars as usize,
+            output_mode: settings.reply_format.output_mode(),
             timeout_secs: budget.max(1) as u64,
             memory: bound.map(|user_id| ExternalMemory {
                 user_id,
@@ -513,6 +519,7 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
     let (segments, blocked) = text::segments(
         &reply.segments,
         &settings.link_mode,
+        settings.reply_format,
         &settings.blocked_words,
         settings.max_reply_chars as usize,
         t.group_id.is_some(),
@@ -542,7 +549,16 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
     if blocked {
         t.reason = Some("blocked_word".to_owned());
     }
-    save_output(&mut tx, &t).await?;
+    save_output(
+        &mut tx,
+        &t,
+        if blocked {
+            crate::message::MessageFormat::Plain
+        } else {
+            settings.reply_format
+        },
+    )
+    .await?;
     sqlx::query("UPDATE qq_turns SET follow_up_ids=$2 WHERE id=$1")
         .bind(id)
         .bind(prepared.follow_up_ids())
@@ -610,20 +626,22 @@ async fn quota_notice(
     t.reason = Some(reason.to_owned());
     if repo::notify_once(c, t, ik_kernel::time::biz_day(Utc::now())).await? {
         t.output = Some(vec![content.to_owned()]);
-        save_output(c, t).await
+        save_output(c, t, crate::message::MessageFormat::Plain).await
     } else {
         repo::terminal(c, t.id, "skipped", reason).await
     }
 }
-async fn save_output(c: &mut PgConnection, t: &Turn) -> Result<(), Problem> {
+async fn save_output(
+    c: &mut PgConnection,
+    t: &Turn,
+    format: crate::message::MessageFormat,
+) -> Result<(), Problem> {
     sqlx::query("UPDATE qq_turns SET status='processing',phase='delivering',output=$2,reason=$3,delivery_deadline_at=LEAST(platform_deadline_at-interval '2 seconds',clock_timestamp()+interval '60 seconds') WHERE id=$1")
         .bind(t.id).bind(t.output.as_deref()).bind(&t.reason).execute(&mut *c).await?;
     for (i, content) in t.output.iter().flatten().enumerate() {
-        let hash = ring::digest::digest(&ring::digest::SHA256, content.as_bytes())
-            .as_ref()
-            .to_vec();
-        sqlx::query("INSERT INTO qq_reply_segments(turn_id,msg_seq,content,payload_hash) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING")
-            .bind(t.id).bind(i as i32+1).bind(content).bind(hash).execute(&mut *c).await?;
+        let hash = format.hash(content);
+        sqlx::query("INSERT INTO qq_reply_segments(turn_id,msg_seq,content,payload_hash,format) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING")
+            .bind(t.id).bind(i as i32+1).bind(content).bind(hash).bind(format).execute(&mut *c).await?;
     }
     Ok(())
 }

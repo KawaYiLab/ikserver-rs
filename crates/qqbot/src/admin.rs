@@ -1,4 +1,4 @@
-use crate::{QqState, repo, text};
+use crate::{QqState, message::MessageFormat, repo, text};
 use axum::extract::{FromRef, State};
 use chrono::{DateTime, Utc};
 use ik_auth::{
@@ -31,6 +31,7 @@ pub struct Settings {
     pub c2c_context_turns: i32,
     pub reply_timeout_secs: i32,
     pub max_reply_chars: i32,
+    pub reply_format: MessageFormat,
     pub link_mode: String,
     pub blocked_words: Vec<String>,
     pub guest_reads_group_memory: bool,
@@ -68,7 +69,7 @@ impl Settings {
             ("maxReplyChars", (1..=4000).contains(&self.max_reply_chars)),
             (
                 "linkMode",
-                matches!(self.link_mode.as_str(), "strip" | "domain"),
+                matches!(self.link_mode.as_str(), "strip" | "domain" | "allow"),
             ),
             (
                 "blockedWords",
@@ -84,6 +85,51 @@ impl Settings {
             }
         }
         Ok(())
+    }
+}
+/// Older admin clients omit replyFormat; preserve the stored choice in the update transaction.
+#[derive(Debug, Deserialize, ToSchema)]
+#[schema(as = QqUpdateSettings)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateSettings {
+    pub enabled: bool,
+    #[serde(default)]
+    pub dispatch_paused: bool,
+    pub guest_daily_turns: i32,
+    pub guest_group_daily_turns: i32,
+    pub guest_daily_tokens: i64,
+    pub guest_model_key: Option<String>,
+    pub group_context_turns: i32,
+    pub group_context_hours: i32,
+    pub c2c_context_turns: i32,
+    pub reply_timeout_secs: i32,
+    pub max_reply_chars: i32,
+    pub reply_format: Option<MessageFormat>,
+    pub link_mode: String,
+    pub blocked_words: Vec<String>,
+    pub guest_reads_group_memory: bool,
+}
+
+impl UpdateSettings {
+    fn resolve(self, current_format: MessageFormat) -> Settings {
+        Settings {
+            enabled: self.enabled,
+            dispatch_paused: self.dispatch_paused,
+            guest_daily_turns: self.guest_daily_turns,
+            guest_group_daily_turns: self.guest_group_daily_turns,
+            guest_daily_tokens: self.guest_daily_tokens,
+            guest_model_key: self.guest_model_key,
+            group_context_turns: self.group_context_turns,
+            group_context_hours: self.group_context_hours,
+            c2c_context_turns: self.c2c_context_turns,
+            reply_timeout_secs: self.reply_timeout_secs,
+            max_reply_chars: self.max_reply_chars,
+            reply_format: self.reply_format.unwrap_or(current_format),
+            link_mode: self.link_mode,
+            blocked_words: self.blocked_words,
+            guest_reads_group_memory: self.guest_reads_group_memory,
+            updated_at: Utc::now(),
+        }
     }
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -163,13 +209,12 @@ async fn settings(
     let mut conn = s.db.acquire().await?;
     Ok(Json(repo::settings(&mut conn).await?))
 }
-#[utoipa::path(put, operation_id = "qq_put_settings",path="/v1/admin/qq/settings",tag="admin",request_body=Settings,responses((status=200,body=Settings)))]
+#[utoipa::path(put, operation_id = "qq_put_settings",path="/v1/admin/qq/settings",tag="admin",request_body=UpdateSettings,responses((status=200,body=Settings)))]
 async fn put_settings(
     State(s): State<QqState>,
     AdminOperator(op): AdminOperator,
-    Json(mut input): Json<Settings>,
+    Json(input): Json<UpdateSettings>,
 ) -> Result<Json<Settings>, Problem> {
-    input.validate()?;
     if let Some(key) = input.guest_model_key.as_deref() {
         let catalog = s.ai.catalog.get().await?;
         if !catalog.models.iter().any(|m| m.key == key && m.enabled) {
@@ -180,8 +225,14 @@ async fn put_settings(
             ));
         }
     }
-    input.updated_at = Utc::now();
     let mut tx = s.db.begin().await?;
+    let format = sqlx::query_scalar::<_, MessageFormat>(
+        "SELECT reply_format FROM qq_settings WHERE singleton FOR UPDATE",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let input = input.resolve(format);
+    input.validate()?;
     repo::save_settings(&mut tx, &input).await?;
     if !input.dispatch_paused {
         s.jobs

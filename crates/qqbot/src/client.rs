@@ -14,6 +14,7 @@ use ring::rand::SecureRandom;
 use serde_json::json;
 use tokio::{sync::Mutex, time::Instant};
 
+use crate::message::Message;
 use response::{number, read_response};
 
 // Local refresh policy. QQ returns the same credential until its final 60 seconds:
@@ -348,6 +349,20 @@ impl ApiClient {
         seq: i32,
         text: &str,
     ) -> SendAttempt {
+        self.send_message_once(app_id, scene, openid, msg_id, seq, Message::Plain(text))
+            .await
+    }
+
+    /// Submit the persisted message type with mutually exclusive content fields.
+    pub async fn send_message_once(
+        &self,
+        app_id: &str,
+        scene: &str,
+        openid: &str,
+        msg_id: &str,
+        seq: i32,
+        message: Message<'_>,
+    ) -> SendAttempt {
         let (collection, endpoint) = match scene {
             "group" => ("groups", ApiEndpoint::GroupMessage),
             "c2c" => ("users", ApiEndpoint::C2cMessage),
@@ -369,12 +384,20 @@ impl ApiClient {
             Ok(token) => token,
             Err(failure) => return failure,
         };
+        let body = match message {
+            Message::Plain(text) => {
+                json!({"msg_type":0,"content":text,"msg_id":msg_id,"msg_seq":seq})
+            }
+            Message::Markdown(text) => {
+                json!({"msg_type":2,"markdown":{"content":text},"msg_id":msg_id,"msg_seq":seq})
+            }
+        };
         let response = self
             .http
             .post(url)
             .header("Authorization", format!("QQBot {}", token.value))
             .header("X-Union-Appid", app_id)
-            .json(&json!({"msg_type":0,"content":text,"msg_id":msg_id,"msg_seq":seq}))
+            .json(&body)
             .send()
             .await;
         let mut attempt = match response {
@@ -393,7 +416,7 @@ impl ApiClient {
         attempt
     }
 
-    /// Compatibility convenience API. Durable delivery must use `send_once` instead.
+    /// Compatibility convenience API. Durable delivery must use `send_message_once` instead.
     pub async fn send(
         &self,
         app_id: &str,
@@ -437,7 +460,8 @@ impl ApiClient {
                     }
                 }
                 if attempt.class == ErrorClass::Url && !stripped {
-                    let clean = crate::text::clean(&rendered, "strip");
+                    let clean =
+                        crate::text::without_links(&rendered, crate::message::MessageFormat::Plain);
                     if !clean.trim().is_empty() && clean != rendered {
                         rendered = clean;
                         stripped = true;

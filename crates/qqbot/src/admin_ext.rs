@@ -136,6 +136,7 @@ pub struct TurnDetail {
 #[serde(rename_all = "camelCase")]
 pub struct SegmentView {
     pub msg_seq: i32,
+    pub format: crate::message::MessageFormat,
     pub status: String,
     pub payload_version: i32,
     pub payload_hash: String,
@@ -151,7 +152,9 @@ pub struct SegmentView {
 #[serde(rename_all = "camelCase")]
 pub struct AttemptView {
     pub msg_seq: i32,
+    pub format: crate::message::MessageFormat,
     pub attempt_no: i32,
+    pub payload_version: i32,
     pub payload_hash: String,
     pub started_at: DateTime<Utc>,
     pub finished_at: Option<DateTime<Utc>>,
@@ -386,11 +389,11 @@ async fn turn_detail(
         t.phase,t.conversation_seq,t.platform_deadline_at,t.generation_deadline_at,t.delivery_deadline_at,t.cost_finalized_at,t.quota_finalized_at
         FROM qq_turns t JOIN qq_identities i ON i.id=t.identity_id WHERE t.id=$1")
         .bind(id.get()).fetch_optional(&mut *tx).await?.ok_or_else(Problem::not_found)?;
-    let segments = sqlx::query_as::<_, SegmentView>("SELECT msg_seq,status,payload_version,encode(payload_hash,'hex') AS payload_hash,
+    let segments = sqlx::query_as::<_, SegmentView>("SELECT msg_seq,format,status,payload_version,encode(payload_hash,'hex') AS payload_hash,
         attempt_count,retry_at,auth_corrected,url_corrected,accepted_at FROM qq_reply_segments WHERE turn_id=$1 ORDER BY msg_seq")
         .bind(id.get()).fetch_all(&mut *tx).await?;
     let attempts = sqlx::query_as::<_, AttemptView>(
-        "SELECT msg_seq,attempt_no,encode(payload_hash,'hex') AS payload_hash,
+        "SELECT msg_seq,format,attempt_no,payload_version,encode(payload_hash,'hex') AS payload_hash,
         started_at,finished_at,result,endpoint,http_status,code,err_code,trace_id
         FROM qq_send_attempts WHERE turn_id=$1 ORDER BY msg_seq,attempt_no",
     )

@@ -475,7 +475,11 @@ async fn bind_code(s: &QqState, user_id: i64, code: &str) {
 }
 
 fn last_sent(qq: &FakeQq) -> String {
-    qq.sent.lock().unwrap().last().unwrap()["content"]
+    let sent = qq.sent.lock().unwrap();
+    let body = sent.last().unwrap();
+    body.get("content")
+        .or_else(|| body.pointer("/markdown/content"))
+        .unwrap()
         .as_str()
         .unwrap()
         .to_owned()

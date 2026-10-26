@@ -10,15 +10,16 @@ use ik_kernel::{Id, Problem};
 use sqlx::PgConnection;
 
 pub(crate) async fn settings(c: &mut PgConnection) -> Result<Settings, Problem> {
-    Ok(sqlx::query_as::<_, Settings>("SELECT enabled,dispatch_paused,guest_daily_turns,guest_group_daily_turns,guest_daily_tokens,guest_model_key,group_context_turns,group_context_hours,c2c_context_turns,reply_timeout_secs,max_reply_chars,link_mode,blocked_words,guest_reads_group_memory,updated_at FROM qq_settings WHERE singleton").fetch_one(c).await?)
+    Ok(sqlx::query_as::<_, Settings>("SELECT enabled,dispatch_paused,guest_daily_turns,guest_group_daily_turns,guest_daily_tokens,guest_model_key,group_context_turns,group_context_hours,c2c_context_turns,reply_timeout_secs,max_reply_chars,reply_format,link_mode,blocked_words,guest_reads_group_memory,updated_at FROM qq_settings WHERE singleton").fetch_one(c).await?)
 }
 pub(crate) async fn save_settings(c: &mut PgConnection, s: &Settings) -> Result<(), Problem> {
-    sqlx::query("UPDATE qq_settings SET enabled=$1,guest_daily_turns=$2,guest_group_daily_turns=$3,guest_daily_tokens=$4,guest_model_key=$5,group_context_turns=$6,group_context_hours=$7,c2c_context_turns=$8,reply_timeout_secs=$9,max_reply_chars=$10,link_mode=$11,blocked_words=$12,guest_reads_group_memory=$13,updated_at=$14,dispatch_paused=$15 WHERE singleton")
+    sqlx::query("UPDATE qq_settings SET enabled=$1,guest_daily_turns=$2,guest_group_daily_turns=$3,guest_daily_tokens=$4,guest_model_key=$5,group_context_turns=$6,group_context_hours=$7,c2c_context_turns=$8,reply_timeout_secs=$9,max_reply_chars=$10,link_mode=$11,blocked_words=$12,guest_reads_group_memory=$13,updated_at=$14,dispatch_paused=$15,reply_format=$16 WHERE singleton")
         .bind(s.enabled).bind(s.guest_daily_turns).bind(s.guest_group_daily_turns)
         .bind(s.guest_daily_tokens).bind(&s.guest_model_key).bind(s.group_context_turns)
         .bind(s.group_context_hours).bind(s.c2c_context_turns).bind(s.reply_timeout_secs)
         .bind(s.max_reply_chars).bind(&s.link_mode).bind(&s.blocked_words)
         .bind(s.guest_reads_group_memory).bind(s.updated_at).bind(s.dispatch_paused)
+        .bind(s.reply_format)
         .execute(c).await?;
     Ok(())
 }

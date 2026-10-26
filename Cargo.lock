@@ -2859,6 +2859,7 @@ dependencies = [
  "ik-notify",
  "moka",
  "parking_lot",
+ "pulldown-cmark",
  "regex",
  "reqwest 0.13.5",
  "ring",
@@ -3859,6 +3860,17 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
+]
+
+[[package]]
+name = "pulldown-cmark"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "278e9268c93b9e498a2da46c34d90ba93a3255eb99009646398f34bc73ab36eb"
+dependencies = [
+ "bitflags",
+ "memchr",
+ "unicase",
 ]
 
 [[package]]
