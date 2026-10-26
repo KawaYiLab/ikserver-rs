@@ -128,8 +128,8 @@ flowchart LR
   → 定稿（锁会话行、写正文、结算、审计），三段各自是短事务，实时事件都在提交后发出。
   AI 评论回复同理建在 comments 之上：发表评论时经 `ik_comments::CommentHooks` 在同一事务里判定目标并建任务，
   后台任务 `ai.comment_reply` 准备（复核、组装上下文与记忆、预占）→ 事务外调用（不推增量）→ 定稿（清洗、
-  沉浸守卫、经 `ik_comments::interop::insert_ai_reply` 以 AI 名义回复、结算、审计）。AI 账号发出的互动通知
-  由 `ik_notify::interop::send` 统一不写（NOTIF-014）。
+  沉浸守卫、经 `ik_comments::interop::insert_ai_reply` 以 AI 名义回复、结算、审计）。AI 的回复与普通回复
+  一样通知被回复的人，按 AI 账号自成一组（D-091）。
   生成核心在 `ik_ai::generate`（私信与评论共用）：工具循环（7 个只读论坛工具，`ik_ai::tools`，以游客身份调用
   content / comments / profile / feed / search 的 service，再按触发者做拉黑过滤）、逐轮计费、首帧看门狗与退回默认模型；
   私信另有工作流时间线与多气泡分段（`ik_ai::workflow`），评论没有（D-089 方案 A）。
