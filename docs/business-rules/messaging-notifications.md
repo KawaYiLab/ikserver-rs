@@ -191,7 +191,7 @@ system 类精确文案（截 500 字符；`处理备注：` 后缀可拼接）�
 - NOTIF-011 like→favorite 升级显示：历史 `type=like` 且关联 Article（非 Comment）的通知，若 sender 当前对该文章存在 favorite 记录，则下发 `type:'favorite'`、`rawType:'like'`。「历史数据纠偏，重写迁移后可能不需要。」`notification/utils/serialize.ts:58-99`
 - NOTIF-012 通知下发字段：`documentId, type, rawType, isRead, createdAt, message, sender, article{documentId,title,coverAspectRatio}, comment{documentId,content,images,isAnonymous}`；`coverAspectRatio` 取封面首图宽/高。`notification/utils/serialize.ts:23-33`
 - NOTIF-013 身份边界（测试钉死）：contacts 桶的 SQL 过滤**必须排除匿名评论**（`Comment.isAnonymous` 为 true 的永远不许经真实 sender 的桶被读到，即使 DTO 已脱敏）；anonymous 桶按 `anonymousSeed` 过滤且标已读时不得跨 seed 误标；匿名目标的 like（如点赞匿名评论）**仍归 contacts 桶**（`Comment.isAnonymous` 指的是「被赞的评论」，与点赞者身份无关）。`notification/utils/conversation.ts:95-131`、`tests/unit/messaging-privacy.test.ts`
-- NOTIF-014 AI sender 不单独成桶：sender 为 `isAiAgent` 的 contacts 桶在列表侧整条剔除（也不计入 totalUnread）；通知照样存库，只是融进 AI 会话本身或不可见。WS 推送侧同样：无真会话时 AI 通知不推 pseudo 桶。`notification-merge.ts:742`、`notification/lifecycles.ts:197`
+- NOTIF-014（新系统不保留，见 D-091 方案 A：AI 发出的通知照常写入并按 AI 账号自成一组；新系统的 AI 会话是独立的 `kind = 'ai'`，通知不会混进 AI 对话）旧系统 AI sender 不单独成桶：sender 为 `isAiAgent` 的 contacts 桶在列表侧整条剔除（也不计入 totalUnread）；通知照样存库，只是融进 AI 会话本身或不可见。WS 推送侧同样：无真会话时 AI 通知不推 pseudo 桶。`notification-merge.ts:742`、`notification/lifecycles.ts:197`
 - NOTIF-015 四种「无桶」情形（不进任何桶、不计未读、不出现在列表）：缺 type / 未知 type / 匿名缺 seed / 缺 sender——与 `classifyNotification` 返回 null 同口径。`notification/utils/bucket.ts:100`
 
 ### 分桶规则（category / senderKey / bucketKey）

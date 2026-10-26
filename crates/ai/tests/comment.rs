@@ -269,15 +269,18 @@ async fn mention_triggers_a_reply_under_the_comment(db: PgPool) {
         .await
         .unwrap();
     assert_eq!(count, 2);
-    // AI 发出的通知不单独成组（NOTIF-014）：不写。帖主照常收到 Bob 的评论通知。
-    let from_ai: i64 = sqlx::query_scalar!(
-        r#"SELECT count(*) AS "n!" FROM notifications WHERE sender_id = $1"#,
-        FAIRY
+    // AI 的回复照常通知被回复的人，自成一组（D-091 方案 A）；回复里 @ 到的也是他，不重复。
+    let from_ai: Vec<(i64, String, String)> = sqlx::query_as(
+        "SELECT recipient_id, kind, bucket_key FROM notifications WHERE sender_id = $1",
     )
-    .fetch_one(&h.db)
+    .bind(FAIRY)
+    .fetch_all(&h.db)
     .await
     .unwrap();
-    assert_eq!(from_ai, 0);
+    assert_eq!(
+        from_ai,
+        vec![(BOB, "reply".to_owned(), format!("user-{FAIRY}"))]
+    );
 
     // 重放：已有回复，不再调用模型（TRIG-037）。
     let calls = h.fake.requests().len();

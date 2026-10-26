@@ -274,7 +274,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
   `dm.message.delta` 的累计全文为准。定稿后整条时间线随消息下发（`message.ai.workflow`，最多 1000 个事件）。
   额度用尽或 AI 全局关闭时，AI 发一条不计费的 `kind = system` 提示消息（D-082 方案 A）。
 - AI 评论回复没有专门的事件：生成完一次性发出（D-089 方案 A），与普通回复一样只有 `post.bumped`；
-  AI 账号发出的互动通知（回复、提及）不写也不推（NOTIF-014）。
+  AI 账号发出的互动通知（回复、提及）与真人一样写入并推 `notification.created`，按 AI 账号自成一组（D-091）。
 - 收件箱：`inbox.read { key, lastReadAt?, notificationsUpdated }`、`inbox.read.all { at }`（只发给本人）。
 - 内部事件（`Audience::Internal`，网关不转发，只给进程内订阅者，例如搜索索引同步）：
   `comment.removed { commentId, postId }`、`user.renamed { userId }`（载荷里是数字 id）。
