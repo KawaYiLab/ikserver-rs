@@ -1206,6 +1206,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 系统状态 */
+        get: operations["system_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/system/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 后台任务列表
+         * @description 最多 100 条，最近更新的在前。不含 payload（可能有用户内容）。
+         */
+        get: operations["list_jobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/system/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除任务
+         * @description 从队列里移除，不再执行；正在执行的任务不能删除。
+         */
+        delete: operations["delete_job"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/system/jobs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 立即重试任务
+         * @description 重置尝试次数并马上执行；正在执行的任务不能重试。
+         */
+        post: operations["retry_job"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/system/test-mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 发一封测试邮件
+         * @description 按正式发信的路由选通道（国内邮箱走 SMTP，其余走 Brevo），用来确认发信配置可用。
+         *     发送失败也返回 200，原因在 `error` 里。
+         */
+        post: operations["test_mail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/tags": {
         parameters: {
             query?: never;
@@ -3666,6 +3764,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/site": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 站点公告与维护状态
+         * @description 公开接口，不需要登录。
+         */
+        get: operations["site_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/story/mcp": {
         parameters: {
             query?: never;
@@ -4447,6 +4565,33 @@ export interface components {
             modelKey?: string | null;
             title?: string | null;
         };
+        /** @description 全站公告横幅（主站顶部）。 */
+        Announcement: {
+            enabled: boolean;
+            /** Format: date-time */
+            endsAt?: string | null;
+            /** @description 点击后打开的地址（`http(s)://`），空为不跳转。 */
+            link: string;
+            /**
+             * Format: date-time
+             * @description 只在这段时间里显示；都不设时一直显示。
+             */
+            startsAt?: string | null;
+            /** @description 纯文本，最多 300 字。 */
+            text: string;
+            tone: components["schemas"]["AnnouncementTone"];
+        };
+        /** @enum {string} */
+        AnnouncementTone: "info" | "warning";
+        AnnouncementView: {
+            /** Format: date-time */
+            endsAt?: string | null;
+            /** @description 内容的摘要：内容或链接变了就变，客户端用它记住「已关闭」。 */
+            id: string;
+            link?: string | null;
+            text: string;
+            tone: components["schemas"]["AnnouncementTone"];
+        };
         /** @description 个人助手（AI-024，二期占位）。 */
         AssistantView: {
             enabled: boolean;
@@ -4951,6 +5096,10 @@ export interface components {
             /** @description 已经是目标状态（或已被删除）而没有改动的。 */
             unchanged: string[];
         };
+        /** @description 屏蔽词（参考 Discourse 的 watched words）：作用于帖子标题与正文、评论、改名。 */
+        ContentFilter: {
+            words: components["schemas"]["WatchedWord"][];
+        };
         ConversationView: {
             /**
              * Format: date-time
@@ -5063,6 +5212,28 @@ export interface components {
             posts: components["schemas"]["CountPair"];
             reports: components["schemas"]["ReportCounts"];
             users: components["schemas"]["UserCounts"];
+        };
+        DatabaseStatus: {
+            /**
+             * Format: double
+             * @description 一次 ping 的往返耗时。
+             */
+            latencyMs?: number | null;
+            /**
+             * Format: int64
+             * @description 已应用的最新迁移版本。
+             */
+            migration?: number | null;
+            ok: boolean;
+            /** @description 二进制里有、数据库还没应用的迁移数。 */
+            pendingMigrations: number;
+            /** Format: int32 */
+            poolIdle: number;
+            /** Format: int32 */
+            poolSize: number;
+            serverVersion?: string | null;
+            /** Format: int64 */
+            sizeBytes?: number | null;
         };
         /** @description 注销账号。有邮箱的账号给 `code`（注销验证码），没有邮箱的给 `qrId`（扫码核验通过的二维码）。 */
         DeleteAccountRequest: {
@@ -5542,6 +5713,38 @@ export interface components {
              */
             notificationsUpdated: number;
         };
+        /** @description IP 封禁：命中的地址不能注册、登录与执行写操作（版主、管理员登录后不受影响）。 */
+        IpBan: {
+            /** @description 单个地址或网段，例如 `203.0.113.7`、`203.0.113.0/24`、`2001:db8::/32`。 */
+            cidr: string;
+            /**
+             * Format: date-time
+             * @description 到期后自动失效；空为永久。
+             */
+            expiresAt?: string | null;
+            note: string;
+        };
+        JobsStatus: {
+            /**
+             * Format: int64
+             * @description 用完重试次数、不再执行的任务（死信）。
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description 到点等待执行的任务。
+             */
+            ready: number;
+            /** Format: int64 */
+            running: number;
+            /**
+             * Format: int64
+             * @description 还没到执行时间（含失败后等待重试）的任务。
+             */
+            scheduled: number;
+            /** @description 按任务类型分开的计数，只列有任务的类型。 */
+            tasks: components["schemas"]["TaskCount"][];
+        };
         /** @description 会话列表里的最后一条消息。 */
         LastMessageView: {
             /** Format: date-time */
@@ -5555,6 +5758,13 @@ export interface components {
             /** Format: int32 */
             likeCount: number;
             liked: boolean;
+        };
+        MailStatus: {
+            brevo: boolean;
+            fallback: boolean;
+            /** @description `dev_log`：只写日志不发信；`dual`：国内邮箱走 SMTP，其余走 Brevo。 */
+            provider: string;
+            smtp: boolean;
         };
         MarkReadRequest: {
             /** @description 帖子 id，去重后最多 100 个。 */
@@ -5847,6 +6057,26 @@ export interface components {
             target: components["schemas"]["TargetPreview"];
             targetId: string;
             targetType: components["schemas"]["TargetType"];
+        };
+        /** @description 新注册账号在头几个小时里的限制（参考 Discourse 的信任等级 0）。版主、管理员与 AI 账号不受限制。 */
+        NewUserLimits: {
+            /** @description 新账号能否在帖子、评论里贴外部链接。 */
+            allowLinks: boolean;
+            /**
+             * Format: int32
+             * @description 新账号 24 小时内最多发几条评论；0 不限。
+             */
+            commentsPerDay: number;
+            /**
+             * Format: int32
+             * @description 新账号 24 小时内最多发布几篇帖子；0 不限。
+             */
+            postsPerDay: number;
+            /**
+             * Format: int32
+             * @description 注册后多少小时内算新账号；0 关闭全部限制。
+             */
+            restrictHours: number;
         };
         NotificationView: {
             /** @description 所属敲敲会话：`user-<发送者 id>` 或 `system`。 */
@@ -7202,6 +7432,23 @@ export interface components {
             /** Format: int64 */
             total: number;
         };
+        QueuedJob: {
+            /** Format: int32 */
+            attempts: number;
+            /** Format: date-time */
+            createdAt: string;
+            id: string;
+            lastError?: string | null;
+            /** Format: date-time */
+            lockedAt?: string | null;
+            /** Format: int32 */
+            maxAttempts: number;
+            /** Format: date-time */
+            runAt: string;
+            task: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
         /** @description 今日额度（AI-023）。只给百分比，不给 token 数与上限。 */
         QuotaView: {
             /** @description false 表示用量读不到，客户端不要把 0 当真。 */
@@ -7238,6 +7485,15 @@ export interface components {
             userReadPerMin: number;
             /** Format: int32 */
             userWritePerMin: number;
+        };
+        /** @description 只读维护模式：除登录、登出外的写请求返回 503 `READ_ONLY`；版主与管理员不受影响。 */
+        ReadOnly: {
+            enabled: boolean;
+            /** @description 给用户看的说明，最多 200 字；空时用默认提示。 */
+            message: string;
+        };
+        ReadOnlyView: {
+            message: string;
         };
         ReadResult: {
             /**
@@ -7296,10 +7552,14 @@ export interface components {
         };
         /** @description 注册与登录。 */
         Registration: {
+            /** @description 不允许注册的邮箱域名（小写，也拦它的子域名），例如 `mailinator.com`。 */
+            emailDomainBlocklist: string[];
             /** @description 米游社扫码登录与绑定。关闭时扫码接口返回 503 `MIHOYO_DISABLED`。 */
             mihoyoLogin: boolean;
             /** @description 注册总开关（REG-002）。关闭时邮箱注册与米游社首登建号都被拒绝，已有账号不受影响。 */
             open: boolean;
+            /** @description 用户不能改成的用户名（不区分大小写，整名匹配），例如 `admin`、`官方`。后台改名不受限制。 */
+            reservedUsernames: string[];
         };
         RelatedPosts: {
             /** @description 按相关度从高到低。 */
@@ -7556,26 +7816,11 @@ export interface components {
             total: number;
         };
         SearchStatus: {
-            /** Format: int64 */
-            dbComments: number;
-            /**
-             * Format: int64
-             * @description 数据库里已发布的帖子数、评论数（索引只收公开的，略少是正常的）。
-             */
-            dbPosts: number;
-            /** @description 没有配置搜索引擎时全部查询走数据库兜底。 */
-            engineConfigured: boolean;
-            /** @description 读取索引统计失败的原因（只给管理员排障）。 */
-            engineError?: string | null;
-            /** Format: int64 */
-            indexedComments?: number | null;
-            /**
-             * Format: int64
-             * @description 索引里的文档数；读不到（未配置或搜索引擎不可用）时为空。
-             */
-            indexedPosts?: number | null;
-            /** @description 本实例正在重建索引。 */
-            reindexing: boolean;
+            comments?: number | null;
+            /** @description 是否配置了搜索引擎；没配时搜索走数据库。 */
+            configured: boolean;
+            ok: boolean;
+            posts?: number | null;
         };
         /** @description 账号安全概览（DEL-001）。 */
         SecurityView: {
@@ -7753,12 +7998,21 @@ export interface components {
             examRequired?: boolean | null;
             values?: components["schemas"]["SiteValues"] | null;
         };
+        SiteStatus: {
+            announcement?: components["schemas"]["AnnouncementView"] | null;
+            readOnly?: components["schemas"]["ReadOnlyView"] | null;
+        };
         /** @description 全部可在线修改的参数。 */
         SiteValues: {
+            announcement: components["schemas"]["Announcement"];
             exam: components["schemas"]["ExamParams"];
+            filter: components["schemas"]["ContentFilter"];
             hot: components["schemas"]["HotParams"];
+            ipBans: components["schemas"]["IpBan"][];
             moderation: components["schemas"]["ModerationParams"];
+            newUser: components["schemas"]["NewUserLimits"];
             rateLimit: components["schemas"]["RateLimitParams"];
+            readOnly: components["schemas"]["ReadOnly"];
             registration: components["schemas"]["Registration"];
         };
         StartView: {
@@ -7771,6 +8025,12 @@ export interface components {
             resumed: boolean;
             /** Format: date-time */
             startedAt: string;
+        };
+        StorageStatus: {
+            /** @description 配置了存储桶；没配时上传接口返回 503。 */
+            configured: boolean;
+            /** @description 对外访问地址前缀。 */
+            publicBaseUrl: string;
         };
         SubmitRequest: {
             /** @description 题目 id → 选中的选项 key。单选、判断题也传数组。没作答的题可以省略。 */
@@ -7809,6 +8069,23 @@ export interface components {
             /** @description 已做 HTML 转义的标题，命中词包在 `<mark>` 里，可直接作为 HTML 渲染。 */
             titleHighlighted: string;
         };
+        SystemStatus: {
+            /** @description 是否多实例部署（事件经数据库转发给其他实例）。 */
+            cluster: boolean;
+            database: components["schemas"]["DatabaseStatus"];
+            jobs: components["schemas"]["JobsStatus"];
+            mail: components["schemas"]["MailStatus"];
+            /** Format: int32 */
+            nodeId: number;
+            search: components["schemas"]["SearchStatus"];
+            /**
+             * Format: date-time
+             * @description 本实例的启动时间。
+             */
+            startedAt: string;
+            storage: components["schemas"]["StorageStatus"];
+            version: string;
+        };
         TagRef: {
             name: string;
             slug: string;
@@ -7845,6 +8122,29 @@ export interface components {
             /** @description 评论所在的帖子。 */
             postId?: string | null;
             postTitle?: string | null;
+        };
+        TaskCount: {
+            /** Format: int64 */
+            failed: number;
+            /** Format: int64 */
+            ready: number;
+            /** Format: int64 */
+            running: number;
+            /** Format: int64 */
+            scheduled: number;
+            task: string;
+        };
+        TestMailInput: {
+            to: string;
+        };
+        TestMailResult: {
+            /** @description 发信器是只写日志的开发模式时为 true：没有真的发出去。 */
+            devLog: boolean;
+            /** @description 发送失败的原因（发信通道返回的错误）。 */
+            error?: string | null;
+            ok: boolean;
+            /** @description 实际发往的地址（已规范化）。 */
+            to: string;
         };
         /** @description 按业务日（北京时间 04:00 切日）的趋势，旧的在前；最后一天是今天（还没过完）。 */
         Trends: {
@@ -8012,6 +8312,13 @@ export interface components {
              */
             given: number;
         };
+        WatchedWord: {
+            action: components["schemas"]["WordAction"];
+            /** @description 按字面匹配，英文字母不区分大小写。 */
+            word: string;
+        };
+        /** @enum {string} */
+        WordAction: "block" | "censor";
         /** @description AI 回复的一个工作流事件（WF-001、第 7.1 节的事件类型表）。 */
         WorkflowEvent: {
             at: string;
@@ -10783,6 +11090,110 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    system_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemStatus"];
+                };
+            };
+        };
+    };
+    list_jobs: {
+        parameters: {
+            query?: {
+                /** @description `failed`（死信，默认）、`scheduled`（等待重试或定时）、`running`。 */
+                state?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedJob"][];
+                };
+            };
+        };
+    };
+    delete_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retry_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueuedJob"];
+                };
+            };
+        };
+    };
+    test_mail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestMailInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestMailResult"];
                 };
             };
         };
@@ -16408,6 +16819,25 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    site_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteStatus"];
                 };
             };
         };

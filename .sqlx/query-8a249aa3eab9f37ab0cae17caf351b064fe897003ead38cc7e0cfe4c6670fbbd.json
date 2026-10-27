@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id FROM graphile_worker.reschedule_jobs(ARRAY[$1::bigint], run_at => now(), attempts => 0)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8a249aa3eab9f37ab0cae17caf351b064fe897003ead38cc7e0cfe4c6670fbbd"
+}

@@ -2087,3 +2087,18 @@ pub(crate) async fn daily_first_published(
     .await?;
     Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
 }
+
+/// 作者从 `since` 起首次发布的帖子数（新账号限制）。
+pub(crate) async fn published_since(
+    conn: &mut PgConnection,
+    author_id: i64,
+    since: DateTime<Utc>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM posts WHERE author_id = $1 AND first_published_at >= $2"#,
+        author_id,
+        since,
+    )
+    .fetch_one(conn)
+    .await
+}

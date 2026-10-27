@@ -419,6 +419,20 @@ pub async fn rename(
     request: RenameRequest,
 ) -> Result<RenameResult, Problem> {
     let username = validate_username(&request.username)?;
+    if let Some(site) = &state.content.site
+        && !ik_auth::guard::exempt(principal)
+    {
+        let values = site.get().await;
+        // 用户名里命中替换词也直接拒绝（不替换成 *）。
+        let screened = ik_auth::guard::screen(&values, "username", &username)?;
+        if values.username_reserved(&username) || screened != username {
+            return Err(Problem::field(
+                "username",
+                "USERNAME_RESERVED",
+                "这个用户名不能使用",
+            ));
+        }
+    }
     let user_id = principal.user_id.get();
     let now = Utc::now();
     let mut tx = state.db.begin().await?;

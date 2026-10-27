@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE graphile_worker._private_jobs SET attempts = 1, last_error = 'boom' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a77e32e77731b60a08ac26f3c9fbfb559f682b9fbaf129200790a3fdb8ba3f9d"
+}

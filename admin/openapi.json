@@ -4363,6 +4363,186 @@
         ]
       }
     },
+    "/v1/admin/system": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "系统状态",
+        "operationId": "system_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/system/jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "后台任务列表",
+        "description": "最多 100 条，最近更新的在前。不含 payload（可能有用户内容）。",
+        "operationId": "list_jobs",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "`failed`（死信，默认）、`scheduled`（等待重试或定时）、`running`。",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/QueuedJob"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/system/jobs/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "删除任务",
+        "description": "从队列里移除，不再执行；正在执行的任务不能删除。",
+        "operationId": "delete_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {}
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/system/jobs/{id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "立即重试任务",
+        "description": "重置尝试次数并马上执行；正在执行的任务不能重试。",
+        "operationId": "retry_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueuedJob"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/system/test-mail": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "发一封测试邮件",
+        "description": "按正式发信的路由选通道（国内邮箱走 SMTP，其余走 Brevo），用来确认发信配置可用。\n发送失败也返回 200，原因在 `error` 里。",
+        "operationId": "test_mail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestMailInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestMailResult"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/tags": {
       "get": {
         "tags": [
@@ -12870,6 +13050,27 @@
         }
       }
     },
+    "/v1/site": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "站点公告与维护状态",
+        "description": "公开接口，不需要登录。",
+        "operationId": "site_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiteStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/story/mcp": {
       "post": {
         "tags": [
@@ -15441,6 +15642,87 @@
           }
         }
       },
+      "Announcement": {
+        "type": "object",
+        "description": "全站公告横幅（主站顶部）。",
+        "required": [
+          "enabled",
+          "text",
+          "link",
+          "tone"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "link": {
+            "type": "string",
+            "description": "点击后打开的地址（`http(s)://`），空为不跳转。"
+          },
+          "startsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "只在这段时间里显示；都不设时一直显示。"
+          },
+          "text": {
+            "type": "string",
+            "description": "纯文本，最多 300 字。"
+          },
+          "tone": {
+            "$ref": "#/components/schemas/AnnouncementTone"
+          }
+        }
+      },
+      "AnnouncementTone": {
+        "type": "string",
+        "enum": [
+          "info",
+          "warning"
+        ]
+      },
+      "AnnouncementView": {
+        "type": "object",
+        "required": [
+          "id",
+          "text",
+          "tone"
+        ],
+        "properties": {
+          "endsAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "description": "内容的摘要：内容或链接变了就变，客户端用它记住「已关闭」。"
+          },
+          "link": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "tone": {
+            "$ref": "#/components/schemas/AnnouncementTone"
+          }
+        }
+      },
       "AssistantView": {
         "type": "object",
         "description": "个人助手（AI-024，二期占位）。",
@@ -16971,6 +17253,21 @@
           }
         }
       },
+      "ContentFilter": {
+        "type": "object",
+        "description": "屏蔽词（参考 Discourse 的 watched words）：作用于帖子标题与正文、评论、改名。",
+        "required": [
+          "words"
+        ],
+        "properties": {
+          "words": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WatchedWord"
+            }
+          }
+        }
+      },
       "ConversationView": {
         "type": "object",
         "required": [
@@ -17266,6 +17563,64 @@
           },
           "users": {
             "$ref": "#/components/schemas/UserCounts"
+          }
+        }
+      },
+      "DatabaseStatus": {
+        "type": "object",
+        "required": [
+          "ok",
+          "poolSize",
+          "poolIdle",
+          "pendingMigrations"
+        ],
+        "properties": {
+          "latencyMs": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "一次 ping 的往返耗时。"
+          },
+          "migration": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "已应用的最新迁移版本。"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "pendingMigrations": {
+            "type": "integer",
+            "description": "二进制里有、数据库还没应用的迁移数。",
+            "minimum": 0
+          },
+          "poolIdle": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "poolSize": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "serverVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
           }
         }
       },
@@ -18508,6 +18863,69 @@
           }
         }
       },
+      "IpBan": {
+        "type": "object",
+        "description": "IP 封禁：命中的地址不能注册、登录与执行写操作（版主、管理员登录后不受影响）。",
+        "required": [
+          "cidr",
+          "note"
+        ],
+        "properties": {
+          "cidr": {
+            "type": "string",
+            "description": "单个地址或网段，例如 `203.0.113.7`、`203.0.113.0/24`、`2001:db8::/32`。"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "到期后自动失效；空为永久。"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      },
+      "JobsStatus": {
+        "type": "object",
+        "required": [
+          "ready",
+          "scheduled",
+          "running",
+          "failed",
+          "tasks"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "用完重试次数、不再执行的任务（死信）。"
+          },
+          "ready": {
+            "type": "integer",
+            "format": "int64",
+            "description": "到点等待执行的任务。"
+          },
+          "running": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scheduled": {
+            "type": "integer",
+            "format": "int64",
+            "description": "还没到执行时间（含失败后等待重试）的任务。"
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskCount"
+            },
+            "description": "按任务类型分开的计数，只列有任务的类型。"
+          }
+        }
+      },
       "LastMessageView": {
         "type": "object",
         "description": "会话列表里的最后一条消息。",
@@ -18546,6 +18964,30 @@
             "format": "int32"
           },
           "liked": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MailStatus": {
+        "type": "object",
+        "required": [
+          "provider",
+          "smtp",
+          "brevo",
+          "fallback"
+        ],
+        "properties": {
+          "brevo": {
+            "type": "boolean"
+          },
+          "fallback": {
+            "type": "boolean"
+          },
+          "provider": {
+            "type": "string",
+            "description": "`dev_log`：只写日志不发信；`dual`：国内邮箱走 SMTP，其余走 Brevo。"
+          },
+          "smtp": {
             "type": "boolean"
           }
         }
@@ -19399,6 +19841,40 @@
           },
           "targetType": {
             "$ref": "#/components/schemas/TargetType"
+          }
+        }
+      },
+      "NewUserLimits": {
+        "type": "object",
+        "description": "新注册账号在头几个小时里的限制（参考 Discourse 的信任等级 0）。版主、管理员与 AI 账号不受限制。",
+        "required": [
+          "restrictHours",
+          "postsPerDay",
+          "commentsPerDay",
+          "allowLinks"
+        ],
+        "properties": {
+          "allowLinks": {
+            "type": "boolean",
+            "description": "新账号能否在帖子、评论里贴外部链接。"
+          },
+          "commentsPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "description": "新账号 24 小时内最多发几条评论；0 不限。",
+            "minimum": 0
+          },
+          "postsPerDay": {
+            "type": "integer",
+            "format": "int32",
+            "description": "新账号 24 小时内最多发布几篇帖子；0 不限。",
+            "minimum": 0
+          },
+          "restrictHours": {
+            "type": "integer",
+            "format": "int32",
+            "description": "注册后多少小时内算新账号；0 关闭全部限制。",
+            "minimum": 0
           }
         }
       },
@@ -23669,6 +24145,59 @@
           }
         }
       },
+      "QueuedJob": {
+        "type": "object",
+        "required": [
+          "id",
+          "task",
+          "attempts",
+          "maxAttempts",
+          "runAt",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lockedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "maxAttempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "runAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "task": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "QuotaView": {
         "type": "object",
         "description": "今日额度（AI-023）。只给百分比，不给 token 数与上限。",
@@ -23761,6 +24290,34 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "ReadOnly": {
+        "type": "object",
+        "description": "只读维护模式：除登录、登出外的写请求返回 503 `READ_ONLY`；版主与管理员不受影响。",
+        "required": [
+          "enabled",
+          "message"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string",
+            "description": "给用户看的说明，最多 200 字；空时用默认提示。"
+          }
+        }
+      },
+      "ReadOnlyView": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "string"
           }
         }
       },
@@ -23926,9 +24483,18 @@
         "description": "注册与登录。",
         "required": [
           "open",
-          "mihoyoLogin"
+          "mihoyoLogin",
+          "emailDomainBlocklist",
+          "reservedUsernames"
         ],
         "properties": {
+          "emailDomainBlocklist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "不允许注册的邮箱域名（小写，也拦它的子域名），例如 `mailinator.com`。"
+          },
           "mihoyoLogin": {
             "type": "boolean",
             "description": "米游社扫码登录与绑定。关闭时扫码接口返回 503 `MIHOYO_DISABLED`。"
@@ -23936,6 +24502,13 @@
           "open": {
             "type": "boolean",
             "description": "注册总开关（REG-002）。关闭时邮箱注册与米游社首登建号都被拒绝，已有账号不受影响。"
+          },
+          "reservedUsernames": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "用户不能改成的用户名（不区分大小写，整名匹配），例如 `admin`、`官方`。后台改名不受限制。"
           }
         }
       },
@@ -24772,50 +25345,30 @@
       "SearchStatus": {
         "type": "object",
         "required": [
-          "engineConfigured",
-          "dbPosts",
-          "dbComments",
-          "reindexing"
+          "configured",
+          "ok"
         ],
         "properties": {
-          "dbComments": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "dbPosts": {
-            "type": "integer",
-            "format": "int64",
-            "description": "数据库里已发布的帖子数、评论数（索引只收公开的，略少是正常的）。"
-          },
-          "engineConfigured": {
-            "type": "boolean",
-            "description": "没有配置搜索引擎时全部查询走数据库兜底。"
-          },
-          "engineError": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "读取索引统计失败的原因（只给管理员排障）。"
-          },
-          "indexedComments": {
+          "comments": {
             "type": [
               "integer",
               "null"
             ],
-            "format": "int64"
+            "minimum": 0
           },
-          "indexedPosts": {
+          "configured": {
+            "type": "boolean",
+            "description": "是否配置了搜索引擎；没配时搜索走数据库。"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "posts": {
             "type": [
               "integer",
               "null"
             ],
-            "format": "int64",
-            "description": "索引里的文档数；读不到（未配置或搜索引擎不可用）时为空。"
-          },
-          "reindexing": {
-            "type": "boolean",
-            "description": "本实例正在重建索引。"
+            "minimum": 0
           }
         }
       },
@@ -25360,28 +25913,77 @@
           }
         }
       },
+      "SiteStatus": {
+        "type": "object",
+        "properties": {
+          "announcement": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AnnouncementView",
+                "description": "当前要显示的公告；没有时为空。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "readOnly": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReadOnlyView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "SiteValues": {
         "type": "object",
         "description": "全部可在线修改的参数。",
         "required": [
+          "announcement",
+          "readOnly",
           "registration",
+          "newUser",
+          "filter",
+          "ipBans",
           "exam",
           "hot",
           "moderation",
           "rateLimit"
         ],
         "properties": {
+          "announcement": {
+            "$ref": "#/components/schemas/Announcement"
+          },
           "exam": {
             "$ref": "#/components/schemas/ExamParams"
+          },
+          "filter": {
+            "$ref": "#/components/schemas/ContentFilter"
           },
           "hot": {
             "$ref": "#/components/schemas/HotParams"
           },
+          "ipBans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpBan"
+            }
+          },
           "moderation": {
             "$ref": "#/components/schemas/ModerationParams"
           },
+          "newUser": {
+            "$ref": "#/components/schemas/NewUserLimits"
+          },
           "rateLimit": {
             "$ref": "#/components/schemas/RateLimitParams"
+          },
+          "readOnly": {
+            "$ref": "#/components/schemas/ReadOnly"
           },
           "registration": {
             "$ref": "#/components/schemas/Registration"
@@ -25422,6 +26024,23 @@
           "startedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "StorageStatus": {
+        "type": "object",
+        "required": [
+          "configured",
+          "publicBaseUrl"
+        ],
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "description": "配置了存储桶；没配时上传接口返回 503。"
+          },
+          "publicBaseUrl": {
+            "type": "string",
+            "description": "对外访问地址前缀。"
           }
         }
       },
@@ -25538,6 +26157,54 @@
           "titleHighlighted": {
             "type": "string",
             "description": "已做 HTML 转义的标题，命中词包在 `<mark>` 里，可直接作为 HTML 渲染。"
+          }
+        }
+      },
+      "SystemStatus": {
+        "type": "object",
+        "required": [
+          "version",
+          "startedAt",
+          "nodeId",
+          "cluster",
+          "database",
+          "search",
+          "storage",
+          "mail",
+          "jobs"
+        ],
+        "properties": {
+          "cluster": {
+            "type": "boolean",
+            "description": "是否多实例部署（事件经数据库转发给其他实例）。"
+          },
+          "database": {
+            "$ref": "#/components/schemas/DatabaseStatus"
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/JobsStatus"
+          },
+          "mail": {
+            "$ref": "#/components/schemas/MailStatus"
+          },
+          "nodeId": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "search": {
+            "$ref": "#/components/schemas/SearchStatus"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "本实例的启动时间。"
+          },
+          "storage": {
+            "$ref": "#/components/schemas/StorageStatus"
+          },
+          "version": {
+            "type": "string"
           }
         }
       },
@@ -25674,6 +26341,77 @@
           }
         ],
         "description": "被举报目标的现状与快照。"
+      },
+      "TaskCount": {
+        "type": "object",
+        "required": [
+          "task",
+          "ready",
+          "scheduled",
+          "running",
+          "failed"
+        ],
+        "properties": {
+          "failed": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "ready": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "running": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scheduled": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "task": {
+            "type": "string"
+          }
+        }
+      },
+      "TestMailInput": {
+        "type": "object",
+        "required": [
+          "to"
+        ],
+        "properties": {
+          "to": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "TestMailResult": {
+        "type": "object",
+        "required": [
+          "to",
+          "devLog",
+          "ok"
+        ],
+        "properties": {
+          "devLog": {
+            "type": "boolean",
+            "description": "发信器是只写日志的开发模式时为 true：没有真的发出去。"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "发送失败的原因（发信通道返回的错误）。"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "to": {
+            "type": "string",
+            "description": "实际发往的地址（已规范化）。"
+          }
+        }
       },
       "Trends": {
         "type": "object",
@@ -26128,6 +26866,29 @@
             "description": "累计投出的丁尼。"
           }
         }
+      },
+      "WatchedWord": {
+        "type": "object",
+        "required": [
+          "word",
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/WordAction"
+          },
+          "word": {
+            "type": "string",
+            "description": "按字面匹配，英文字母不区分大小写。"
+          }
+        }
+      },
+      "WordAction": {
+        "type": "string",
+        "enum": [
+          "block",
+          "censor"
+        ]
       },
       "WorkflowEvent": {
         "type": "object",

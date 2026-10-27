@@ -1,86 +1,21 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import { GraduationCap } from '@lucide/vue'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import { ApiError, api, unwrap } from '~/lib/api'
-import type { Schemas } from '~/lib/api'
+import { api, unwrap } from '~/lib/api'
 import { formatTime } from '~/lib/format'
-import type { SettingValue, SiteValues } from '~/lib/settings'
-import { getPath, sameValue, setPath, settingSections } from '~/lib/settings'
+import { getPath, settingSections } from '~/lib/settings'
 
 definePageMeta({ admin: true })
 
-const { run, failure, success } = useNotify()
+const { run } = useNotify()
 const confirm = useConfirm()
-const settings = ref<Schemas['SiteSettings'] | null>(null)
-const draft = ref<SiteValues | null>(null)
-const errors = ref<Record<string, string>>({})
-const loading = ref(false)
-const saving = ref(false)
-
-function adopt(next: Schemas['SiteSettings']) {
-  settings.value = next
-  draft.value = structuredClone(toRaw(next.values))
-  errors.value = {}
-}
-
-async function load() {
-  loading.value = true
-  try {
-    adopt(await unwrap(api.GET('/v1/admin/settings')))
-  }
-  catch (error) {
-    failure(error)
-  }
-  finally {
-    loading.value = false
-  }
-}
-onMounted(load)
-
-const allFields = settingSections.flatMap(section => section.fields)
-const dirtyPaths = computed(() => {
-  if (!settings.value || !draft.value) return []
-  return allFields
-    .map(field => field.path)
-    .filter(path => !sameValue(getPath(draft.value, path), getPath(settings.value!.values, path)))
-})
+const { settings, draft, errors, loading, saving, dirtyPaths, load, value, update, discard, save }
+  = useSiteSettings(settingSections.flatMap(section => section.fields.map(field => field.path)))
 const overriddenCount = computed(() => settings.value?.overridden.length ?? 0)
-
-function value(path: string) {
-  return getPath(draft.value, path)
-}
-function update(path: string, next: SettingValue) {
-  if (!draft.value) return
-  setPath(draft.value, path, next)
-  delete errors.value[path]
-}
-
-function discard() {
-  if (settings.value) adopt(settings.value)
-}
-
-async function save() {
-  if (!draft.value || !dirtyPaths.value.length) return
-  saving.value = true
-  try {
-    adopt(await unwrap(api.PUT('/v1/admin/settings', { body: { values: draft.value } })))
-    success('已保存，本实例立即生效，其他实例最长 1 分钟内生效')
-  }
-  catch (error) {
-    if (error instanceof ApiError && error.problem.errors?.length) {
-      errors.value = Object.fromEntries(error.problem.errors.map(e => [e.field, e.detail]))
-    }
-    failure(error)
-  }
-  finally {
-    saving.value = false
-  }
-}
 
 async function setExamRequired(on: boolean) {
   if (!settings.value || on === settings.value.examRequired) return
@@ -112,12 +47,6 @@ async function setExamRequired(on: boolean) {
     saving.value = false
   }
 }
-
-// 离开页面前提醒还没保存的修改。
-onBeforeRouteLeave(async () => {
-  if (!dirtyPaths.value.length) return true
-  return confirm({ title: '放弃未保存的修改？', description: `还有 ${dirtyPaths.value.length} 项没有保存。`, confirmLabel: '放弃', destructive: true })
-})
 
 const navItems = [{ id: 'access', title: '入站考试', icon: GraduationCap }, ...settingSections]
 const active = ref('access')
@@ -216,22 +145,6 @@ useEventListener('scroll', () => {
       </div>
     </div>
 
-    <Transition
-      enter-active-class="transition duration-150 ease-out" enter-from-class="translate-y-2 opacity-0"
-      leave-active-class="transition duration-100 ease-in" leave-to-class="translate-y-2 opacity-0"
-    >
-      <div v-if="dirtyPaths.length" class="fixed inset-x-0 bottom-4 z-30 flex justify-center px-4">
-        <div class="flex w-full max-w-xl items-center gap-3 rounded-xl border bg-popover px-4 py-3 shadow-lg">
-          <span class="size-2 shrink-0 rounded-full bg-brand-strong" />
-          <span class="flex-1 text-sm">{{ dirtyPaths.length }} 项修改未保存</span>
-          <Button variant="ghost" size="sm" :disabled="saving" @click="discard">
-            放弃
-          </Button>
-          <Button size="sm" :disabled="saving" @click="save">
-            {{ saving ? '保存中…' : '保存' }}
-          </Button>
-        </div>
-      </div>
-    </Transition>
+    <AdminSaveBar :count="dirtyPaths.length" :saving="saving" @save="save" @discard="discard" />
   </div>
 </template>

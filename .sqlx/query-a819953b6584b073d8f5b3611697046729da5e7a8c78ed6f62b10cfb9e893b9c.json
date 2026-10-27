@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT action FROM admin_audit_log WHERE action LIKE 'system.%' ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "action",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "admin_audit_log",
+            "name": "action"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a819953b6584b073d8f5b3611697046729da5e7a8c78ed6f62b10cfb9e893b9c"
+}

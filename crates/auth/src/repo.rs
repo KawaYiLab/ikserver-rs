@@ -468,6 +468,15 @@ pub(crate) async fn exam_passed_at(
         .await
 }
 
+pub(crate) async fn registered_at(
+    conn: &mut PgConnection,
+    id: i64,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar!("SELECT created_at FROM users WHERE id = $1", id)
+        .fetch_optional(conn)
+        .await
+}
+
 pub(crate) async fn set_level(
     conn: &mut PgConnection,
     id: i64,

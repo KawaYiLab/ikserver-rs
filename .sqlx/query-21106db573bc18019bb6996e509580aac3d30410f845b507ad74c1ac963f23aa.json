@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.identifier AS task,\n                  count(*) FILTER (WHERE j.is_available AND j.run_at <= now()) AS \"ready!\",\n                  count(*) FILTER (WHERE j.is_available AND j.run_at > now()) AS \"scheduled!\",\n                  count(*) FILTER (WHERE j.locked_at IS NOT NULL) AS \"running!\",\n                  count(*) FILTER (WHERE j.locked_at IS NULL AND j.attempts >= j.max_attempts) AS \"failed!\"\n             FROM graphile_worker._private_jobs j\n             JOIN graphile_worker._private_tasks t ON t.id = j.task_id\n            GROUP BY t.identifier\n            ORDER BY t.identifier",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "task",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_tasks",
+            "name": "identifier"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "ready!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "scheduled!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "running!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "failed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "21106db573bc18019bb6996e509580aac3d30410f845b507ad74c1ac963f23aa"
+}

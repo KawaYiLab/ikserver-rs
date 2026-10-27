@@ -1983,6 +1983,165 @@ async fn site_values_override_deploy_config(db: PgPool) {
     );
 }
 
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn announcement_and_read_only_mode(db: PgPool) {
+    let app = setup(&db).await;
+    let base = "/v1/admin/settings";
+    let (_, site) = call(&app, USER, "GET", "/v1/site", Value::Null).await;
+    assert_eq!(site, json!({ "announcement": null, "readOnly": null }));
+
+    let (_, settings) = call(&app, ADMIN, "GET", base, Value::Null).await;
+    let mut values = settings["values"].clone();
+    values["announcement"] = json!({
+        "enabled": true, "text": "今晚 23:00 维护", "link": "", "tone": "warning",
+        "startsAt": null, "endsAt": "2999-01-01T00:00:00Z",
+    });
+    values["readOnly"] = json!({ "enabled": true, "message": "" });
+    let (status, body) = call(&app, ADMIN, "PUT", base, json!({ "values": values })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (_, site) = call(&app, USER, "GET", "/v1/site", Value::Null).await;
+    assert_eq!(site["announcement"]["text"], "今晚 23:00 维护");
+    assert_eq!(site["announcement"]["tone"], "warning");
+    assert_eq!(site["announcement"]["link"], Value::Null);
+    assert_eq!(site["announcement"]["id"].as_str().unwrap().len(), 16);
+    assert!(site["readOnly"]["message"].is_string());
+
+    // 普通用户不能写，读不受影响；版主照常写。
+    let (status, body) = call(&app, USER, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(body["code"], "READ_ONLY");
+    assert_eq!(
+        call(&app, USER, "GET", "/v1/me", Value::Null).await.0,
+        StatusCode::OK
+    );
+    let (status, body) = call(&app, MODERATOR, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // 公告时间段已过就不显示。
+    values["announcement"]["endsAt"] = json!("2001-01-01T00:00:00Z");
+    values["readOnly"]["enabled"] = json!(false);
+    let (status, body) = call(&app, ADMIN, "PUT", base, json!({ "values": values })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, site) = call(&app, USER, "GET", "/v1/site", Value::Null).await;
+    assert_eq!(site, json!({ "announcement": null, "readOnly": null }));
+    let (status, body) = call(&app, USER, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn content_and_account_rules(db: PgPool) {
+    let app = setup(&db).await;
+    sqlx::query!("INSERT INTO categories (id, slug, name) VALUES (10, 'chat', '闲聊')")
+        .execute(&db)
+        .await
+        .unwrap();
+    let base = "/v1/admin/settings";
+    let (_, settings) = call(&app, ADMIN, "GET", base, Value::Null).await;
+    let mut values = settings["values"].clone();
+    values["filter"]["words"] = json!([
+        { "word": "外挂", "action": "block" },
+        { "word": "代练", "action": "censor" },
+    ]);
+    // 测试账号都是刚建的，算新账号。
+    values["newUser"] =
+        json!({ "restrictHours": 24, "postsPerDay": 1, "commentsPerDay": 1, "allowLinks": false });
+    values["registration"]["emailDomainBlocklist"] = json!(["spam.com"]);
+    values["registration"]["reservedUsernames"] = json!(["官方客服"]);
+    let (status, body) = call(&app, ADMIN, "PUT", base, json!({ "values": values })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let publish = "/v1/posts?publish=true";
+    let (status, body) = call(
+        &app,
+        USER,
+        "POST",
+        publish,
+        json!({ "title": "出售外挂", "body": "正文", "categoryId": "10" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["errors"][0]["field"], "title");
+    assert_eq!(body["errors"][0]["code"], "BLOCKED_WORD");
+    let (status, post) = call(
+        &app,
+        USER,
+        "POST",
+        publish,
+        json!({ "title": "求助", "body": "找代练", "categoryId": "10" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{post}");
+    assert_eq!(post["body"], "找**");
+    let (status, body) = call(
+        &app,
+        USER,
+        "POST",
+        publish,
+        json!({ "title": "第二篇", "body": "正文", "categoryId": "10" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(body["code"], "NEW_USER_LIMIT");
+
+    let comments = format!("/v1/posts/{}/comments", post["id"].as_str().unwrap());
+    let (status, body) = call(
+        &app,
+        USER,
+        "POST",
+        &comments,
+        json!({ "body": "看 https://x.cn" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["errors"][0]["code"], "LINKS_NOT_ALLOWED");
+    let (status, body) = call(&app, USER, "POST", &comments, json!({ "body": "顶一下" })).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = call(&app, USER, "POST", &comments, json!({ "body": "再顶" })).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    // 版主不受新账号限制与屏蔽词影响。
+    for text in ["外挂 https://x.cn", "再来一条"] {
+        let (status, body) =
+            call(&app, MODERATOR, "POST", &comments, json!({ "body": text })).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+
+    let (status, body) = call(
+        &app,
+        USER,
+        "PUT",
+        "/v1/me/username",
+        json!({ "username": "官方客服" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["errors"][0]["code"], "USERNAME_RESERVED");
+    let (status, body) = call(
+        &app,
+        USER,
+        "POST",
+        "/v1/auth/email-codes",
+        json!({ "email": "a@mx.spam.com", "purpose": "register" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["errors"][0]["code"], "EMAIL_DOMAIN_BLOCKED");
+
+    // 测试请求没有对端地址，按 0.0.0.0 计。
+    values["ipBans"] = json!([{ "cidr": "0.0.0.0", "note": "测试", "expiresAt": null }]);
+    let (status, body) = call(&app, ADMIN, "PUT", base, json!({ "values": values })).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = call(&app, USER, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "IP_BANNED");
+    assert_eq!(
+        call(&app, USER, "GET", "/v1/me", Value::Null).await.0,
+        StatusCode::OK
+    );
+    let (status, body) = call(&app, MODERATOR, "POST", "/v1/me/check-in", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 /// 原始字节请求（剧情库语料包上传）。
 async fn send_raw(app: &Router, token: &str, uri: &str, body: Vec<u8>) -> (StatusCode, Value) {
     let request = Request::builder()
@@ -2328,5 +2487,100 @@ async fn ai_mcp_servers_are_managed_in_admin(db: PgPool) {
             "ai.mcp_tool.save",
             "ai.mcp_server.delete"
         ]
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn system_status_and_dead_jobs(db: PgPool) {
+    let app = setup(&db).await;
+    let (status, _) = call(&app, MODERATOR, "GET", "/v1/admin/system", Value::Null).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "只有管理员能看");
+
+    // 一个用完重试次数的任务（死信）。
+    let job_id = sqlx::query_scalar!(
+        r#"SELECT id AS "id!" FROM graphile_worker.add_job('fanout_new_post', '{}'::json, max_attempts => 1)"#
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "UPDATE graphile_worker._private_jobs SET attempts = 1, last_error = 'boom' WHERE id = $1",
+        job_id
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+
+    let (status, body) = call(&app, ADMIN, "GET", "/v1/admin/system", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["database"]["ok"], true);
+    assert_eq!(body["database"]["pendingMigrations"], 0);
+    assert_eq!(body["mail"]["provider"], "dev_log");
+    assert_eq!(body["jobs"]["failed"], 1);
+    assert_eq!(body["jobs"]["tasks"][0]["task"], "fanout_new_post");
+
+    let (_, jobs) = call(&app, ADMIN, "GET", "/v1/admin/system/jobs", Value::Null).await;
+    assert_eq!(jobs[0]["id"], job_id.to_string());
+    assert_eq!(jobs[0]["lastError"], "boom");
+    let (status, _) = call(
+        &app,
+        ADMIN,
+        "GET",
+        "/v1/admin/system/jobs?state=nope",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // 重试：尝试次数清零、马上可执行。
+    let path = format!("/v1/admin/system/jobs/{job_id}");
+    let (status, job) = call(&app, ADMIN, "POST", &format!("{path}/retry"), Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{job}");
+    assert_eq!(job["attempts"], 0);
+    let (_, body) = call(&app, ADMIN, "GET", "/v1/admin/system", Value::Null).await;
+    assert_eq!(body["jobs"]["failed"], 0);
+    assert_eq!(body["jobs"]["ready"], 1);
+
+    // 删除：从队列移除；再删报不存在。
+    let (status, _) = call(&app, ADMIN, "DELETE", &path, Value::Null).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, body) = call(&app, ADMIN, "DELETE", &path, Value::Null).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(body["code"], "JOB_NOT_FOUND");
+
+    // 测试邮件：开发模式只写日志。
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/system/test-mail",
+        json!({ "to": "bad" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["errors"][0]["field"], "to");
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/system/test-mail",
+        json!({ "to": " Boss@Example.com " }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body,
+        json!({ "to": "boss@example.com", "devLog": true, "ok": true, "error": null })
+    );
+
+    let actions = sqlx::query_scalar!(
+        "SELECT action FROM admin_audit_log WHERE action LIKE 'system.%' ORDER BY id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        actions,
+        ["system.job.retry", "system.job.delete", "system.mail.test"]
     );
 }

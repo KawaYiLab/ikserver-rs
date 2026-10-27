@@ -8,7 +8,7 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
 use ik_kernel::config::Config;
 use ik_kernel::mail::Mailer;
-use ik_kernel::site::Site;
+use ik_kernel::site::{Site, SiteValues};
 use sqlx::PgPool;
 
 /// 认证接口每 IP 每条路由每分钟 20 次（RL-001）。
@@ -60,6 +60,14 @@ impl AuthState {
     pub fn with_site(mut self, site: Site) -> Self {
         self.site = Some(site);
         self
+    }
+
+    /// 后台可改的站点参数；没有接上时为空（规则都按关闭处理）。
+    pub async fn site_values(&self) -> Option<Arc<SiteValues>> {
+        match &self.site {
+            Some(site) => Some(site.get().await),
+            None => None,
+        }
     }
 
     /// 当前是否开放注册（REG-002）。

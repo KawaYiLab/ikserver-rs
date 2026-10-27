@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT current_setting('server_version') AS \"version!\",\n                  pg_database_size(current_database()) AS \"size!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "size!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "50b3ffe81c7b6c61583536554278e8ebd1bb02d7e1956f659ca35827b15922cd"
+}

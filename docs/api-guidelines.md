@@ -83,7 +83,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 | code | status | 中文 detail（默认文案） | 说明 |
 |---|---|---|---|
-| VALIDATION_FAILED | 400 | 请求参数不合法 | 带 errors[]；也用于 JSON 字段缺失/类型错/多余字段 |
+| VALIDATION_FAILED | 400 | 请求参数不合法 | 带 errors[]；也用于 JSON 字段缺失/类型错/多余字段。后台「内容与安全」规则的字段码：`BLOCKED_WORD`（命中屏蔽词）、`LINKS_NOT_ALLOWED`（新账号贴外链）、`USERNAME_RESERVED`（保留用户名）、`EMAIL_DOMAIN_BLOCKED`（注册邮箱域名被拒） |
 | INVALID_JSON | 400 | 请求体不是合法的 JSON | |
 | CURSOR_INVALID | 400 | 分页游标无效 | |
 | IDEMPOTENCY_KEY_INVALID | 400 | 幂等键格式不正确 | 需为 UUID |
@@ -118,6 +118,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | CSRF_REJECTED | 403 | 跨站请求被拒绝 | CsrfLayer 拒绝 |
 | FORBIDDEN | 403 | 没有权限执行该操作 | |
 | EXAM_REQUIRED | 403 | 需要先通过入站考试才能执行此操作 | |
+| IP_BANNED | 403 | 你所在的网络已被限制，暂时不能执行此操作 | 后台 IP 封禁命中的写请求（含登录注册）；版主、管理员登录后不受影响 |
+| AUTHORIZATION_REVOKED | 403 | 对话授权已变更 | AI 代用户执行写操作时，这段对话的授权已被撤销或改动（QQ 机器人等） |
 | ANONYMOUS_POST_LOCKED | 403 | 匿名委托发布后不能再修改、下线或删除 | POST-043 |
 | CATEGORY_ADMIN_ONLY | 403 | 只有管理员可以在该分区发帖 | |
 | ACCOUNT_BLOCKED | 403 | 该账号已被封禁或已注销 | |
@@ -155,6 +157,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REPORT_ALREADY_CLAIMED | 409 | 该举报已被 <名字> 领取，仅处理人可以处理 | 组里有被别人领取的举报；不做部分领取 |
 | NOT_FOUND | 404 | 内容不存在或不可见 | 存在性探测统一 404；路径里的 id 格式不对也是 404 |
 | VIDEO_NOT_FOUND | 404 | 视频不存在或已失效 | `GET /v1/videos/resolve`：B 站说视频不存在、被删除或不可见 |
+| JOB_NOT_FOUND | 404 | 任务不存在或正在执行 | 后台「系统状态」重试或删除后台任务 |
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
@@ -174,6 +177,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | IDEMPOTENCY_KEY_REUSED | 422 | 这个幂等键已经用在了另一个请求上 | 方法、路径、查询或请求体与第一次不同 |
 | WEBSOCKET_REQUIRED | 426 | 请使用 WebSocket 连接 | `/v1/realtime` 收到普通 HTTP 请求 |
 | RATE_LIMITED | 429 | 操作过于频繁，请稍后再试 | 带 `Retry-After`（秒） |
+| NEW_USER_LIMIT | 429 | 新注册的账号 24 小时内最多…次，请稍后再来 | 后台「新账号限制」；带 `Retry-After` |
 | UPLOAD_VERIFICATION_BUSY | 429 | 上传校验繁忙，请稍后重试 | 排队已满；带 `Retry-After` |
 | UPLOAD_VERIFICATION_TIMEOUT | 429 | 上传校验超时，请稍后重试 | 排队或校验超时；带 `Retry-After` |
 | CODE_COOLDOWN | 429 | 验证码发送过于频繁，请 N 秒后再试 | 仅注册用途；带 `Retry-After` |
@@ -185,7 +189,8 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | EXAM_NOT_AVAILABLE | 503 | 题库暂未配置，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | MIHOYO_UPSTREAM_ERROR | 502 | 米游社服务暂时不可用，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | VIDEO_UPSTREAM_ERROR | 502 | B 站服务暂时不可用，请稍后再试 | 视频预览时 B 站超时或报错；5xx 统一文案，客户端按 code 区分。保存帖子不受影响 |
-| MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | `IK_MIHOYO__ENABLED=false`；5xx 统一文案 |
+| MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | 后台「系统设置」关闭了扫码登录（缺省取 `IK_MIHOYO__ENABLED`）；5xx 统一文案 |
+| READ_ONLY | 503 | 后台填写的维护说明 | 只读维护模式下普通用户与游客的写请求；带 `Retry-After`；登录登出、后台接口不受影响 |
 | QQ_BOT_DISABLED | 409 | QQ 机器人没有开启 | 部署配置 `IK_QQBOT__ENABLED=false` 或管理后台关了 QQ 时生成绑定码（ADR 0008） |
 | QQ_BIND_CODE_LIMIT | 429 | 绑定码生成得太频繁了，请稍后再试 | 同时有 3 个有效的 QQ 绑定码，或一小时内生成了 10 个（ADR 0008） |
 | STORY_DISABLED | 503 | 剧情库暂不可用 | 还没有上传语料（没有生效版本）；5xx 统一文案 |

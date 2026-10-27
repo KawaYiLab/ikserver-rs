@@ -94,9 +94,11 @@ impl AppState {
             std::time::Duration::from_secs(config.video.timeout_secs),
         )?;
         let content = ContentState::new(db.clone(), ids.clone(), publisher.clone(), media.clone())
-            .with_video_api(Arc::new(bilibili));
+            .with_video_api(Arc::new(bilibili))
+            .with_site(site.clone());
         let comments =
-            CommentsState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
+            CommentsState::new(db.clone(), ids.clone(), publisher.clone(), media.clone())
+                .with_site(site.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
         let exam =
             ExamState::new(db.clone(), ids.clone(), config.exam.clone()).with_site(site.clone());

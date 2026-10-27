@@ -91,6 +91,18 @@ fn email_taken() -> Problem {
     Problem::conflict("EMAIL_TAKEN", "该邮箱已注册")
 }
 
+/// 注册邮箱的域名在后台的黑名单里（一次性邮箱等）。
+async fn check_email_domain(state: &AuthState, email: &str) -> Result<(), Problem> {
+    match state.site_values().await {
+        Some(values) if values.email_domain_blocked(email) => Err(Problem::field(
+            "email",
+            "EMAIL_DOMAIN_BLOCKED",
+            "这个邮箱域名不能用来注册，请换一个邮箱",
+        )),
+        _ => Ok(()),
+    }
+}
+
 pub fn registration_closed() -> Problem {
     Problem::new(
         StatusCode::FORBIDDEN,
@@ -147,6 +159,7 @@ pub async fn send_code(
             if !state.registration_open().await {
                 return Err(registration_closed());
             }
+            check_email_domain(state, &email).await?;
             if repo::email_taken(&mut conn, &email).await? {
                 return Err(email_taken());
             }
@@ -329,6 +342,7 @@ pub async fn register(
     if !state.registration_open().await {
         return Err(registration_closed());
     }
+    check_email_domain(state, &email).await?;
     {
         let mut conn = state.db.acquire().await?;
         if repo::email_taken(&mut conn, &email).await? {

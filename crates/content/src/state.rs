@@ -6,6 +6,7 @@ use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
 use ik_kernel::jobs::Jobs;
+use ik_kernel::site::Site;
 use ik_media::MediaState;
 use moka::future::Cache;
 use sqlx::PgPool;
@@ -38,6 +39,8 @@ pub struct ContentState {
     /// B 站视频信息（带缓存）。默认不访问网络，server 用 [`ContentState::with_video_api`] 接上真实上游。
     pub(crate) videos: Videos,
     pub(crate) video_lookups: Arc<DefaultKeyedRateLimiter<i64>>,
+    /// 后台可改的站点参数（屏蔽词、新账号限制）；没有时不检查。
+    pub site: Option<Site>,
 }
 
 impl ContentState {
@@ -59,7 +62,15 @@ impl ContentState {
             video_lookups: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 VIDEO_LOOKUPS_PER_MINUTE,
             ))),
+            site: None,
         }
+    }
+
+    /// 接上后台可改的站点参数（`serve` 启动时调用）。
+    #[must_use]
+    pub fn with_site(mut self, site: Site) -> Self {
+        self.site = Some(site);
+        self
     }
 
     /// 换上查询 B 站视频信息的上游（生产用 [`crate::bilibili::HttpBilibili`]，测试用假实现）。

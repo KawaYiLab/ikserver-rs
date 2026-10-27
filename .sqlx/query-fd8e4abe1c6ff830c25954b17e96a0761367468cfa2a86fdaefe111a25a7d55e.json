@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id AS \"id!\" FROM graphile_worker.add_job('fanout_new_post', '{}'::json, max_attempts => 1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "fd8e4abe1c6ff830c25954b17e96a0761367468cfa2a86fdaefe111a25a7d55e"
+}

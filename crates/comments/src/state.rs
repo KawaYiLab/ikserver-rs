@@ -4,6 +4,7 @@ use std::sync::{Arc, OnceLock};
 use chrono::{DateTime, Utc};
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::bus::{Effects, EventBus};
+use ik_kernel::site::Site;
 use ik_kernel::{Problem, Snowflake};
 use ik_media::MediaState;
 use sqlx::{PgConnection, PgPool};
@@ -24,6 +25,8 @@ pub struct CommentsState {
     pub(crate) limiter: Arc<DefaultKeyedRateLimiter<i64>>,
     /// 上层（ik-ai）注册的钩子；组装时注册一次，所有克隆共享。
     hooks: Arc<OnceLock<Arc<dyn CommentHooks>>>,
+    /// 后台可改的站点参数（屏蔽词、新账号限制）；没有时不检查。
+    pub site: Option<Site>,
 }
 
 /// 被回复的评论。
@@ -74,7 +77,15 @@ impl CommentsState {
             media,
             limiter: Arc::new(RateLimiter::keyed(Quota::per_minute(COMMENTS_PER_MINUTE))),
             hooks: Arc::new(OnceLock::new()),
+            site: None,
         }
+    }
+
+    /// 接上后台可改的站点参数（`serve` 启动时调用）。
+    #[must_use]
+    pub fn with_site(mut self, site: Site) -> Self {
+        self.site = Some(site);
+        self
     }
 
     /// 注册钩子（只能一次；重复注册返回 false）。

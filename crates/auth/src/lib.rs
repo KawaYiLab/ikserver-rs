@@ -6,6 +6,7 @@ pub mod admin;
 mod code;
 pub mod dto;
 mod extract;
+pub mod guard;
 pub mod interop;
 pub mod lifecycle;
 mod password;
@@ -14,7 +15,7 @@ mod routes;
 pub mod service;
 mod state;
 mod token;
-mod validate;
+pub mod validate;
 
 pub use admin::{AdminOperator, Operator, StaffOperator};
 pub use extract::{

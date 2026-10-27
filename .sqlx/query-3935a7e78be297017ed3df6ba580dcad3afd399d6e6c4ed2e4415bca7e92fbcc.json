@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT t.identifier\n           FROM graphile_worker._private_jobs j\n           JOIN graphile_worker._private_tasks t ON t.id = j.task_id\n          WHERE j.id = $1 AND j.locked_at IS NULL\n            FOR UPDATE OF j",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "identifier",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_tasks",
+            "name": "identifier"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3935a7e78be297017ed3df6ba580dcad3afd399d6e6c4ed2e4415bca7e92fbcc"
+}

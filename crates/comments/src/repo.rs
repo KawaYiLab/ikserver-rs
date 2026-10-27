@@ -804,3 +804,18 @@ pub(crate) async fn daily_comments(
     .await?;
     Ok(rows.into_iter().map(|r| (r.bucket, r.n)).collect())
 }
+
+/// 作者从 `since` 起发的评论数（新账号限制，含已删除的）。
+pub(crate) async fn count_since(
+    conn: &mut PgConnection,
+    author_id: i64,
+    since: DateTime<Utc>,
+) -> sqlx::Result<i64> {
+    sqlx::query_scalar!(
+        r#"SELECT count(*) AS "n!" FROM comments WHERE author_id = $1 AND created_at >= $2"#,
+        author_id,
+        since,
+    )
+    .fetch_one(conn)
+    .await
+}

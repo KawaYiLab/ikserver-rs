@@ -1,11 +1,13 @@
 //! 组装 HTTP 应用：状态、路由、中间件栈。`main.rs` 只负责命令行与进程生命周期。
 
+pub mod admin_system;
 pub mod admin_ui;
 pub mod app;
 pub mod idempotency;
 pub mod jobs;
 pub mod middleware;
 pub mod rate_limit;
+pub mod site;
 pub mod state;
 pub mod system;
 

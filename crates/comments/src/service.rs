@@ -180,6 +180,36 @@ pub(crate) async fn notify_new_comment(
 }
 
 /// 发表评论或回复。需要通过入站考试；帖子必须公开（作者本人也不能评论自己被隐藏的帖子，CMT-030）。
+/// 后台「内容与安全」的规则：屏蔽词（拦截或替换），新账号不能贴链接、24 小时内评论条数有上限。
+async fn apply_site_rules(
+    state: &CommentsState,
+    conn: &mut PgConnection,
+    principal: &Principal,
+    body: String,
+    now: DateTime<Utc>,
+) -> Result<String, Problem> {
+    let Some(site) = &state.site else {
+        return Ok(body);
+    };
+    if ik_auth::guard::exempt(principal) {
+        return Ok(body);
+    }
+    let values = site.get().await;
+    let body = ik_auth::guard::screen(&values, "body", &body)?;
+    if let Some(since) = ik_auth::guard::new_user_window(conn, &values, principal, now).await? {
+        if !values.new_user.allow_links && ik_kernel::site::has_link(&body) {
+            return Err(ik_auth::guard::links_not_allowed("body"));
+        }
+        let limit = values.new_user.comments_per_day;
+        if limit > 0
+            && repo::count_since(conn, principal.user_id.get(), since).await? >= i64::from(limit)
+        {
+            return Err(ik_auth::guard::new_user_limit("发评论", limit));
+        }
+    }
+    Ok(body)
+}
+
 pub async fn create(
     state: &CommentsState,
     principal: &Principal,
@@ -217,6 +247,7 @@ pub async fn create(
     let mut effects = Effects::new();
 
     let mut tx = state.db.begin().await?;
+    let body = apply_site_rules(state, &mut tx, principal, body, now).await?;
     let post = interop::lock_post(&mut tx, post_id)
         .await?
         .filter(|p| p.is_public)

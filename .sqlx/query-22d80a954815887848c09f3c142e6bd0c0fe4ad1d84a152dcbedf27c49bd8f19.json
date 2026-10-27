@@ -1,0 +1,114 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT j.id::text AS \"id!\", t.identifier AS task, j.attempts, j.max_attempts,\n                  left(j.last_error, 2000) AS last_error, j.run_at, j.created_at, j.updated_at, j.locked_at\n             FROM graphile_worker._private_jobs j\n             JOIN graphile_worker._private_tasks t ON t.id = j.task_id\n            WHERE j.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "task",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_tasks",
+            "name": "identifier"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "attempts",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_jobs",
+            "name": "attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "max_attempts",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_jobs",
+            "name": "max_attempts"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "last_error",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "run_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_jobs",
+            "name": "run_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_jobs",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_jobs",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "locked_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker._private_jobs",
+            "name": "locked_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "22d80a954815887848c09f3c142e6bd0c0fe4ad1d84a152dcbedf27c49bd8f19"
+}

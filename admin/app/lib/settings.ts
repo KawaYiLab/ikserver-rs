@@ -1,5 +1,5 @@
 import type { Component } from 'vue'
-import { ClipboardList, Flame, Gauge, ShieldAlert, UserPlus } from '@lucide/vue'
+import { ClipboardList, Construction, Flame, Gauge, Megaphone, ShieldAlert, UserPlus } from '@lucide/vue'
 import type { Schemas } from '~/lib/api'
 
 export type SiteValues = Schemas['SiteValues']
@@ -9,7 +9,12 @@ export interface SettingField {
   path: string
   label: string
   help?: string
-  kind: 'switch' | 'number'
+  kind: 'switch' | 'number' | 'text' | 'textarea' | 'select' | 'datetime'
+  /** `select` 的选项。 */
+  options?: { value: string, label: string }[]
+  placeholder?: string
+  /** 文本最长字数。 */
+  maxLength?: number
   min?: number
   max?: number
   step?: number
@@ -26,6 +31,33 @@ export interface SettingSection {
 
 /** 「系统设置」的分组。取值范围与后端 `SiteValues::validate` 一致。 */
 export const settingSections: SettingSection[] = [
+  {
+    id: 'announcement',
+    title: '站点公告',
+    description: '显示在主站顶部的横幅，用户可以关掉；内容或链接改了会重新出现。',
+    icon: Megaphone,
+    fields: [
+      { path: 'announcement.enabled', label: '显示公告', kind: 'switch' },
+      { path: 'announcement.text', label: '内容', kind: 'textarea', maxLength: 300, placeholder: '例如：今晚 23:00–23:30 停机维护' },
+      { path: 'announcement.link', label: '链接', help: '点击公告时打开，留空则不跳转。', kind: 'text', placeholder: 'https://', maxLength: 500 },
+      {
+        path: 'announcement.tone', label: '样式', kind: 'select',
+        options: [{ value: 'info', label: '普通' }, { value: 'warning', label: '醒目' }],
+      },
+      { path: 'announcement.startsAt', label: '开始显示', help: '留空为立即。', kind: 'datetime' },
+      { path: 'announcement.endsAt', label: '结束显示', help: '留空为一直显示。', kind: 'datetime' },
+    ],
+  },
+  {
+    id: 'readOnly',
+    title: '维护模式',
+    description: '开启后全站只读：普通用户与游客不能发帖、评论、私信等，版主与管理员不受影响。',
+    icon: Construction,
+    fields: [
+      { path: 'readOnly.enabled', label: '只读维护模式', kind: 'switch' },
+      { path: 'readOnly.message', label: '提示文字', help: '用户尝试写操作时看到；留空用默认提示。', kind: 'text', maxLength: 200, placeholder: '绳网正在维护，暂时只能浏览，请稍后再来' },
+    ],
+  },
   {
     id: 'registration',
     title: '注册与登录',
@@ -91,7 +123,8 @@ export const settingSections: SettingSection[] = [
   },
 ]
 
-export type SettingValue = boolean | number | string | string[]
+// string 要排在 boolean 前面：Vue 对同时允许两者的 prop 会把空字符串转成 true。
+export type SettingValue = string | number | boolean | string[] | null | unknown[]
 
 export function getPath(values: unknown, path: string): SettingValue {
   return path.split('.').reduce<any>((node, key) => node?.[key], values) as SettingValue
@@ -107,3 +140,11 @@ export function setPath(values: unknown, path: string, value: SettingValue) {
 export function sameValue(a: SettingValue, b: SettingValue) {
   return JSON.stringify(a) === JSON.stringify(b)
 }
+
+/** 「内容与安全」页的新账号限制。取值范围与后端一致。 */
+export const newUserFields: SettingField[] = [
+  { path: 'newUser.restrictHours', label: '新账号期限', help: '注册后这么久以内按新账号限制；0 关闭下面全部限制。', kind: 'number', min: 0, max: 720, unit: '小时' },
+  { path: 'newUser.postsPerDay', label: '每天最多发帖', help: '0 表示不限。', kind: 'number', min: 0, max: 1000, unit: '篇' },
+  { path: 'newUser.commentsPerDay', label: '每天最多评论', help: '0 表示不限。', kind: 'number', min: 0, max: 10000, unit: '条' },
+  { path: 'newUser.allowLinks', label: '允许贴外部链接', help: '关闭时新账号的帖子与评论里不能出现站外链接。', kind: 'switch' },
+]

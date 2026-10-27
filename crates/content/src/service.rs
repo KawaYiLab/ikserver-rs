@@ -556,6 +556,50 @@ async fn grant_first_publish_exp(
 
 // ---------- 写入 ----------
 
+/// 后台「内容与安全」的规则：屏蔽词（拦截或替换标题、正文），新账号不能贴链接、24 小时内发布篇数有上限。
+/// `prepared` 为空时只做发布数检查（已保存的草稿在保存时检查过）。
+async fn apply_site_rules(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    principal: &Principal,
+    prepared: Option<&mut Prepared>,
+    first_publish: bool,
+    now: DateTime<Utc>,
+) -> Result<(), Problem> {
+    let Some(site) = &state.site else {
+        return Ok(());
+    };
+    if ik_auth::guard::exempt(principal) {
+        return Ok(());
+    }
+    let values = site.get().await;
+    let window = ik_auth::guard::new_user_window(conn, &values, principal, now).await?;
+    if let Some(prepared) = prepared {
+        prepared.title = ik_auth::guard::screen(&values, "title", &prepared.title)?;
+        let body = ik_auth::guard::screen(&values, "body", &prepared.body)?;
+        if body != prepared.body {
+            // 编辑器状态里还是原文：丢掉它，编辑器改从正文恢复。
+            prepared.editor_state = None;
+            prepared.body = body;
+        }
+        if window.is_some()
+            && !values.new_user.allow_links
+            && ik_kernel::site::has_link(&prepared.body)
+        {
+            return Err(ik_auth::guard::links_not_allowed("body"));
+        }
+    }
+    let limit = values.new_user.posts_per_day;
+    if let Some(since) = window
+        && first_publish
+        && limit > 0
+        && repo::published_since(conn, principal.user_id.get(), since).await? >= i64::from(limit)
+    {
+        return Err(ik_auth::guard::new_user_limit("发布帖子", limit));
+    }
+    Ok(())
+}
+
 /// 新建帖子。`publish` 为真时直接发布，否则存为草稿。
 pub async fn create(
     state: &ContentState,
@@ -572,6 +616,7 @@ pub async fn create(
     let mut effects = Effects::new();
 
     let mut tx = state.db.begin().await?;
+    apply_site_rules(state, &mut tx, principal, Some(&mut prepared), publish, now).await?;
     let content = resolve(state, &mut tx, principal, prepared, &Existing::default()).await?;
     let seed = seed_for(content.is_anonymous, None)?;
     repo::insert_post(&mut tx, post_id, author_id, &content, seed.as_deref(), now).await?;
@@ -609,6 +654,7 @@ pub async fn save_draft(
     let now = Utc::now();
 
     let mut tx = state.db.begin().await?;
+    apply_site_rules(state, &mut tx, principal, Some(&mut prepared), false, now).await?;
     let row = lock_own_post(&mut tx, principal, post_id).await?;
     ensure_revision(&row, expected_revision)?;
     ensure_anonymity_unchanged(&row, prepared.is_anonymous)?;
@@ -681,6 +727,16 @@ pub async fn publish(
     if let Some(prepared) = &prepared {
         ensure_anonymity_unchanged(&row, prepared.is_anonymous)?;
     }
+    let first_publish = row.first_published_at.is_none();
+    apply_site_rules(
+        state,
+        &mut tx,
+        principal,
+        prepared.as_mut(),
+        first_publish,
+        now,
+    )
+    .await?;
 
     let mut changed = false;
     let mut category_id = row.category_id;

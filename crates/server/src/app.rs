@@ -89,6 +89,8 @@ impl Modify for SecuritySchemes {
 fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(system::router())
+        .merge(crate::site::router())
+        .merge(crate::admin_system::router())
         .merge(ik_auth::router())
         .merge(ik_content::router())
         .merge(ik_comments::router())
@@ -152,6 +154,10 @@ pub fn build_app(state: AppState) -> anyhow::Result<Router> {
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::idempotency::layer,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::site::guard,
         ))
         .with_state(state)
         .layer(axum::middleware::from_fn(middleware::timeout(
