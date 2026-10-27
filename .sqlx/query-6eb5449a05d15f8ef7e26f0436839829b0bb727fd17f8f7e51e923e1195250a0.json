@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id AS \"id!\" FROM graphile_worker.add_job('fanout_new_post', '{}'::json, max_attempts => 1)",
+  "query": "SELECT id AS \"id!\" FROM graphile_worker.add_job('content.fanout_new_post', '{}'::json, max_attempts => 1)",
   "describe": {
     "columns": [
       {
@@ -17,5 +17,5 @@
       null
     ]
   },
-  "hash": "fd8e4abe1c6ff830c25954b17e96a0761367468cfa2a86fdaefe111a25a7d55e"
+  "hash": "6eb5449a05d15f8ef7e26f0436839829b0bb727fd17f8f7e51e923e1195250a0"
 }
