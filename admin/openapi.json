@@ -11271,7 +11271,7 @@
           "comments"
         ],
         "summary": "帖子的评论",
-        "description": "所有评论按楼层排成一条线（回复也是普通的一层，带上被回复评论的摘要），默认从旧到新，`sort=newest` 时从新到旧。\n第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始，`floor` 从第几层开始。",
+        "description": "所有评论按楼层排成一条线（回复也是普通的一层，带上被回复评论的摘要），默认从旧到新，`sort=newest` 时从新到旧。\n第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。",
         "operationId": "list_comments",
         "parameters": [
           {
@@ -11310,16 +11310,6 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "floor",
-            "in": "query",
-            "description": "从第几层开始（跳楼）。那一层已删除或不可见时从排序方向上最近的一层开始；超出范围时给排在最后的一页。\n与 `cursor` / `anchor` 同时给时以它们为准。",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int32"
             }
           },
           {
@@ -16867,7 +16857,7 @@
               "string",
               "null"
             ],
-            "description": "往回翻页（与 `nextCursor` 方向相反）：从 `anchor` / `floor` 开始或往回翻过时才有。"
+            "description": "往回翻页（与 `nextCursor` 方向相反）：从 `anchor` 开始或往回翻过时才有。"
           }
         }
       },

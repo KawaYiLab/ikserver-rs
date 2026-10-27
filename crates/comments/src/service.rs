@@ -914,7 +914,7 @@ async fn fetch(
 ///
 /// 游标只记楼层号和往哪边取（`b` 为 true 往楼层小的方向），与排序无关；排序只决定这一页是
 /// 「往下翻」（`nextCursor`）还是「往回翻」（`prevCursor`），以及 `items` 的顺序。
-/// 三种起点：游标、`anchor` / `floor`（从那一层开始，前面还有时带 `prevCursor`）、都没有时从排序的开头开始。
+/// 三种起点：游标、`anchor`（从那条评论所在楼层开始，往回还有时带 `prevCursor`）、都没有时从排序的开头开始。
 pub async fn list(
     state: &CommentsState,
     viewer: Option<&Principal>,
@@ -933,13 +933,12 @@ pub async fn list(
     let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
 
     let start_floor = match (&cursor, query.anchor) {
-        (Some(_), _) => None,
         (None, Some(anchor)) => repo::get(&mut conn, anchor.get())
             .await?
             .filter(|c| c.post_id == post_id && c.hidden_at.is_none())
             .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
             .map(|c| c.floor),
-        (None, None) => query.floor.map(|f| f.max(1)),
+        _ => None,
     };
 
     // 往下翻时取的方向（与游标的 `b` 同义）：从旧到新往楼层大的方向取，从新到旧往楼层小的方向取。
@@ -957,14 +956,7 @@ pub async fn list(
                 floor - 1
             };
             let (rows, more) = fetch(&mut conn, post_id, &excluded, from, down, limit).await?;
-            if rows.is_empty() {
-                // 起点之后没有了（跳过了头）：从另一头往回取，给排在最后的一页。
-                let from = if down { 0 } else { i32::MAX };
-                let (rows, more) = fetch(&mut conn, post_id, &excluded, from, !down, limit).await?;
-                (rows, !down, more)
-            } else {
-                (rows, down, more)
-            }
+            (rows, down, more)
         }
         (None, None) => {
             let from = if down { i32::MAX } else { 0 };

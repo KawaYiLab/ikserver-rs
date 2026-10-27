@@ -709,16 +709,14 @@ fn floors(page: &ik_comments::dto::CommentsPage) -> Vec<i32> {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn newest_first_and_jumping_to_a_floor(db: PgPool) {
+async fn newest_first_pages_both_ways(db: PgPool) {
     let h = harness(db);
     let op = h.user(1).await;
     let post = h.post(&op, false).await;
     let mut all = Vec::new();
-    let mut authors = Vec::new();
     for i in 0..7 {
         let who = h.user(10 + i).await;
         all.push(h.comment(&who, post, None, "x").await);
-        authors.push(who);
     }
     let list = |q: CommentsQuery| service::list(&h.comments, None, post, q);
 
@@ -749,59 +747,6 @@ async fn newest_first_and_jumping_to_a_floor(db: PgPool) {
     let back = list(newest(page.prev_cursor, 2)).await.unwrap();
     assert_eq!(floors(&back), vec![7, 6]);
     assert!(back.prev_cursor.is_none() && back.next_cursor.is_none());
-
-    // 跳到第 3 层（从旧到新）：往回能翻到第 1 层。
-    let page = list(CommentsQuery {
-        floor: Some(3),
-        ..page_query(None, 2, None)
-    })
-    .await
-    .unwrap();
-    assert_eq!(floors(&page), vec![3, 4]);
-    assert!(page.accepted.is_none() && page.pinned.is_none());
-    let back = list(page_query(page.prev_cursor, 5, None)).await.unwrap();
-    assert_eq!(floors(&back), vec![1, 2]);
-
-    // 那一层删了就从下一层开始；超出范围给排在最后的一页。
-    service::delete(&h.comments, &authors[3], all[3])
-        .await
-        .unwrap();
-    let page = list(CommentsQuery {
-        floor: Some(4),
-        ..page_query(None, 2, None)
-    })
-    .await
-    .unwrap();
-    assert_eq!(floors(&page), vec![5, 6]);
-    let page = list(CommentsQuery {
-        floor: Some(4),
-        ..newest(None, 2)
-    })
-    .await
-    .unwrap();
-    assert_eq!(floors(&page), vec![3, 2]);
-    let past_end = list(CommentsQuery {
-        floor: Some(100),
-        ..page_query(None, 2, None)
-    })
-    .await
-    .unwrap();
-    assert_eq!(floors(&past_end), vec![6, 7]);
-    assert!(past_end.next_cursor.is_none());
-    let back = list(page_query(past_end.prev_cursor, 2, None))
-        .await
-        .unwrap();
-    assert_eq!(floors(&back), vec![3, 5]);
-    let below = list(CommentsQuery {
-        floor: Some(0),
-        ..newest(None, 2)
-    })
-    .await
-    .unwrap();
-    assert_eq!(floors(&below), vec![1]);
-    assert!(below.next_cursor.is_none());
-    let back = list(newest(below.prev_cursor, 2)).await.unwrap();
-    assert_eq!(floors(&back), vec![3, 2]);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

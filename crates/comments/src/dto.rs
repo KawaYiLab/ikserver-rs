@@ -90,7 +90,7 @@ pub struct CommentsPage {
     /// 沿排序方向往下翻页（默认是更新的楼层，`newest` 时是更早的楼层）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
-    /// 往回翻页（与 `nextCursor` 方向相反）：从 `anchor` / `floor` 开始或往回翻过时才有。
+    /// 往回翻页（与 `nextCursor` 方向相反）：从 `anchor` 开始或往回翻过时才有。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prev_cursor: Option<String>,
 }
@@ -118,9 +118,6 @@ pub struct CommentsQuery {
     /// 与 `cursor` 同时给时以 `cursor` 为准。
     #[param(value_type = Option<String>)]
     pub anchor: Option<Id<Comment>>,
-    /// 从第几层开始（跳楼）。那一层已删除或不可见时从排序方向上最近的一层开始；超出范围时给排在最后的一页。
-    /// 与 `cursor` / `anchor` 同时给时以它们为准。
-    pub floor: Option<i32>,
     /// 默认 `oldest`。翻页时要和第一页给同一个值。
     #[param(inline)]
     #[serde(default)]
