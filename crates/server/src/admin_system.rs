@@ -26,9 +26,9 @@ pub fn router() -> OpenApiRouter<AppState> {
     LazyLock::force(&STARTED_AT);
     OpenApiRouter::new()
         .routes(routes!(system_status))
-        .routes(routes!(list_jobs))
-        .routes(routes!(retry_job, delete_job))
-        .routes(routes!(test_mail))
+        .routes(routes!(list_system_jobs))
+        .routes(routes!(retry_system_job, delete_system_job))
+        .routes(routes!(send_test_mail))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -40,16 +40,16 @@ pub struct SystemStatus {
     pub node_id: u16,
     /// 是否多实例部署（事件经数据库转发给其他实例）。
     pub cluster: bool,
-    pub database: DatabaseStatus,
-    pub search: SearchStatus,
-    pub storage: StorageStatus,
-    pub mail: MailStatus,
-    pub jobs: JobsStatus,
+    pub database: SystemDatabase,
+    pub search: SystemSearch,
+    pub storage: SystemStorage,
+    pub mail: SystemMail,
+    pub jobs: SystemJobs,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct DatabaseStatus {
+pub struct SystemDatabase {
     pub ok: bool,
     /// 一次 ping 的往返耗时。
     pub latency_ms: Option<f64>,
@@ -65,7 +65,7 @@ pub struct DatabaseStatus {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchStatus {
+pub struct SystemSearch {
     /// 是否配置了搜索引擎；没配时搜索走数据库。
     pub configured: bool,
     pub ok: bool,
@@ -75,7 +75,7 @@ pub struct SearchStatus {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct StorageStatus {
+pub struct SystemStorage {
     /// 配置了存储桶；没配时上传接口返回 503。
     pub configured: bool,
     /// 对外访问地址前缀。
@@ -84,7 +84,7 @@ pub struct StorageStatus {
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct MailStatus {
+pub struct SystemMail {
     /// `dev_log`：只写日志不发信；`dual`：国内邮箱走 SMTP，其余走 Brevo。
     pub provider: String,
     pub smtp: bool,
@@ -94,7 +94,7 @@ pub struct MailStatus {
 
 #[derive(Debug, Default, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct JobsStatus {
+pub struct SystemJobs {
     /// 到点等待执行的任务。
     pub ready: i64,
     /// 还没到执行时间（含失败后等待重试）的任务。
@@ -103,12 +103,12 @@ pub struct JobsStatus {
     /// 用完重试次数、不再执行的任务（死信）。
     pub failed: i64,
     /// 按任务类型分开的计数，只列有任务的类型。
-    pub tasks: Vec<TaskCount>,
+    pub tasks: Vec<SystemTaskCount>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskCount {
+pub struct SystemTaskCount {
     pub task: String,
     pub ready: i64,
     pub scheduled: i64,
@@ -138,11 +138,11 @@ async fn system_status(
         cluster: config.bus.cluster,
         database,
         search,
-        storage: StorageStatus {
+        storage: SystemStorage {
             configured: !config.storage.bucket.is_empty(),
             public_base_url: config.storage.public_base_url.clone(),
         },
-        mail: MailStatus {
+        mail: SystemMail {
             provider: match config.mail.provider {
                 MailProvider::DevLog => "dev_log",
                 MailProvider::Dual => "dual",
@@ -156,8 +156,8 @@ async fn system_status(
     }))
 }
 
-async fn database_and_jobs(state: &AppState) -> (DatabaseStatus, JobsStatus) {
-    let mut status = DatabaseStatus {
+async fn database_and_jobs(state: &AppState) -> (SystemDatabase, SystemJobs) {
+    let mut status = SystemDatabase {
         ok: false,
         latency_ms: None,
         server_version: None,
@@ -171,12 +171,12 @@ async fn database_and_jobs(state: &AppState) -> (DatabaseStatus, JobsStatus) {
         Ok(conn) => conn,
         Err(error) => {
             tracing::warn!(%error, "系统状态：获取数据库连接失败");
-            return (status, JobsStatus::default());
+            return (status, SystemJobs::default());
         }
     };
     let started = Instant::now();
     if conn.ping().await.is_err() {
-        return (status, JobsStatus::default());
+        return (status, SystemJobs::default());
     }
     status.ok = true;
     status.latency_ms = Some(started.elapsed().as_secs_f64() * 1000.0);
@@ -202,7 +202,7 @@ async fn database_and_jobs(state: &AppState) -> (DatabaseStatus, JobsStatus) {
             .count();
     }
     let tasks = sqlx::query_as!(
-        TaskCount,
+        SystemTaskCount,
         r#"SELECT t.identifier AS task,
                   count(*) FILTER (WHERE j.is_available AND j.run_at <= now()) AS "ready!",
                   count(*) FILTER (WHERE j.is_available AND j.run_at > now()) AS "scheduled!",
@@ -219,7 +219,7 @@ async fn database_and_jobs(state: &AppState) -> (DatabaseStatus, JobsStatus) {
         tracing::warn!(%error, "系统状态：读取任务队列失败");
         Vec::new()
     });
-    let jobs = JobsStatus {
+    let jobs = SystemJobs {
         ready: tasks.iter().map(|t| t.ready).sum(),
         scheduled: tasks.iter().map(|t| t.scheduled).sum(),
         running: tasks.iter().map(|t| t.running).sum(),
@@ -229,7 +229,7 @@ async fn database_and_jobs(state: &AppState) -> (DatabaseStatus, JobsStatus) {
     (status, jobs)
 }
 
-async fn search_status(state: &AppState) -> SearchStatus {
+async fn search_status(state: &AppState) -> SystemSearch {
     let configured = state.search.engine_configured();
     let counts = if configured {
         state.search.document_counts().await
@@ -237,7 +237,7 @@ async fn search_status(state: &AppState) -> SearchStatus {
         Ok(None)
     };
     match counts {
-        Ok(counts) => SearchStatus {
+        Ok(counts) => SystemSearch {
             configured,
             ok: true,
             posts: counts.map(|c| c.0),
@@ -245,7 +245,7 @@ async fn search_status(state: &AppState) -> SearchStatus {
         },
         Err(error) => {
             tracing::warn!(%error, "系统状态：搜索引擎不可用");
-            SearchStatus {
+            SystemSearch {
                 configured,
                 ok: false,
                 posts: None,
@@ -288,7 +288,7 @@ pub struct QueuedJob {
     security(("session_cookie" = []), ("bearer" = [])),
     responses((status = 200, body = Vec<QueuedJob>))
 )]
-async fn list_jobs(
+async fn list_system_jobs(
     State(state): State<AppState>,
     AdminOperator(_): AdminOperator,
     Query(query): Query<JobListQuery>,
@@ -342,7 +342,7 @@ fn job_not_found() -> Problem {
     security(("session_cookie" = []), ("bearer" = [])),
     responses((status = 200, body = QueuedJob))
 )]
-async fn retry_job(
+async fn retry_system_job(
     State(state): State<AppState>,
     AdminOperator(op): AdminOperator,
     Path(raw): Path<String>,
@@ -395,7 +395,7 @@ async fn retry_job(
     security(("session_cookie" = []), ("bearer" = [])),
     responses((status = 204))
 )]
-async fn delete_job(
+async fn delete_system_job(
     State(state): State<AppState>,
     AdminOperator(op): AdminOperator,
     Path(raw): Path<String>,
@@ -471,7 +471,7 @@ pub struct TestMailResult {
     security(("session_cookie" = []), ("bearer" = [])),
     responses((status = 200, body = TestMailResult))
 )]
-async fn test_mail(
+async fn send_test_mail(
     State(state): State<AppState>,
     AdminOperator(op): AdminOperator,
     Json(input): Json<TestMailInput>,

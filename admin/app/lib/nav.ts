@@ -1,6 +1,6 @@
 import type { Component } from 'vue'
 import {
-  Bot, Brain, ClipboardList, FileText, Flag, LayoutDashboard, MessagesSquare, Newspaper, Palette, Search, Settings, ShieldBan, Smile,
+  Activity, Bot, Brain, ClipboardList, FileText, Flag, LayoutDashboard, MessagesSquare, Newspaper, Palette, Search, Settings, ShieldBan, Smile,
   Tags, Users,
 } from '@lucide/vue'
 
@@ -56,6 +56,7 @@ export const navGroups: NavGroup[] = [
       { to: '/memory', label: 'AI 记忆', icon: Brain, adminOnly: true, keywords: 'ai memory 记忆 摘要 向量' },
       { to: '/qq', label: 'QQ 机器人', icon: MessagesSquare, adminOnly: true, keywords: 'qq bot 群聊 游客 额度 机器人' },
       { to: '/search', label: '搜索索引', icon: Search, adminOnly: true, keywords: 'search meilisearch 索引' },
+      { to: '/system', label: '系统状态', icon: Activity, adminOnly: true, keywords: 'system status 状态 数据库 任务 队列 死信 邮件 测试邮件 版本' },
       { to: '/audit', label: '审计日志', icon: FileText, adminOnly: true, keywords: 'audit log 日志' },
       { to: '/security', label: '内容与安全', icon: ShieldBan, adminOnly: true, keywords: 'security 屏蔽词 敏感词 封禁 ip 邮箱 黑名单 保留用户名 新用户 新账号' },
       { to: '/settings', label: '系统设置', icon: Settings, adminOnly: true, keywords: 'settings 设置 开关 入站考试 exam 公告 announcement 维护 只读 read only 热榜 限流' },

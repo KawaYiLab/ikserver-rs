@@ -2498,7 +2498,7 @@ async fn system_status_and_dead_jobs(db: PgPool) {
 
     // 一个用完重试次数的任务（死信）。
     let job_id = sqlx::query_scalar!(
-        r#"SELECT id AS "id!" FROM graphile_worker.add_job('fanout_new_post', '{}'::json, max_attempts => 1)"#
+        r#"SELECT id AS "id!" FROM graphile_worker.add_job('content.fanout_new_post', '{}'::json, max_attempts => 1)"#
     )
     .fetch_one(&db)
     .await
@@ -2517,7 +2517,7 @@ async fn system_status_and_dead_jobs(db: PgPool) {
     assert_eq!(body["database"]["pendingMigrations"], 0);
     assert_eq!(body["mail"]["provider"], "dev_log");
     assert_eq!(body["jobs"]["failed"], 1);
-    assert_eq!(body["jobs"]["tasks"][0]["task"], "fanout_new_post");
+    assert_eq!(body["jobs"]["tasks"][0]["task"], "content.fanout_new_post");
 
     let (_, jobs) = call(&app, ADMIN, "GET", "/v1/admin/system/jobs", Value::Null).await;
     assert_eq!(jobs[0]["id"], job_id.to_string());

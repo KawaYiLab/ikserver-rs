@@ -1234,7 +1234,7 @@ export interface paths {
          * 后台任务列表
          * @description 最多 100 条，最近更新的在前。不含 payload（可能有用户内容）。
          */
-        get: operations["list_jobs"];
+        get: operations["list_system_jobs"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1257,7 +1257,7 @@ export interface paths {
          * 删除任务
          * @description 从队列里移除，不再执行；正在执行的任务不能删除。
          */
-        delete: operations["delete_job"];
+        delete: operations["delete_system_job"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1276,7 +1276,7 @@ export interface paths {
          * 立即重试任务
          * @description 重置尝试次数并马上执行；正在执行的任务不能重试。
          */
-        post: operations["retry_job"];
+        post: operations["retry_system_job"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1297,7 +1297,7 @@ export interface paths {
          * @description 按正式发信的路由选通道（国内邮箱走 SMTP，其余走 Brevo），用来确认发信配置可用。
          *     发送失败也返回 200，原因在 `error` 里。
          */
-        post: operations["test_mail"];
+        post: operations["send_test_mail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5213,28 +5213,6 @@ export interface components {
             reports: components["schemas"]["ReportCounts"];
             users: components["schemas"]["UserCounts"];
         };
-        DatabaseStatus: {
-            /**
-             * Format: double
-             * @description 一次 ping 的往返耗时。
-             */
-            latencyMs?: number | null;
-            /**
-             * Format: int64
-             * @description 已应用的最新迁移版本。
-             */
-            migration?: number | null;
-            ok: boolean;
-            /** @description 二进制里有、数据库还没应用的迁移数。 */
-            pendingMigrations: number;
-            /** Format: int32 */
-            poolIdle: number;
-            /** Format: int32 */
-            poolSize: number;
-            serverVersion?: string | null;
-            /** Format: int64 */
-            sizeBytes?: number | null;
-        };
         /** @description 注销账号。有邮箱的账号给 `code`（注销验证码），没有邮箱的给 `qrId`（扫码核验通过的二维码）。 */
         DeleteAccountRequest: {
             code?: string | null;
@@ -5724,27 +5702,6 @@ export interface components {
             expiresAt?: string | null;
             note: string;
         };
-        JobsStatus: {
-            /**
-             * Format: int64
-             * @description 用完重试次数、不再执行的任务（死信）。
-             */
-            failed: number;
-            /**
-             * Format: int64
-             * @description 到点等待执行的任务。
-             */
-            ready: number;
-            /** Format: int64 */
-            running: number;
-            /**
-             * Format: int64
-             * @description 还没到执行时间（含失败后等待重试）的任务。
-             */
-            scheduled: number;
-            /** @description 按任务类型分开的计数，只列有任务的类型。 */
-            tasks: components["schemas"]["TaskCount"][];
-        };
         /** @description 会话列表里的最后一条消息。 */
         LastMessageView: {
             /** Format: date-time */
@@ -5758,13 +5715,6 @@ export interface components {
             /** Format: int32 */
             likeCount: number;
             liked: boolean;
-        };
-        MailStatus: {
-            brevo: boolean;
-            fallback: boolean;
-            /** @description `dev_log`：只写日志不发信；`dual`：国内邮箱走 SMTP，其余走 Brevo。 */
-            provider: string;
-            smtp: boolean;
         };
         MarkReadRequest: {
             /** @description 帖子 id，去重后最多 100 个。 */
@@ -7816,11 +7766,26 @@ export interface components {
             total: number;
         };
         SearchStatus: {
-            comments?: number | null;
-            /** @description 是否配置了搜索引擎；没配时搜索走数据库。 */
-            configured: boolean;
-            ok: boolean;
-            posts?: number | null;
+            /** Format: int64 */
+            dbComments: number;
+            /**
+             * Format: int64
+             * @description 数据库里已发布的帖子数、评论数（索引只收公开的，略少是正常的）。
+             */
+            dbPosts: number;
+            /** @description 没有配置搜索引擎时全部查询走数据库兜底。 */
+            engineConfigured: boolean;
+            /** @description 读取索引统计失败的原因（只给管理员排障）。 */
+            engineError?: string | null;
+            /** Format: int64 */
+            indexedComments?: number | null;
+            /**
+             * Format: int64
+             * @description 索引里的文档数；读不到（未配置或搜索引擎不可用）时为空。
+             */
+            indexedPosts?: number | null;
+            /** @description 本实例正在重建索引。 */
+            reindexing: boolean;
         };
         /** @description 账号安全概览（DEL-001）。 */
         SecurityView: {
@@ -8026,12 +7991,6 @@ export interface components {
             /** Format: date-time */
             startedAt: string;
         };
-        StorageStatus: {
-            /** @description 配置了存储桶；没配时上传接口返回 503。 */
-            configured: boolean;
-            /** @description 对外访问地址前缀。 */
-            publicBaseUrl: string;
-        };
         SubmitRequest: {
             /** @description 题目 id → 选中的选项 key。单选、判断题也传数组。没作答的题可以省略。 */
             answers: Record<string, never>;
@@ -8069,22 +8028,96 @@ export interface components {
             /** @description 已做 HTML 转义的标题，命中词包在 `<mark>` 里，可直接作为 HTML 渲染。 */
             titleHighlighted: string;
         };
+        SystemDatabase: {
+            /**
+             * Format: double
+             * @description 一次 ping 的往返耗时。
+             */
+            latencyMs?: number | null;
+            /**
+             * Format: int64
+             * @description 已应用的最新迁移版本。
+             */
+            migration?: number | null;
+            ok: boolean;
+            /** @description 二进制里有、数据库还没应用的迁移数。 */
+            pendingMigrations: number;
+            /** Format: int32 */
+            poolIdle: number;
+            /** Format: int32 */
+            poolSize: number;
+            serverVersion?: string | null;
+            /** Format: int64 */
+            sizeBytes?: number | null;
+        };
+        SystemJobs: {
+            /**
+             * Format: int64
+             * @description 用完重试次数、不再执行的任务（死信）。
+             */
+            failed: number;
+            /**
+             * Format: int64
+             * @description 到点等待执行的任务。
+             */
+            ready: number;
+            /** Format: int64 */
+            running: number;
+            /**
+             * Format: int64
+             * @description 还没到执行时间（含失败后等待重试）的任务。
+             */
+            scheduled: number;
+            /** @description 按任务类型分开的计数，只列有任务的类型。 */
+            tasks: components["schemas"]["SystemTaskCount"][];
+        };
+        SystemMail: {
+            brevo: boolean;
+            fallback: boolean;
+            /** @description `dev_log`：只写日志不发信；`dual`：国内邮箱走 SMTP，其余走 Brevo。 */
+            provider: string;
+            smtp: boolean;
+        };
+        SystemSearch: {
+            comments?: number | null;
+            /** @description 是否配置了搜索引擎；没配时搜索走数据库。 */
+            configured: boolean;
+            ok: boolean;
+            posts?: number | null;
+        };
         SystemStatus: {
             /** @description 是否多实例部署（事件经数据库转发给其他实例）。 */
             cluster: boolean;
-            database: components["schemas"]["DatabaseStatus"];
-            jobs: components["schemas"]["JobsStatus"];
-            mail: components["schemas"]["MailStatus"];
+            database: components["schemas"]["SystemDatabase"];
+            jobs: components["schemas"]["SystemJobs"];
+            mail: components["schemas"]["SystemMail"];
             /** Format: int32 */
             nodeId: number;
-            search: components["schemas"]["SearchStatus"];
+            search: components["schemas"]["SystemSearch"];
             /**
              * Format: date-time
              * @description 本实例的启动时间。
              */
             startedAt: string;
-            storage: components["schemas"]["StorageStatus"];
+            storage: components["schemas"]["SystemStorage"];
             version: string;
+        };
+        SystemStorage: {
+            /** @description 配置了存储桶；没配时上传接口返回 503。 */
+            configured: boolean;
+            /** @description 对外访问地址前缀。 */
+            publicBaseUrl: string;
+        };
+        SystemTaskCount: {
+            /** Format: int64 */
+            failed: number;
+            /** Format: int64 */
+            ready: number;
+            /** Format: int64 */
+            running: number;
+            /** Format: int64 */
+            scheduled: number;
+            task: string;
         };
         TagRef: {
             name: string;
@@ -8122,17 +8155,6 @@ export interface components {
             /** @description 评论所在的帖子。 */
             postId?: string | null;
             postTitle?: string | null;
-        };
-        TaskCount: {
-            /** Format: int64 */
-            failed: number;
-            /** Format: int64 */
-            ready: number;
-            /** Format: int64 */
-            running: number;
-            /** Format: int64 */
-            scheduled: number;
-            task: string;
         };
         TestMailInput: {
             to: string;
@@ -11113,7 +11135,7 @@ export interface operations {
             };
         };
     };
-    list_jobs: {
+    list_system_jobs: {
         parameters: {
             query?: {
                 /** @description `failed`（死信，默认）、`scheduled`（等待重试或定时）、`running`。 */
@@ -11135,7 +11157,7 @@ export interface operations {
             };
         };
     };
-    delete_job: {
+    delete_system_job: {
         parameters: {
             query?: never;
             header?: never;
@@ -11154,7 +11176,7 @@ export interface operations {
             };
         };
     };
-    retry_job: {
+    retry_system_job: {
         parameters: {
             query?: never;
             header?: never;
@@ -11175,7 +11197,7 @@ export interface operations {
             };
         };
     };
-    test_mail: {
+    send_test_mail: {
         parameters: {
             query?: never;
             header?: never;
