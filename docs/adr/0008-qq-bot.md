@@ -168,7 +168,7 @@ pub struct ExternalTurn<'a> {
     pub history: Vec<ExternalLine>,     // 已按时间正序、已假名化的上下文
     pub memory: Option<ExternalMemory>, // None = 不读不写记忆
     pub images: Vec<String>,            // 第二期：用户发的图片地址（识图模型才带）
-    pub max_chars: usize,               // QQ 默认 600
+    pub max_chars: usize,               // QQ 默认 4000
     pub output_mode: OutputMode,        // QQ 设置的 plain / markdown，独立于角色卡站内格式
 }
 pub struct ExternalReply { pub segments: Vec<String>, pub usage: Usage, pub model_key: String, pub outcome: RunOutcome }
@@ -178,7 +178,7 @@ pub struct ExternalReply { pub segments: Vec<String>, pub usage: Usage, pub mode
   `sanitize` 与 `immersion` 守卫；QQ 的最终格式、分段和长度由渠道排版层处理，生成阶段不提前截断 Markdown。
 - 额度：预占在调用方（qqbot）的准备事务里完成（因为要和游客计次在同一个事务），所以 `ik-ai` 对外暴露
   `quota::reserve*`、`quota::settle` 以及「这次生成的预占估算」函数（`external::estimate(...)`），结算由调用方在定稿事务里做。
-- 直接使用角色卡提示词，不追加外部聊天的身份、语气、字数、场合或链接要求；群聊历史标记「当前提问者」。
+- 直接使用角色卡提示词，不追加外部聊天的身份、语气、场合或链接要求；另附最终传输预算的长度提示，要求模型在自然边界收尾。群聊历史标记「当前提问者」。
   工具与记忆沿用角色卡配置及当前授权范围。QQ 的 `reply_format` 参与公共输出格式组装，最终格式、链接策略与总字数由渠道排版层处理。
 
 ### 6.2 角色卡
@@ -208,7 +208,7 @@ pub struct ExternalReply { pub segments: Vec<String>, pub usage: Usage, pub mode
 - 链接：`qq_settings.link_mode` 默认 `allow`，允许 HTTP/HTTPS 外链；相对 `/post/<id>` 补全为 `https://interk.net/post/<id>`。Markdown 保留可点击标题，纯文本保留标题与 URL。自动链接 `<https://…>` 不按 HTML 清除，其他协议只保留说明文字。
   `domain` 仅保留规范的绳网帖子链接；`strip` 去链接，站内帖子改成「（在绳网搜《标题》）」。
 - 敏感词兜底：按原文及可见正文检查 `blocked_words`，命中整条换成「这个话题我就不聊啦」，记 `reason=blocked_word`。
-- 总长 `max_reply_chars` 默认 600，计入实际发送的 Markdown 标记、URL 与换行。按结构分段、截断，保持标记闭合；完整链接放不下时保留标题。**群最多 4 段、单聊最多 3 段**，多余并入最后一段。群第一段不额外 @ 提问者。
+- 总长 `max_reply_chars` 默认 4000，计入实际发送的 Markdown 标记、URL 与换行。按结构分段、截断时优先回退到换行、句末标点等自然边界，避免把回答切在句中，并保持标记闭合；片段没有可用自然边界时按上限截断。完整链接放不下时保留标题。**群最多 4 段、单聊最多 3 段**，多余并入最后一段。群第一段不额外 @ 提问者。
 - 发送类型明确区分：纯文本 `msg_type=0` + `content`；Markdown `msg_type=2` + `markdown.content`（省略顶层 `content`）；均携带原 `msg_id` 与该段 `msg_seq`。
 - 分段和发送尝试持久化 format；新段摘要覆盖格式与正文，重试不按新设置重新排版，历史段默认 plain 并保留旧摘要。Markdown 明确拒绝码 `40034011`、`40034124`、`304036`、`40034127` 且无不确定发送记录时，转纯文本重试一次；URL 明确拒绝码 `304003`、`40034028`、群端点 `40054010` 同样要求无不确定记录，去链接并保持当前格式。修正先持久化并递增 payload_version，共用原序号、截止和每段 3 次 POST 上限。
 - 超时、待审核、去重不触发改写；成功后仅把实际发送正文写入历史，不重复计费。后台投递详情展示每次尝试的格式与载荷版本。
@@ -304,7 +304,7 @@ id 一律雪花（`ik_kernel::id`），时间 `TIMESTAMPTZ`，与现有表一致
 | `qq_memory_progress` | (`user_id`, `ai_user_id`) PK、`until` | 个人记忆提炼进度 |
 | `qq_group_memories` | 见 8.3（第三期） | |
 | `qq_group_memory_progress` | (`group_id`, `ai_user_id`) PK、`until` | 第三期 |
-| `qq_settings` | 单行：`enabled`、`guest_daily_turns`(10)、`guest_group_daily_turns`(100)、`guest_daily_tokens`(2000000)、`guest_model_key`、`group_context_turns`(12)、`group_context_hours`(2)、`c2c_context_turns`(20)、`reply_timeout_secs`(90)、`max_reply_chars`(600)、`reply_format`('markdown')、`link_mode`('allow')、`blocked_words TEXT[]`、`guest_reads_group_memory`(false)、`updated_at` | 后台维护、随配置快照 60 秒缓存（同 AI-002），改了记审计 |
+| `qq_settings` | 单行：`enabled`、`guest_daily_turns`(10)、`guest_group_daily_turns`(100)、`guest_daily_tokens`(2000000)、`guest_model_key`、`group_context_turns`(12)、`group_context_hours`(2)、`c2c_context_turns`(20)、`reply_timeout_secs`(90)、`max_reply_chars`(4000)、`reply_format`('markdown')、`link_mode`('allow')、`blocked_words TEXT[]`、`guest_reads_group_memory`(false)、`updated_at` | 后台维护、随配置快照 60 秒缓存（同 AI-002），改了记审计 |
 
 `ai_role_cards` 加 `qq_enabled`；`ai_memories` 加 `source_qq_group_id`。
 

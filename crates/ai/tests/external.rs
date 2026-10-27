@@ -93,6 +93,8 @@ async fn external_guest_uses_character_tools_and_returns_usage_on_timeout(db: Pg
     let prompt = serde_json::to_string(&requests[0].messages).unwrap();
     assert!(prompt.contains("你是 Fairy。用户询问人物档案时，完整说明背景、经历和关系。"));
     assert!(prompt.contains("六分街的档案已调取。"));
+    assert!(prompt.contains("【QQ回复长度】最终回复最多 600 字"));
+    assert!(prompt.contains("不要以未完成的标题、列表项或半句结尾"));
     assert!(!prompt.contains("【外部聊天】"));
     assert!(!prompt.contains("external_fairy"));
 

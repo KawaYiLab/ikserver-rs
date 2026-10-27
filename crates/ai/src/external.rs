@@ -104,10 +104,15 @@ impl ExternalReply {
 }
 
 fn messages(card: &RoleCard, turn: &ExternalTurn, toolbox: &Toolbox) -> Vec<ChatMessage> {
-    let mut messages = vec![ChatMessage::system(dm::system_prompt(
-        card,
-        turn.output_mode,
-    ))];
+    let mut system = dm::system_prompt(card, turn.output_mode);
+    if turn.channel == "qq" {
+        let target = turn.max_chars.saturating_mul(9) / 10;
+        system.push_str(&format!(
+            "\n\n【QQ回复长度】最终回复最多 {} 字（含格式标记、链接和换行）。请尽量控制在约 {} 字以内，优先完整收尾；超长时在自然段或句号处结束，不要以未完成的标题、列表项或半句结尾。",
+            turn.max_chars, target
+        ));
+    }
+    let mut messages = vec![ChatMessage::system(system)];
     toolbox.annotate_system(&mut messages);
     messages.extend(turn.history.iter().map(|line| {
         if line.assistant {

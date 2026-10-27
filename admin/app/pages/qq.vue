@@ -415,6 +415,7 @@ function refresh() {
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">单次回复总字数上限</span>
                   <Input v-model.number="form.maxReplyChars" type="number" min="1" max="4000" required />
+                  <span class="text-xs text-muted-foreground">包含 Markdown 标记、链接和换行；超长回复会优先在句末或段落边界结束，范围 1–4000。</span>
                 </label>
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">群聊上下文条数</span>

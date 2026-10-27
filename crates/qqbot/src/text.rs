@@ -58,6 +58,7 @@ fn nodes<'a>(events: &mut impl Iterator<Item = Event<'a>>) -> Vec<Node<'a>> {
 enum Piece {
     Text(String),
     Syntax(String),
+    Heading(String, Vec<Piece>),
     Wrap(String, Vec<Piece>, String),
     Link(Vec<Piece>, String, bool),
 }
@@ -147,6 +148,7 @@ fn indent(parts: Vec<Piece>, prefix: &str) -> Vec<Piece> {
         .map(|part| match part {
             Piece::Text(s) => Piece::Text(s.replace('\n', &format!("\n{prefix}"))),
             Piece::Syntax(s) => Piece::Syntax(s.replace('\n', &format!("\n{prefix}"))),
+            Piece::Heading(open, inner) => Piece::Heading(open, indent(inner, prefix)),
             Piece::Wrap(a, inner, b) => Piece::Wrap(a, indent(inner, prefix), b),
             other => other,
         })
@@ -159,7 +161,7 @@ fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
         Node::Break => vec![syntax("\n")],
         Node::Rule => vec![syntax(if md { "---" } else { "——" })],
         Node::Branch(tag, inner) => match tag {
-            Tag::Heading { level, .. } => vec![Piece::Wrap(
+            Tag::Heading { level, .. } => vec![Piece::Heading(
                 if md {
                     if *level == pulldown_cmark::HeadingLevel::H1 {
                         "# "
@@ -171,7 +173,6 @@ fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
                 }
                 .into(),
                 children(inner, mode, format),
-                String::new(),
             )],
             Tag::Emphasis | Tag::Strong | Tag::Strikethrough => {
                 let marker = if !md {
@@ -284,38 +285,92 @@ fn escape(c: char, format: MessageFormat) -> String {
 }
 
 /// Each escaped character and complete link is indivisible; wrappers reserve their closing markers.
-fn render(parts: &[Piece], format: MessageFormat, max: usize) -> String {
+struct Rendered {
+    text: String,
+    truncated: bool,
+}
+
+fn natural_boundary(c: char) -> bool {
+    matches!(
+        c,
+        '\n' | '。' | '！' | '？' | '；' | '…' | '.' | '!' | '?' | ';'
+    )
+}
+
+fn render_text(value: &str, format: MessageFormat, max: usize) -> Rendered {
+    let mut out = String::new();
+    let mut remaining = max;
+    let mut last_boundary = None;
+    for c in value.chars() {
+        let atom = escape(c, format);
+        let size = atom.chars().count();
+        if size > remaining {
+            if let Some(boundary) = last_boundary {
+                out.truncate(boundary);
+            }
+            return Rendered {
+                text: out,
+                truncated: true,
+            };
+        }
+        remaining -= size;
+        out.push_str(&atom);
+        if natural_boundary(c) {
+            last_boundary = Some(out.len());
+        }
+    }
+    Rendered {
+        text: out,
+        truncated: false,
+    }
+}
+
+fn render_wrapped(
+    open: &str,
+    inner: &[Piece],
+    close: &str,
+    format: MessageFormat,
+    max: usize,
+) -> Rendered {
+    let overhead = open.chars().count() + close.chars().count();
+    if overhead >= max {
+        return render_limited(inner, format, max);
+    }
+    let body = render_limited(inner, format, max - overhead);
+    if body.text.trim().is_empty() {
+        Rendered {
+            text: String::new(),
+            truncated: body.truncated,
+        }
+    } else {
+        Rendered {
+            text: format!("{open}{}{close}", body.text.trim_end()),
+            truncated: body.truncated,
+        }
+    }
+}
+
+fn render_limited(parts: &[Piece], format: MessageFormat, max: usize) -> Rendered {
     let mut out = String::new();
     let mut remaining = max;
     for part in parts {
-        let value = match part {
-            Piece::Text(s) => {
-                let mut text = String::new();
-                for c in s.chars() {
-                    let atom = escape(c, format);
-                    let size = atom.chars().count();
-                    if size > remaining {
-                        return format!("{out}{text}");
-                    }
-                    remaining -= size;
-                    text.push_str(&atom);
+        let rendered = match part {
+            Piece::Text(s) => render_text(s, format, remaining),
+            Piece::Syntax(s) => {
+                if s.chars().count() > remaining {
+                    return Rendered {
+                        text: out,
+                        truncated: true,
+                    };
                 }
-                out.push_str(&text);
-                continue;
+                Rendered {
+                    text: s.clone(),
+                    truncated: false,
+                }
             }
-            Piece::Syntax(s) => s.clone(),
+            Piece::Heading(open, inner) => render_wrapped(open, inner, "", format, remaining),
             Piece::Wrap(open, inner, close) => {
-                let overhead = open.chars().count() + close.chars().count();
-                if overhead >= remaining {
-                    render(inner, format, remaining)
-                } else {
-                    let body = render(inner, format, remaining - overhead);
-                    if body.trim().is_empty() {
-                        String::new()
-                    } else {
-                        format!("{open}{}{close}", body.trim_end())
-                    }
-                }
+                render_wrapped(open, inner, close, format, remaining)
             }
             Piece::Link(label, url, automatic) => {
                 let title = render(label, format, usize::MAX);
@@ -327,25 +382,45 @@ fn render(parts: &[Piece], format: MessageFormat, max: usize) -> String {
                     format!("{title} {url}")
                 };
                 if full.chars().count() <= remaining {
-                    full
+                    Rendered {
+                        text: full,
+                        truncated: false,
+                    }
                 } else if *automatic {
-                    render(&[Piece::Text("网页链接".into())], format, remaining)
+                    render_limited(&[Piece::Text("网页链接".into())], format, remaining)
                 } else {
-                    render(label, format, remaining)
+                    render_limited(label, format, remaining)
                 }
             }
         };
-        let size = value.chars().count();
+        let size = rendered.text.chars().count();
         if size > remaining {
-            break;
+            return Rendered {
+                text: out,
+                truncated: true,
+            };
         }
         remaining -= size;
-        out.push_str(&value);
-        if remaining == 0 {
-            break;
+        out.push_str(&rendered.text);
+        if rendered.truncated {
+            return Rendered {
+                text: out,
+                truncated: true,
+            };
         }
     }
-    out
+    Rendered {
+        text: out,
+        truncated: false,
+    }
+}
+
+fn render(parts: &[Piece], format: MessageFormat, max: usize) -> String {
+    render_limited(parts, format, max).text
+}
+
+fn is_heading_chunk(chunk: &[Piece]) -> bool {
+    matches!(chunk, [Piece::Heading(_, _)])
 }
 
 fn blocks(value: &str, mode: &str, format: MessageFormat) -> Vec<Vec<Piece>> {
@@ -402,6 +477,8 @@ pub fn without_links(value: &str, format: MessageFormat) -> String {
 }
 
 /// The total includes every format marker, URL and newline, including merged bubbles.
+/// The tuple is `(segments, blocked, truncated)`; truncation is reported for diagnostics
+/// while the persisted payload remains the exact rendered prefix.
 pub fn segments(
     values: &[String],
     mode: &str,
@@ -409,7 +486,7 @@ pub fn segments(
     blocked: &[String],
     max_chars: usize,
     group: bool,
-) -> (Vec<String>, bool) {
+) -> (Vec<String>, bool, bool) {
     let visible = values
         .iter()
         .map(|v| clean(v, "allow"))
@@ -420,34 +497,46 @@ pub fn segments(
         .iter()
         .any(|w| !w.trim().is_empty() && joined.contains(&w.to_lowercase()))
     {
-        return (vec![truncate("这个话题我就不聊啦", max_chars)], true);
+        return (vec![truncate("这个话题我就不聊啦", max_chars)], true, false);
     }
     let mut remaining = max_chars;
     let mut out: Vec<String> = Vec::new();
+    let mut truncated = false;
     let limit = if group { 4 } else { 3 };
     let chunks: Vec<_> = values
         .iter()
         .flat_map(|v| blocks(v, mode, format))
         .collect();
-    for chunk in chunks {
+    for chunk in &chunks {
         let separator = if out.len() >= limit { "\n\n" } else { "" };
         let budget = remaining.saturating_sub(separator.len());
         if budget == 0 {
+            truncated = true;
             break;
         }
-        let text = render(&chunk, format, budget).trim().to_owned();
+        let rendered = render_limited(chunk, format, budget);
+        let text = rendered.text.trim().to_owned();
         if text.is_empty() {
+            truncated |= rendered.truncated;
             continue;
         }
+        if rendered.truncated && is_heading_chunk(chunk) {
+            truncated = true;
+            break;
+        }
         remaining -= text.chars().count() + separator.len();
+        truncated |= rendered.truncated;
         if out.len() < limit {
             out.push(text);
         } else if let Some(last) = out.last_mut() {
             last.push_str(separator);
             last.push_str(&text);
         }
+        if rendered.truncated {
+            break;
+        }
     }
-    (out, false)
+    (out, false, truncated)
 }
 
 #[cfg(test)]
@@ -519,9 +608,10 @@ mod tests {
         for format in [Plain, Markdown] {
             for group in [false, true] {
                 let values = vec!["**你好**".to_owned(); 8];
-                let (out, _) = segments(&values, "allow", format, &[], 30, group);
+                let (out, _, truncated) = segments(&values, "allow", format, &[], 20, group);
                 assert!(out.len() <= if group { 4 } else { 3 });
-                assert!(out.iter().map(|s| s.chars().count()).sum::<usize>() <= 30);
+                assert!(out.iter().map(|s| s.chars().count()).sum::<usize>() <= 20);
+                assert!(truncated);
                 for part in out {
                     assert_eq!(part.matches("**").count() % 2, 0);
                 }
@@ -543,10 +633,40 @@ mod tests {
             "攻略"
         );
     }
+
+    #[test]
+    fn truncation_prefers_sentence_boundaries_and_skips_partial_headings() {
+        let out = format_content("第一句完整。第二句还没有结束", "allow", Plain, 8);
+        assert_eq!(out, "第一句完整。", "{out}");
+
+        let (out, _, truncated) = segments(
+            &[
+                "第一句完整。第二句还没有结束".into(),
+                "后续内容不应跳过前文".into(),
+            ],
+            "allow",
+            Plain,
+            &[],
+            8,
+            false,
+        );
+        assert!(truncated);
+        assert_eq!(out, ["第一句完整。"]);
+
+        let raw = "# 一、第一节标题很长\n\n正文很长。";
+        let (out, blocked, truncated) = segments(&[raw.into()], "allow", Markdown, &[], 5, false);
+        assert!(!blocked);
+        assert!(truncated);
+        assert!(out.is_empty(), "partial heading leaked: {out:?}");
+
+        let raw = "**第一句完整。第二句还没有结束**";
+        let out = format_content(raw, "allow", Markdown, 10);
+        assert_eq!(out, "**第一句完整。**", "{out}");
+    }
     #[test]
     fn blocked_words_match_visible_text_and_link_destinations() {
         for raw in ["敏**感**词", "[普通](https://example.com/敏感词)"] {
-            let (out, blocked) = segments(
+            let (out, blocked, truncated) = segments(
                 &[raw.into()],
                 "strip",
                 Markdown,
@@ -555,6 +675,7 @@ mod tests {
                 true,
             );
             assert!(blocked);
+            assert!(!truncated);
             assert_eq!(out, ["这个话题我就不聊啦"]);
         }
     }

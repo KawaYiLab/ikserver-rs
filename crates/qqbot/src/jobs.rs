@@ -505,7 +505,7 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
     )
     .execute(&mut *tx)
     .await?;
-    let (segments, blocked) = text::segments(
+    let (segments, blocked, truncated) = text::segments(
         &reply.segments,
         &settings.link_mode,
         settings.reply_format,
@@ -513,6 +513,13 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
         settings.max_reply_chars as usize,
         t.group_id.is_some(),
     );
+    if truncated {
+        tracing::info!(
+            turn_id = id,
+            max_chars = settings.max_reply_chars,
+            "QQ 回复达到字数上限，已在自然边界截断"
+        );
+    }
     let window_expired = dispatch::now(&mut tx).await? >= metadata.platform_deadline_at;
     if reply.outcome != RunOutcome::Completed
         || segments.is_empty()

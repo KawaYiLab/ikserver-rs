@@ -437,7 +437,9 @@
 | `qq_guest_usage` | day + identity_id 主键，游客预占/成功次数与当日超额提示标志 |
 | `qq_group_usage` | day + group_id 主键，游客次数与真实加权 token |
 | `qq_guest_tokens` | 配额日主键，全部游客的已用 token（含在飞预占） |
-| `qq_settings` | 单行设置；关闭为默认值，游客 10 次/人、100 次/群、200 万 token；上下文、90 秒预算、600 字；reply_format 默认 markdown（可选 plain），link_mode 默认 allow（可选 strip/domain） |
+| `qq_settings` | 单行设置；关闭为默认值，游客 10 次/人、100 次/群、200 万 token；上下文、90 秒预算、4000 字；reply_format 默认 markdown（可选 plain），link_mode 默认 allow（可选 strip/domain） |
+
+`20261120000001_qq_reply_cap.sql` 将 `max_reply_chars` 的默认值从 600 提高到 4000，保留已有设置行的当前值不变。回复达到上限时按结构分段，并优先在换行、句末标点等自然边界截断，保持 Markdown 标记闭合。
 
 `ai_role_cards.qq_enabled` 默认 false，由 `ik-ai` 维护。计数以北京时间 04:00 为日界。
 QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群消息、30 天前游客消息及 90 天前计数。
@@ -454,7 +456,7 @@ QQ 消息删除会级联对应 turn 与回复；每天删除 3 天前非 @ 群�
 | `ai_shared_memories`（ik-ai） | 按场合共享的记忆（QQ 群共享记忆）：场合键、角色、正文 1–200 字、来源（extracted / told / manual）、置顶、写入者（账号删除置空）；每场合每角色最多 40 条，`(scope, ai_user_id, updated_at)` 索引 |
 | `qq_group_memory_progress`（ik-qqbot） | （群, 角色）的群共享记忆提炼进度；群删除级联 |
 
-基础设施升级（`20261118000001_qq_dispatch.sql`、`20261118000002_qq_identity_memory.sql`、`20261118000003_qq_lifecycle_order.sql`）：
+基础设施升级（`20261118000001_qq_dispatch.sql`、`20261118000002_qq_identity_memory.sql`、`20261118000003_qq_lifecycle_order.sql`、`20261119000001_qq_markdown.sql`、`20261120000001_qq_reply_cap.sql`）：
 
 | 表 / 列 | 约束与用途 |
 |---|---|
