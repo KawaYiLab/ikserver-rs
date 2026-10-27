@@ -305,7 +305,7 @@ async fn auto_hide(
     effects: &mut Effects,
 ) -> Result<(), Problem> {
     let reporters = repo::pending_reporters(conn, target_type.as_str(), target_id).await?;
-    if reporters < state.auto_hide_threshold {
+    if reporters < state.auto_hide_threshold().await {
         return Ok(());
     }
     let reason = ik_content::interop::HIDDEN_BY_REPORTS;

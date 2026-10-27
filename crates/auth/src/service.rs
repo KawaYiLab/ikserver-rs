@@ -144,7 +144,7 @@ pub async fn send_code(
 
     let eligible = match purpose {
         CodePurpose::Register => {
-            if !state.settings.registration_open {
+            if !state.registration_open().await {
                 return Err(registration_closed());
             }
             if repo::email_taken(&mut conn, &email).await? {
@@ -326,7 +326,7 @@ pub async fn register(
     let email = validate::normalize_email(&request.email)?;
     validate::validate_code_format(&request.code)?;
     validate::validate_password("password", &request.password)?;
-    if !state.settings.registration_open {
+    if !state.registration_open().await {
         return Err(registration_closed());
     }
     {

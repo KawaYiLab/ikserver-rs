@@ -54,6 +54,14 @@ impl MihoyoState {
         }
     }
 
+    /// 扫码登录是否开放：站点参数可在后台修改（`auth.site`），没有时用部署配置。
+    pub async fn login_enabled(&self) -> bool {
+        match &self.auth.site {
+            Some(site) => site.get().await.registration.mihoyo_login,
+            None => self.enabled,
+        }
+    }
+
     /// 按配置连接真实的米游社上游。
     pub fn from_config(auth: AuthState, config: &Config) -> anyhow::Result<Self> {
         let raw = config.secrets.qr_session_key.expose();

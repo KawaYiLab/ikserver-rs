@@ -1139,7 +1139,8 @@ export interface paths {
         get: operations["get_site_settings"];
         /**
          * 修改系统设置（只有管理员）
-         * @description 立即生效，不需要重启或重新登录。关闭入站考试后，未通过考试的账号也能执行写操作。
+         * @description 不需要重启或重新登录：本实例立即生效，其他实例最长 60 秒后生效。关闭入站考试后，未通过考试的账号
+         *     也能执行写操作。参数超出范围时返回 400 `VALIDATION_FAILED`，`errors[].field` 形如 `hot.count`。
          */
         put: operations["put_site_settings"];
         post?: never;
@@ -5225,6 +5226,23 @@ export interface components {
             key: string;
             text: string;
         };
+        /** @description 入站考试参数（EXAM-004）。改动只影响之后开始的考试。 */
+        ExamParams: {
+            /** Format: int64 */
+            failCooldownSecs: number;
+            /** Format: int32 */
+            maxFailsBeforeCooldown: number;
+            /** Format: int32 */
+            passScorePercent: number;
+            /** Format: int32 */
+            questionCount: number;
+            /** Format: int32 */
+            rewardDenny: number;
+            /** Format: int32 */
+            rewardExp: number;
+            /** Format: int64 */
+            timeLimitSecs: number;
+        };
         ExamStatusView: {
             activeAttempt?: components["schemas"]["ActiveAttemptView"] | null;
             config: components["schemas"]["ExamConfigView"];
@@ -5435,6 +5453,21 @@ export interface components {
             items: components["schemas"]["PostCard"][];
             nextCursor?: string | null;
             pinned: components["schemas"]["PostCard"][];
+        };
+        /** @description 热榜参数（HOT-001）。 */
+        HotParams: {
+            /** Format: int64 */
+            candidates: number;
+            count: number;
+            enabled: boolean;
+            feedSize: number;
+            /** Format: double */
+            gravity: number;
+            maxPerAuthor: number;
+            /** Format: int32 */
+            recentDays: number;
+            /** Format: int64 */
+            refreshSecs: number;
         };
         /**
          * @description 统一收件箱的一项：私聊会话，或某人（或系统）发来的通知分组（KNOCK-010）。
@@ -5757,6 +5790,13 @@ export interface components {
             reportCount: number;
             targetId: string;
             targetType: components["schemas"]["TargetType"];
+        };
+        ModerationParams: {
+            /**
+             * Format: int64
+             * @description 同一内容收到这么多个不同的人的待处理举报时自动隐藏（RPT-052）。
+             */
+            autoHideThreshold: number;
         };
         MovePostInput: {
             categoryId: string;
@@ -7187,6 +7227,18 @@ export interface components {
             excerpt: string;
             id: string;
         };
+        /** @description 全站默认限流（每分钟，RL-002）。改动后计数从零开始。 */
+        RateLimitParams: {
+            /** Format: int32 */
+            anonReadPerMin: number;
+            /** Format: int32 */
+            anonWritePerMin: number;
+            enabled: boolean;
+            /** Format: int32 */
+            userReadPerMin: number;
+            /** Format: int32 */
+            userWritePerMin: number;
+        };
         ReadResult: {
             /**
              * Format: int64
@@ -7241,6 +7293,13 @@ export interface components {
             code: string;
             email: string;
             password: string;
+        };
+        /** @description 注册与登录。 */
+        Registration: {
+            /** @description 米游社扫码登录与绑定。关闭时扫码接口返回 503 `MIHOYO_DISABLED`。 */
+            mihoyoLogin: boolean;
+            /** @description 注册总开关（REG-002）。关闭时邮箱注册与米游社首登建号都被拒绝，已有账号不受影响。 */
+            open: boolean;
         };
         RelatedPosts: {
             /** @description 按相关度从高到低。 */
@@ -7670,21 +7729,37 @@ export interface components {
             uploadId?: string | null;
             uploadUrl?: string | null;
         };
-        /** @description 站点设置（后台「系统设置」）：随时切换、立即生效的开关。 */
+        /** @description 站点设置（后台「系统设置」）：随时切换、不用重启的开关与参数。 */
         SiteSettings: {
+            /** @description 部署配置里的缺省值（「恢复默认」恢复到它）。 */
+            defaults: components["schemas"]["SiteValues"];
             /**
              * @description 入站考试开关。关闭后未通过考试的普通账号也能发帖、评论、私信等（REG-007），
              *     等级在下次获得经验时按经验计算（EXP-002）；考试本身仍可参加，首次通过照常发奖励。
              */
             examRequired: boolean;
+            /** @description 后台改过的项（形如 `hot.count`）。 */
+            overridden: string[];
             /**
              * Format: date-time
              * @description 最近一次修改时间；从未修改过时为空。
              */
             updatedAt?: string | null;
+            /** @description 当前生效的参数（部署配置叠加后台的修改）。本实例立即生效，其他实例最长 60 秒后生效。 */
+            values: components["schemas"]["SiteValues"];
         };
+        /** @description 两项都可省略；`values` 要给全部参数（与缺省值相同的项不会保存为修改）。 */
         SiteSettingsInput: {
-            examRequired: boolean;
+            examRequired?: boolean | null;
+            values?: components["schemas"]["SiteValues"] | null;
+        };
+        /** @description 全部可在线修改的参数。 */
+        SiteValues: {
+            exam: components["schemas"]["ExamParams"];
+            hot: components["schemas"]["HotParams"];
+            moderation: components["schemas"]["ModerationParams"];
+            rateLimit: components["schemas"]["RateLimitParams"];
+            registration: components["schemas"]["Registration"];
         };
         StartView: {
             attemptId: string;
@@ -10583,6 +10658,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteSettings"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             403: {

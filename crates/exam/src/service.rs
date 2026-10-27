@@ -61,8 +61,8 @@ fn expired() -> Problem {
 
 // ---------- 公共 ----------
 
-fn config_view(state: &ExamState) -> ExamConfigView {
-    let s = &state.settings;
+async fn config_view(state: &ExamState) -> ExamConfigView {
+    let s = state.params().await;
     ExamConfigView {
         question_count: s.question_count,
         pass_score_percent: s.pass_score_percent,
@@ -104,7 +104,8 @@ async fn cooldown_for(
     user_id: i64,
     now: DateTime<Utc>,
 ) -> Result<i64, Problem> {
-    let limit = i64::from(state.settings.max_fails_before_cooldown);
+    let params = state.params().await;
+    let limit = i64::from(params.max_fails_before_cooldown);
     let results: Vec<(bool, DateTime<Utc>)> = repo::recent_results(conn, user_id, now, limit)
         .await?
         .into_iter()
@@ -112,8 +113,8 @@ async fn cooldown_for(
         .collect();
     Ok(cooldown_remaining(
         &results,
-        state.settings.max_fails_before_cooldown,
-        state.settings.fail_cooldown_secs,
+        params.max_fails_before_cooldown,
+        params.fail_cooldown_secs,
         now,
     ))
 }
@@ -194,7 +195,7 @@ async fn draw(
     }
     let mut rng = Rng { failed: false };
     paper::shuffle(&mut pool, &mut |n| rng.below(n));
-    pool.truncate(usize::try_from(state.settings.question_count).unwrap_or(usize::MAX));
+    pool.truncate(usize::try_from(state.params().await.question_count).unwrap_or(usize::MAX));
     for question in &mut pool {
         paper::shuffle(&mut question.options, &mut |n| rng.below(n));
     }
@@ -220,7 +221,7 @@ pub async fn status(state: &ExamState, principal: &Principal) -> Result<ExamStat
             passed_at,
             cooldown_remaining_secs: 0,
             active_attempt: None,
-            config: config_view(state),
+            config: config_view(state).await,
         });
     }
     let cooldown_remaining_secs = cooldown_for(state, &mut conn, user_id, now).await?;
@@ -238,7 +239,7 @@ pub async fn status(state: &ExamState, principal: &Principal) -> Result<ExamStat
         passed_at: None,
         cooldown_remaining_secs,
         active_attempt,
-        config: config_view(state),
+        config: config_view(state).await,
     })
 }
 
@@ -276,13 +277,13 @@ pub async fn start(
             started_at: open.started_at,
             expires_at: open.expires_at,
             questions: paper_of(&snapshot),
-            config: config_view(state),
+            config: config_view(state).await,
         });
     }
 
     let snapshot = draw(state, &mut tx).await?;
     let id = state.ids.next_raw();
-    let expires_at = now + Duration::seconds(state.settings.time_limit_secs);
+    let expires_at = now + Duration::seconds(state.params().await.time_limit_secs);
     repo::insert_attempt(
         &mut tx,
         &NewAttempt {
@@ -302,7 +303,7 @@ pub async fn start(
         started_at: now,
         expires_at,
         questions: paper_of(&snapshot),
-        config: config_view(state),
+        config: config_view(state).await,
     })
 }
 
@@ -387,7 +388,7 @@ pub async fn submit(
     }
     let snapshot = snapshot_of(&attempt)?;
     let answers = parse_answers(&snapshot, &request.answers)?;
-    let pass_percent = state.settings.pass_score_percent;
+    let pass_percent = state.params().await.pass_score_percent;
 
     if attempt.expires_at <= now {
         let total = paper::grade(&snapshot, &Answers::new(), pass_percent).total_score;
@@ -432,7 +433,7 @@ pub async fn submit(
             &state.ids,
             user_id,
             DennyAction::ExamPassed,
-            state.settings.reward_denny,
+            state.params().await.reward_denny,
             Some(&reward_key),
             "通过入站考试奖励",
             now,
@@ -444,7 +445,7 @@ pub async fn submit(
             &state.ids,
             user_id,
             ExpAction::ExamPassed,
-            state.settings.reward_exp,
+            state.params().await.reward_exp,
             Dedup::Ref(reward_key),
             now,
         )
@@ -509,7 +510,7 @@ pub async fn review(
         .into_iter()
         .map(|r| (r.id, r.explanation))
         .collect();
-    let grade = paper::grade(&snapshot, &answers, state.settings.pass_score_percent);
+    let grade = paper::grade(&snapshot, &answers, state.params().await.pass_score_percent);
     let questions = snapshot
         .iter()
         .map(|q| {

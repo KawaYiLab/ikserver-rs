@@ -462,12 +462,15 @@ async fn get_site_settings(
     AdminOperator(_): AdminOperator,
 ) -> Result<Json<SiteSettings>, Problem> {
     let mut conn = state.db.acquire().await?;
-    Ok(Json(ik_auth::admin::site_settings(&mut conn).await?))
+    Ok(Json(
+        ik_auth::admin::site_settings(&mut conn, state.site.defaults()).await?,
+    ))
 }
 
 /// 修改系统设置（只有管理员）
 ///
-/// 立即生效，不需要重启或重新登录。关闭入站考试后，未通过考试的账号也能执行写操作。
+/// 不需要重启或重新登录：本实例立即生效，其他实例最长 60 秒后生效。关闭入站考试后，未通过考试的账号
+/// 也能执行写操作。参数超出范围时返回 400 `VALIDATION_FAILED`，`errors[].field` 形如 `hot.count`。
 #[utoipa::path(
     put,
     path = "/v1/admin/settings",
@@ -476,6 +479,7 @@ async fn get_site_settings(
     security(("session_cookie" = []), ("bearer" = [])),
     responses(
         (status = 200, body = SiteSettings),
+        (status = 400, body = ProblemBody, content_type = "application/problem+json"),
         (status = 403, body = ProblemBody, content_type = "application/problem+json"),
     )
 )]
@@ -485,7 +489,15 @@ async fn put_site_settings(
     Json(input): Json<SiteSettingsInput>,
 ) -> Result<Json<SiteSettings>, Problem> {
     let mut tx = state.db.begin().await?;
-    let settings = ik_auth::admin::update_site_settings(&mut tx, &state.ids, &op, input).await?;
+    let settings = ik_auth::admin::update_site_settings(
+        &mut tx,
+        &state.ids,
+        &op,
+        state.site.defaults(),
+        input,
+    )
+    .await?;
     tx.commit().await?;
+    state.site.invalidate();
     Ok(Json(settings))
 }

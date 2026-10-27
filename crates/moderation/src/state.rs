@@ -5,6 +5,7 @@ use std::time::Duration;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
+use ik_kernel::site::Site;
 use ik_media::MediaState;
 use sqlx::PgPool;
 
@@ -27,7 +28,9 @@ pub struct ModerationState {
     pub bus: Arc<dyn EventBus>,
     /// 快照里图片的展示数据。
     pub media: MediaState,
+    /// 部署配置里的自动隐藏阈值；设置了 `site` 时以后台的为准。
     pub auto_hide_threshold: i64,
+    pub site: Option<Site>,
     pub(crate) limits: Arc<Limits>,
 }
 
@@ -53,10 +56,26 @@ impl ModerationState {
             bus,
             media,
             auto_hide_threshold,
+            site: None,
             limits: Arc::new(Limits {
                 per_minute: RateLimiter::keyed(Quota::per_minute(REPORTS_PER_MINUTE)),
                 per_day: RateLimiter::keyed(per_day),
             }),
+        }
+    }
+
+    /// 改用后台可改的站点参数（`serve` 启动时调用）。
+    #[must_use]
+    pub fn with_site(mut self, site: Site) -> Self {
+        self.site = Some(site);
+        self
+    }
+
+    /// 当前的自动隐藏阈值（RPT-052）。
+    pub async fn auto_hide_threshold(&self) -> i64 {
+        match &self.site {
+            Some(site) => site.get().await.moderation.auto_hide_threshold,
+            None => self.auto_hide_threshold,
         }
     }
 }

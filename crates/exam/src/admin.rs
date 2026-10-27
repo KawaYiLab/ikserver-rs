@@ -155,7 +155,7 @@ pub async fn stats(state: &ExamState) -> Result<QuestionStats, Problem> {
         single: row.single,
         multiple: row.multiple,
         boolean: row.boolean,
-        question_count: state.settings.question_count,
+        question_count: state.params().await.question_count,
     })
 }
 

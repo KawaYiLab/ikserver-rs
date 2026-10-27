@@ -1430,18 +1430,21 @@ pub(crate) async fn daily_signups(
 
 pub(crate) struct SiteSettingsRow {
     pub exam_required: bool,
+    /// 后台改过的站点参数（`ik_kernel::site`），只含与缺省值不同的叶子。
+    pub overrides: serde_json::Value,
     pub updated_at: Option<DateTime<Utc>>,
 }
 
 pub(crate) async fn site_settings(conn: &mut PgConnection) -> sqlx::Result<SiteSettingsRow> {
     let row = sqlx::query_as!(
         SiteSettingsRow,
-        "SELECT exam_required, updated_at FROM site_settings WHERE id = 1",
+        "SELECT exam_required, overrides, updated_at FROM site_settings WHERE id = 1",
     )
     .fetch_optional(conn)
     .await?;
     Ok(row.unwrap_or(SiteSettingsRow {
         exam_required: true,
+        overrides: serde_json::json!({}),
         updated_at: None,
     }))
 }
@@ -1453,7 +1456,7 @@ pub(crate) async fn lock_site_settings(conn: &mut PgConnection) -> sqlx::Result<
         .await?;
     sqlx::query_as!(
         SiteSettingsRow,
-        "SELECT exam_required, updated_at FROM site_settings WHERE id = 1 FOR UPDATE",
+        "SELECT exam_required, overrides, updated_at FROM site_settings WHERE id = 1 FOR UPDATE",
     )
     .fetch_one(conn)
     .await
@@ -1462,11 +1465,13 @@ pub(crate) async fn lock_site_settings(conn: &mut PgConnection) -> sqlx::Result<
 pub(crate) async fn update_site_settings(
     conn: &mut PgConnection,
     exam_required: bool,
+    overrides: &serde_json::Value,
     now: DateTime<Utc>,
 ) -> sqlx::Result<()> {
     sqlx::query!(
-        "UPDATE site_settings SET exam_required = $1, updated_at = $2 WHERE id = 1",
+        "UPDATE site_settings SET exam_required = $1, overrides = $2, updated_at = $3 WHERE id = 1",
         exam_required,
+        overrides,
         now,
     )
     .execute(conn)

@@ -7,11 +7,12 @@
 //! - 身份要查会话：令牌摘要 → 用户 id 缓存 30 秒，所以大多数请求不多查一次库。令牌无效、账号封禁、
 //!   查库失败都按游客处理（RL-004）；随便编的令牌落在 IP 桶里，拿不到新配额。
 //! - 进程内计数（不使用 Redis）：多实例时每个实例各自计。
+//! - 次数与开关可在后台在线修改（`ik_kernel::site`）；次数变了就换一套新桶，计数从零开始。
 //! - 读 = GET / HEAD，外加剧情库 MCP 的 POST（JSON-RPC 只读查询）。
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, PoisonError, RwLock};
 use std::time::Duration;
 
 use axum::extract::{ConnectInfo, Request, State};
@@ -26,6 +27,7 @@ use ik_auth::AuthState;
 use ik_auth::service::Resolution;
 use ik_kernel::Problem;
 use ik_kernel::config::RateLimit;
+use ik_kernel::site::{RateLimitParams, Site};
 use moka::future::Cache;
 use sha2::{Digest, Sha256};
 
@@ -57,31 +59,59 @@ impl Bucket {
     }
 }
 
-pub struct GlobalLimiter {
-    enabled: bool,
+/// 按同一组参数建的四个桶。
+struct Buckets {
+    params: RateLimitParams,
     anon_read: Bucket,
     anon_write: Bucket,
     user_read: Bucket,
     user_write: Bucket,
+}
+
+impl Buckets {
+    fn new(params: RateLimitParams) -> Self {
+        Self {
+            anon_read: Bucket::new(params.anon_read_per_min),
+            anon_write: Bucket::new(params.anon_write_per_min),
+            user_read: Bucket::new(params.user_read_per_min),
+            user_write: Bucket::new(params.user_write_per_min),
+            params,
+        }
+    }
+
+    fn all(&self) -> [&Bucket; 4] {
+        [
+            &self.anon_read,
+            &self.anon_write,
+            &self.user_read,
+            &self.user_write,
+        ]
+    }
+}
+
+pub struct GlobalLimiter {
+    /// 部署配置里的参数；设置了 `site` 时以后台的为准。
+    config: RateLimitParams,
+    site: Option<Site>,
+    buckets: RwLock<Arc<Buckets>>,
     /// 令牌 SHA-256 → 用户 id（`None`：令牌无效或账号不可用）。不保存令牌原文。
     sessions: Cache<[u8; 32], Option<i64>>,
 }
 
 impl GlobalLimiter {
-    pub fn new(config: &RateLimit) -> Arc<Self> {
+    pub fn new(config: &RateLimit, site: Option<Site>) -> Arc<Self> {
+        let config = RateLimitParams::from(config);
         let limiter = Arc::new(Self {
-            enabled: config.enabled,
-            anon_read: Bucket::new(config.anon_read_per_min),
-            anon_write: Bucket::new(config.anon_write_per_min),
-            user_read: Bucket::new(config.user_read_per_min),
-            user_write: Bucket::new(config.user_write_per_min),
+            buckets: RwLock::new(Arc::new(Buckets::new(config.clone()))),
+            config,
+            site,
             sessions: Cache::builder()
                 .max_capacity(SESSION_CACHE_CAPACITY)
                 .time_to_live(SESSION_CACHE_TTL)
                 .build(),
         });
         // 定期丢掉已经恢复满额的桶，防止键无限增长。CLI 等没有运行时的场景不需要。
-        if limiter.enabled
+        if (limiter.config.enabled || limiter.site.is_some())
             && let Ok(runtime) = tokio::runtime::Handle::try_current()
         {
             let weak = Arc::downgrade(&limiter);
@@ -91,7 +121,8 @@ impl GlobalLimiter {
                 loop {
                     tick.tick().await;
                     let Some(limiter) = weak.upgrade() else { break };
-                    for bucket in limiter.buckets() {
+                    let buckets = limiter.current();
+                    for bucket in buckets.all() {
                         bucket.limiter.retain_recent();
                         bucket.limiter.shrink_to_fit();
                     }
@@ -101,13 +132,31 @@ impl GlobalLimiter {
         limiter
     }
 
-    fn buckets(&self) -> [&Bucket; 4] {
-        [
-            &self.anon_read,
-            &self.anon_write,
-            &self.user_read,
-            &self.user_write,
-        ]
+    fn current(&self) -> Arc<Buckets> {
+        self.buckets
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// 当前生效的桶；参数变了就换一套新的（关闭时返回 `None`）。
+    async fn active(&self) -> Option<Arc<Buckets>> {
+        let params = match &self.site {
+            Some(site) => site.get().await.rate_limit.clone(),
+            None => self.config.clone(),
+        };
+        if !params.enabled {
+            return None;
+        }
+        let current = self.current();
+        if current.params == params {
+            return Some(current);
+        }
+        let mut slot = self.buckets.write().unwrap_or_else(PoisonError::into_inner);
+        if slot.params != params {
+            *slot = Arc::new(Buckets::new(params));
+        }
+        Some(slot.clone())
     }
 
     /// 已登录请求的用户 id。
@@ -131,21 +180,21 @@ impl GlobalLimiter {
 pub async fn layer(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let limiter = state.rate_limit.clone();
     // QQ 回调来自少量平台出口 IP；由 qqbot 在认证后按已配置 AppID 限流。
-    if !limiter.enabled
-        || !request.uri().path().starts_with("/v1/")
-        || request.uri().path() == "/v1/qq/webhook"
-    {
+    if !request.uri().path().starts_with("/v1/") || request.uri().path() == "/v1/qq/webhook" {
         return next.run(request).await;
     }
+    let Some(buckets) = limiter.active().await else {
+        return next.run(request).await;
+    };
     // 剧情库 MCP 是只读查询，只是 JSON-RPC 规定用 POST：按读计，否则总结一章要读几十次就会撞上写的限额。
     let read = matches!(*request.method(), Method::GET | Method::HEAD)
         || request.uri().path() == STORY_MCP_PATH;
     let (bucket, key) = match limiter.user_id(&state.auth, request.headers()).await {
         Some(user_id) => (
             if read {
-                &limiter.user_read
+                &buckets.user_read
             } else {
-                &limiter.user_write
+                &buckets.user_write
             },
             format!("u:{user_id}"),
         ),
@@ -161,9 +210,9 @@ pub async fn layer(State(state): State<AppState>, request: Request, next: Next) 
             );
             (
                 if read {
-                    &limiter.anon_read
+                    &buckets.anon_read
                 } else {
-                    &limiter.anon_write
+                    &buckets.anon_write
                 },
                 format!("ip:{ip}"),
             )

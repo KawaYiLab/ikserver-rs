@@ -22,6 +22,7 @@ use ik_ai::AiState;
 use ik_content::ContentState;
 use ik_exam::ExamState;
 use ik_kernel::Snowflake;
+use ik_kernel::site::Site;
 use ik_moderation::ModerationState;
 use ik_search::SearchState;
 use sqlx::PgPool;
@@ -35,6 +36,8 @@ pub struct AdminState {
     pub ai: AiState,
     pub moderation: ModerationState,
     pub search: SearchState,
+    /// 站点参数（「系统设置」页读写，保存后让本实例缓存失效）。
+    pub site: Site,
     /// 正在后台重建索引（同一进程同时只跑一个）。
     pub(crate) reindexing: Arc<AtomicBool>,
 }
@@ -46,6 +49,7 @@ impl AdminState {
         ai: AiState,
         moderation: ModerationState,
         search: SearchState,
+        site: Site,
     ) -> Self {
         Self {
             db: content.db.clone(),
@@ -55,6 +59,7 @@ impl AdminState {
             ai,
             moderation,
             search,
+            site,
             reindexing: Arc::new(AtomicBool::new(false)),
         }
     }

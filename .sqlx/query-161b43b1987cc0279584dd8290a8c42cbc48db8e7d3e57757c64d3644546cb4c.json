@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT overrides FROM site_settings WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "overrides",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "site_settings",
+            "name": "overrides"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "161b43b1987cc0279584dd8290a8c42cbc48db8e7d3e57757c64d3644546cb4c"
+}

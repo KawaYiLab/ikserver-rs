@@ -4151,7 +4151,7 @@
           "admin"
         ],
         "summary": "修改系统设置（只有管理员）",
-        "description": "立即生效，不需要重启或重新登录。关闭入站考试后，未通过考试的账号也能执行写操作。",
+        "description": "不需要重启或重新登录：本实例立即生效，其他实例最长 60 秒后生效。关闭入站考试后，未通过考试的账号\n也能执行写操作。参数超出范围时返回 400 `VALIDATION_FAILED`，`errors[].field` 形如 `hot.count`。",
         "operationId": "put_site_settings",
         "requestBody": {
           "content": {
@@ -4169,6 +4169,15 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SiteSettings"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
                 }
               }
             }
@@ -17701,6 +17710,52 @@
           }
         }
       },
+      "ExamParams": {
+        "type": "object",
+        "description": "入站考试参数（EXAM-004）。改动只影响之后开始的考试。",
+        "required": [
+          "questionCount",
+          "passScorePercent",
+          "timeLimitSecs",
+          "maxFailsBeforeCooldown",
+          "failCooldownSecs",
+          "rewardDenny",
+          "rewardExp"
+        ],
+        "properties": {
+          "failCooldownSecs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "maxFailsBeforeCooldown": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "passScorePercent": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "questionCount": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "rewardDenny": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "rewardExp": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "timeLimitSecs": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "ExamStatusView": {
         "type": "object",
         "required": [
@@ -18208,6 +18263,55 @@
             "items": {
               "$ref": "#/components/schemas/PostCard"
             }
+          }
+        }
+      },
+      "HotParams": {
+        "type": "object",
+        "description": "热榜参数（HOT-001）。",
+        "required": [
+          "enabled",
+          "count",
+          "feedSize",
+          "refreshSecs",
+          "gravity",
+          "recentDays",
+          "candidates",
+          "maxPerAuthor"
+        ],
+        "properties": {
+          "candidates": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "feedSize": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "gravity": {
+            "type": "number",
+            "format": "double"
+          },
+          "maxPerAuthor": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "recentDays": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "refreshSecs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -19079,6 +19183,19 @@
           },
           "targetType": {
             "$ref": "#/components/schemas/TargetType"
+          }
+        }
+      },
+      "ModerationParams": {
+        "type": "object",
+        "required": [
+          "autoHideThreshold"
+        ],
+        "properties": {
+          "autoHideThreshold": {
+            "type": "integer",
+            "format": "int64",
+            "description": "同一内容收到这么多个不同的人的待处理举报时自动隐藏（RPT-052）。"
           }
         }
       },
@@ -23611,6 +23728,42 @@
           }
         }
       },
+      "RateLimitParams": {
+        "type": "object",
+        "description": "全站默认限流（每分钟，RL-002）。改动后计数从零开始。",
+        "required": [
+          "enabled",
+          "anonReadPerMin",
+          "anonWritePerMin",
+          "userReadPerMin",
+          "userWritePerMin"
+        ],
+        "properties": {
+          "anonReadPerMin": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "anonWritePerMin": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "userReadPerMin": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "userWritePerMin": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "ReadResult": {
         "type": "object",
         "required": [
@@ -23767,6 +23920,24 @@
           }
         },
         "additionalProperties": false
+      },
+      "Registration": {
+        "type": "object",
+        "description": "注册与登录。",
+        "required": [
+          "open",
+          "mihoyoLogin"
+        ],
+        "properties": {
+          "mihoyoLogin": {
+            "type": "boolean",
+            "description": "米游社扫码登录与绑定。关闭时扫码接口返回 503 `MIHOYO_DISABLED`。"
+          },
+          "open": {
+            "type": "boolean",
+            "description": "注册总开关（REG-002）。关闭时邮箱注册与米游社首登建号都被拒绝，已有账号不受影响。"
+          }
+        }
       },
       "RelatedPosts": {
         "type": "object",
@@ -25130,14 +25301,28 @@
       },
       "SiteSettings": {
         "type": "object",
-        "description": "站点设置（后台「系统设置」）：随时切换、立即生效的开关。",
+        "description": "站点设置（后台「系统设置」）：随时切换、不用重启的开关与参数。",
         "required": [
-          "examRequired"
+          "examRequired",
+          "values",
+          "defaults",
+          "overridden"
         ],
         "properties": {
+          "defaults": {
+            "$ref": "#/components/schemas/SiteValues",
+            "description": "部署配置里的缺省值（「恢复默认」恢复到它）。"
+          },
           "examRequired": {
             "type": "boolean",
             "description": "入站考试开关。关闭后未通过考试的普通账号也能发帖、评论、私信等（REG-007），\n等级在下次获得经验时按经验计算（EXP-002）；考试本身仍可参加，首次通过照常发奖励。"
+          },
+          "overridden": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "后台改过的项（形如 `hot.count`）。"
           },
           "updatedAt": {
             "type": [
@@ -25146,17 +25331,60 @@
             ],
             "format": "date-time",
             "description": "最近一次修改时间；从未修改过时为空。"
+          },
+          "values": {
+            "$ref": "#/components/schemas/SiteValues",
+            "description": "当前生效的参数（部署配置叠加后台的修改）。本实例立即生效，其他实例最长 60 秒后生效。"
           }
         }
       },
       "SiteSettingsInput": {
         "type": "object",
-        "required": [
-          "examRequired"
-        ],
+        "description": "两项都可省略；`values` 要给全部参数（与缺省值相同的项不会保存为修改）。",
         "properties": {
           "examRequired": {
-            "type": "boolean"
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "values": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SiteValues"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "SiteValues": {
+        "type": "object",
+        "description": "全部可在线修改的参数。",
+        "required": [
+          "registration",
+          "exam",
+          "hot",
+          "moderation",
+          "rateLimit"
+        ],
+        "properties": {
+          "exam": {
+            "$ref": "#/components/schemas/ExamParams"
+          },
+          "hot": {
+            "$ref": "#/components/schemas/HotParams"
+          },
+          "moderation": {
+            "$ref": "#/components/schemas/ModerationParams"
+          },
+          "rateLimit": {
+            "$ref": "#/components/schemas/RateLimitParams"
+          },
+          "registration": {
+            "$ref": "#/components/schemas/Registration"
           }
         }
       },

@@ -184,7 +184,7 @@ pub async fn create_qr(
     request: CreateQrRequest,
     meta: &RequestMeta,
 ) -> Result<QrCreated, Problem> {
-    if !state.enabled {
+    if !state.login_enabled().await {
         return Err(disabled());
     }
     check_rate(&state.limits.create, meta.ip, "二维码生成")?;
@@ -273,7 +273,7 @@ pub async fn poll(
     request: &PollQrRequest,
     meta: &RequestMeta,
 ) -> Result<Polled, Problem> {
-    if !state.enabled {
+    if !state.login_enabled().await {
         return Err(disabled());
     }
     check_rate(&state.limits.poll, meta.ip, "轮询")?;
@@ -550,7 +550,7 @@ async fn login(
             tx.commit().await?;
             return Ok((user_id, false));
         }
-        if !state.auth.settings.registration_open {
+        if !state.auth.registration_open().await {
             return Err(ik_auth::service::registration_closed());
         }
         let user_id = state.auth.ids.next_raw();

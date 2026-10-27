@@ -14,6 +14,7 @@ pub mod id;
 pub mod jobs;
 pub mod mail;
 pub mod role;
+pub mod site;
 pub mod time;
 
 pub use error::{FieldError, Problem};

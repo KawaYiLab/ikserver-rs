@@ -8,6 +8,7 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::EventBus;
 use ik_kernel::config::Config;
 use ik_kernel::mail::Mailer;
+use ik_kernel::site::Site;
 use sqlx::PgPool;
 
 /// 认证接口每 IP 每条路由每分钟 20 次（RL-001）。
@@ -25,6 +26,8 @@ pub struct AuthState {
     /// 会话被吊销时发布内部事件（实时网关据此断开连接）。
     pub bus: Arc<dyn EventBus>,
     pub lifecycle: crate::lifecycle::LifecycleHooks,
+    /// 后台可改的站点参数；不设置时（测试、CLI）用 `settings` 里的部署配置。
+    pub site: Option<Site>,
     pub(crate) limiter: Arc<DefaultKeyedRateLimiter<String>>,
 }
 
@@ -43,9 +46,27 @@ impl AuthState {
             settings: Arc::new(settings),
             bus,
             lifecycle: crate::lifecycle::LifecycleHooks::default(),
+            site: None,
             limiter: Arc::new(RateLimiter::keyed(Quota::per_minute(
                 AUTH_REQUESTS_PER_MINUTE,
             ))),
+        }
+    }
+}
+
+impl AuthState {
+    /// 改用后台可改的站点参数（`serve` 启动时调用）。
+    #[must_use]
+    pub fn with_site(mut self, site: Site) -> Self {
+        self.site = Some(site);
+        self
+    }
+
+    /// 当前是否开放注册（REG-002）。
+    pub async fn registration_open(&self) -> bool {
+        match &self.site {
+            Some(site) => site.get().await.registration.open,
+            None => self.settings.registration_open,
         }
     }
 }

@@ -1873,7 +1873,10 @@ async fn exam_switch_in_site_settings(db: PgPool) {
     assert_eq!(status, StatusCode::FORBIDDEN);
     let (status, settings) = call(&app, ADMIN, "GET", base, Value::Null).await;
     assert_eq!(status, StatusCode::OK, "{settings}");
-    assert_eq!(settings, json!({ "examRequired": true, "updatedAt": null }));
+    assert_eq!(settings["examRequired"], true);
+    assert_eq!(settings["updatedAt"], Value::Null);
+    assert_eq!(settings["overridden"], json!([]));
+    assert_eq!(settings["values"], settings["defaults"]);
 
     // 默认开启：未通过考试不能写。
     let (_, me) = call(&app, NEWBIE, "GET", "/v1/me", Value::Null).await;
@@ -1915,6 +1918,69 @@ async fn exam_switch_in_site_settings(db: PgPool) {
     let (status, body) = call(&app, NEWBIE, "POST", "/v1/me/check-in", Value::Null).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(body["code"], "EXAM_REQUIRED");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn site_values_override_deploy_config(db: PgPool) {
+    let app = setup(&db).await;
+    let base = "/v1/admin/settings";
+    let (_, settings) = call(&app, ADMIN, "GET", base, Value::Null).await;
+    let defaults = settings["defaults"].clone();
+    assert_eq!(defaults["registration"]["open"], true);
+    assert_eq!(defaults["hot"]["count"], 4);
+
+    // 超出范围：逐项报错，不写库。
+    let mut bad = defaults.clone();
+    bad["hot"]["count"] = json!(0);
+    let (status, body) = call(&app, ADMIN, "PUT", base, json!({ "values": bad })).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["errors"][0]["field"], "hot.count");
+
+    // 关闭注册：立即生效，只有改过的项记为覆盖，审计记下改了哪些。
+    let mut values = defaults.clone();
+    values["registration"]["open"] = json!(false);
+    values["hot"]["count"] = json!(6);
+    let (status, settings) = call(&app, ADMIN, "PUT", base, json!({ "values": values })).await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["values"], values);
+    assert_eq!(
+        settings["overridden"],
+        json!(["hot.count", "registration.open"])
+    );
+    assert_eq!(settings["examRequired"], true, "没给 examRequired 时不变");
+    let (status, body) = call(
+        &app,
+        USER,
+        "POST",
+        "/v1/auth/email-codes",
+        json!({ "email": "new@example.com", "purpose": "register" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "REGISTRATION_CLOSED");
+
+    // 改回缺省值就不再算覆盖。
+    let (_, settings) = call(&app, ADMIN, "PUT", base, json!({ "values": defaults })).await;
+    assert_eq!(settings["overridden"], json!([]));
+    let overrides = sqlx::query_scalar!("SELECT overrides FROM site_settings WHERE id = 1")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(overrides, json!({}));
+    let audits = sqlx::query_scalar!(
+        "SELECT details FROM admin_audit_log WHERE action = 'site.settings.update'
+         ORDER BY created_at, id"
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(
+        audits,
+        vec![
+            json!({ "changed": ["hot.count", "registration.open"] }),
+            json!({ "changed": ["hot.count", "registration.open"] }),
+        ]
+    );
 }
 
 /// 原始字节请求（剧情库语料包上传）。

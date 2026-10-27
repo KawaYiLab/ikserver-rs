@@ -14,6 +14,7 @@ use ik_kernel::Snowflake;
 use ik_kernel::bus::{EventBus, LocalBus};
 use ik_kernel::cluster::ClusterBus;
 use ik_kernel::config::Config;
+use ik_kernel::site::{Site, SiteValues};
 use ik_media::MediaState;
 use ik_messaging::MessagingState;
 use ik_mihoyo::MihoyoState;
@@ -59,6 +60,8 @@ pub struct AppState {
     /// 剧情库：这里只建空壳，语料由 `serve` 显式加载（CLI 子命令不需要）。
     pub story: StoryState,
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
+    /// 后台可在线修改的站点参数（缺省值来自部署配置）。
+    pub site: Site,
 }
 
 impl AppState {
@@ -71,13 +74,15 @@ impl AppState {
         } else {
             bus.clone()
         };
+        let site = Site::new(db.clone(), SiteValues::from_config(&config));
         let auth = AuthState::new(
             db.clone(),
             ids.clone(),
             mailer,
             AuthSettings::from_config(&config)?,
             publisher.clone(),
-        );
+        )
+        .with_site(site.clone());
         let media = MediaState::new(
             db.clone(),
             ids.clone(),
@@ -93,7 +98,8 @@ impl AppState {
         let comments =
             CommentsState::new(db.clone(), ids.clone(), publisher.clone(), media.clone());
         let economy = EconomyState::new(db.clone(), ids.clone());
-        let exam = ExamState::new(db.clone(), ids.clone(), config.exam.clone());
+        let exam =
+            ExamState::new(db.clone(), ids.clone(), config.exam.clone()).with_site(site.clone());
         let social = SocialState::new(db.clone());
         let notify = NotifyState::new(db.clone(), publisher.clone(), media.clone());
         let messaging =
@@ -116,10 +122,11 @@ impl AppState {
             comments.clone(),
             media.clone(),
         );
-        let feed = FeedState::start(content.clone(), config.hot.clone())?;
+        let feed = FeedState::start(content.clone(), config.hot.clone(), Some(site.clone()))?;
         // 索引同步由 `serve` 显式启动（CLI 子命令不需要）。
         let search = SearchState::new(content.clone(), comments.clone(), &config.search)?;
-        let rate_limit = crate::rate_limit::GlobalLimiter::new(&config.rate_limit);
+        let rate_limit =
+            crate::rate_limit::GlobalLimiter::new(&config.rate_limit, Some(site.clone()));
         let cosmetics = CosmeticsState::new(db.clone(), ids.clone(), media.clone());
         let mihoyo = MihoyoState::from_config(auth.clone(), &config)?;
         let moderation = ModerationState::new(
@@ -128,7 +135,8 @@ impl AppState {
             publisher.clone(),
             media.clone(),
             config.moderation.auto_hide_threshold,
-        );
+        )
+        .with_site(site.clone());
         let forum = ik_ai::Forum {
             content: content.clone(),
             comments: comments.clone(),
@@ -156,8 +164,10 @@ impl AppState {
             ai.clone(),
             moderation.clone(),
             search.clone(),
+            site.clone(),
         );
         Ok(Self {
+            site,
             story,
             admin,
             ai,

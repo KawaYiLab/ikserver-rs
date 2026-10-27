@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use http::StatusCode;
 use http::request::Parts;
 use ik_kernel::cursor::{Paged, page_window};
+use ik_kernel::site::{SiteValues, override_paths};
 use ik_kernel::{Id, Problem, Role, Snowflake};
 use serde::{Deserialize, Serialize};
 use sqlx::PgConnection;
@@ -557,47 +558,88 @@ pub async fn daily_signups(
     ))
 }
 
-/// 站点设置（后台「系统设置」）：随时切换、立即生效的开关。
+/// 站点设置（后台「系统设置」）：随时切换、不用重启的开关与参数。
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SiteSettings {
     /// 入站考试开关。关闭后未通过考试的普通账号也能发帖、评论、私信等（REG-007），
     /// 等级在下次获得经验时按经验计算（EXP-002）；考试本身仍可参加，首次通过照常发奖励。
     pub exam_required: bool,
+    /// 当前生效的参数（部署配置叠加后台的修改）。本实例立即生效，其他实例最长 60 秒后生效。
+    pub values: SiteValues,
+    /// 部署配置里的缺省值（「恢复默认」恢复到它）。
+    pub defaults: SiteValues,
+    /// 后台改过的项（形如 `hot.count`）。
+    pub overridden: Vec<String>,
     /// 最近一次修改时间；从未修改过时为空。
     pub updated_at: Option<DateTime<Utc>>,
 }
 
+/// 两项都可省略；`values` 要给全部参数（与缺省值相同的项不会保存为修改）。
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SiteSettingsInput {
-    pub exam_required: bool,
+    #[serde(default)]
+    pub exam_required: Option<bool>,
+    #[serde(default)]
+    pub values: Option<SiteValues>,
 }
 
-fn settings_view(row: repo::SiteSettingsRow) -> SiteSettings {
+fn effective(defaults: &SiteValues, overrides: &serde_json::Value) -> SiteValues {
+    SiteValues::with_overrides(defaults, overrides).unwrap_or_else(|error| {
+        tracing::warn!(%error, "站点设置的覆盖项不合法，按缺省值显示");
+        defaults.clone()
+    })
+}
+
+fn settings_view(row: repo::SiteSettingsRow, defaults: &SiteValues) -> SiteSettings {
+    let values = effective(defaults, &row.overrides);
     SiteSettings {
         exam_required: row.exam_required,
+        overridden: override_paths(&values.overrides_against(defaults)),
+        values,
+        defaults: defaults.clone(),
         updated_at: row.updated_at,
     }
 }
 
-pub async fn site_settings(conn: &mut PgConnection) -> Result<SiteSettings, Problem> {
-    Ok(settings_view(repo::site_settings(conn).await?))
+pub async fn site_settings(
+    conn: &mut PgConnection,
+    defaults: &SiteValues,
+) -> Result<SiteSettings, Problem> {
+    Ok(settings_view(repo::site_settings(conn).await?, defaults))
 }
 
-/// 修改站点设置（只有管理员）。值没变时不写库也不记审计。
+/// 修改站点设置（只有管理员）。值没变时不写库也不记审计。调用方提交后让站点参数缓存失效。
 pub async fn update_site_settings(
     conn: &mut PgConnection,
     ids: &Snowflake,
     op: &Operator,
+    defaults: &SiteValues,
     input: SiteSettingsInput,
 ) -> Result<SiteSettings, Problem> {
     let current = repo::lock_site_settings(conn).await?;
-    if current.exam_required == input.exam_required {
-        return Ok(settings_view(current));
+    let before = effective(defaults, &current.overrides);
+    let after = input.values.unwrap_or_else(|| before.clone());
+    let errors = after.validate();
+    if !errors.is_empty() {
+        return Err(Problem::validation(errors));
     }
+    let exam_required = input.exam_required.unwrap_or(current.exam_required);
+    let changed = override_paths(&after.overrides_against(&before));
+    if exam_required == current.exam_required && changed.is_empty() {
+        return Ok(settings_view(current, defaults));
+    }
+    let overrides = after.overrides_against(defaults);
     let now = Utc::now();
-    repo::update_site_settings(conn, input.exam_required, now).await?;
+    repo::update_site_settings(conn, exam_required, &overrides, now).await?;
+    let mut details = serde_json::Map::new();
+    if exam_required != current.exam_required {
+        details.insert("examRequired".to_owned(), exam_required.into());
+    }
+    if !changed.is_empty() {
+        details.insert("changed".to_owned(), changed.into());
+    }
     record(
         conn,
         ids,
@@ -606,13 +648,17 @@ pub async fn update_site_settings(
             action: "site.settings.update",
             target_type: "site_settings",
             target_id: None,
-            details: serde_json::json!({ "examRequired": input.exam_required }),
+            details: serde_json::Value::Object(details),
         },
         now,
     )
     .await?;
-    Ok(SiteSettings {
-        exam_required: input.exam_required,
-        updated_at: Some(now),
-    })
+    Ok(settings_view(
+        repo::SiteSettingsRow {
+            exam_required,
+            overrides,
+            updated_at: Some(now),
+        },
+        defaults,
+    ))
 }
