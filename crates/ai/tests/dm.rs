@@ -228,6 +228,7 @@ async fn message_triggers_a_streamed_reply(db: PgPool) {
     let kinds: Vec<&str> = h.drain(&mut rx).iter().map(|e| e.kind).collect();
     assert_eq!(kinds.first(), Some(&"dm.message.created"), "{kinds:?}");
     assert!(kinds.contains(&"dm.message.delta"), "{kinds:?}");
+    assert!(kinds.contains(&"dm.message.append"), "{kinds:?}");
     assert_eq!(kinds.last(), Some(&"dm.message.edited"), "{kinds:?}");
 
     // 请求：system + 带昵称的用户消息。

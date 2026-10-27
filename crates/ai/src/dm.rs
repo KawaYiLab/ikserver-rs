@@ -652,6 +652,7 @@ pub async fn run_job(
             reply_id: prepared.reply_id,
             ai_user_id: prepared.job.ai_user_id,
             audience,
+            appended: Default::default(),
         }),
         providers: prepared.providers.clone(),
         mode: prepared.card.output_mode,

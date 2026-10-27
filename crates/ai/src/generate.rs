@@ -34,6 +34,8 @@ use crate::workflow::Workflow;
 const STOP_POLL: Duration = Duration::from_millis(600);
 /// 生成期间「正在输入」的间隔（GEN-005）。
 const TYPING_EVERY: Duration = Duration::from_secs(2);
+/// `dm.message.append` 每隔这么多条带一次全文快照，供中途加入或丢了事件的客户端对齐（GEN-009）。
+const APPEND_SNAPSHOT_EVERY: u64 = 64;
 /// 正文增长不足 `stream_min_chars` 时，距上次推送超过这么久也推一次，免得尾巴卡住（GEN-004）。
 const STREAM_PUSH_EVERY: Duration = Duration::from_millis(150);
 /// 剩余预算少于这么多时，首帧超时后不再退回默认模型（GEN-022）。
@@ -95,6 +97,14 @@ pub(crate) struct Live {
     pub ai_user_id: i64,
     /// 推送对象（会话里的人类成员）。
     pub audience: Vec<i64>,
+    /// 已经用 `dm.message.append` 推出去的正文（跨工具调用的各轮累计）。
+    pub appended: parking_lot::Mutex<Appended>,
+}
+
+#[derive(Default)]
+pub(crate) struct Appended {
+    seq: u64,
+    text: String,
 }
 
 pub(crate) struct StreamCtx<'a> {
@@ -257,13 +267,17 @@ async fn stream_round(
                         out.received_chars += text.chars().count();
                         out.content.push_str(&text);
                         workflow.content(&text);
-                        let total = out.content.chars().count();
-                        let due = total >= pushed_chars + min_chars
-                            || (total > pushed_chars && pushed_at.elapsed() >= STREAM_PUSH_EVERY);
-                        if ctx.live.is_some() && due {
-                            pushed_chars = total;
-                            pushed_at = Instant::now();
-                            publish_delta(ctx, prefix, &out.content, conversation_id, reply_id);
+                        if ctx.live.is_some() {
+                            let shown = shown_text(ctx, prefix, &out.content);
+                            publish_append(ctx, &shown, conversation_id, reply_id);
+                            let total = out.content.chars().count();
+                            let due = total >= pushed_chars + min_chars
+                                || (total > pushed_chars && pushed_at.elapsed() >= STREAM_PUSH_EVERY);
+                            if due {
+                                pushed_chars = total;
+                                pushed_at = Instant::now();
+                                publish_delta(ctx, &shown, conversation_id, reply_id);
+                            }
                         }
                     }
                     StreamEvent::ToolCallDelta { index, id, name, arguments } => {
@@ -304,7 +318,8 @@ async fn stream_round(
         && matches!(out.end, End::Finished)
         && out.content.chars().count() > pushed_chars
     {
-        publish_delta(ctx, prefix, &out.content, conversation_id, reply_id);
+        let shown = shown_text(ctx, prefix, &out.content);
+        publish_delta(ctx, &shown, conversation_id, reply_id);
     }
     workflow.flush();
     ctx.publish_workflow(workflow);
@@ -318,16 +333,44 @@ async fn stream_round(
     out
 }
 
-/// 推送累计正文（GEN-004：累计全文、已清洗、不落库）。
-fn publish_delta(
-    ctx: &StreamCtx<'_>,
-    prefix: &str,
-    content: &str,
-    conversation_id: i64,
-    reply_id: i64,
-) {
-    let full = join_rounds(prefix, content);
-    let shown = sanitize::sanitize(&full, ctx.mode, ctx.max_chars);
+/// 到目前为止要展示的正文：前几轮 + 本轮，整体清洗。
+fn shown_text(ctx: &StreamCtx<'_>, prefix: &str, content: &str) -> String {
+    sanitize::sanitize(&join_rounds(prefix, content), ctx.mode, ctx.max_chars)
+}
+
+/// 逐块推送正文增量（GEN-009）：清洗后的正文只是在上次基础上往后长，就只发新增的 `text`；
+/// 清洗改动了前文（标签闭合后被剥掉等）、第一条和每隔 [`APPEND_SNAPSHOT_EVERY`] 条发全文 `content`。
+/// `seq` 从 1 连续递增，客户端发现断号就等下一份全文。
+fn publish_append(ctx: &StreamCtx<'_>, shown: &str, conversation_id: i64, reply_id: i64) {
+    let Some(live) = ctx.live.as_ref() else {
+        return;
+    };
+    let Some(mut payload) = next_append(&mut live.appended.lock(), shown) else {
+        return;
+    };
+    payload["conversationId"] = conversation_id.to_string().into();
+    payload["messageId"] = reply_id.to_string().into();
+    ctx.publish("dm.message.append", &payload);
+}
+
+/// 算下一条 `dm.message.append` 的 `{seq, text | content}`；正文没变返回 None。
+fn next_append(appended: &mut Appended, shown: &str) -> Option<serde_json::Value> {
+    if appended.text == shown {
+        return None;
+    }
+    appended.seq += 1;
+    let seq = appended.seq;
+    let payload = if seq % APPEND_SNAPSHOT_EVERY != 1 && shown.starts_with(appended.text.as_str()) {
+        serde_json::json!({ "seq": seq, "text": &shown[appended.text.len()..] })
+    } else {
+        serde_json::json!({ "seq": seq, "content": shown })
+    };
+    shown.clone_into(&mut appended.text);
+    Some(payload)
+}
+
+/// 推送累计正文（GEN-004：累计全文、已清洗、不落库）。旧客户端（安卓）用。
+fn publish_delta(ctx: &StreamCtx<'_>, shown: &str, conversation_id: i64, reply_id: i64) {
     ctx.publish(
         "dm.message.delta",
         &serde_json::json!({
@@ -753,5 +796,33 @@ mod tests {
         assert!(reused);
         assert!(!success.await.is_error);
         assert_eq!(count.load(Ordering::SeqCst), 6);
+    }
+
+    #[test]
+    fn append_sends_suffix_and_snapshots() {
+        let mut a = Appended::default();
+        // 第一条总是全文
+        assert_eq!(
+            next_append(&mut a, "你好"),
+            Some(serde_json::json!({ "seq": 1, "content": "你好" }))
+        );
+        assert_eq!(next_append(&mut a, "你好"), None);
+        assert_eq!(
+            next_append(&mut a, "你好呀，"),
+            Some(serde_json::json!({ "seq": 2, "text": "呀，" }))
+        );
+        // 清洗改了前文：发全文
+        assert_eq!(
+            next_append(&mut a, "你好呀"),
+            Some(serde_json::json!({ "seq": 3, "content": "你好呀" }))
+        );
+        for n in 4..=APPEND_SNAPSHOT_EVERY {
+            let next = format!("{}x", a.text);
+            assert_eq!(next_append(&mut a, &next).unwrap()["seq"], n);
+        }
+        let next = format!("{}y", a.text);
+        let snap = next_append(&mut a, &next).unwrap();
+        assert_eq!(snap["seq"], APPEND_SNAPSHOT_EVERY + 1);
+        assert_eq!(snap["content"], next.as_str());
     }
 }

@@ -202,6 +202,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 
 ### 6.2 停止与重新生成
 
+- **GEN-009** 逐块增量（Rust 版新增）：上游每到一块正文就把清洗后的累计正文和上次推出的比较，广播 `message.append {seq, text}`（只带新增部分）；第一条、清洗改动了前文时、以及每隔 64 条改带全文 `{seq, content}`。`seq` 按回复从 1 连续递增（重试会从 1 重来，第一条是全文）。客户端断号就丢弃增量，等下一份全文。与 GEN-004 并存：旧客户端继续用节流的 `message.delta`。
 - **GEN-010** 停止生成（旧 `POST /api/dm/ai/stop {messageId=占位 documentId}`）：消息存在且未撤回、是 AI 发出的 text 消息、请求者是会话活跃成员；写停止标志（TTL 300s），写失败返回 500。`conversation.ts:1479-1520`
 - **GEN-011** 生成方在开始前检查一次停止标志，之后每 600ms 轮询；命中即中止上游流（纯思考阶段、尚无正文时也能停）。有已生成正文则定稿为 `<正文>\n\n（已停止）`，没有则为 `（已停止）`；停止后清除标志。开始前就已停止的，直接以 `（已停止）` 定稿且不计费。`worker.ts:432-444,524-553`、`tests/unit/agent-worker-cancellation.test.ts`
 - **GEN-012** 停止必须同时终止服务端那次生成，且**被截断的回答不得以全文形式进入 AI 记忆**：旧实现曾出现「用户看到截断文本、AI 记住全文」，下一轮答非所问。`agent-worker/README.md`「契约 4」、`worker.ts:437-440`
