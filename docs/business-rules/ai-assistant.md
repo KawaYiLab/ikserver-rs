@@ -194,7 +194,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **GEN-001** 私信回复是流式的：先创建一条空的 AI 占位消息（发送者 = AI，`content=''`，带 `triggerMessage`、`generationEpoch`、`agentJobId`、`aiModelKey`），推进会话活跃时间，广播 `message.created`（附 `streaming:true`），前端渲染空气泡。`dm-stream.ts:49-128`
 - **GEN-002** 占位消息按 jobId 幂等：同一任务重试时复用同一条占位（已定稿则直接返回 completed，不再生成）。`dm-stream.ts:61-67,105-110`、`worker.ts:234-235`
 - **GEN-003** 占位上的 `aiModelKey` 在创建时就写死，流中断或失败也能查到本次用的是哪个模型；只有实际指定了模型时才写，用服务端默认模型时为空。`dm-stream.ts:85,100`、`worker.ts:233`
-- **GEN-004** 增量推送内容是**累计全文**（不是差量），广播 `message.delta {content}`，**不落库**；只有累计文本比上次推送增长 ≥ `AGENT_STREAM_MIN_CHARS`（默认 16）字符才推一次；推送串行进行，排队期间只保留最新一份快照。已定稿的占位不再接受增量。`worker.ts:414-429,516-522`、`dm-stream.ts:130-148`、`agent-worker/src/config.ts:22`
+- **GEN-004** 增量推送内容是**累计全文**（不是差量），广播 `message.delta {content}`，**不落库**；累计文本比上次推送增长 ≥ `AGENT_STREAM_MIN_CHARS`（默认 16）字符，或有新字且距上次推送 ≥ 150ms 时推一次，每轮上游流正常结束时补推节流攒下的尾巴（Rust 版新增，前端再按帧匀速放字）；推送串行进行，排队期间只保留最新一份快照。已定稿的占位不再接受增量。`worker.ts:414-429,516-522`、`dm-stream.ts:130-148`、`agent-worker/src/config.ts:22`
 - **GEN-005** 生成期间每 2s 向会话成员推一次「正在输入」，结束后停止。`agent-worker/src/strapi.ts:180-188`
 - **GEN-006** 定稿：在事务内锁会话行并复查（CTX-025），已定稿则跳过；写最终正文、`streamFinishedAt`、工作流序列、配额回执、`aiModelKey`；广播 `message.edited {content, editedAt, message, streamingDone:true}`。payload 必须与普通编辑同形（含 `content`），否则前端会把定稿内容清空成空气泡。`dm-stream.ts:169-219`
 - **GEN-007** 失败时用 `（生成失败，请重试）` 定稿，但 `streamFinishedAt` 保持为空（`completed:false`），不写配额回执；同一任务的后续重试继续写这条占位。`worker.ts:325-337`、`agent.ts:308-310`

@@ -34,6 +34,8 @@ use crate::workflow::Workflow;
 const STOP_POLL: Duration = Duration::from_millis(600);
 /// 生成期间「正在输入」的间隔（GEN-005）。
 const TYPING_EVERY: Duration = Duration::from_secs(2);
+/// 正文增长不足 `stream_min_chars` 时，距上次推送超过这么久也推一次，免得尾巴卡住（GEN-004）。
+const STREAM_PUSH_EVERY: Duration = Duration::from_millis(150);
 /// 剩余预算少于这么多时，首帧超时后不再退回默认模型（GEN-022）。
 const FALLBACK_MIN_REMAINING: Duration = Duration::from_secs(20);
 /// 上游输出（正文 + 思考 + 工具参数）累计上限（GEN-023、LLM-012）。
@@ -214,6 +216,7 @@ async fn stream_round(
     let mut typing_tick = tokio::time::interval(TYPING_EVERY);
     let mut got_content = false;
     let mut pushed_chars = 0usize;
+    let mut pushed_at = Instant::now();
     let mut assembler = ToolCallAssembler::default();
     let min_chars = ctx.state.config.stream_min_chars;
     let (conversation_id, reply_id, ai_user_id) = ctx
@@ -255,15 +258,12 @@ async fn stream_round(
                         out.content.push_str(&text);
                         workflow.content(&text);
                         let total = out.content.chars().count();
-                        if ctx.live.is_some() && total >= pushed_chars + min_chars {
+                        let due = total >= pushed_chars + min_chars
+                            || (total > pushed_chars && pushed_at.elapsed() >= STREAM_PUSH_EVERY);
+                        if ctx.live.is_some() && due {
                             pushed_chars = total;
-                            let full = join_rounds(prefix, &out.content);
-                            let shown = sanitize::sanitize(&full, ctx.mode, ctx.max_chars);
-                            ctx.publish("dm.message.delta", &serde_json::json!({
-                                "conversationId": conversation_id.to_string(),
-                                "messageId": reply_id.to_string(),
-                                "content": shown,
-                            }));
+                            pushed_at = Instant::now();
+                            publish_delta(ctx, prefix, &out.content, conversation_id, reply_id);
                         }
                     }
                     StreamEvent::ToolCallDelta { index, id, name, arguments } => {
@@ -299,6 +299,13 @@ async fn stream_round(
     }
     // 丢弃流即断开上游连接：停止也终止服务端那次生成（GEN-012）。
     drop(stream);
+    // 本轮正常结束时把节流攒下的尾巴推出去（后面可能还要跑工具，不能让它等到定稿）。
+    if ctx.live.is_some()
+        && matches!(out.end, End::Finished)
+        && out.content.chars().count() > pushed_chars
+    {
+        publish_delta(ctx, prefix, &out.content, conversation_id, reply_id);
+    }
     workflow.flush();
     ctx.publish_workflow(workflow);
     if matches!(out.end, End::Finished) {
@@ -309,6 +316,26 @@ async fn stream_round(
             .collect();
     }
     out
+}
+
+/// 推送累计正文（GEN-004：累计全文、已清洗、不落库）。
+fn publish_delta(
+    ctx: &StreamCtx<'_>,
+    prefix: &str,
+    content: &str,
+    conversation_id: i64,
+    reply_id: i64,
+) {
+    let full = join_rounds(prefix, content);
+    let shown = sanitize::sanitize(&full, ctx.mode, ctx.max_chars);
+    ctx.publish(
+        "dm.message.delta",
+        &serde_json::json!({
+            "conversationId": conversation_id.to_string(),
+            "messageId": reply_id.to_string(),
+            "content": shown,
+        }),
+    );
 }
 
 fn join_rounds(prefix: &str, current: &str) -> String {

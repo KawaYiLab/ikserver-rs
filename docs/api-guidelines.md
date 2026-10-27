@@ -265,7 +265,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
   `dm.conversation.left { conversationId }`（只发给本人，多端同步）。
 - AI 私聊（ik-ai 发布，受众同上）：AI 回复以 `dm.message.created` 到达，`message.ai.state = streaming`、正文为空；
   生成中 `dm.message.delta { conversationId, messageId, content }`（**累计全文**，已清洗，不落库；正文比上次推送
-  增长 ≥ `ai.stream_min_chars` 字才推一次）；每 2 秒一次 `dm.typing`（`userId` 是 AI 账号）；定稿、停止、失败都以
+  增长 ≥ `ai.stream_min_chars` 字，或有新字且距上次推送 ≥ 150ms 才推一次；每轮结束时补推剩下的）；每 2 秒一次 `dm.typing`（`userId` 是 AI 账号）；定稿、停止、失败都以
   `dm.message.edited` 下发完整消息（`ai.state` 为 `done` / `stopped` / `failed`）；重新生成时旧回复以
   `dm.message.withdrawn` 移除。改 AI 会话推 `dm.conversation.updated { conversationId, title, aiModelKey }`（只发给本人）。
   生成中的工作流事件 `dm.message.workflow { conversationId, messageId, event }`（WF-003，已脱敏：思考文本、工具参数与
