@@ -3268,8 +3268,8 @@ export interface paths {
         };
         /**
          * 帖子的评论
-         * @description 所有评论按楼层从旧到新排成一条线（回复也是普通的一层，带上被回复评论的摘要）。
-         *     第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。
+         * @description 所有评论按楼层排成一条线（回复也是普通的一层，带上被回复评论的摘要），默认从旧到新，`sort=newest` 时从新到旧。
+         *     第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始，`floor` 从第几层开始。
          */
         get: operations["list_comments"];
         put?: never;
@@ -4905,12 +4905,12 @@ export interface components {
         };
         CommentsPage: {
             accepted?: components["schemas"]["CommentView"] | null;
-            /** @description 评论，按楼层从旧到新。 */
+            /** @description 评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。 */
             items: components["schemas"]["CommentView"][];
-            /** @description 往后（更新的楼层）翻页。 */
+            /** @description 沿排序方向往下翻页（默认是更新的楼层，`newest` 时是更早的楼层）。 */
             nextCursor?: string | null;
             pinned?: components["schemas"]["CommentView"] | null;
-            /** @description 往前（更早的楼层）翻页：从 `anchor` 开始或往前翻过时才有。 */
+            /** @description 往回翻页（与 `nextCursor` 方向相反）：从 `anchor` / `floor` 开始或往回翻过时才有。 */
             prevCursor?: string | null;
         };
         CompleteRequest: {
@@ -15302,6 +15302,13 @@ export interface operations {
                  *     与 `cursor` 同时给时以 `cursor` 为准。
                  */
                 anchor?: string;
+                /**
+                 * @description 从第几层开始（跳楼）。那一层已删除或不可见时从排序方向上最近的一层开始；超出范围时给排在最后的一页。
+                 *     与 `cursor` / `anchor` 同时给时以它们为准。
+                 */
+                floor?: number;
+                /** @description 默认 `oldest`。翻页时要和第一页给同一个值。 */
+                sort?: "oldest" | "newest";
             };
             header?: never;
             path: {

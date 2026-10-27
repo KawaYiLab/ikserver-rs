@@ -20,8 +20,8 @@ use sqlx::PgConnection;
 
 use crate::CommentsState;
 use crate::dto::{
-    AuthorCommentView, CommentLikeResult, CommentSearchView, CommentView, CommentsPage,
-    CommentsQuery, CreateCommentRequest, PageQuery, QuotedComment, ReplyToView,
+    AuthorCommentView, CommentLikeResult, CommentSearchView, CommentSort, CommentView,
+    CommentsPage, CommentsQuery, CreateCommentRequest, PageQuery, QuotedComment, ReplyToView,
 };
 use crate::repo::{self, CommentRow, NewComment};
 use crate::text;
@@ -889,10 +889,32 @@ pub async fn hot_comments(
     Ok(Some(HotComments { total, comments }))
 }
 
-/// 帖子的评论，按楼层从旧到新。第一页额外返回采纳与置顶（各最多一条，它们在 `items` 里照常出现）。
+/// 从 `from`（不含）往一个方向取一页可见评论：`older` 时往楼层小的方向（楼层降序），否则楼层升序。
+/// 多取一条，第二个值表示这个方向上还有没有。
+async fn fetch(
+    conn: &mut PgConnection,
+    post_id: i64,
+    excluded: &[i64],
+    from: i32,
+    older: bool,
+    limit: i64,
+) -> Result<(Vec<CommentRow>, bool), Problem> {
+    let mut rows = if older {
+        repo::page_before(conn, post_id, excluded, from, limit + 1).await?
+    } else {
+        repo::page_after(conn, post_id, excluded, from, limit + 1).await?
+    };
+    let more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
+    rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+    Ok((rows, more))
+}
+
+/// 帖子的评论，默认按楼层从旧到新，`sort = newest` 时从新到旧。第一页额外返回采纳与置顶
+/// （各最多一条，它们在 `items` 里照常出现）。
 ///
-/// 三种起点：游标（`b` 决定往后还是往前翻）、`anchor`（从那条评论所在楼层开始，带 `prevCursor`）、
-/// 都没有时从第一层开始。
+/// 游标只记楼层号和往哪边取（`b` 为 true 往楼层小的方向），与排序无关；排序只决定这一页是
+/// 「往下翻」（`nextCursor`）还是「往回翻」（`prevCursor`），以及 `items` 的顺序。
+/// 三种起点：游标、`anchor` / `floor`（从那一层开始，前面还有时带 `prevCursor`）、都没有时从排序的开头开始。
 pub async fn list(
     state: &CommentsState,
     viewer: Option<&Principal>,
@@ -901,7 +923,6 @@ pub async fn list(
 ) -> Result<CommentsPage, Problem> {
     let viewer_id = viewer.map(|p| p.user_id.get());
     let limit = page_limit(query.limit);
-    let take = usize::try_from(limit).unwrap_or(usize::MAX);
     let cursor = query
         .cursor
         .as_deref()
@@ -911,57 +932,70 @@ pub async fn list(
     readable_post(&mut conn, post_id, viewer_id).await?;
     let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
 
-    let anchor_floor = match (&cursor, query.anchor) {
+    let start_floor = match (&cursor, query.anchor) {
+        (Some(_), _) => None,
         (None, Some(anchor)) => repo::get(&mut conn, anchor.get())
             .await?
             .filter(|c| c.post_id == post_id && c.hidden_at.is_none())
             .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
             .map(|c| c.floor),
+        (None, None) => query.floor.map(|f| f.max(1)),
+    };
+
+    // 往下翻时取的方向（与游标的 `b` 同义）：从旧到新往楼层大的方向取，从新到旧往楼层小的方向取。
+    let down = query.sort == CommentSort::Newest;
+    let (fetched, older, more) = match (cursor, start_floor) {
+        (Some(FloorCursor { f, b }), _) => {
+            let (rows, more) = fetch(&mut conn, post_id, &excluded, f, b, limit).await?;
+            (rows, b, more)
+        }
+        (None, Some(floor)) => {
+            // 包含起点那一层。
+            let from = if down {
+                floor.saturating_add(1)
+            } else {
+                floor - 1
+            };
+            let (rows, more) = fetch(&mut conn, post_id, &excluded, from, down, limit).await?;
+            if rows.is_empty() {
+                // 起点之后没有了（跳过了头）：从另一头往回取，给排在最后的一页。
+                let from = if down { 0 } else { i32::MAX };
+                let (rows, more) = fetch(&mut conn, post_id, &excluded, from, !down, limit).await?;
+                (rows, !down, more)
+            } else {
+                (rows, down, more)
+            }
+        }
+        (None, None) => {
+            let from = if down { i32::MAX } else { 0 };
+            let (rows, more) = fetch(&mut conn, post_id, &excluded, from, down, limit).await?;
+            (rows, down, more)
+        }
+    };
+    // 同方向接着取的游标：取的顺序里最后一条。
+    let onward = match (more, fetched.last()) {
+        (true, Some(last)) => Some(floor_cursor(last.floor, older)?),
         _ => None,
     };
-
-    let (rows, next_cursor, prev_cursor) = match cursor {
-        Some(FloorCursor { f, b: true }) => {
-            let mut rows = repo::page_before(&mut conn, post_id, &excluded, f, limit + 1).await?;
-            let has_more = rows.len() > take;
-            rows.truncate(take);
-            rows.reverse();
-            let prev = match (has_more, rows.first()) {
-                (true, Some(first)) => Some(floor_cursor(first.floor, true)?),
-                _ => None,
-            };
-            (rows, None, prev)
-        }
-        forward => {
-            let after = match (forward, anchor_floor) {
-                (Some(c), _) => c.f,
-                (None, Some(floor)) => floor - 1,
-                (None, None) => 0,
-            };
-            let mut rows =
-                repo::page_after(&mut conn, post_id, &excluded, after, limit + 1).await?;
-            let has_more = rows.len() > take;
-            rows.truncate(take);
-            let next = match (has_more, rows.last()) {
-                (true, Some(last)) => Some(floor_cursor(last.floor, false)?),
-                _ => None,
-            };
-            // 从中间开始时，前面还有没有可见的评论。
-            let prev = match (anchor_floor, rows.first()) {
-                (Some(_), Some(first))
-                    if !repo::page_before(&mut conn, post_id, &excluded, first.floor, 1)
-                        .await?
-                        .is_empty() =>
-                {
-                    Some(floor_cursor(first.floor, true)?)
-                }
-                _ => None,
-            };
-            (rows, next, prev)
-        }
+    let mut rows = fetched;
+    let (next_cursor, mut prev_cursor) = if older == down {
+        (onward, None)
+    } else {
+        rows.reverse();
+        (None, onward)
     };
+    // 从中间开始时，往回还有没有可见的评论。
+    if start_floor.is_some()
+        && older == down
+        && let Some(first) = rows.first()
+        && fetch(&mut conn, post_id, &excluded, first.floor, !down, 0)
+            .await?
+            .1
+    {
+        prev_cursor = Some(floor_cursor(first.floor, !down)?);
+    }
 
-    let first_page = query.cursor.is_none() && anchor_floor.is_none();
+    let first_page = query.cursor.is_none() && start_floor.is_none();
     let (accepted, pinned) = if first_page {
         (
             repo::accepted(&mut conn, post_id, &excluded).await?,
