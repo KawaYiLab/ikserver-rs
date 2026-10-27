@@ -360,10 +360,11 @@ impl Workflow {
     }
 
     fn ensure_answer(&mut self) -> String {
+        // 每轮的思考都要在正文开始时收尾：工具调用之后的第二轮也一样，不能等整条回复结束。
+        self.finish_reasoning();
         if let Some(step) = &self.answer_step {
             return step.clone();
         }
-        self.finish_reasoning();
         let step = self.next_step();
         self.emit("answer.start", &step, None, None);
         self.answer_step = Some(step.clone());
@@ -588,6 +589,25 @@ mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
     use super::*;
+
+    #[test]
+    fn later_rounds_finish_thinking_when_text_starts() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        wf.reasoning(20);
+        wf.content("我先查一下。");
+        wf.flush();
+        // 工具之后的第二轮：又思考了一会儿，然后开始写正文
+        wf.reasoning(20);
+        let second = wf.reasoning.as_ref().map(|r| r.0.clone()).unwrap();
+        wf.content("查到了");
+        let events = wf.take_pending();
+        assert!(
+            events
+                .iter()
+                .any(|e| e["type"] == "reasoning.finish" && e["stepId"] == second.as_str()),
+            "{events:?}"
+        );
+    }
 
     #[test]
     fn patterns_compile() {
