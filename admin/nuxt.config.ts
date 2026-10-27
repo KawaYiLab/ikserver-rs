@@ -10,6 +10,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
   app: {
     baseURL: '/admin/',
+    pageTransition: { name: 'page', mode: 'out-in' },
     head: {
       title: '绳网管理后台',
       htmlAttrs: { lang: 'zh-CN' },

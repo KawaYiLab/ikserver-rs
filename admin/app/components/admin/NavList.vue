@@ -20,10 +20,10 @@ function formatCount(count: number) {
 <template>
   <nav class="space-y-4 p-2">
     <div v-for="group in groups" :key="group.label">
-      <div v-if="!props.collapsed" class="px-3 pb-1 text-xs font-medium text-muted-foreground/80">
+      <div v-if="!props.collapsed" class="px-3 pb-1.5 text-[11px] font-medium tracking-wider text-sidebar-muted/80">
         {{ group.label }}
       </div>
-      <div v-else class="mx-auto mb-2 h-px w-6 bg-border first:hidden" />
+      <div v-else class="mx-auto mb-2 h-px w-6 bg-sidebar-border first:hidden" />
       <div class="space-y-0.5">
         <Tooltip v-for="item in group.items" :key="item.to" :disabled="!props.collapsed">
           <TooltipTrigger as-child>
@@ -31,12 +31,17 @@ function formatCount(count: number) {
               :to="item.to"
               :aria-current="current === item.to ? 'page' : undefined"
               :class="cn(
-                'relative flex h-9 items-center gap-2 rounded-md px-3 text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
-                current === item.to ? 'bg-accent font-medium text-accent-foreground' : 'text-muted-foreground',
+                'relative flex h-9 items-center gap-2.5 rounded-md px-3 text-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                current === item.to ? 'bg-sidebar-accent font-medium text-sidebar-foreground' : 'text-sidebar-muted',
                 props.collapsed && 'justify-center px-0',
               )"
             >
-              <component :is="item.icon" class="size-4 shrink-0" />
+              <span
+                v-if="current === item.to"
+                aria-hidden="true"
+                :class="cn('absolute top-2 bottom-2 left-0 w-[3px] rounded-full bg-brand', props.collapsed && 'left-0.5')"
+              />
+              <component :is="item.icon" :class="cn('size-4 shrink-0', current === item.to && 'text-brand')" />
               <span v-if="!props.collapsed" class="flex-1 truncate">{{ item.label }}</span>
               <template v-if="item.badge">
                 <span

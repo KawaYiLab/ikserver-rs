@@ -1,26 +1,33 @@
 <script setup lang="ts">
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import type { Component } from 'vue'
 
-defineProps<{ title: string, value: string | number, hint?: string, tone?: 'default' | 'warning' | 'danger' }>()
+/** 统计卡。`value` 是数字时入场滚动一次（Inspira Number Ticker），字符串原样显示。 */
+defineProps<{
+  title: string
+  value: string | number
+  hint?: string
+  icon?: Component
+  tone?: 'default' | 'warning' | 'danger'
+}>()
 </script>
 
 <template>
-  <Card>
-    <CardHeader class="pb-2">
-      <CardTitle class="text-sm font-medium text-muted-foreground">
-        {{ title }}
-      </CardTitle>
-    </CardHeader>
-    <CardContent>
-      <div
-        class="text-2xl font-semibold tabular-nums"
-        :class="{ 'text-warning': tone === 'warning', 'text-destructive': tone === 'danger' }"
-      >
+  <InspiraCardSpotlight class="h-full p-5 shadow-sm">
+    <div class="flex items-center justify-between gap-2 text-sm text-muted-foreground">
+      <span>{{ title }}</span>
+      <component :is="icon" v-if="icon" class="size-4" />
+    </div>
+    <div
+      class="mt-3 text-3xl font-semibold tracking-tight tabular-nums"
+      :class="{ 'text-warning': tone === 'warning', 'text-destructive': tone === 'danger' }"
+    >
+      <InspiraNumberTicker v-if="typeof value === 'number'" :value="value" />
+      <template v-else>
         {{ value }}
-      </div>
-      <p v-if="hint" class="mt-1 text-xs text-muted-foreground">
-        {{ hint }}
-      </p>
-    </CardContent>
-  </Card>
+      </template>
+    </div>
+    <p v-if="hint" class="mt-1 text-xs text-muted-foreground">
+      {{ hint }}
+    </p>
+  </InspiraCardSpotlight>
 </template>

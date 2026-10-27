@@ -29,8 +29,17 @@
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.141 0.005 285.823);
+  /* 绳网黄：只用于少量强调（当前菜单、标志、选中态），大面积文字与按钮仍用中性色。 */
+  --brand: #fbfe00;
+  --brand-foreground: #0a0a0a;
+  /* 强调色在浅底上读不清，描边、指示条用压暗的一档。 */
+  --brand-strong: #a3a600;
+  /* 侧边栏深浅两种模式都是深色，和主站的黑底呼应。 */
+  --sidebar: oklch(0.17 0.004 285.9);
+  --sidebar-foreground: oklch(0.92 0.004 286.32);
+  --sidebar-muted: oklch(0.65 0.012 286);
+  --sidebar-accent: oklch(1 0 0 / 7%);
+  --sidebar-border: oklch(1 0 0 / 8%);
 }
 
 .dark {
@@ -40,8 +49,6 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.92 0.004 286.32);
-  --primary-foreground: oklch(0.21 0.006 285.885);
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.274 0.006 286.033);
@@ -56,8 +63,14 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
-  --sidebar: oklch(0.21 0.006 285.885);
-  --sidebar-foreground: oklch(0.985 0 0);
+  --primary: #fbfe00;
+  --primary-foreground: #0a0a0a;
+  --brand-strong: #fbfe00;
+  --sidebar: oklch(0.12 0.003 285.8);
+  --sidebar-foreground: oklch(0.92 0.004 286.32);
+  --sidebar-muted: oklch(0.62 0.012 286);
+  --sidebar-accent: oklch(1 0 0 / 6%);
+  --sidebar-border: oklch(1 0 0 / 7%);
 }
 
 @theme inline {
@@ -89,6 +102,12 @@
   --color-ring: var(--ring);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-strong: var(--brand-strong);
 }
 
 @layer base {
@@ -98,5 +117,20 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+}
+
+/* 切换页面时淡入一次（不循环）。 */
+.page-enter-active {
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter-active {
+    transition: none;
   }
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { Bot, CheckCircle2, ChevronRight, ClipboardList, Flag, Hand, SearchX } from '@lucide/vue'
+import { Bot, CheckCircle2, ChevronRight, ClipboardList, Flag, Hand, MessagesSquare, Newspaper, SearchX, Users } from '@lucide/vue'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -90,9 +90,9 @@ const todos = computed<Todo[]>(() => {
 })
 
 const toneClass: Record<Todo['tone'], string> = {
-  danger: 'text-destructive',
-  warning: 'text-warning',
-  default: 'text-muted-foreground',
+  danger: 'bg-destructive/10 text-destructive',
+  warning: 'bg-warning/15 text-warning',
+  default: 'bg-muted text-muted-foreground',
 }
 
 // ---------- 趋势 ----------
@@ -144,9 +144,11 @@ const aiPercent = computed(() => {
         <div v-if="todos.length" class="grid gap-3 md:grid-cols-2">
           <NuxtLink
             v-for="todo in todos" :key="todo.key" :to="todo.to"
-            class="group flex items-center gap-3 rounded-lg border bg-card p-4 transition-colors hover:bg-accent"
+            class="group flex items-center gap-3 rounded-xl border bg-card p-4 shadow-xs transition-colors hover:bg-accent/60"
           >
-            <component :is="todo.icon" :class="cn('size-5 shrink-0', toneClass[todo.tone])" />
+            <span :class="cn('grid size-9 shrink-0 place-items-center rounded-lg', toneClass[todo.tone])">
+              <component :is="todo.icon" class="size-4.5" />
+            </span>
             <div class="min-w-0 flex-1">
               <div class="font-medium">{{ todo.title }}</div>
               <div class="truncate text-xs text-muted-foreground">{{ todo.detail }}</div>
@@ -154,8 +156,8 @@ const aiPercent = computed(() => {
             <ChevronRight class="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
           </NuxtLink>
         </div>
-        <div v-else class="flex items-center gap-3 rounded-lg border bg-card p-4 text-sm text-muted-foreground">
-          <CheckCircle2 class="size-5 text-success" />都处理完了，没有待办。
+        <div v-else class="flex items-center gap-3 rounded-xl border bg-card p-4 text-sm text-muted-foreground shadow-xs">
+          <span class="grid size-9 place-items-center rounded-lg bg-success/10 text-success"><CheckCircle2 class="size-4.5" /></span>都处理完了，没有待办。
         </div>
       </section>
 
@@ -171,21 +173,23 @@ const aiPercent = computed(() => {
           </Tabs>
         </div>
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <button
-            v-for="m in metrics" :key="m.key" type="button" :aria-pressed="metric === m.key"
+          <InspiraCardSpotlight
+            v-for="m in metrics" :key="m.key" as="button" type="button" :aria-pressed="metric === m.key"
             :class="cn(
-              'rounded-xl border bg-card p-4 text-left transition-colors hover:bg-accent/60',
-              metric === m.key && 'ring-2 ring-ring',
+              'p-4 text-left shadow-xs transition-[border-color,box-shadow]',
+              metric === m.key ? 'border-brand-strong shadow-[inset_0_-3px_0_var(--brand-strong)]' : 'hover:border-foreground/20',
             )"
             @click="metric = m.key"
           >
             <div class="text-sm text-muted-foreground">{{ m.label }} · 今天</div>
-            <div class="mt-1 text-2xl font-semibold tabular-nums">{{ formatNumber(series(m.key).at(-1) ?? 0) }}</div>
+            <div class="mt-1 text-2xl font-semibold tracking-tight">
+              <InspiraNumberTicker :value="series(m.key).at(-1) ?? 0" />
+            </div>
             <div class="text-xs text-muted-foreground">{{ change(series(m.key)) }}</div>
             <AdminSparkline class="mt-2" :values="series(m.key)" />
-          </button>
+          </InspiraCardSpotlight>
         </div>
-        <Card>
+        <Card class="shadow-xs">
           <CardHeader class="pb-0">
             <CardTitle class="text-base">{{ activeMetric.label }} · 最近 {{ range }} 天</CardTitle>
           </CardHeader>
@@ -200,11 +204,11 @@ const aiPercent = computed(() => {
         <section aria-labelledby="total-title">
           <h2 id="total-title" class="mb-3 text-sm font-medium text-muted-foreground">总量</h2>
           <div class="grid grid-cols-2 gap-4">
-            <NuxtLink to="/users" class="block"><AdminStatCard class="h-full" title="账号" :value="formatNumber(data.users.total)" :hint="`封禁中 ${formatNumber(data.users.blocked)}`" /></NuxtLink>
-            <NuxtLink to="/posts" class="block"><AdminStatCard class="h-full" title="委托" :value="formatNumber(data.posts.total)" :hint="`今日 ${formatNumber(data.posts.today)}`" /></NuxtLink>
-            <NuxtLink to="/comments" class="block"><AdminStatCard class="h-full" title="评论" :value="formatNumber(data.comments.total)" :hint="`今日 ${formatNumber(data.comments.today)}`" /></NuxtLink>
+            <NuxtLink to="/users" class="block"><AdminStatCard title="账号" :icon="Users" :value="data.users.total" :hint="`封禁中 ${formatNumber(data.users.blocked)}`" /></NuxtLink>
+            <NuxtLink to="/posts" class="block"><AdminStatCard title="委托" :icon="Newspaper" :value="data.posts.total" :hint="`今日 ${formatNumber(data.posts.today)}`" /></NuxtLink>
+            <NuxtLink to="/comments" class="block"><AdminStatCard title="评论" :icon="MessagesSquare" :value="data.comments.total" :hint="`今日 ${formatNumber(data.comments.today)}`" /></NuxtLink>
             <AdminStatCard
-              title="AI 助手" :value="data.ai.globalEnabled ? '已开启' : '已关闭'" :tone="data.ai.globalEnabled ? 'default' : 'warning'"
+              title="AI 助手" :icon="Bot" :value="data.ai.globalEnabled ? '已开启' : '已关闭'" :tone="data.ai.globalEnabled ? 'default' : 'warning'"
               :hint="aiPercent === null ? `今日全站用量 ${formatNumber(data.ai.siteUsedToday)}（不限）` : `今日全站额度已用 ${aiPercent}%`"
             />
           </div>
@@ -213,7 +217,7 @@ const aiPercent = computed(() => {
         <!-- 我领取的 / 最近操作 -->
         <section aria-labelledby="recent-title">
           <h2 id="recent-title" class="mb-3 text-sm font-medium text-muted-foreground">{{ isAdmin ? '最近的后台操作' : '我领取的举报' }}</h2>
-          <div class="rounded-lg border bg-card">
+          <div class="overflow-hidden rounded-xl border bg-card shadow-xs">
             <template v-if="isAdmin">
               <ul v-if="audit?.length" class="divide-y">
                 <li v-for="entry in audit" :key="entry.id" class="flex items-center gap-3 px-4 py-2.5 text-sm">

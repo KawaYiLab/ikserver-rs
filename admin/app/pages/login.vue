@@ -38,10 +38,15 @@ async function submit() {
 </script>
 
 <template>
-  <div class="flex min-h-dvh items-center justify-center bg-muted/40 p-4">
-    <Card class="w-full max-w-sm">
+  <div class="relative flex min-h-dvh items-center justify-center overflow-hidden bg-background p-4">
+    <div class="absolute top-1/2 left-1/2 size-[1600px] -translate-x-1/2 -translate-y-1/2 [mask-image:radial-gradient(560px_circle_at_center,white,transparent)]">
+      <InspiraInteractiveGridPattern :squares="[40, 40]" />
+    </div>
+    <Card class="relative w-full max-w-sm shadow-lg">
       <CardHeader class="text-center">
-        <ShieldCheck class="mx-auto mb-2 size-8" />
+        <span class="mx-auto mb-2 grid size-11 place-items-center rounded-lg bg-brand text-brand-foreground">
+          <ShieldCheck class="size-6" />
+        </span>
         <CardTitle>绳网管理后台</CardTitle>
         <CardDescription>用版主或管理员的论坛账号登录</CardDescription>
       </CardHeader>
