@@ -153,11 +153,8 @@ pub async fn guard(State(state): State<AppState>, request: Request, next: Next) 
         )
         .into_response();
     }
-    Problem::new(
-        StatusCode::SERVICE_UNAVAILABLE,
-        "READ_ONLY",
-        read_only_message(&values.read_only.message),
-    )
-    .with_retry_after(300)
-    .into_response()
+    // 5xx 的 detail 是统一文案；客户端按 code 显示 `GET /v1/site` 里的维护说明。
+    Problem::new(StatusCode::SERVICE_UNAVAILABLE, "READ_ONLY", "站点维护中")
+        .with_retry_after(300)
+        .into_response()
 }

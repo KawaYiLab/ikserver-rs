@@ -190,7 +190,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | MIHOYO_UPSTREAM_ERROR | 502 | 米游社服务暂时不可用，请稍后再试 | 5xx 统一文案，客户端按 code 区分 |
 | VIDEO_UPSTREAM_ERROR | 502 | B 站服务暂时不可用，请稍后再试 | 视频预览时 B 站超时或报错；5xx 统一文案，客户端按 code 区分。保存帖子不受影响 |
 | MIHOYO_DISABLED | 503 | 米游社登录暂不可用 | 后台「系统设置」关闭了扫码登录（缺省取 `IK_MIHOYO__ENABLED`）；5xx 统一文案 |
-| READ_ONLY | 503 | 后台填写的维护说明 | 只读维护模式下普通用户与游客的写请求；带 `Retry-After`；登录登出、后台接口不受影响 |
+| READ_ONLY | 503 | 服务暂时不可用，请稍后再试 | 只读维护模式下普通用户与游客的写请求；带 `Retry-After`；登录登出、后台接口不受影响。5xx 统一文案，客户端按 code 显示 `GET /v1/site` 的 `readOnly.message` |
 | QQ_BOT_DISABLED | 409 | QQ 机器人没有开启 | 部署配置 `IK_QQBOT__ENABLED=false` 或管理后台关了 QQ 时生成绑定码（ADR 0008） |
 | QQ_BIND_CODE_LIMIT | 429 | 绑定码生成得太频繁了，请稍后再试 | 同时有 3 个有效的 QQ 绑定码，或一小时内生成了 10 个（ADR 0008） |
 | STORY_DISABLED | 503 | 剧情库暂不可用 | 还没有上传语料（没有生效版本）；5xx 统一文案 |
