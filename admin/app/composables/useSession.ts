@@ -7,6 +7,8 @@ type Me = Schemas['MeView']
 export function useSession() {
   const me = useState<Me | null>('me', () => null)
   const loaded = useState<boolean>('me-loaded', () => false)
+  // 头像不在 /v1/me 里，取自己的公开主页；拿不到就显示首字母。
+  const avatarUrl = useState<string | null>('me-avatar', () => null)
 
   const isStaff = computed(() => me.value?.role === 'moderator' || me.value?.role === 'admin')
   const isAdmin = computed(() => me.value?.role === 'admin')
@@ -15,6 +17,7 @@ export function useSession() {
     if (loaded.value && !force) return me.value
     try {
       me.value = await unwrap(api.GET('/v1/me'))
+      void loadAvatar(me.value.id)
     }
     catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401) throw error
@@ -22,6 +25,17 @@ export function useSession() {
     }
     loaded.value = true
     return me.value
+  }
+
+  /** 与主站一致：自定义头像优先，其次是装备的系统头像。 */
+  async function loadAvatar(id: string) {
+    try {
+      const profile = await unwrap(api.GET('/v1/users/{id}', { params: { path: { id } } }))
+      avatarUrl.value = profile.avatar?.thumbUrl ?? profile.equippedAvatar?.image.thumbUrl ?? null
+    }
+    catch {
+      avatarUrl.value = null
+    }
   }
 
   async function login(identifier: string, password: string) {
@@ -35,11 +49,12 @@ export function useSession() {
     }
     finally {
       me.value = null
+      avatarUrl.value = null
       await navigateTo('/login')
     }
   }
 
-  return { me, loaded, isStaff, isAdmin, load, login, logout }
+  return { me, avatarUrl, loaded, isStaff, isAdmin, load, login, logout }
 }
 
 /** 任何接口返回 401（会话过期、被踢下线）都回到登录页。 */

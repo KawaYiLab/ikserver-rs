@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useColorMode, useStorage } from '@vueuse/core'
 import { ChevronRight, ExternalLink, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from '@lucide/vue'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { roleLabel } from '~/lib/format'
 import { navGroups, navItemFor } from '~/lib/nav'
 
-const { me, logout } = useSession()
+const { me, avatarUrl, logout } = useSession()
 const mode = useColorMode({ selector: 'html', attribute: 'class', storageKey: 'ik-admin-theme' })
 const route = useRoute()
 const mobileOpen = ref(false)
@@ -108,6 +108,7 @@ function toggleTheme() {
             <DropdownMenuTrigger as-child>
               <Button variant="ghost" size="icon" class="size-8 rounded-full" aria-label="账号菜单">
                 <Avatar class="size-7 ring-2 ring-background">
+                  <AvatarImage v-if="avatarUrl" :src="avatarUrl" :alt="me.username" class="object-cover" />
                   <AvatarFallback class="bg-brand text-xs font-semibold text-brand-foreground">{{ initial }}</AvatarFallback>
                 </Avatar>
               </Button>
