@@ -159,7 +159,7 @@ function rowActions(post: Post): RowAction[] {
       <span class="text-xs text-muted-foreground">按作者筛选时不包含匿名委托</span>
     </div>
 
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

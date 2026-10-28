@@ -60,7 +60,7 @@ function toLocalInput(value?: string | null) {
     </div>
 
     <div v-else class="grid grid-cols-1 gap-6 xl:grid-cols-2">
-      <Card class="min-w-0 gap-0 py-0 shadow-xs xl:col-span-2">
+      <Card class="min-w-0 gap-0 py-0 xl:col-span-2">
         <CardHeader class="border-b py-5">
           <CardTitle class="flex items-center gap-2 text-base">
             <Ban class="size-4 text-muted-foreground" />屏蔽词
@@ -98,7 +98,7 @@ function toLocalInput(value?: string | null) {
         </CardContent>
       </Card>
 
-      <Card class="min-w-0 gap-0 py-0 shadow-xs">
+      <Card class="min-w-0 gap-0 py-0">
         <CardHeader class="border-b py-5">
           <CardTitle class="flex items-center gap-2 text-base">
             <UserPlus class="size-4 text-muted-foreground" />注册限制
@@ -141,7 +141,7 @@ function toLocalInput(value?: string | null) {
         </CardContent>
       </Card>
 
-      <Card class="min-w-0 gap-0 py-0 shadow-xs">
+      <Card class="min-w-0 gap-0 py-0">
         <CardHeader class="border-b py-5">
           <CardTitle class="flex items-center gap-2 text-base">
             <UserCheck class="size-4 text-muted-foreground" />新账号限制
@@ -162,7 +162,7 @@ function toLocalInput(value?: string | null) {
         </CardContent>
       </Card>
 
-      <Card class="min-w-0 gap-0 py-0 shadow-xs xl:col-span-2">
+      <Card class="min-w-0 gap-0 py-0 xl:col-span-2">
         <CardHeader class="border-b py-5">
           <div class="flex items-start justify-between gap-4">
             <div class="space-y-1.5">

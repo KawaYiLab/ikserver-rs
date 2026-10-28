@@ -216,7 +216,7 @@ async function remove(job: Schemas['QueuedJob']) {
       <AdminStatCard title="死信任务" :value="status?.jobs.failed ?? '—'" hint="用完重试次数，不再执行" :icon="Skull" :tone="status?.jobs.failed ? 'danger' : 'default'" />
     </div>
 
-    <Card class="mt-6 gap-0 py-0 shadow-xs">
+    <Card class="mt-6 gap-0 py-0">
       <CardHeader class="border-b py-5">
         <CardTitle class="text-base">
           组件
@@ -254,7 +254,7 @@ async function remove(job: Schemas['QueuedJob']) {
       </CardContent>
     </Card>
 
-    <Card class="mt-6 gap-0 py-0 shadow-xs">
+    <Card class="mt-6 gap-0 py-0">
       <CardHeader class="border-b py-5">
         <CardTitle class="text-base">
           后台任务

@@ -636,7 +636,7 @@ const jobFilters = jobList.filters
           任何 OpenAI 兼容的接口都可以添加（DeepSeek、通义千问、智谱、Kimi、OpenRouter、硅基流动、本地 Ollama / vLLM……），
           模型在「模型」里按提供方名字引用。部署配置（<code class="font-mono text-xs">IK_AI__PROVIDERS__…</code>）里的提供方在这里只读。
         </p>
-        <div class="rounded-md border">
+        <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -686,7 +686,7 @@ const jobFilters = jobList.filters
       </TabsContent>
 
       <TabsContent value="models">
-        <div class="rounded-md border">
+        <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -734,7 +734,7 @@ const jobFilters = jobList.filters
       </TabsContent>
 
       <TabsContent value="characters">
-        <div class="rounded-md border">
+        <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -828,7 +828,7 @@ const jobFilters = jobList.filters
               </div>
             </CardHeader>
             <CardContent>
-              <div class="rounded-md border">
+              <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -902,7 +902,7 @@ const jobFilters = jobList.filters
             </SelectContent>
           </Select>
         </div>
-        <div class="rounded-md border">
+        <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
             <TableHeader>
               <TableRow>

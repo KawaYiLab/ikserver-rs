@@ -19,7 +19,7 @@ const { result, loading } = list
 
 <template>
   <div>
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

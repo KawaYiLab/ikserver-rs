@@ -122,3 +122,17 @@ export const loginMethodLabel: Record<string, string> = {
   password_reset: '重置密码',
   password_change: '修改密码',
 }
+
+const relative = new Intl.RelativeTimeFormat('zh-CN', { numeric: 'auto' })
+
+/** 「3 分钟前」「昨天」；超过 7 天显示日期时间。 */
+export function formatRelative(value?: string | null, now = Date.now()) {
+  if (!value) return '—'
+  const seconds = Math.round((new Date(value).getTime() - now) / 1000)
+  const abs = Math.abs(seconds)
+  if (abs < 60) return '刚刚'
+  if (abs < 3600) return relative.format(Math.round(seconds / 60), 'minute')
+  if (abs < 86400) return relative.format(Math.round(seconds / 3600), 'hour')
+  if (abs < 7 * 86400) return relative.format(Math.round(seconds / 86400), 'day')
+  return formatTime(value)
+}

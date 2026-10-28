@@ -97,7 +97,7 @@ function rowActions(comment: Comment): RowAction[] {
       <span v-if="applied.authorId" class="text-xs text-muted-foreground">按作者筛选时不包含匿名评论</span>
     </div>
 
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

@@ -64,7 +64,7 @@ function hasDetails(entry: Schemas['AuditEntry']) {
       <Input v-model="filters.actorId" placeholder="操作人 ID" />
     </div>
 
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

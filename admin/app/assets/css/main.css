@@ -5,7 +5,9 @@
 
 /* 设计令牌（shadcn-vue new-york / zinc）。暗色跟随系统，`.dark` 也可手动切换。 */
 :root {
-  --radius: 0.5rem;
+  --radius: 0.625rem;
+  /* 外壳底色：侧边栏直接落在它上面，内容区是浮在它上面的白色面板。 */
+  --canvas: oklch(0.973 0.002 286);
   --background: oklch(1 0 0);
   --foreground: oklch(0.141 0.005 285.823);
   --card: oklch(1 0 0);
@@ -24,9 +26,9 @@
   --destructive-foreground: oklch(0.985 0 0);
   --warning: oklch(0.769 0.188 70.08);
   --success: oklch(0.627 0.194 149.214);
-  /* 图表单系列色（dataviz 参考调色板第 1 槽，已按浅 / 深两种底色校验对比度）。 */
-  --chart-1: #2a78d6;
-  --border: oklch(0.92 0.004 286.32);
+  /* 图表单系列色：近黑的中性色，强调色只留给「今天」。 */
+  --chart-1: oklch(0.32 0.008 286);
+  --border: oklch(0.922 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
   /* 绳网黄：只用于少量强调（当前菜单、标志、选中态），大面积文字与按钮仍用中性色。 */
@@ -34,18 +36,22 @@
   --brand-foreground: #0a0a0a;
   /* 强调色在浅底上读不清，描边、指示条用压暗的一档。 */
   --brand-strong: #a3a600;
-  /* 侧边栏深浅两种模式都是深色，和主站的黑底呼应。 */
-  --sidebar: oklch(0.17 0.004 285.9);
-  --sidebar-foreground: oklch(0.92 0.004 286.32);
-  --sidebar-muted: oklch(0.65 0.012 286);
-  --sidebar-accent: oklch(1 0 0 / 7%);
-  --sidebar-border: oklch(1 0 0 / 8%);
+  /* 侧边栏和外壳同色，选中项是浮起来的白色胶囊。 */
+  --sidebar: var(--canvas);
+  --sidebar-foreground: oklch(0.21 0.006 285.885);
+  --sidebar-muted: oklch(0.5 0.014 286);
+  --sidebar-accent: oklch(0 0 0 / 4.5%);
+  --sidebar-border: oklch(0 0 0 / 6%);
+  --sidebar-active: oklch(1 0 0);
+  --shadow-panel: 0 0 0 1px oklch(0 0 0 / 5%), 0 1px 2px oklch(0 0 0 / 4%), 0 8px 24px -12px oklch(0 0 0 / 8%);
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 4%);
 }
 
 .dark {
-  --background: oklch(0.141 0.005 285.823);
+  --canvas: oklch(0.115 0.004 286);
+  --background: oklch(0.155 0.005 286);
   --foreground: oklch(0.985 0 0);
-  --card: oklch(0.21 0.006 285.885);
+  --card: oklch(0.18 0.005 286);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.21 0.006 285.885);
   --popover-foreground: oklch(0.985 0 0);
@@ -59,18 +65,21 @@
   --destructive-foreground: oklch(0.985 0 0);
   --warning: oklch(0.828 0.189 84.429);
   --success: oklch(0.723 0.219 149.579);
-  --chart-1: #3987e5;
+  --chart-1: oklch(0.82 0.008 286);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
   --primary: #fbfe00;
   --primary-foreground: #0a0a0a;
   --brand-strong: #fbfe00;
-  --sidebar: oklch(0.12 0.003 285.8);
-  --sidebar-foreground: oklch(0.92 0.004 286.32);
-  --sidebar-muted: oklch(0.62 0.012 286);
-  --sidebar-accent: oklch(1 0 0 / 6%);
+  --sidebar: var(--canvas);
+  --sidebar-foreground: oklch(0.95 0.003 286);
+  --sidebar-muted: oklch(0.64 0.012 286);
+  --sidebar-accent: oklch(1 0 0 / 5%);
   --sidebar-border: oklch(1 0 0 / 7%);
+  --sidebar-active: oklch(1 0 0 / 8%);
+  --shadow-panel: 0 0 0 1px oklch(1 0 0 / 6%), 0 8px 24px -12px oklch(0 0 0 / 60%);
+  --shadow-card: 0 0 0 0 transparent;
 }
 
 @theme inline {
@@ -100,6 +109,8 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-canvas: var(--canvas);
+  --color-sidebar-active: var(--sidebar-active);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-muted: var(--sidebar-muted);
@@ -116,7 +127,13 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-family: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--brand) 55%, transparent);
+    color: var(--brand-foreground);
   }
 }
 

@@ -210,7 +210,7 @@ async function resolve() {
       <Button size="sm" :variant="filters.mine === 'yes' ? 'outline' : 'default'" @click="filters.mine = 'no'">查看全部</Button>
     </div>
 
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

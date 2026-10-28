@@ -10,11 +10,13 @@ installUnauthorizedRedirect()
 </script>
 
 <template>
-  <TooltipProvider :delay-duration="300">
-    <NuxtLayout>
-      <NuxtPage />
-    </NuxtLayout>
-  </TooltipProvider>
+  <MotionConfig reduced-motion="user">
+    <TooltipProvider :delay-duration="300">
+      <NuxtLayout>
+        <NuxtPage />
+      </NuxtLayout>
+    </TooltipProvider>
+  </MotionConfig>
   <Toaster rich-colors position="top-center" />
   <AdminConfirmHost />
   <AdminModerateHost />

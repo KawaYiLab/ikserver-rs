@@ -193,7 +193,7 @@ onMounted(loadCategories)
       </TabsList>
 
       <TabsContent value="categories">
-        <div class="rounded-md border">
+        <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
             <TableHeader>
               <TableRow>
@@ -245,7 +245,7 @@ onMounted(loadCategories)
             </SelectContent>
           </Select>
         </div>
-        <div class="rounded-md border">
+        <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
             <TableHeader>
               <TableRow>

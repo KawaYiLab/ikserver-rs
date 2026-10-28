@@ -242,7 +242,7 @@ async function save() {
       <Input v-model="filters.q" placeholder="搜索题干或标签" class="lg:col-span-2" />
     </div>
 
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

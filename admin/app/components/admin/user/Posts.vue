@@ -67,7 +67,7 @@ function rowActions(post: Post): RowAction[] {
         <NuxtLink :to="{ path: '/posts', query: { authorId: userId } }">在帖子管理中打开</NuxtLink>
       </Button>
     </div>
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

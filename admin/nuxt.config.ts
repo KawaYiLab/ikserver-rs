@@ -6,8 +6,8 @@ export default defineNuxtConfig({
   compatibilityDate: '2026-08-01',
   ssr: false,
   devtools: { enabled: false },
-  modules: ['shadcn-nuxt'],
-  css: ['~/assets/css/main.css'],
+  modules: ['shadcn-nuxt', 'motion-v/nuxt'],
+  css: ['@fontsource-variable/inter', '~/assets/css/main.css'],
   app: {
     baseURL: '/admin/',
     pageTransition: { name: 'page', mode: 'out-in' },

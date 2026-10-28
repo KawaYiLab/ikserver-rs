@@ -66,7 +66,7 @@ function rowActions(comment: Comment): RowAction[] {
         <NuxtLink :to="{ path: '/comments', query: { authorId: userId } }">在评论管理中打开</NuxtLink>
       </Button>
     </div>
-    <div class="rounded-md border">
+    <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>
           <TableRow>

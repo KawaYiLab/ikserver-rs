@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useElementSize } from '@vueuse/core'
+import { cn } from '@/lib/utils'
 import { formatNumber } from '~/lib/format'
 
 /**
@@ -94,8 +95,12 @@ const tooltip = computed(() => {
         <g>
           <path
             v-for="(_, i) in values" :key="i" :d="barPath(i)"
-            class="fill-chart-1 transition-opacity"
-            :class="{ 'opacity-60': active != null && active !== i }"
+            :class="cn(
+              'transition-opacity duration-150',
+              i === lastIndex ? 'fill-brand stroke-brand-strong' : 'fill-chart-1',
+              active != null && active !== i && 'opacity-50',
+            )"
+            stroke-width="1"
           />
         </g>
         <!-- 直接标注：最大值与今天 -->
@@ -134,7 +139,7 @@ const tooltip = computed(() => {
       >
         <div class="text-sm font-semibold tabular-nums text-popover-foreground">{{ tooltip.value }}</div>
         <div class="flex items-center gap-1.5 text-muted-foreground">
-          <span class="inline-block h-0.5 w-3 rounded bg-chart-1" />{{ label }} · {{ tooltip.day }}
+          <span class="inline-block size-2 rounded-sm bg-chart-1" />{{ label }} · {{ tooltip.day }}
         </div>
       </div>
 

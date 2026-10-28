@@ -91,7 +91,7 @@ useEventListener('scroll', () => {
       </nav>
 
       <div class="min-w-0 space-y-6">
-        <Card id="section-access" class="scroll-mt-20 gap-0 py-0 shadow-xs">
+        <Card id="section-access" class="scroll-mt-20 gap-0 py-0">
           <CardHeader class="border-b py-5">
             <CardTitle class="flex items-center gap-2 text-base">
               <GraduationCap class="size-4 text-muted-foreground" />入站考试
@@ -116,7 +116,7 @@ useEventListener('scroll', () => {
 
         <Card
           v-for="section in settingSections" :id="`section-${section.id}`" :key="section.id"
-          class="scroll-mt-20 gap-0 py-0 shadow-xs"
+          class="scroll-mt-20 gap-0 py-0"
         >
           <CardHeader class="border-b py-5">
             <CardTitle class="flex items-center gap-2 text-base">
