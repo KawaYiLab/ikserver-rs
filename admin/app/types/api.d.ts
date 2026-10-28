@@ -3764,6 +3764,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 是否需要首次安装
+         * @description 公开接口，不需要登录。
+         */
+        get: operations["setup_status"];
+        put?: never;
+        /**
+         * 创建第一个管理员
+         * @description 只在还没有管理员时可用。成功后用同样的邮箱和密码正常登录。
+         */
+        post: operations["setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/site": {
         parameters: {
             query?: never;
@@ -7882,6 +7906,20 @@ export interface components {
              */
             dailyTokensPerUser: number;
             globalEnabled: boolean;
+        };
+        SetupInput: {
+            email: string;
+            password: string;
+            /** @description 启动日志里打印的安装码。 */
+            token: string;
+            username: string;
+        };
+        SetupResult: {
+            userId: string;
+        };
+        SetupStatus: {
+            /** @description 还没有管理员，需要先安装。 */
+            needed: boolean;
         };
         /** @description 管理员新建或修改一条共享记忆。 */
         SharedMemoryInput: {
@@ -16838,6 +16876,66 @@ export interface operations {
             };
             /** @description RATE_LIMITED */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    setup_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupStatus"];
+                };
+            };
+        };
+    };
+    setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetupInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupResult"];
+                };
+            };
+            /** @description SETUP_TOKEN_INVALID */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description ALREADY_SET_UP / EMAIL_TAKEN / USERNAME_TAKEN */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

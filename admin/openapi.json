@@ -13051,6 +13051,76 @@
         }
       }
     },
+    "/v1/setup": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "是否需要首次安装",
+        "description": "公开接口，不需要登录。",
+        "operationId": "setup_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "创建第一个管理员",
+        "description": "只在还没有管理员时可用。成功后用同样的邮箱和密码正常登录。",
+        "operationId": "setup",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetupInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SetupResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "SETUP_TOKEN_INVALID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "ALREADY_SET_UP / EMAIL_TAKEN / USERNAME_TAKEN",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/site": {
       "get": {
         "tags": [
@@ -25587,6 +25657,53 @@
           }
         },
         "additionalProperties": false
+      },
+      "SetupInput": {
+        "type": "object",
+        "required": [
+          "token",
+          "email",
+          "username",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "启动日志里打印的安装码。"
+          },
+          "username": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupResult": {
+        "type": "object",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "SetupStatus": {
+        "type": "object",
+        "required": [
+          "needed"
+        ],
+        "properties": {
+          "needed": {
+            "type": "boolean",
+            "description": "还没有管理员，需要先安装。"
+          }
+        }
       },
       "SharedMemoryInput": {
         "type": "object",
