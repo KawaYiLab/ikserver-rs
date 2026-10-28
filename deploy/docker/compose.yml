@@ -1,0 +1,54 @@
+# ik-server + PostgreSQL（+ 可选的 Meilisearch）。第一次运行前先执行 ./init.sh 生成 .env。
+#
+#   ./init.sh
+#   docker compose up -d
+#   docker compose logs ik-server | grep setup_token     # 安装码
+#
+# 打开 http://127.0.0.1:8080/admin/ 创建管理员。要搜索引擎：docker compose --profile search up -d
+# 详见 README.md。
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: interknot
+      POSTGRES_DB: interknot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?先运行 ./init.sh}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "interknot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.55
+    profiles: ["search"]
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?先运行 ./init.sh}
+      MEILI_NO_ANALYTICS: "true"
+      MEILI_ENV: production
+    volumes:
+      - meilisearch:/meili_data
+
+  ik-server:
+    image: ${IK_IMAGE:-ghcr.io/kawayilab/ikserver-rs:latest}
+    build:
+      context: ../..
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://interknot:${POSTGRES_PASSWORD}@postgres:5432/interknot
+    # 只在本机开放，前面用 Caddy / nginx 终止 HTTPS（见 deploy/README.md）。
+    ports:
+      - "127.0.0.1:${IK_PORT:-8080}:8080"
+
+volumes:
+  postgres:
+  meilisearch:

@@ -1,0 +1,8 @@
+/target
+/.git
+.env
+**/node_modules
+/admin/.output
+/admin/.nuxt
+/deploy/docker/.env
+/deploy/docker/data

@@ -1,7 +1,8 @@
 name: Release
 
-# 手动触发（Actions 页面的「Run workflow」）或推 v* 标签时，编出嵌好管理后台的 ik-server，
-# 作为产物上传。下载后用 `deploy/release.sh --binary ik-server root@服务器` 发布（见 deploy/README.md）。
+# 手动触发（Actions 页面的「Run workflow」）：编出嵌好管理后台的 ik-server，作为产物上传。
+# 推 v* 标签（例如 v0.2.0）时还会：建 GitHub Release 并附上可执行文件，推送 Docker 镜像到
+# ghcr.io/<仓库>（标签 0.2.0 与 latest）。发布步骤见 deploy/README.md 与 deploy/docker/README.md。
 on:
   workflow_dispatch:
   push:
@@ -16,6 +17,8 @@ jobs:
   build:
     # 固定发行版：可执行文件依赖编译机的 glibc，服务器的发行版不能比它旧。
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -42,3 +45,41 @@ jobs:
           name: ${{ steps.artifact.outputs.name }}
           path: target/release/ik-server
           if-no-files-found: error
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cp target/release/ik-server "ik-server-${TAG}-linux-x86_64"
+          gh release create "$TAG" "ik-server-${TAG}-linux-x86_64" --title "$TAG" --notes-file <(deploy/changelog-section.sh "$TAG") --verify-tag
+
+  image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -16,3 +16,4 @@ Thumbs.db
 /admin/.nuxt
 /admin/.output
 /admin/dist
+/deploy/docker/.env

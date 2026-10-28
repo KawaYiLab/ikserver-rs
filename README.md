@@ -23,9 +23,23 @@
 Rust 2024 · Axum · SQLx + PostgreSQL · graphile_worker（任务队列）· Meilisearch · utoipa（OpenAPI）·
 管理后台用 Nuxt 4 + shadcn-vue。没有 Redis，缓存与限流都在进程内。
 
-## 本地运行
+## 用 Docker 试一下
 
-需要 Rust 1.99+、Docker（或者自己装的 PostgreSQL 17/18）。
+```bash
+git clone https://github.com/KawaYiLab/ikserver-rs.git
+cd ikserver-rs/deploy/docker
+./init.sh                     # 生成 .env 和随机密钥
+# 本机试用：.env 里 IK_ENV 改成 dev、IK_SESSION__COOKIE_SECURE 改成 false
+docker compose up -d
+docker compose logs ik-server | grep setup_token
+```
+
+打开 <http://127.0.0.1:8080/admin/>，用日志里的安装码创建管理员。正式上线要用 `IK_ENV=prod` 并填好站点地址和发信配置，
+见 [`deploy/docker/README.md`](deploy/docker/README.md)。
+
+## 本地开发
+
+需要 Rust 1.99+ 和 PostgreSQL 17/18（下面用 Docker 起一个）。
 
 ```bash
 cp .env.example .env
@@ -37,14 +51,17 @@ cargo run -p ik-server -- serve       # http://127.0.0.1:8080
 
 - 接口文档：<http://127.0.0.1:8080/docs>
 - 开发环境不真的发信，注册验证码会打印在日志里。
-- 注册一个账号后，把它设为管理员：`cargo run -p ik-server -- user set-role 你的邮箱 admin`
+- 第一次启动时日志里有安装码，打开 `/admin/setup` 创建管理员；或者 `cargo run -p ik-server -- setup --email 你的邮箱 --username 站长`
 - 管理后台：需要 Node 22 和 pnpm 10，见 [`admin/README.md`](admin/README.md)。
 
 更多开发说明（测试、改 SQL 后更新 `.sqlx` 缓存、运维命令）见 [`docs/dev-setup.md`](docs/dev-setup.md)。
 
 ## 部署
 
-见 [`deploy/README.md`](deploy/README.md)：一台服务器、一个反向代理、systemd 托管，发布脚本负责编译、迁移和重启。
+- Docker：[`deploy/docker/README.md`](deploy/docker/README.md)，镜像在 `ghcr.io/kawayilab/ikserver-rs`。
+- 直接跑可执行文件：[`deploy/README.md`](deploy/README.md)，一台服务器、一个反向代理、systemd 托管，发布脚本负责编译、迁移和重启；
+  每个版本的可执行文件附在 [GitHub Releases](https://github.com/KawaYiLab/ikserver-rs/releases) 上。
+
 配置全部走 `IK_` 前缀的环境变量，模板是 [`deploy/ik-server.env.example`](deploy/ik-server.env.example)。
 
 ## 文档

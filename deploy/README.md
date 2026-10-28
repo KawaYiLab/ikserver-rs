@@ -6,6 +6,7 @@ S3 兼容存储（图片上传）、SMTP（验证码邮件）、大模型接口�
 
 论坛前台是另一个仓库 [InterKnot-Web](https://github.com/KawaYiLab/InterKnot-Web)（纯静态 SPA）。
 
+用 Docker 部署见 [`docker/README.md`](docker/README.md)；这一页讲直接在服务器上跑可执行文件（systemd）。
 绳网自己的线上环境（EdgeOne 直接回源、主站跨站调用）见 [`interknot/README.md`](interknot/README.md)。
 
 | 文件 | 作用 |
@@ -109,14 +110,23 @@ deploy/release.sh --binary ~/Downloads/ik-server root@服务器
 
 ## 第一个管理员
 
-服务启动后，先在前台用邮箱注册一个账号，再在服务器上把它设为管理员：
+第一次启动时站里还没有管理员，日志里会打印一个安装码：
 
 ```bash
-sudo ik user set-role you@example.com admin
+journalctl -u ik-server | grep setup_token
 ```
 
-然后打开 `https://forum.example.com/admin` 登录，在「系统设置」里配置注册方式、入站考试、公告等，
-在「分区与标签」里建分区。
+打开 `https://forum.example.com/admin/`，会自动进入「创建管理员」页面，填安装码和管理员的邮箱、用户名、密码。
+创建完自动登录，接着在「系统设置」里配置注册方式、入站考试、公告等，在「分区与标签」里建分区。
+
+不想开网页时用命令行（运行后按提示输入密码）：
+
+```bash
+sudo ik setup --email you@example.com --username 站长
+```
+
+安装码每次启动都会换；想固定就设 `IK_SECRETS__SETUP_TOKEN`。有了管理员以后安装页和安装码都不再起作用，
+之后的管理员、版主用 `ik user set-role` 或在后台「账号」里设置。
 
 ## 运维命令
 
