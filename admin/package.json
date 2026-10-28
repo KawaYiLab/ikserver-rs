@@ -1,6 +1,7 @@
 {
   "name": "ik-admin-web",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "description": "绳网管理后台（Nuxt 4 SPA），部署在 /admin，调用同源的 /v1/admin/* 接口",
   "scripts": {
