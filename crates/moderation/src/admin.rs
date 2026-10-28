@@ -193,7 +193,7 @@ async fn assemble(
     let mut image_ids: Vec<i64> = snapshots.iter().flat_map(|s| s.image_ids.clone()).collect();
     image_ids.sort_unstable();
     image_ids.dedup();
-    let media = state.media.views(&image_ids).await?;
+    let media = state.media.views(conn, &image_ids).await?;
 
     let user_ref = |id: Option<i64>| -> Option<UserRef> {
         let user: &UserStatus = users.get(&id?)?;

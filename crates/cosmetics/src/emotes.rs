@@ -48,10 +48,9 @@ async fn build_manifest(state: &CosmeticsState) -> Result<Arc<EmoteManifest>, Pr
     let mut conn = state.db.acquire().await?;
     let group_rows = repo::emote_groups(&mut conn).await?;
     let emote_rows = repo::emotes(&mut conn).await?;
-    drop(conn);
     let mut media: Vec<i64> = emote_rows.iter().map(|e| e.image_media_id).collect();
     media.extend(group_rows.iter().filter_map(|g| g.icon_media_id));
-    let views = state.media.views(&media).await?;
+    let views = state.media.views(&mut conn, &media).await?;
 
     let groups: Vec<EmoteGroupView> = group_rows
         .iter()
@@ -241,9 +240,9 @@ async fn check_media(
     id: Option<Id<Media>>,
     errors: &mut Vec<FieldError>,
 ) -> Result<(), Problem> {
-    if let Some(id) = id
-        && state.media.views(&[id.get()]).await?.is_empty()
-    {
+    let Some(id) = id else { return Ok(()) };
+    let mut conn = state.db.acquire().await?;
+    if state.media.views(&mut conn, &[id.get()]).await?.is_empty() {
         errors.push(field_error(field, "NOT_FOUND", "图片不存在"));
     }
     Ok(())
@@ -261,10 +260,9 @@ pub async fn admin_list(state: &CosmeticsState) -> Result<AdminEmotes, Problem> 
     let mut conn = state.db.acquire().await?;
     let groups = repo::emote_groups(&mut conn).await?;
     let emotes = repo::emotes(&mut conn).await?;
-    drop(conn);
     let mut media: Vec<i64> = emotes.iter().map(|e| e.image_media_id).collect();
     media.extend(groups.iter().filter_map(|g| g.icon_media_id));
-    let views = state.media.views(&media).await?;
+    let views = state.media.views(&mut conn, &media).await?;
     Ok(AdminEmotes {
         groups: groups
             .into_iter()

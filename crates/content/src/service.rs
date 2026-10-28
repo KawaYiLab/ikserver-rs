@@ -1011,12 +1011,12 @@ pub struct Authors {
 
 /// 批量读取作者资料与头像。匿名内容的作者不要传进来。
 pub async fn load_authors(
-    db: &sqlx::PgPool,
+    conn: &mut PgConnection,
     media: &ik_media::MediaState,
     ids: &[i64],
 ) -> Result<Authors, Problem> {
-    let map = ik_auth::service::authors(db, ids).await?;
-    let avatars = media.avatar_urls(map.values()).await?;
+    let map = ik_auth::service::authors(conn, ids).await?;
+    let avatars = media.avatar_urls(conn, map.values()).await?;
     Ok(Authors { map, avatars })
 }
 
@@ -1077,7 +1077,11 @@ async fn tag_map(
 }
 
 /// 只查非匿名帖的作者：匿名帖的真实作者不进入任何后续流程。
-async fn author_map(state: &ContentState, rows: &[&CardRow]) -> Result<Authors, Problem> {
+async fn author_map(
+    state: &ContentState,
+    conn: &mut PgConnection,
+    rows: &[&CardRow],
+) -> Result<Authors, Problem> {
     let mut ids: Vec<i64> = rows
         .iter()
         .filter(|r| !r.is_anonymous)
@@ -1085,7 +1089,7 @@ async fn author_map(state: &ContentState, rows: &[&CardRow]) -> Result<Authors, 
         .collect();
     ids.sort_unstable();
     ids.dedup();
-    load_authors(&state.db, &state.media, &ids).await
+    load_authors(conn, &state.media, &ids).await
 }
 
 async fn cards(
@@ -1096,9 +1100,9 @@ async fn cards(
 ) -> Result<Vec<PostCard>, Problem> {
     let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let mut tags = tag_map(conn, &ids).await?;
-    let authors = author_map(state, &rows.iter().collect::<Vec<_>>()).await?;
+    let authors = author_map(state, conn, &rows.iter().collect::<Vec<_>>()).await?;
     let cover_ids: Vec<i64> = rows.iter().filter_map(|r| r.cover_id).collect();
-    let mut covers = state.media.views(&cover_ids).await?;
+    let mut covers = state.media.views(conn, &cover_ids).await?;
     let mut videos: HashMap<i64, CardVideo> = if ids.is_empty() {
         HashMap::new()
     } else {
@@ -1588,9 +1592,9 @@ pub async fn detail(
     let authors = if row.is_anonymous {
         Authors::default()
     } else {
-        load_authors(&state.db, &state.media, &[row.author_id]).await?
+        load_authors(&mut conn, &state.media, &[row.author_id]).await?
     };
-    let covers = media_in_order(state, &row.cover_ids).await?;
+    let covers = media_in_order(state, &mut conn, &row.cover_ids).await?;
     let external_videos = video::decode_stored(&row.external_videos);
     let denny_given = match viewer {
         Some(p) => !ik_economy::service::gifted_posts(&mut conn, p.user_id.get(), &[row.id])
@@ -1669,9 +1673,10 @@ async fn edit_view_by_id(state: &ContentState, post_id: i64) -> Result<PostEditV
 /// 按给定顺序取媒体视图（不存在的跳过）。
 async fn media_in_order(
     state: &ContentState,
+    conn: &mut PgConnection,
     ids: &[i64],
 ) -> Result<Vec<ik_media::dto::MediaView>, Problem> {
-    let mut views = state.media.views(ids).await?;
+    let mut views = state.media.views(conn, ids).await?;
     Ok(ids.iter().filter_map(|id| views.remove(id)).collect())
 }
 
@@ -1713,7 +1718,7 @@ async fn build_edit_view(
                 )
             }
         };
-    let covers = media_in_order(state, &cover_ids).await?;
+    let covers = media_in_order(state, conn, &cover_ids).await?;
     let tag_rows = repo::tags_by_ids(conn, &tag_ids).await?;
     let tags = tag_ids
         .iter()

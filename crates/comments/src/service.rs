@@ -372,7 +372,8 @@ pub async fn create(
         image_ids,
     };
     let quoted: Vec<CommentRow> = reply_to.into_iter().collect();
-    let lookup = lookup_with(state, &[&row], &quoted, HashSet::new()).await?;
+    let mut conn = state.db.acquire().await?;
+    let lookup = lookup_with(state, &mut conn, &[&row], &quoted, HashSet::new()).await?;
     Ok(view(&row, &lookup, Some(author_id)))
 }
 
@@ -763,27 +764,28 @@ async fn lookup(
         .into_iter()
         .map(|c| (c.reply_to_id, c.n))
         .collect();
-    let mut lookup = lookup_with(state, rows, &quoted, liked).await?;
+    let mut lookup = lookup_with(state, conn, rows, &quoted, liked).await?;
     lookup.reply_counts = reply_counts;
     Ok(lookup)
 }
 
-/// 不需要查点赞与回复数时（刚发表的评论、搜索结果）用这个，不占额外的连接。
+/// 不需要查点赞与回复数时（刚发表的评论、搜索结果）用这个。
 async fn lookup_with(
     state: &CommentsState,
+    conn: &mut PgConnection,
     rows: &[&CommentRow],
     quoted: &[CommentRow],
     liked: HashSet<i64>,
 ) -> Result<Lookup, Problem> {
     let everyone: Vec<&CommentRow> = rows.iter().copied().chain(quoted.iter()).collect();
-    let authors = author_map(state, &everyone).await?;
+    let authors = author_map(state, conn, &everyone).await?;
     let mut media_ids: Vec<i64> = rows
         .iter()
         .flat_map(|r| r.image_ids.iter().copied())
         .collect();
     media_ids.sort_unstable();
     media_ids.dedup();
-    let media = state.media.views(&media_ids).await?;
+    let media = state.media.views(conn, &media_ids).await?;
     Ok(Lookup {
         authors,
         media,
@@ -832,6 +834,7 @@ async fn liked_set(
 /// 只查非匿名评论的作者：匿名评论的真实作者不进入任何后续流程。
 async fn author_map(
     state: &CommentsState,
+    conn: &mut PgConnection,
     rows: &[&CommentRow],
 ) -> Result<ik_content::service::Authors, Problem> {
     let mut ids: Vec<i64> = rows
@@ -841,7 +844,7 @@ async fn author_map(
         .collect();
     ids.sort_unstable();
     ids.dedup();
-    ik_content::service::load_authors(&state.db, &state.media, &ids).await
+    ik_content::service::load_authors(conn, &state.media, &ids).await
 }
 
 /// 作者主页的游标（按时间）。
@@ -914,8 +917,7 @@ pub async fn hot_comments(
     let rows = repo::hot(&mut conn, post_id, &excluded, limit).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
     let quoted = quoted_rows(&mut conn, &refs, &excluded).await?;
-    drop(conn);
-    let lookup = lookup_with(state, &refs, &quoted, HashSet::new()).await?;
+    let lookup = lookup_with(state, &mut conn, &refs, &quoted, HashSet::new()).await?;
     let comments = rows.iter().map(|r| view(r, &lookup, None)).collect();
     Ok(Some(HotComments { total, comments }))
 }
@@ -1121,7 +1123,7 @@ pub async fn author_comments(
         .filter(|r| titles.contains_key(&r.post_id))
         .collect();
     let liked = liked_set(&mut conn, viewer_id, &visible).await?;
-    let lookup = lookup_with(state, &visible, &[], liked).await?;
+    let lookup = lookup_with(state, &mut conn, &visible, &[], liked).await?;
     let items = visible
         .into_iter()
         .filter_map(|row| {
@@ -1196,10 +1198,9 @@ pub async fn search_views(
     let (rows, posts) = visible_rows(&mut conn, viewer_id, ids).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
     let liked = liked_set(&mut conn, viewer_id, &refs).await?;
-    drop(conn);
-    let lookup = lookup_with(state, &refs, &[], liked).await?;
+    let lookup = lookup_with(state, &mut conn, &refs, &[], liked).await?;
     let cover_ids: Vec<i64> = posts.values().filter_map(|p| p.cover_id).collect();
-    let covers = state.media.views(&cover_ids).await?;
+    let covers = state.media.views(&mut conn, &cover_ids).await?;
     Ok(rows
         .iter()
         .filter_map(|row| {

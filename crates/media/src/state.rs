@@ -6,7 +6,7 @@ use std::time::Duration;
 use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
 use ik_kernel::config::Storage as StorageConfig;
 use ik_kernel::{Problem, Snowflake};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 
 use crate::cdn::Urls;
 use crate::dto::MediaView;
@@ -85,12 +85,17 @@ impl MediaState {
     }
 
     /// 批量取媒体视图（不存在的 id 不出现）。供引用媒体的业务域展示用。
-    pub async fn views(&self, ids: &[i64]) -> Result<HashMap<i64, MediaView>, Problem> {
+    ///
+    /// 这一组查询都用调用方手里的连接：拿着一个连接再去池里要第二个，并发一高所有请求会互相等到超时。
+    pub async fn views(
+        &self,
+        conn: &mut PgConnection,
+        ids: &[i64],
+    ) -> Result<HashMap<i64, MediaView>, Problem> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let mut conn = self.db.acquire().await?;
-        Ok(crate::repo::by_ids(&mut conn, ids)
+        Ok(crate::repo::by_ids(conn, ids)
             .await?
             .into_iter()
             .map(|row| (row.id, crate::service::view(&self.urls, row)))
@@ -98,12 +103,15 @@ impl MediaState {
     }
 
     /// 原尺寸 WebP 地址（按媒体 id；不存在的 id 不出现）。
-    pub async fn webp_urls(&self, ids: &[i64]) -> Result<HashMap<i64, String>, Problem> {
+    pub async fn webp_urls(
+        &self,
+        conn: &mut PgConnection,
+        ids: &[i64],
+    ) -> Result<HashMap<i64, String>, Problem> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let mut conn = self.db.acquire().await?;
-        Ok(crate::repo::by_ids(&mut conn, ids)
+        Ok(crate::repo::by_ids(conn, ids)
             .await?
             .into_iter()
             .map(|row| {
@@ -115,13 +123,16 @@ impl MediaState {
 
     /// 发给识图大模型的图片地址（按媒体 id；不存在的 id 不出现）。上游自己去拉：JPEG、PNG、WebP 且不大于
     /// 8 MB 的用原图，其余（GIF、AVIF、过大的图）用 CDN 转出的 WebP，各家上游都认、体积也小。
-    pub async fn vision_urls(&self, ids: &[i64]) -> Result<HashMap<i64, String>, Problem> {
+    pub async fn vision_urls(
+        &self,
+        conn: &mut PgConnection,
+        ids: &[i64],
+    ) -> Result<HashMap<i64, String>, Problem> {
         const ORIGINAL_MAX_BYTES: i64 = 8 * 1024 * 1024;
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let mut conn = self.db.acquire().await?;
-        Ok(crate::repo::by_ids(&mut conn, ids)
+        Ok(crate::repo::by_ids(conn, ids)
             .await?
             .into_iter()
             .map(|row| {
@@ -172,6 +183,7 @@ impl MediaState {
     /// 这些作者的头像缩略图地址（按用户 id）。没有头像、已注销的不出现。
     pub async fn avatar_urls<'a>(
         &self,
+        conn: &mut PgConnection,
         authors: impl IntoIterator<Item = &'a ik_auth::service::Author>,
     ) -> Result<HashMap<i64, String>, Problem> {
         let pairs: Vec<(i64, i64)> = authors
@@ -182,7 +194,7 @@ impl MediaState {
         let mut media_ids: Vec<i64> = pairs.iter().map(|(_, m)| *m).collect();
         media_ids.sort_unstable();
         media_ids.dedup();
-        let views = self.views(&media_ids).await?;
+        let views = self.views(conn, &media_ids).await?;
         Ok(pairs
             .into_iter()
             .filter_map(|(user, media)| views.get(&media).map(|v| (user, v.thumb_url.clone())))

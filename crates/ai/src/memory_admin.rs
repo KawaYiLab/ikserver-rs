@@ -172,14 +172,14 @@ pub async fn update_settings(
 /// 按 id 或用户名找用户（用户名不区分大小写、完全匹配）。
 pub async fn find_user(state: &AiState, query: &str) -> Result<(i64, String), Problem> {
     let query = query.trim().trim_start_matches('@');
+    let mut conn = state.db.acquire().await?;
     if let Ok(id) = query.parse::<i64>()
-        && let Some(author) = ik_auth::service::authors(&state.db, &[id])
+        && let Some(author) = ik_auth::service::authors(&mut conn, &[id])
             .await?
             .remove(&id)
     {
         return Ok((id, author.username));
     }
-    let mut conn = state.db.acquire().await?;
     ik_auth::interop::search_users(&mut conn, query, 20)
         .await?
         .into_iter()

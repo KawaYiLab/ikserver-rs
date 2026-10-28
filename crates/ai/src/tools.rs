@@ -49,11 +49,12 @@ pub(crate) fn body_image_urls(body: &str) -> Vec<String> {
 /// 帖子发给识图模型的图片（LLM-015）：封面在前、正文插图在后，去重，最多 [`POST_IMAGES`] 张。
 pub(crate) async fn post_images(
     state: &AiState,
+    conn: &mut sqlx::PgConnection,
     cover_ids: &[i64],
     body: &str,
 ) -> Result<Vec<String>, Problem> {
     let covers: Vec<i64> = cover_ids.iter().copied().take(POST_IMAGES).collect();
-    let urls = state.media.vision_urls(&covers).await?;
+    let urls = state.media.vision_urls(conn, &covers).await?;
     let mut images: Vec<String> = covers
         .iter()
         .filter_map(|id| urls.get(id).cloned())
@@ -952,7 +953,8 @@ async fn post_content(
         },
     );
     if offset == 0 {
-        output.images = post_images(state, &cover_ids, &post.body).await?;
+        let mut conn = state.db.acquire().await?;
+        output.images = post_images(state, &mut conn, &cover_ids, &post.body).await?;
     }
     Ok(output)
 }

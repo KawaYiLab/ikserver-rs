@@ -991,13 +991,15 @@ pub struct Author {
     pub avatar_media_id: Option<i64>,
 }
 
-/// 批量读取作者资料；不存在的 id 不出现在结果里。
-pub async fn authors(db: &PgPool, ids: &[i64]) -> Result<HashMap<i64, Author>, Problem> {
+/// 批量读取作者资料；不存在的 id 不出现在结果里。用调用方手里的连接（见 `MediaState::views`）。
+pub async fn authors(
+    conn: &mut PgConnection,
+    ids: &[i64],
+) -> Result<HashMap<i64, Author>, Problem> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let mut conn = db.acquire().await?;
-    let rows = repo::authors(&mut conn, ids).await?;
+    let rows = repo::authors(conn, ids).await?;
     Ok(rows
         .into_iter()
         .map(|row| {

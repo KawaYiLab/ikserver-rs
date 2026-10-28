@@ -459,7 +459,7 @@ async fn prepare(
     let mut senders: Vec<i64> = history.iter().map(|h| h.sender_id).collect();
     senders.sort_unstable();
     senders.dedup();
-    let names: HashMap<i64, String> = ik_auth::service::authors(&state.db, &senders)
+    let names: HashMap<i64, String> = ik_auth::service::authors(&mut tx, &senders)
         .await?
         .into_iter()
         .map(|(id, a)| (id, a.username))
@@ -468,7 +468,7 @@ async fn prepare(
     let images = if model.vision {
         state
             .media
-            .vision_urls(&recent_image_ids(&history, job.ai_user_id))
+            .vision_urls(&mut tx, &recent_image_ids(&history, job.ai_user_id))
             .await?
     } else {
         HashMap::new()

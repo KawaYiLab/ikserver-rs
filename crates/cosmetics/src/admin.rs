@@ -93,7 +93,13 @@ async fn check_image(
     image: Id<Media>,
     errors: &mut Vec<FieldError>,
 ) -> Result<(), Problem> {
-    if state.media.views(&[image.get()]).await?.is_empty() {
+    let mut conn = state.db.acquire().await?;
+    if state
+        .media
+        .views(&mut conn, &[image.get()])
+        .await?
+        .is_empty()
+    {
         errors.push(FieldError {
             field: "imageId".to_owned(),
             code: "NOT_FOUND".to_owned(),
@@ -110,9 +116,8 @@ fn name_taken() -> Problem {
 pub async fn avatars(state: &CosmeticsState) -> Result<Vec<AdminAvatar>, Problem> {
     let mut conn = state.db.acquire().await?;
     let rows = repo::all_avatars(&mut conn).await?;
-    drop(conn);
     let media: Vec<i64> = rows.iter().map(|r| r.image_media_id).collect();
-    let views = state.media.views(&media).await?;
+    let views = state.media.views(&mut conn, &media).await?;
     Ok(rows
         .into_iter()
         .map(|r| AdminAvatar {
@@ -128,9 +133,8 @@ pub async fn avatars(state: &CosmeticsState) -> Result<Vec<AdminAvatar>, Problem
 pub async fn cards(state: &CosmeticsState) -> Result<Vec<AdminCard>, Problem> {
     let mut conn = state.db.acquire().await?;
     let rows = repo::all_cards(&mut conn).await?;
-    drop(conn);
     let media: Vec<i64> = rows.iter().map(|r| r.image_media_id).collect();
-    let views = state.media.views(&media).await?;
+    let views = state.media.views(&mut conn, &media).await?;
     Ok(rows
         .into_iter()
         .map(|r| AdminCard {

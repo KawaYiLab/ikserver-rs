@@ -8,7 +8,7 @@
 
 use std::net::IpAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
@@ -690,6 +690,8 @@ struct Inner {
     generation: AtomicU64,
     /// 同一时间只让一个请求去查库，其余的等它查完。
     loading: tokio::sync::Mutex<()>,
+    /// 已经有后台任务在刷新过期的缓存。
+    refreshing: AtomicBool,
 }
 
 impl Site {
@@ -701,6 +703,7 @@ impl Site {
                 cache: Mutex::new(None),
                 generation: AtomicU64::new(0),
                 loading: tokio::sync::Mutex::new(()),
+                refreshing: AtomicBool::new(false),
             }),
         }
     }
@@ -710,15 +713,38 @@ impl Site {
         &self.inner.defaults
     }
 
-    /// 当前生效的参数（最长 60 秒前的）。
+    /// 当前生效的参数（通常不超过 60 秒前的）。
+    ///
+    /// 缓存过期但还有上一份时直接返回上一份，由后台任务去刷新：调用方常常正拿着数据库连接
+    /// （甚至在事务里），在这里再等池子给一个连接，池子紧张时会拖住所有请求。
     pub async fn get(&self) -> Arc<SiteValues> {
         if let Some(values) = self.fresh() {
+            return values;
+        }
+        if let Some(values) = self.cached() {
+            if !self.inner.refreshing.swap(true, Ordering::AcqRel) {
+                let site = self.clone();
+                tokio::spawn(async move {
+                    {
+                        let _guard = site.inner.loading.lock().await;
+                        if site.fresh().is_none() {
+                            site.reload().await;
+                        }
+                    }
+                    site.inner.refreshing.store(false, Ordering::Release);
+                });
+            }
             return values;
         }
         let _guard = self.inner.loading.lock().await;
         if let Some(values) = self.fresh() {
             return values;
         }
+        self.reload().await
+    }
+
+    /// 查库并更新缓存。调用方持有 `loading`。
+    async fn reload(&self) -> Arc<SiteValues> {
         let generation = self.inner.generation.load(Ordering::Acquire);
         let values = match self.load().await {
             Ok(values) => Arc::new(values),
@@ -749,12 +775,13 @@ impl Site {
             .map(|(_, values)| values.clone())
     }
 
+    fn cached(&self) -> Option<Arc<SiteValues>> {
+        let cache = self.inner.cache.lock();
+        cache.as_ref().map(|(_, values)| values.clone())
+    }
+
     fn last(&self) -> Arc<SiteValues> {
-        self.inner
-            .cache
-            .lock()
-            .as_ref()
-            .map_or_else(|| self.inner.defaults.clone(), |(_, values)| values.clone())
+        self.cached().unwrap_or_else(|| self.inner.defaults.clone())
     }
 
     async fn load(&self) -> anyhow::Result<SiteValues> {

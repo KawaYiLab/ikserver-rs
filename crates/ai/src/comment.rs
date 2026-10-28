@@ -454,12 +454,12 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
             .take(COMMENT_IMAGES)
             .collect();
         let all: Vec<i64> = parent_ids.iter().chain(&comment_ids).copied().collect();
-        let urls = state.media.vision_urls(&all).await?;
+        let urls = state.media.vision_urls(&mut tx, &all).await?;
         let pick = |ids: &[i64]| -> Vec<String> {
             ids.iter().filter_map(|id| urls.get(id).cloned()).collect()
         };
         (
-            crate::tools::post_images(state, &cover_ids, &raw_body).await?,
+            crate::tools::post_images(state, &mut tx, &cover_ids, &raw_body).await?,
             pick(&parent_ids),
             pick(&comment_ids),
         )

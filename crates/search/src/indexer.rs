@@ -130,7 +130,8 @@ impl Indexer {
         let mut ids: Vec<i64> = ids.collect();
         ids.sort_unstable();
         ids.dedup();
-        ik_auth::service::authors(&self.db, &ids)
+        let mut conn = self.db.acquire().await?;
+        ik_auth::service::authors(&mut conn, &ids)
             .await
             .map_err(|p| anyhow::anyhow!("读取作者失败：{}", p.detail()))
     }

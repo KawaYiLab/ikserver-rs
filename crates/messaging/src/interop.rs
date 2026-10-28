@@ -65,8 +65,7 @@ pub async fn pinned(
 ) -> Result<Vec<ConversationView>, Problem> {
     let mut conn = db.acquire().await?;
     let rows = repo::pinned_summaries(&mut conn, user_id).await?;
-    drop(conn);
-    conversation_views(db, media, rows).await
+    conversation_views(&mut conn, media, rows).await
 }
 
 /// 未置顶的在场会话，按 `(activityAt, id)` 倒序，严格早于 `before`。
@@ -79,8 +78,7 @@ pub async fn page(
 ) -> Result<Vec<ConversationView>, Problem> {
     let mut conn = db.acquire().await?;
     let rows = repo::stream_summaries(&mut conn, user_id, before.map(Before::bound), limit).await?;
-    drop(conn);
-    conversation_views(db, media, rows).await
+    conversation_views(&mut conn, media, rows).await
 }
 
 /// 全部在场会话的未读消息合计。
@@ -116,7 +114,7 @@ pub async fn messages(
     limit: i64,
 ) -> Result<Vec<MessageView>, Problem> {
     let rows = repo::messages(conn, conversation_id, before.map(Before::bound), limit).await?;
-    message_views(media, rows).await
+    message_views(conn, media, rows).await
 }
 
 // ---------- AI 私聊（ik-ai） ----------

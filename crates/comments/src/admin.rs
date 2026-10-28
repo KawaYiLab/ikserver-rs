@@ -104,28 +104,24 @@ pub async fn comment_list(
         author_id: query.author_id.map(Id::get),
         hidden: query.visibility.map(|v| v == CommentVisibility::Hidden),
     };
-    // 先在一个连接上查完，再去取图片（媒体查询自己取连接，规则 6）。
-    let (total, rows, users, titles) = {
-        let mut conn = state.db.acquire().await?;
-        let total = repo::count_admin_comments(&mut conn, &filter).await?;
-        let rows = repo::admin_comments(&mut conn, &filter, i64::from(limit), offset).await?;
-        let user_ids: Vec<i64> = rows
-            .iter()
-            .flat_map(|r| [(!r.is_anonymous).then_some(r.author_id), r.hidden_by])
-            .flatten()
-            .collect();
-        let users = ik_content::admin::user_briefs(&mut conn, &user_ids).await?;
-        let mut post_ids: Vec<i64> = rows.iter().map(|r| r.post_id).collect();
-        post_ids.sort_unstable();
-        post_ids.dedup();
-        let titles = ik_content::interop::post_titles(&mut conn, &post_ids).await?;
-        (total, rows, users, titles)
-    };
+    let mut conn = state.db.acquire().await?;
+    let total = repo::count_admin_comments(&mut conn, &filter).await?;
+    let rows = repo::admin_comments(&mut conn, &filter, i64::from(limit), offset).await?;
+    let user_ids: Vec<i64> = rows
+        .iter()
+        .flat_map(|r| [(!r.is_anonymous).then_some(r.author_id), r.hidden_by])
+        .flatten()
+        .collect();
+    let users = ik_content::admin::user_briefs(&mut conn, &user_ids).await?;
+    let mut post_ids: Vec<i64> = rows.iter().map(|r| r.post_id).collect();
+    post_ids.sort_unstable();
+    post_ids.dedup();
+    let titles = ik_content::interop::post_titles(&mut conn, &post_ids).await?;
     let image_ids: Vec<i64> = rows
         .iter()
         .flat_map(|r| r.image_ids.iter().copied())
         .collect();
-    let media = state.media.views(&image_ids).await?;
+    let media = state.media.views(&mut conn, &image_ids).await?;
     let items = rows
         .into_iter()
         .map(|r| AdminComment {

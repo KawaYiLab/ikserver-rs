@@ -251,7 +251,6 @@ pub async fn list(
         .into_iter()
         .map(|b| (b.bucket_key.clone(), b))
         .collect();
-    drop(conn);
     let bucket_peers: Vec<i64> = merged
         .iter()
         .filter_map(|s| match s {
@@ -259,7 +258,7 @@ pub async fn list(
             Source::Conversation(_) => None,
         })
         .collect();
-    let authors = sender_map(state, bucket_peers.into_iter()).await?;
+    let authors = sender_map(state, &mut conn, bucket_peers.into_iter()).await?;
 
     let to_entry = |cv: ConversationView| {
         let bucket = stats.get(&user_bucket(cv.peer_user_id));
@@ -343,8 +342,7 @@ pub async fn items(
         limit + 1,
     )
     .await?;
-    drop(conn);
-    let authors = sender_map(state, rows.iter().filter_map(|r| r.sender_id)).await?;
+    let authors = sender_map(state, &mut conn, rows.iter().filter_map(|r| r.sender_id)).await?;
     let notifications: Vec<NotificationView> =
         rows.into_iter().map(|r| view(r, &authors)).collect();
 

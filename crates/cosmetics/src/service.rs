@@ -5,6 +5,7 @@ use ik_auth::Principal;
 use ik_kernel::cursor::{self, Page};
 use ik_kernel::{FieldError, Id, Problem};
 use serde::{Deserialize, Serialize};
+use sqlx::PgConnection;
 
 use crate::CosmeticsState;
 use crate::dto::{
@@ -29,10 +30,11 @@ fn card_not_found() -> Problem {
 
 async fn avatar_views(
     state: &CosmeticsState,
+    conn: &mut PgConnection,
     rows: Vec<AvatarRow>,
 ) -> Result<Vec<AvatarView>, Problem> {
     let media_ids: Vec<i64> = rows.iter().map(|r| r.image_media_id).collect();
-    let media = state.media.views(&media_ids).await?;
+    let media = state.media.views(conn, &media_ids).await?;
     Ok(rows
         .into_iter()
         .filter_map(|row| {
@@ -48,10 +50,14 @@ async fn avatar_views(
         .collect())
 }
 
-async fn card_views(state: &CosmeticsState, rows: Vec<CardRow>) -> Result<Vec<CardView>, Problem> {
+async fn card_views(
+    state: &CosmeticsState,
+    conn: &mut PgConnection,
+    rows: Vec<CardRow>,
+) -> Result<Vec<CardView>, Problem> {
     let media_ids: Vec<i64> = rows.iter().map(|r| r.image_media_id).collect();
-    let media = state.media.views(&media_ids).await?;
-    let urls = state.media.webp_urls(&media_ids).await?;
+    let media = state.media.views(conn, &media_ids).await?;
+    let urls = state.media.webp_urls(conn, &media_ids).await?;
     Ok(rows
         .into_iter()
         .filter_map(|row| {
@@ -80,8 +86,7 @@ pub async fn avatars_by_ids(
     }
     let mut conn = state.db.acquire().await?;
     let rows = repo::avatars_by_ids(&mut conn, ids).await?;
-    drop(conn);
-    Ok(avatar_views(state, rows)
+    Ok(avatar_views(state, &mut conn, rows)
         .await?
         .into_iter()
         .map(|v| (v.id.get(), v))
@@ -98,8 +103,7 @@ pub async fn cards_by_ids(
     }
     let mut conn = state.db.acquire().await?;
     let rows = repo::cards_by_ids(&mut conn, ids).await?;
-    drop(conn);
-    Ok(card_views(state, rows)
+    Ok(card_views(state, &mut conn, rows)
         .await?
         .into_iter()
         .map(|v| (v.id.get(), v))
@@ -138,9 +142,8 @@ pub async fn my_avatars(
     let (equipped, _) = equipped_ids(state, principal.user_id.get()).await?;
     let mut conn = state.db.acquire().await?;
     let rows = repo::all_avatars(&mut conn).await?;
-    drop(conn);
     Ok(AvatarList {
-        items: avatar_views(state, rows).await?,
+        items: avatar_views(state, &mut conn, rows).await?,
         equipped_avatar_id: equipped.map(Id::new),
     })
 }
@@ -194,7 +197,6 @@ pub async fn my_cards(
         i64::from(limit) + 1,
     )
     .await?;
-    drop(conn);
     let cursor_of = |row: &CardRow| CardCursor {
         k: row.kind.clone(),
         id: row.id,
@@ -202,7 +204,7 @@ pub async fn my_cards(
     // 先用原始行算下一页游标，再转视图（视图可能因数据异常少一项）。
     let page = Page::from_rows(rows, usize::try_from(limit).unwrap_or(20), cursor_of)?;
     Ok(CardPage {
-        items: card_views(state, page.items).await?,
+        items: card_views(state, &mut conn, page.items).await?,
         next_cursor: page.next_cursor,
         equipped_card: one_card(state, equipped).await?,
     })
@@ -309,7 +311,9 @@ pub async fn import(
             }
         }
     }
-    let existing = state.media.views(&media_ids).await?;
+    let mut conn = state.db.acquire().await?;
+    let existing = state.media.views(&mut conn, &media_ids).await?;
+    drop(conn);
     for (index, id) in media_ids.iter().enumerate() {
         if !existing.contains_key(id) {
             errors.push(FieldError {
