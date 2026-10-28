@@ -1029,6 +1029,52 @@ fn session_view(row: SessionRow, current_session_id: i64) -> SessionView {
 }
 
 /// 运维命令用：按邮箱设置角色（例如创建第一个管理员）。返回是否找到该用户。
+/// 站里有没有管理员。没有时进入首次安装（`POST /v1/setup`、`ik-server setup`）。
+pub async fn admin_exists(db: &PgPool) -> Result<bool, Problem> {
+    let mut conn = db.acquire().await?;
+    Ok(repo::admin_exists(&mut conn).await?)
+}
+
+/// 首次安装：还没有管理员时直接建一个管理员账号，不发验证码。
+/// 用事务级咨询锁让同时提交的几次排队，只有第一次成功，其余返回 409 `ALREADY_SET_UP`。
+/// `username` 由调用方校验（`ik_profile::service::validate_username`）。
+pub async fn create_first_admin(
+    state: &AuthState,
+    email: &str,
+    username: &str,
+    password: String,
+) -> Result<i64, Problem> {
+    let email = validate::normalize_email(email)?;
+    validate::validate_password("password", &password)?;
+    let password_hash = password::hash(password).await?;
+    let now = Utc::now();
+    let user_id = state.ids.next_raw();
+    let mut tx = state.db.begin().await?;
+    sqlx::query!("SELECT pg_advisory_xact_lock($1)", SETUP_LOCK_KEY)
+        .execute(&mut *tx)
+        .await?;
+    if repo::admin_exists(&mut tx).await? {
+        return Err(already_set_up());
+    }
+    if repo::email_taken(&mut tx, &email).await? {
+        return Err(email_taken());
+    }
+    if !repo::insert_user(&mut tx, user_id, username, &email, now).await? {
+        return Err(Problem::conflict("USERNAME_TAKEN", "该用户名已被占用"));
+    }
+    repo::upsert_password(&mut tx, user_id, &password_hash, now).await?;
+    repo::set_role_by_email(&mut tx, &email, Role::Admin, now).await?;
+    tx.commit().await?;
+    Ok(user_id)
+}
+
+/// 首次安装的咨询锁编号（任意固定值，只要不和别处的咨询锁重复）。
+const SETUP_LOCK_KEY: i64 = 0x494b_5345_5455_5000;
+
+pub fn already_set_up() -> Problem {
+    Problem::conflict("ALREADY_SET_UP", "站点已经安装过了")
+}
+
 pub async fn set_role_by_email(db: &PgPool, email: &str, role: Role) -> Result<bool, Problem> {
     let email = validate::normalize_email(email)?;
     let mut conn = db.acquire().await?;

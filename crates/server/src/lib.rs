@@ -7,6 +7,7 @@ pub mod idempotency;
 pub mod jobs;
 pub mod middleware;
 pub mod rate_limit;
+pub mod setup;
 pub mod site;
 pub mod state;
 pub mod system;

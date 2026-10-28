@@ -23,6 +23,13 @@ enum Command {
     /// 对 DATABASE_URL 指向的库执行全部待应用的迁移
     Migrate,
     /// 用户运维
+    /// 首次安装：创建第一个管理员（密码从环境变量 IK_ADMIN_PASSWORD 读，不设则交互输入）
+    Setup {
+        #[arg(long)]
+        email: String,
+        #[arg(long)]
+        username: String,
+    },
     #[command(subcommand)]
     User(UserCommand),
     /// 分区运维
@@ -169,6 +176,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Serve => serve().await,
         Command::Migrate => migrate().await,
+        Command::Setup { email, username } => setup_command(email, username).await,
         Command::User(cmd) => user_command(cmd).await,
         Command::Category(cmd) => category_command(cmd).await,
         Command::Exam(cmd) => exam_command(cmd).await,
@@ -343,6 +351,34 @@ async fn connect_for_cli() -> anyhow::Result<AppState> {
     AppState::new(config, db)
 }
 
+async fn setup_command(email: String, username: String) -> anyhow::Result<()> {
+    let state = connect_for_cli().await?;
+    let username =
+        ik_profile::service::validate_username(&username).map_err(|p| anyhow::anyhow!("{p}"))?;
+    let password = match std::env::var("IK_ADMIN_PASSWORD") {
+        Ok(password) if !password.is_empty() => password,
+        _ => read_password()?,
+    };
+    ik_auth::service::create_first_admin(&state.auth, &email, &username, password)
+        .await
+        .map_err(|p| anyhow::anyhow!("{p}"))?;
+    tracing::info!("已创建管理员，用这个邮箱和密码登录 /admin");
+    Ok(())
+}
+
+/// 从标准输入读一行密码（输入会显示在屏幕上；不想显示就用 IK_ADMIN_PASSWORD）。
+fn read_password() -> anyhow::Result<String> {
+    use std::io::{BufRead, Write as _};
+    let mut err = std::io::stderr().lock();
+    write!(err, "管理员密码：")?;
+    err.flush()?;
+    let mut line = String::new();
+    std::io::stdin().lock().read_line(&mut line)?;
+    let password = line.trim_end_matches(['\r', '\n']).to_owned();
+    anyhow::ensure!(!password.is_empty(), "密码不能为空");
+    Ok(password)
+}
+
 async fn user_command(cmd: UserCommand) -> anyhow::Result<()> {
     let state = connect_for_cli().await?;
     match cmd {
@@ -394,7 +430,11 @@ async fn migrate() -> anyhow::Result<()> {
     let db = ik_kernel::db::connect(&config.database)
         .await
         .context("连接数据库失败")?;
-    ik_server::MIGRATOR.run(&db).await.context("执行迁移失败")?;
+    run_migrations(&db).await
+}
+
+async fn run_migrations(db: &sqlx::PgPool) -> anyhow::Result<()> {
+    ik_server::MIGRATOR.run(db).await.context("执行迁移失败")?;
     ik_kernel::jobs::Jobs::new(db.clone()).migrate().await?;
     tracing::info!("迁移完成");
     Ok(())
@@ -409,6 +449,9 @@ async fn serve() -> anyhow::Result<()> {
     let db = ik_kernel::db::connect(&config.database)
         .await
         .context("连接数据库失败")?;
+    if config.database.auto_migrate {
+        run_migrations(&db).await?;
+    }
     let addr = config.http.addr;
     let state = AppState::new(config, db)?;
     // 剧情库：加载数据库里的生效版本（或开发用的本地语料）。加载失败则启动失败；
@@ -441,12 +484,16 @@ async fn serve() -> anyhow::Result<()> {
     } else {
         None
     };
+    let state_for_setup = state.clone();
     let app = build_app(state)?;
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("监听 {addr} 失败"))?;
     tracing::info!(%addr, "ik-server 已启动");
+    if let Err(error) = ik_server::setup::announce(&state_for_setup).await {
+        tracing::warn!(%error, "检查是否需要首次安装失败");
+    }
     if !ik_server::admin_ui::is_bundled() {
         tracing::warn!(
             "这个版本没有打包管理后台，/admin 不可用（发布前先在 admin/ 下 pnpm build）"

@@ -810,6 +810,12 @@ pub(crate) async fn authors(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Resul
     .await
 }
 
+pub(crate) async fn admin_exists(conn: &mut PgConnection) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(r#"SELECT EXISTS(SELECT 1 FROM users WHERE role = 'admin') AS "exists!""#)
+        .fetch_one(conn)
+        .await
+}
+
 pub(crate) async fn set_role_by_email(
     conn: &mut PgConnection,
     email: &str,

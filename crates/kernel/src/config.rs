@@ -721,6 +721,9 @@ pub struct Database {
     pub max_connections: u32,
     pub min_connections: u32,
     pub acquire_timeout_secs: u64,
+    /// `serve` 启动时先执行迁移（`IK_DATABASE__AUTO_MIGRATE`）。Docker 部署打开；
+    /// 用 `deploy/release.sh` 发布时由脚本单独迁移，不用打开。
+    pub auto_migrate: bool,
 }
 
 impl Default for Database {
@@ -730,6 +733,7 @@ impl Default for Database {
             max_connections: 20,
             min_connections: 1,
             acquire_timeout_secs: 5,
+            auto_migrate: false,
         }
     }
 }
@@ -768,6 +772,9 @@ pub struct Secrets {
     pub code_hmac_key: Secret,
     /// 米游社扫码登录的确定性会话密钥（base64，解码后至少 32 字节，D-070 方案 A）。
     pub qr_session_key: Secret,
+    /// 首次安装用的安装码（`IK_SECRETS__SETUP_TOKEN`）。不设置时每次启动随机生成一个并打印在日志里；
+    /// 站里有管理员以后不再使用。
+    pub setup_token: Secret,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
