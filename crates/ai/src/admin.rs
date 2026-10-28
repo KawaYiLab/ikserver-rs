@@ -465,11 +465,11 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
     let cards = repo::cards(&mut conn).await?;
     let models = repo::models(&mut conn).await?;
     let servers = repo::mcp_servers(&mut conn).await?;
-    drop(conn);
     let key_of = |id: i64| models.iter().find(|m| m.id == id).map(|m| m.key.clone());
     let server_of = |id: i64| servers.iter().find(|s| s.id == id).map(|s| s.name.clone());
     let user_ids: Vec<i64> = cards.iter().map(|c| c.bound_user_id).collect();
-    let authors = ik_auth::service::authors(&state.db, &user_ids).await?;
+    let authors = ik_auth::service::authors(&mut conn, &user_ids).await?;
+    drop(conn);
     Ok(cards
         .into_iter()
         .map(|c| AdminCharacter {

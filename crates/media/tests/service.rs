@@ -393,7 +393,14 @@ async fn gallery_pages_and_removal_only_unlinks(db: PgPool) {
     );
     assert!(!h.gallery(1).await.contains(&target));
     // 文件本身还在（D-078 方案 A）。
-    assert_eq!(h.state.views(&[target]).await.unwrap().len(), 1);
+    assert_eq!(
+        h.state
+            .views(&mut h.db.acquire().await.unwrap(), &[target])
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

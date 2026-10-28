@@ -15,7 +15,7 @@ use ik_kernel::{Id, Problem};
 use ik_media::MediaState;
 use ik_media::dto::MediaView;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::PgConnection;
 
 use crate::MessagingState;
 use crate::dto::{
@@ -112,6 +112,7 @@ pub(crate) fn message_view(row: MessageRow, media: &HashMap<i64, MediaView>) -> 
 
 /// 批量生成消息视图，图片一次取齐。
 pub(crate) async fn message_views(
+    conn: &mut PgConnection,
     media: &MediaState,
     rows: Vec<MessageRow>,
 ) -> Result<Vec<MessageView>, Problem> {
@@ -120,15 +121,19 @@ pub(crate) async fn message_views(
         .filter(|r| r.withdrawn_at.is_none())
         .flat_map(|r| r.image_ids.iter().copied())
         .collect();
-    let views = media.views(&ids).await?;
+    let views = media.views(conn, &ids).await?;
     Ok(rows
         .into_iter()
         .map(|row| message_view(row, &views))
         .collect())
 }
 
-pub(crate) async fn one_view(media: &MediaState, row: MessageRow) -> Result<MessageView, Problem> {
-    message_views(media, vec![row])
+pub(crate) async fn one_view(
+    conn: &mut PgConnection,
+    media: &MediaState,
+    row: MessageRow,
+) -> Result<MessageView, Problem> {
+    message_views(conn, media, vec![row])
         .await?
         .pop()
         .ok_or_else(Problem::internal)
@@ -194,15 +199,15 @@ fn conversation_view(
 
 /// 把摘要行转成视图（批量取对方资料）。
 pub(crate) async fn conversation_views(
-    db: &PgPool,
+    conn: &mut PgConnection,
     media: &ik_media::MediaState,
     rows: Vec<SummaryRow>,
 ) -> Result<Vec<ConversationView>, Problem> {
     let mut peers: Vec<i64> = rows.iter().map(|r| r.peer_id).collect();
     peers.sort_unstable();
     peers.dedup();
-    let authors = ik_auth::service::authors(db, &peers).await?;
-    let avatars = media.avatar_urls(authors.values()).await?;
+    let authors = ik_auth::service::authors(conn, &peers).await?;
+    let avatars = media.avatar_urls(conn, authors.values()).await?;
     Ok(rows
         .into_iter()
         .map(|row| conversation_view(row, &authors, &avatars))
@@ -343,8 +348,7 @@ pub async fn conversation(
     let row = repo::summary(&mut conn, principal.user_id.get(), id)
         .await?
         .ok_or_else(Problem::not_found)?;
-    drop(conn);
-    conversation_views(&state.db, &state.media, vec![row])
+    conversation_views(&mut conn, &state.media, vec![row])
         .await?
         .pop()
         .ok_or_else(Problem::internal)
@@ -441,9 +445,8 @@ pub async fn messages(
         return Err(Problem::not_found());
     }
     let rows = repo::messages(&mut conn, id, bound, limit + 1).await?;
-    drop(conn);
     Page::from_rows(
-        message_views(&state.media, rows).await?,
+        message_views(&mut conn, &state.media, rows).await?,
         usize::try_from(limit).unwrap_or(50),
         |m: &MessageView| MessageCursor {
             c: m.created_at,
@@ -477,7 +480,7 @@ pub async fn send(
     if let Some(client_id) = client_id
         && let Some(existing) = repo::message_by_client_id(&mut tx, me, client_id).await?
     {
-        return replay(state, existing, conversation_id).await;
+        return replay(state, &mut tx, existing, conversation_id).await;
     }
     let peer = repo::active_peer(&mut tx, conversation_id, me)
         .await?
@@ -531,7 +534,7 @@ pub async fn send(
             None => None,
         };
         return match existing {
-            Some(existing) => replay(state, existing, conversation_id).await,
+            Some(existing) => replay(state, &mut conn, existing, conversation_id).await,
             None => Err(Problem::internal()),
         };
     }
@@ -540,7 +543,7 @@ pub async fn send(
     let row = repo::message(&mut tx, id)
         .await?
         .ok_or_else(Problem::internal)?;
-    let view = one_view(&state.media, row).await?;
+    let view = one_view(&mut tx, &state.media, row).await?;
     let mut effects = Effects::new();
     effects.publish(event(
         "dm.message.created",
@@ -571,11 +574,12 @@ pub async fn send(
 /// 重放：同一个 clientId 已经发过。用在别的会话上视为冲突。
 async fn replay(
     state: &MessagingState,
+    conn: &mut PgConnection,
     existing: MessageRow,
     conversation_id: i64,
 ) -> Result<(bool, MessageView), Problem> {
     if existing.conversation_id == conversation_id {
-        Ok((false, one_view(&state.media, existing).await?))
+        Ok((false, one_view(conn, &state.media, existing).await?))
     } else {
         Err(Problem::conflict(
             "ALREADY_EXISTS",
@@ -651,16 +655,13 @@ pub async fn edit(
     let now = Utc::now();
     ensure_editable(&row, now)?;
     if row.content == content {
-        return one_view(&state.media, row).await;
+        return one_view(&mut tx, &state.media, row).await;
     }
     repo::edit_message(&mut tx, id, &content, now).await?;
-    let view = one_view(
-        &state.media,
-        repo::message(&mut tx, id)
-            .await?
-            .ok_or_else(Problem::internal)?,
-    )
-    .await?;
+    let row = repo::message(&mut tx, id)
+        .await?
+        .ok_or_else(Problem::internal)?;
+    let view = one_view(&mut tx, &state.media, row).await?;
     let effects = publish_change(&mut tx, "dm.message.edited", &view).await?;
     tx.commit().await?;
     effects.dispatch(state.bus.as_ref());

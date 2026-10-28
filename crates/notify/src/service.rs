@@ -10,6 +10,7 @@ use ik_kernel::bus::{Audience, Effects, Event};
 use ik_kernel::cursor::{self, Page};
 use ik_kernel::{Id, Problem};
 use serde::{Deserialize, Serialize};
+use sqlx::PgConnection;
 
 use crate::NotifyState;
 use crate::dto::{
@@ -89,13 +90,14 @@ pub(crate) fn system_peer() -> SenderView {
 
 pub(crate) async fn sender_map(
     state: &NotifyState,
+    conn: &mut PgConnection,
     ids: impl Iterator<Item = i64>,
 ) -> Result<Senders, Problem> {
     let mut ids: Vec<i64> = ids.collect();
     ids.sort_unstable();
     ids.dedup();
-    let authors = ik_auth::service::authors(&state.db, &ids).await?;
-    let avatars = state.media.avatar_urls(authors.values()).await?;
+    let authors = ik_auth::service::authors(conn, &ids).await?;
+    let avatars = state.media.avatar_urls(conn, authors.values()).await?;
     Ok(Senders { authors, avatars })
 }
 
@@ -148,8 +150,7 @@ async fn items(
         limit + 1,
     )
     .await?;
-    drop(conn);
-    let authors = sender_map(state, rows.iter().filter_map(|r| r.sender_id)).await?;
+    let authors = sender_map(state, &mut conn, rows.iter().filter_map(|r| r.sender_id)).await?;
     let views = rows.into_iter().map(|r| view(r, &authors)).collect();
     Page::from_rows(
         views,
@@ -263,7 +264,6 @@ pub async fn buckets(
         .map(|c| (c.t, c.k));
     let mut conn = state.db.acquire().await?;
     let rows = repo::buckets(&mut conn, principal.user_id.get(), after, limit + 1).await?;
-    drop(conn);
     let peers: Vec<(String, Option<i64>)> = rows
         .iter()
         .map(|r| {
@@ -273,7 +273,7 @@ pub async fn buckets(
             )
         })
         .collect();
-    let authors = sender_map(state, peers.iter().filter_map(|(_, id)| *id)).await?;
+    let authors = sender_map(state, &mut conn, peers.iter().filter_map(|(_, id)| *id)).await?;
     let views = rows
         .into_iter()
         .zip(peers)

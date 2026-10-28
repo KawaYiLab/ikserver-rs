@@ -21,10 +21,12 @@ pub async fn characters(state: &AiState) -> Result<CharacterList, Problem> {
     let catalog = state.catalog.get().await?;
     let cards: Vec<&RoleCard> = catalog.visible_cards().collect();
     let user_ids: Vec<i64> = cards.iter().map(|c| c.bound_user_id).collect();
-    let authors = ik_auth::service::authors(&state.db, &user_ids).await?;
-    let user_avatars = state.media.avatar_urls(authors.values()).await?;
+    let mut conn = state.db.acquire().await?;
+    let authors = ik_auth::service::authors(&mut conn, &user_ids).await?;
+    let user_avatars = state.media.avatar_urls(&mut conn, authors.values()).await?;
     let card_media: Vec<i64> = cards.iter().filter_map(|c| c.avatar_media_id).collect();
-    let card_avatars = state.media.views(&card_media).await?;
+    let card_avatars = state.media.views(&mut conn, &card_media).await?;
+    drop(conn);
     let items = cards
         .into_iter()
         .filter_map(|card| {
@@ -362,7 +364,7 @@ pub(crate) async fn apply(
                         "不是合法的 id",
                     )
                 })?;
-                if state.media.views(&[id.get()]).await?.is_empty() {
+                if state.media.views(tx, &[id.get()]).await?.is_empty() {
                     return Err(Problem::field(
                         &format!("characters[{index}].avatarId"),
                         "not_found",

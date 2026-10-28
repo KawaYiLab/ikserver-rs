@@ -176,15 +176,15 @@ pub async fn detail(
     let economy = ik_economy::service::summary_of(&mut conn, id).await?;
     let bio = ik_profile::interop::bio_of(&mut conn, id).await?;
     let last_seen_at = admin::last_seen(&mut conn, id).await?;
-    drop(conn);
-    let stats = ik_content::service::author_stats(&state.content, id).await?;
-    let authors = ik_auth::service::authors(&state.db, &[id]).await?;
+    let authors = ik_auth::service::authors(&mut conn, &[id]).await?;
     let avatar_url = state
         .content
         .media
-        .avatar_urls(authors.values())
+        .avatar_urls(&mut conn, authors.values())
         .await?
         .remove(&id);
+    drop(conn);
+    let stats = ik_content::service::author_stats(&state.content, id).await?;
     Ok(AdminUserDetail {
         user,
         denny: economy.denny,

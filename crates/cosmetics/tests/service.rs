@@ -68,7 +68,7 @@ impl Harness {
 
     /// 作者展示用的头像（经 auth，各域都走这里）。
     async fn shown_avatar(&self, user_id: i64) -> Option<i64> {
-        ik_auth::service::authors(&self.db, &[user_id])
+        ik_auth::service::authors(&mut self.db.acquire().await.unwrap(), &[user_id])
             .await
             .unwrap()
             .remove(&user_id)

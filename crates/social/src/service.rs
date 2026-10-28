@@ -177,7 +177,7 @@ fn decode_cursor(raw: Option<&str>) -> Result<Option<(DateTime<Utc>, i64)>, Prob
 
 /// 把关系行变成用户卡片。已注销的账号不展示，但游标照常按原始行推进。
 async fn user_cards(
-    state: &SocialState,
+    conn: &mut PgConnection,
     mut rows: Vec<RelationRow>,
     limit: usize,
 ) -> Result<Page<UserCard>, Problem> {
@@ -191,7 +191,7 @@ async fn user_cards(
         _ => None,
     };
     let ids: Vec<i64> = rows.iter().map(|r| r.user_id).collect();
-    let authors = ik_auth::service::authors(&state.db, &ids).await?;
+    let authors = ik_auth::service::authors(conn, &ids).await?;
     let items = rows
         .into_iter()
         .filter_map(|row| {
@@ -225,8 +225,7 @@ pub async fn following(
         i64::try_from(limit).unwrap_or(20) + 1,
     )
     .await?;
-    drop(conn);
-    user_cards(state, rows, limit).await
+    user_cards(&mut conn, rows, limit).await
 }
 
 /// 我拉黑的人（新拉黑的在前）。
@@ -245,8 +244,7 @@ pub async fn blocks(
         i64::try_from(limit).unwrap_or(20) + 1,
     )
     .await?;
-    drop(conn);
-    user_cards(state, rows, limit).await
+    user_cards(&mut conn, rows, limit).await
 }
 
 /// 解析逗号分隔的 id 列表：去空白、去重、保序，最多 100 个（COMMON-002）。

@@ -150,33 +150,40 @@ pub async fn profile(
         (followers, following, is_following)
     };
 
-    let (exp, stats, zzz) = if t.access == Access::Full {
+    let (exp, zzz) = if t.access == Access::Full {
         let exp = ik_economy::service::exp_of(&mut conn, user_id).await?;
         let zzz = if t.user.gone {
             None
         } else {
             ik_mihoyo::interop::zzz_profile(&mut conn, user_id).await?
         };
-        drop(conn);
+        (Some(exp), zzz)
+    } else {
+        (None, None)
+    };
+    let avatar = avatar_view(
+        state,
+        &mut conn,
+        t.user.avatar_media_id.filter(|_| !t.user.gone),
+    )
+    .await?;
+    // 下面这些各自取连接，先把手里的还回去。
+    drop(conn);
+
+    let stats = if t.access == Access::Full {
         let posts = ik_content::service::author_stats(&state.content, user_id).await?;
         let comment_count =
             ik_comments::service::author_comment_count(&state.comments, user_id).await?;
-        (
-            Some(exp),
-            Some(ProfileStats {
-                post_count: posts.post_count,
-                comment_count,
-                total_views: posts.total_views,
-                total_comments: posts.total_comments,
-                total_likes: posts.total_likes,
-            }),
-            zzz,
-        )
+        Some(ProfileStats {
+            post_count: posts.post_count,
+            comment_count,
+            total_views: posts.total_views,
+            total_comments: posts.total_comments,
+            total_likes: posts.total_likes,
+        })
     } else {
-        (None, None, None)
+        None
     };
-
-    let avatar = avatar_view(state, t.user.avatar_media_id.filter(|_| !t.user.gone)).await?;
     // 隐藏主页时不给装扮（PROFILE-022）；拉黑时保留（PROFILE-021）；已注销的不给（COSMETIC-008）。
     let show_cosmetics = !t.user.gone && t.access != Access::Hidden;
     let (equipped_avatar, equipped_card) = if show_cosmetics {
@@ -295,12 +302,13 @@ pub async fn comments(
 
 async fn avatar_view(
     state: &ProfileState,
+    conn: &mut PgConnection,
     media_id: Option<i64>,
 ) -> Result<Option<ik_media::dto::MediaView>, Problem> {
     let Some(id) = media_id else {
         return Ok(None);
     };
-    Ok(state.media.views(&[id]).await?.remove(&id))
+    Ok(state.media.views(conn, &[id]).await?.remove(&id))
 }
 
 type Equipped = (
@@ -338,11 +346,12 @@ async fn my_view(
     let user = ik_auth::interop::profile_user(&mut conn, user_id)
         .await?
         .ok_or_else(Problem::not_found)?;
+    let avatar = avatar_view(state, &mut conn, user.avatar_media_id).await?;
     drop(conn);
     let (equipped_avatar, equipped_card) =
         equipped(state, user.equipped_avatar_id, user.equipped_card_id).await?;
     Ok(MyProfileView {
-        avatar: avatar_view(state, user.avatar_media_id).await?,
+        avatar,
         equipped_avatar,
         equipped_card,
         bio: row.bio,
@@ -522,8 +531,9 @@ pub async fn set_avatar(
         .balance
     };
     tx.commit().await?;
+    let mut conn = state.db.acquire().await?;
     Ok(AvatarResult {
-        avatar: avatar_view(state, Some(media_id)).await?,
+        avatar: avatar_view(state, &mut conn, Some(media_id)).await?,
         balance,
     })
 }
@@ -649,8 +659,7 @@ pub async fn search(
             .collect(),
         None => HashSet::new(),
     };
-    drop(conn);
-    let avatars = avatar_urls(state, &ids).await?;
+    let avatars = avatar_urls(state, &mut conn, &ids).await?;
     Ok(found
         .into_iter()
         .map(|u| UserSearchItem {
@@ -671,10 +680,11 @@ pub async fn search(
 /// 这些用户的头像缩略图地址。
 async fn avatar_urls(
     state: &ProfileState,
+    conn: &mut PgConnection,
     ids: &[i64],
 ) -> Result<std::collections::HashMap<i64, String>, Problem> {
-    let authors = ik_auth::service::authors(&state.db, ids).await?;
-    state.media.avatar_urls(authors.values()).await
+    let authors = ik_auth::service::authors(conn, ids).await?;
+    state.media.avatar_urls(conn, authors.values()).await
 }
 
 /// @ 提及候选（需要登录，PROFILE-023）。关键词必须是 1–32 字。
@@ -695,9 +705,8 @@ pub async fn mention_candidates(
         usize::try_from(query.limit.unwrap_or(MENTION_DEFAULT).clamp(1, MENTION_MAX)).unwrap_or(8);
     let mut conn = state.db.acquire().await?;
     let found = search_candidates(&mut conn, Some(principal.user_id.get()), q, limit).await?;
-    drop(conn);
     let ids: Vec<i64> = found.iter().map(|u| u.id).collect();
-    let avatars = avatar_urls(state, &ids).await?;
+    let avatars = avatar_urls(state, &mut conn, &ids).await?;
     Ok(found
         .into_iter()
         .map(|u| MentionCandidate {
@@ -721,14 +730,13 @@ pub async fn presence(state: &ProfileState) -> Result<PresenceView, Problem> {
         .try_get_with((), async {
             let online = ik_realtime::presence::online(&state.db).await?;
             let mut candidates = online.recent_user_ids;
+            let mut conn = state.db.acquire().await?;
             if !candidates.is_empty() {
-                let mut conn = state.db.acquire().await?;
                 let hidden = repo::hidden_among(&mut conn, &candidates).await?;
-                drop(conn);
                 candidates.retain(|id| !hidden.contains(id));
             }
-            let authors = ik_auth::service::authors(&state.db, &candidates).await?;
-            let avatars = state.media.avatar_urls(authors.values()).await?;
+            let authors = ik_auth::service::authors(&mut conn, &candidates).await?;
+            let avatars = state.media.avatar_urls(&mut conn, authors.values()).await?;
             let users = candidates
                 .iter()
                 .filter_map(|id| {
