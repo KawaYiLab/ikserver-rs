@@ -17,8 +17,8 @@ docker compose up -d
 然后打开 `http://127.0.0.1:8080/admin/`，填管理员的邮箱、用户名、密码，
 创建完会自动登录并进入「系统设置」。
 
-只想在本机试一下：把 `.env` 里的 `IK_ENV` 改成 `dev`、`IK_SESSION__COOKIE_SECURE` 改成 `false`、
-`IK_MAIL__PROVIDER` 改成 `dev_log`，不用配发信，注册验证码会打印在日志里（`docker compose logs -f ik-server`）。
+只想在本机试一下：用 `./init.sh try` 代替 `./init.sh`，不用改 `.env`，也不用配发信，
+注册验证码会打印在日志里（`docker compose logs -f ik-server`）。
 
 不想开网页时，用命令行创建管理员：
 
