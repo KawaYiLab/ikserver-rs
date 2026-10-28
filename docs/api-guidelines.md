@@ -128,7 +128,6 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | DENNY_ANONYMOUS_POST | 403 | 不能给匿名委托投丁尼 | DENNY-008 |
 | USER_BLOCKED | 403 | 你与对方存在拉黑关系，无法进行此操作 | 任一方向的拉黑；不说明谁拉黑了谁。查看帖子详情时文案为「无法查看该委托」。匿名内容永不返回此码 |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
-| SETUP_TOKEN_INVALID | 403 | 安装码不对，请在服务的启动日志里找到它 | `POST /v1/setup` |
 | MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
 | STORY_ACCESS_DENIED | 401 | 剧情库访问密钥无效 | `POST /v1/story/mcp`：没带或带错 `Authorization: Bearer <IK_STORY__ACCESS_KEY>`（未设 `IK_STORY__PUBLIC=true` 时）；响应带 `WWW-Authenticate: Bearer` |
 | MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |

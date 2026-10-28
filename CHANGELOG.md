@@ -7,7 +7,7 @@
 
 ### 新增
 
-- 首次安装：还没有管理员时，启动日志打印安装码，打开 `/admin/setup` 创建第一个管理员；也可以用 `ik-server setup`。
+- 首次安装：还没有管理员时，打开 `/admin/setup` 创建第一个管理员；也可以用 `ik-server setup`。
 - Docker 镜像与 `deploy/docker/` 下的 compose 部署，`init.sh` 自动生成数据库密码和密钥。
 - `IK_DATABASE__AUTO_MIGRATE`：启动时自动迁移数据库（镜像里默认打开）。
 - `IK_SITE_URL`：论坛前台地址，管理后台和 QQ 机器人的帖子链接按它生成，`GET /v1/site` 返回为 `siteUrl`。

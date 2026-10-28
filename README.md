@@ -31,10 +31,9 @@ cd ikserver-rs/deploy/docker
 ./init.sh                     # 生成 .env 和随机密钥
 # 本机试用：.env 里 IK_ENV=dev、IK_SESSION__COOKIE_SECURE=false、IK_MAIL__PROVIDER=dev_log
 docker compose up -d
-docker compose logs ik-server | grep setup_token
 ```
 
-打开 <http://127.0.0.1:8080/admin/>，用日志里的安装码创建管理员。正式上线要用 `IK_ENV=prod` 并填好站点地址和发信配置，
+打开 <http://127.0.0.1:8080/admin/> 创建管理员。正式上线要用 `IK_ENV=prod` 并填好站点地址和发信配置，
 见 [`deploy/docker/README.md`](deploy/docker/README.md)。
 
 ## 本地开发
@@ -51,7 +50,7 @@ cargo run -p ik-server -- serve       # http://127.0.0.1:8080
 
 - 接口文档：<http://127.0.0.1:8080/docs>
 - 开发环境不真的发信，注册验证码会打印在日志里。
-- 第一次启动时日志里有安装码，打开 `/admin/setup` 创建管理员；或者 `cargo run -p ik-server -- setup --email 你的邮箱 --username 站长`
+- 第一次启动后打开 `/admin/setup` 创建管理员；或者 `cargo run -p ik-server -- setup --email 你的邮箱 --username 站长`
 - 管理后台：需要 Node 22 和 pnpm 10，见 [`admin/README.md`](admin/README.md)。
 
 更多开发说明（测试、改 SQL 后更新 `.sqlx` 缓存、运维命令）见 [`docs/dev-setup.md`](docs/dev-setup.md)。

@@ -2,7 +2,6 @@
 #
 #   ./init.sh
 #   docker compose up -d
-#   docker compose logs ik-server | grep setup_token     # 安装码
 #
 # 打开 http://127.0.0.1:8080/admin/ 创建管理员。要搜索引擎：docker compose --profile search up -d
 # 详见 README.md。

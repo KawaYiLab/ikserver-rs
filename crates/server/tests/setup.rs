@@ -15,14 +15,12 @@ use tower::ServiceExt;
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
 const ORIGIN: &str = "https://forum.example.com";
-const TOKEN: &str = "0123456789abcdef0123456789abcdef";
 
 fn app(db: &PgPool) -> Router {
     let mut config = Config::default();
     config.database.url = Secret::new("postgres://unused");
     config.http.allowed_origins = vec![ORIGIN.to_owned()];
     config.hot.enabled = false;
-    config.secrets.setup_token = Secret::new(TOKEN);
     build_app(AppState::new(config, db.clone()).unwrap()).unwrap()
 }
 
@@ -49,8 +47,8 @@ async fn send(app: &Router, method: &str, path: &str, body: Value) -> (StatusCod
     (status, value)
 }
 
-fn input(token: &str, email: &str) -> Value {
-    json!({ "token": token, "email": email, "username": "论坛站长", "password": "correct-horse-1" })
+fn input(email: &str) -> Value {
+    json!({ "email": email, "username": "论坛站长", "password": "correct-horse-1" })
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -60,11 +58,7 @@ async fn creates_the_first_admin_once(db: PgPool) {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["needed"], true);
 
-    let (status, body) = send(&app, "POST", "/v1/setup", input("wrong", "a@example.com")).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["code"], "SETUP_TOKEN_INVALID");
-
-    let (status, body) = send(&app, "POST", "/v1/setup", input(TOKEN, "Admin@Example.com")).await;
+    let (status, body) = send(&app, "POST", "/v1/setup", input("Admin@Example.com")).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let role = sqlx::query_scalar!("SELECT role FROM users WHERE email = 'admin@example.com'")
         .fetch_one(&db)
@@ -74,7 +68,7 @@ async fn creates_the_first_admin_once(db: PgPool) {
 
     let (_, body) = send(&app, "GET", "/v1/setup", Value::Null).await;
     assert_eq!(body["needed"], false);
-    let (status, body) = send(&app, "POST", "/v1/setup", input(TOKEN, "b@example.com")).await;
+    let (status, body) = send(&app, "POST", "/v1/setup", input("b@example.com")).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "ALREADY_SET_UP");
 
@@ -99,6 +93,6 @@ async fn existing_admin_means_no_setup(db: PgPool) {
     let app = app(&db);
     let (_, body) = send(&app, "GET", "/v1/setup", Value::Null).await;
     assert_eq!(body["needed"], false);
-    let (status, body) = send(&app, "POST", "/v1/setup", input(TOKEN, "a@example.com")).await;
+    let (status, body) = send(&app, "POST", "/v1/setup", input("a@example.com")).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
 }

@@ -13,7 +13,7 @@ use ik_feed::FeedState;
 use ik_kernel::Snowflake;
 use ik_kernel::bus::{EventBus, LocalBus};
 use ik_kernel::cluster::ClusterBus;
-use ik_kernel::config::{Config, Secret};
+use ik_kernel::config::Config;
 use ik_kernel::site::{Site, SiteValues};
 use ik_media::MediaState;
 use ik_messaging::MessagingState;
@@ -62,8 +62,6 @@ pub struct AppState {
     pub rate_limit: Arc<crate::rate_limit::GlobalLimiter>,
     /// 后台可在线修改的站点参数（缺省值来自部署配置）。
     pub site: Site,
-    /// 首次安装的安装码（见 [`crate::setup`]）。
-    pub setup_token: Arc<Secret>,
 }
 
 impl AppState {
@@ -181,7 +179,6 @@ impl AppState {
             cosmetics,
             mihoyo,
             rate_limit,
-            setup_token: Arc::new(crate::setup::token(&config.secrets.setup_token)?),
             config: Arc::new(config),
             db,
             ids,

@@ -772,9 +772,6 @@ pub struct Secrets {
     pub code_hmac_key: Secret,
     /// 米游社扫码登录的确定性会话密钥（base64，解码后至少 32 字节，D-070 方案 A）。
     pub qr_session_key: Secret,
-    /// 首次安装用的安装码（`IK_SECRETS__SETUP_TOKEN`）。不设置时每次启动随机生成一个并打印在日志里；
-    /// 站里有管理员以后不再使用。
-    pub setup_token: Secret,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

@@ -7910,8 +7910,6 @@ export interface components {
         SetupInput: {
             email: string;
             password: string;
-            /** @description 启动日志里打印的安装码。 */
-            token: string;
             username: string;
         };
         SetupResult: {
@@ -16923,15 +16921,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SetupResult"];
-                };
-            };
-            /** @description SETUP_TOKEN_INVALID */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
             /** @description ALREADY_SET_UP / EMAIL_TAKEN / USERNAME_TAKEN */

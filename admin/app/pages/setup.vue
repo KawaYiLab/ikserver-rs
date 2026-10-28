@@ -9,7 +9,6 @@ definePageMeta({ layout: false })
 
 const { check, markDone } = useSetup()
 const { login } = useSession()
-const token = ref('')
 const email = ref('')
 const username = ref('')
 const password = ref('')
@@ -30,7 +29,7 @@ async function submit() {
   pending.value = true
   try {
     await unwrap(api.POST('/v1/setup', {
-      body: { token: token.value.trim(), email: email.value.trim(), username: username.value.trim(), password: password.value },
+      body: { email: email.value.trim(), username: username.value.trim(), password: password.value },
     }))
     markDone()
     await login(email.value.trim(), password.value)
@@ -63,13 +62,6 @@ async function submit() {
       </CardHeader>
       <CardContent>
         <form class="space-y-4" @submit.prevent="submit">
-          <div class="space-y-2">
-            <Label for="token">安装码</Label>
-            <Input id="token" v-model="token" autocomplete="off" spellcheck="false" class="font-mono" required />
-            <p class="text-xs text-muted-foreground">
-              在服务的启动日志里
-            </p>
-          </div>
           <div class="space-y-2">
             <Label for="email">邮箱</Label>
             <Input id="email" v-model="email" type="email" autocomplete="email" required />

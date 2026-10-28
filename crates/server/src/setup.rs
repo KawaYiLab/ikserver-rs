@@ -1,16 +1,12 @@
-//! 首次安装：站里还没有管理员时，用安装码在 `/admin/setup` 创建第一个管理员账号。
+//! 首次安装：站里还没有管理员时，在 `/admin/setup` 创建第一个管理员账号。
 //!
-//! 安装码默认每次启动随机生成并打印在日志里（也可以用 `IK_SECRETS__SETUP_TOKEN` 固定），
-//! 防止服务刚上线、还没装好时被别人抢先建管理员。装好以后接口一律返回 409 `ALREADY_SET_UP`。
-//! 不想开网页时用 `ik-server setup`。
+//! 装好以后接口一律返回 409 `ALREADY_SET_UP`。不想开网页时用 `ik-server setup`。
 
 use axum::Json;
 use axum::extract::State;
 use http::StatusCode;
 use ik_kernel::Problem;
-use ik_kernel::config::Secret;
 use serde::{Deserialize, Serialize};
-use subtle::ConstantTimeEq;
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -19,18 +15,6 @@ use crate::AppState;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new().routes(routes!(setup_status, setup))
-}
-
-/// 配置里固定的安装码，或者新生成一个（32 位十六进制）。
-pub fn token(configured: &Secret) -> anyhow::Result<Secret> {
-    if !configured.is_empty() {
-        return Ok(configured.clone());
-    }
-    let mut bytes = [0u8; 16];
-    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("生成安装码失败：{e}"))?;
-    Ok(Secret::new(
-        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>(),
-    ))
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -43,8 +27,6 @@ pub struct SetupStatus {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SetupInput {
-    /// 启动日志里打印的安装码。
-    pub token: String,
     pub email: String,
     pub username: String,
     pub password: String,
@@ -80,7 +62,6 @@ async fn setup_status(State(state): State<AppState>) -> Result<Json<SetupStatus>
     request_body = SetupInput,
     responses(
         (status = 201, body = SetupResult),
-        (status = 403, description = "SETUP_TOKEN_INVALID", body = ik_kernel::error::ProblemBody, content_type = "application/problem+json"),
         (status = 409, description = "ALREADY_SET_UP / EMAIL_TAKEN / USERNAME_TAKEN", body = ik_kernel::error::ProblemBody, content_type = "application/problem+json"),
     )
 )]
@@ -90,14 +71,6 @@ async fn setup(
 ) -> Result<(StatusCode, Json<SetupResult>), Problem> {
     if ik_auth::service::admin_exists(&state.db).await? {
         return Err(ik_auth::service::already_set_up());
-    }
-    let expected = state.setup_token.expose().as_bytes();
-    if !bool::from(input.token.trim().as_bytes().ct_eq(expected)) {
-        return Err(Problem::new(
-            StatusCode::FORBIDDEN,
-            "SETUP_TOKEN_INVALID",
-            "安装码不对，请在服务的启动日志里找到它",
-        ));
     }
     let username = ik_profile::service::validate_username(&input.username)?;
     let user_id =
@@ -112,14 +85,11 @@ async fn setup(
     ))
 }
 
-/// 启动时调用：还没有管理员就把安装码打印出来。
+/// 启动时调用：还没有管理员就在日志里提醒一下。
 pub async fn announce(state: &AppState) -> Result<(), Problem> {
     if ik_auth::service::admin_exists(&state.db).await? {
         return Ok(());
     }
-    tracing::warn!(
-        setup_token = state.setup_token.expose(),
-        "还没有管理员：打开 /admin/setup，用这个安装码创建第一个管理员（或运行 ik-server setup）"
-    );
+    tracing::warn!("还没有管理员：打开 /admin/setup 创建第一个管理员（或运行 ik-server setup）");
     Ok(())
 }

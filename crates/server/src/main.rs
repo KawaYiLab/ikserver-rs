@@ -174,7 +174,7 @@ async fn main() -> anyhow::Result<()> {
             writeln!(std::io::stdout().lock(), "{json}")?;
             Ok(())
         }
-        Command::Serve => serve().await,
+        Command::Serve => Box::pin(serve()).await,
         Command::Migrate => migrate().await,
         Command::Setup { email, username } => setup_command(email, username).await,
         Command::User(cmd) => user_command(cmd).await,

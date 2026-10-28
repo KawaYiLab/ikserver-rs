@@ -13098,16 +13098,6 @@
               }
             }
           },
-          "403": {
-            "description": "SETUP_TOKEN_INVALID",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemBody"
-                }
-              }
-            }
-          },
           "409": {
             "description": "ALREADY_SET_UP / EMAIL_TAKEN / USERNAME_TAKEN",
             "content": {
@@ -25661,7 +25651,6 @@
       "SetupInput": {
         "type": "object",
         "required": [
-          "token",
           "email",
           "username",
           "password"
@@ -25672,10 +25661,6 @@
           },
           "password": {
             "type": "string"
-          },
-          "token": {
-            "type": "string",
-            "description": "启动日志里打印的安装码。"
           },
           "username": {
             "type": "string"

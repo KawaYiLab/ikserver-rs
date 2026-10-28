@@ -12,10 +12,9 @@ cd ikserver-rs/deploy/docker
 ./init.sh            # 生成 .env：数据库密码、Meilisearch 主密钥、两把服务密钥都自动填好
 $EDITOR .env         # 填站点地址和发信配置
 docker compose up -d
-docker compose logs ik-server | grep setup_token
 ```
 
-然后打开 `http://127.0.0.1:8080/admin/`，填日志里的安装码和管理员的邮箱、用户名、密码，
+然后打开 `http://127.0.0.1:8080/admin/`，填管理员的邮箱、用户名、密码，
 创建完会自动登录并进入「系统设置」。
 
 只想在本机试一下：把 `.env` 里的 `IK_ENV` 改成 `dev`、`IK_SESSION__COOKIE_SECURE` 改成 `false`、
