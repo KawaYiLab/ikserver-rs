@@ -113,9 +113,13 @@ async fn harness(db: PgPool) -> Harness {
 
 impl Harness {
     async fn session(&self) -> i64 {
+        self.session_as(&self.me).await
+    }
+
+    async fn session_as(&self, me: &Principal) -> i64 {
         sessions::create(
             &self.state,
-            &self.me,
+            me,
             CreateSessionRequest {
                 character: "fairy".into(),
                 title: Some("  第一次  ".into()),
@@ -128,9 +132,13 @@ impl Harness {
     }
 
     async fn send(&self, conversation_id: i64, text: &str) -> i64 {
+        self.send_as(&self.me, conversation_id, text).await
+    }
+
+    async fn send_as(&self, me: &Principal, conversation_id: i64, text: &str) -> i64 {
         let (_, view) = ik_messaging::service::send(
             &self.state.messaging,
-            &self.me,
+            me,
             conversation_id,
             SendMessageRequest {
                 content: text.into(),
@@ -284,6 +292,71 @@ async fn history_carries_prior_turns_until_reset(db: PgPool) {
         .unwrap();
     let messages = &h.fake.requests()[2].messages;
     assert_eq!(&messages[1..], &[ChatMessage::user("user100 说：第三句")]);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn popular_questions_count_people_not_messages(db: PgPool) {
+    let h = harness(db).await;
+    insert_user(&h.db, 101, false).await;
+    insert_user(&h.db, 102, false).await;
+    let popular = |h: &Harness| {
+        let state = h.state.clone();
+        async move {
+            state.popular.invalidate().await;
+            let list = service::characters(&state).await.unwrap();
+            list.items[0].popular_questions.clone()
+        }
+    };
+    // 两个人问过：还不够展示。同一个人换个会话、换个写法再问不重复计数，追问不算。
+    let me = h.me.clone();
+    let first = h.session().await;
+    let opener = h.send(first, "最近有什么热帖？").await;
+    h.send(first, "那第二个呢？").await;
+    let again = h.session().await;
+    h.send(again, "最近有什么 热帖").await;
+    let other = principal(101, false);
+    let conversation = h.session_as(&other).await;
+    h.send_as(&other, conversation, "最近有什么热帖").await;
+    h.send_as(&other, conversation, "新角色是谁？").await;
+    assert!(popular(&h).await.is_empty());
+
+    let third = principal(102, false);
+    let conversation = h.session_as(&third).await;
+    h.send_as(&third, conversation, "最近有什么热帖").await;
+    assert_eq!(popular(&h).await, ["最近有什么热帖"]);
+
+    // 重置之后的第一句重新算开场。
+    sessions::reset(&h.state, &third, conversation)
+        .await
+        .unwrap();
+    h.send_as(&third, conversation, "新角色是谁").await;
+    h.send_as(&me, first, "新角色是谁").await;
+    assert_eq!(popular(&h).await, ["最近有什么热帖"]);
+
+    // 撤回开场的那条后不再计入（第二个会话里的那次已把记录换成了它，先撤回那一条）。
+    let latest: i64 = sqlx::query_scalar(
+        "SELECT message_id FROM ai_question_asks WHERE user_id = $1 AND question_key = '最近有什么热帖'",
+    )
+    .bind(HUMAN)
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_ne!(latest, opener);
+    ik_messaging::service::withdraw(&h.state.messaging, &me, latest)
+        .await
+        .unwrap();
+    assert!(popular(&h).await.is_empty());
+
+    // 超过 30 天的清理掉。
+    let pruned = ik_ai::popular::prune(&h.db, Utc::now() + chrono::Duration::days(31))
+        .await
+        .unwrap();
+    assert!(pruned > 0);
+    let left: i64 = sqlx::query_scalar("SELECT count(*) FROM ai_question_asks")
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

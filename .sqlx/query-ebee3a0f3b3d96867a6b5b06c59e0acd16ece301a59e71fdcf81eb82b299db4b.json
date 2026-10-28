@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM messages\n               WHERE conversation_id = $1 AND sender_id = $2 AND kind = 'text' AND id <> $3\n                 AND ($4::timestamptz IS NULL OR created_at >= $4)\n           ) AS \"earlier!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "earlier!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ebee3a0f3b3d96867a6b5b06c59e0acd16ece301a59e71fdcf81eb82b299db4b"
+}

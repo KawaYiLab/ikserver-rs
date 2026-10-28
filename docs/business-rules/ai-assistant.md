@@ -79,6 +79,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **AI-025** 旧内部端点（config / resolve / context / internal/* / dead-letter / mcp）全部用共享密钥头 `X-Agent-Secret` 做常量时间比较；未配置密钥时整组 403。新设计下 worker 与工具都在进程内，这组 HTTP 端点不需要保留，只保留其中的业务校验（见 CTX、GEN）。`src/middlewares/agent-internal.ts`、`agent-custom.ts`
 - **AI-026** 内部端点带任务头时须校验队列租约仍归属当前执行者，否则 409 `agent lease expired`：被回收重投的旧执行者不能再写占位消息或回复。新设计的等价要求：任务执行者每次写入前确认自己仍持有该任务（graphile_worker 的 job 锁 / 版本号）。`agent.ts:48-55`
 - **AI-027** 死信查看（后台排障）：按最近顺序列出失败任务，limit 默认 50、范围 1-200；读失败返回空列表。`agent.ts:480-498`
+- **AI-028**（新设计）「大家都在问」：角色列表另给 `popularQuestions`，来自用户在该角色 AI 会话里每段对话（重置后重新算）的第一句文本。同一人对同一角色的同一问题只算一次（去空白、英文小写、去句末标点后比较）；带图、多行、含链接 / `@` / 表情码、连续 5 位以上数字、不足 4 字或超过 60 字的不记。最近 30 天至少 3 人问过才展示，按人数、最近时间排序，最多 6 条；命中屏蔽词（拦截或替换）的、与示例问题重复的不展示。撤回消息时删除对应记录，注销账号级联删除，超过 30 天的每天清理。结果缓存 5 分钟。没有数据时为空数组，客户端退回 `suggestedQuestions`。
 
 ## 3 触发、去重与任务（TRIG）
 

@@ -21,6 +21,7 @@ pub mod mcp_client;
 pub mod memory;
 pub mod memory_admin;
 pub mod memory_jobs;
+pub mod popular;
 pub mod quota;
 mod repo;
 mod routes;

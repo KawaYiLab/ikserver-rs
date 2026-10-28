@@ -53,6 +53,11 @@ pub fn crontabs() -> anyhow::Result<Vec<Crontab>> {
             .payload(ik_qqbot::jobs::Prune::default())?
             .max_attempts(1)
             .build(),
+        Cron::daily_at::<ik_ai::popular::PrunePopularQuestions>(20, 57)
+            .map_err(invalid)?
+            .payload(ik_ai::popular::PrunePopularQuestions::default())?
+            .max_attempts(1)
+            .build(),
     ])
 }
 
@@ -76,6 +81,7 @@ pub fn worker_options(state: &AppState) -> anyhow::Result<WorkerOptions> {
         .define_job::<ik_ai::memory_jobs::ExtractMemories>()
         .define_job::<ik_ai::memory_jobs::NightlyMemory>()
         .define_job::<ik_ai::memory_jobs::ConsolidateMemories>()
+        .define_job::<ik_ai::popular::PrunePopularQuestions>()
         .define_job::<ik_qqbot::jobs::Reply>()
         .define_job::<ik_qqbot::jobs::Dispatch>()
         .define_job::<ik_qqbot::jobs::Reconcile>()
@@ -112,7 +118,7 @@ mod tests {
     #[test]
     fn cron_payloads_decode_into_their_tasks() {
         let crontabs = crontabs().unwrap();
-        assert_eq!(crontabs.len(), 9);
+        assert_eq!(crontabs.len(), 10);
         for crontab in &crontabs {
             assert!(
                 decodes::<ik_media::jobs::SweepStaging>(crontab)
@@ -122,6 +128,7 @@ mod tests {
                     && decodes::<ik_ai::mcp::RefreshMcpTools>(crontab)
                     && decodes::<ik_ai::memory_jobs::NightlyMemory>(crontab)
                     && decodes::<ik_qqbot::jobs::Prune>(crontab)
+                    && decodes::<ik_ai::popular::PrunePopularQuestions>(crontab)
                     && decodes::<ik_qqbot::jobs::Reconcile>(crontab)
                     && decodes::<ik_qqbot::memory_jobs::RecoverMemoryBacklog>(crontab),
                 "{} 的 payload 解不出任务结构体",

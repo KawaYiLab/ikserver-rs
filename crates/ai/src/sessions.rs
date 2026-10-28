@@ -428,6 +428,7 @@ impl MessageHooks for Hooks {
         {
             return Ok(());
         }
+        crate::popular::record(conn, session.ai_user_id, session.context_from, message).await?;
         let created = repo::insert_job(
             conn,
             &NewJob {
@@ -460,6 +461,7 @@ impl MessageHooks for Hooks {
         _effects: &mut Effects,
     ) -> Result<(), Problem> {
         repo::stop_by_trigger(conn, message_id, Utc::now()).await?;
+        crate::popular::forget(conn, message_id).await?;
         Ok(())
     }
 }

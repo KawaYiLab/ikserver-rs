@@ -4875,9 +4875,15 @@ export interface components {
             /** @description 角色卡默认模型（已停用或不在白名单内时为 null）。 */
             defaultModelKey?: string | null;
             displayName: string;
+            /**
+             * @description 「大家都在问」：最近 30 天至少 3 个人问过的开场问题，问的人多的在前，最多 6 条（AI-028）。
+             *     已去掉和示例问题重复的；数据不够时为空或不足 6 条，客户端用示例问题补齐。
+             */
+            popularQuestions: string[];
             slug: string;
             /** Format: int32 */
             sortOrder: number;
+            /** @description 角色卡里配的示例问题。 */
             suggestedQuestions: string[];
             user: components["schemas"]["CharacterUser"];
         };

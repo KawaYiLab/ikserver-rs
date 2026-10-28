@@ -12,6 +12,7 @@
 - `IK_DATABASE__AUTO_MIGRATE`：启动时自动迁移数据库（镜像里默认打开）。
 - `IK_SITE_URL`：论坛前台地址，管理后台和 QQ 机器人的帖子链接按它生成，`GET /v1/site` 返回为 `siteUrl`。
 - 打 `v*` 标签时发布 GitHub Release（附可执行文件）和 `ghcr.io` 镜像。
+- AI 角色列表（`GET /v1/ai/characters`）新增 `popularQuestions`：最近 30 天至少 3 人用来开场的问题，敲敲「大家都在问」据此展示。
 
 ### 变更
 

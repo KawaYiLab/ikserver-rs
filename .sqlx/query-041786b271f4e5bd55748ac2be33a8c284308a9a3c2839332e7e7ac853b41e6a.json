@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT ai_user_id AS \"ai_user_id!\", text AS \"text!\" FROM (\n               SELECT ai_user_id,\n                      mode() WITHIN GROUP (ORDER BY text) AS text,\n                      row_number() OVER (\n                          PARTITION BY ai_user_id ORDER BY count(*) DESC, max(asked_at) DESC\n                      ) AS rank\n               FROM ai_question_asks\n               WHERE asked_at >= $1\n               GROUP BY ai_user_id, question_key\n               HAVING count(*) >= $2\n           ) ranked\n           WHERE rank <= $3\n           ORDER BY ai_user_id, rank",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ai_user_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_question_asks",
+            "name": "ai_user_id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "text!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "041786b271f4e5bd55748ac2be33a8c284308a9a3c2839332e7e7ac853b41e6a"
+}

@@ -27,7 +27,11 @@ pub struct Character {
     /// 角色卡头像，没有时回落到绑定账号的头像。
     pub avatar_url: Option<String>,
     pub sort_order: i32,
+    /// 角色卡里配的示例问题。
     pub suggested_questions: Vec<String>,
+    /// 「大家都在问」：最近 30 天至少 3 个人问过的开场问题，问的人多的在前，最多 6 条（AI-028）。
+    /// 已去掉和示例问题重复的；数据不够时为空或不足 6 条，客户端用示例问题补齐。
+    pub popular_questions: Vec<String>,
     /// 角色卡默认模型（已停用或不在白名单内时为 null）。
     pub default_model_key: Option<String>,
     /// 允许选择的模型；null 表示不限制（全部启用模型）。

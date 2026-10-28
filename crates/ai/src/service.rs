@@ -27,6 +27,11 @@ pub async fn characters(state: &AiState) -> Result<CharacterList, Problem> {
     let card_media: Vec<i64> = cards.iter().filter_map(|c| c.avatar_media_id).collect();
     let card_avatars = state.media.views(&mut conn, &card_media).await?;
     drop(conn);
+    let popular = state.popular.get().await?;
+    let site = match &state.comments.site {
+        Some(site) => Some(site.get().await),
+        None => None,
+    };
     let items = cards
         .into_iter()
         .filter_map(|card| {
@@ -37,7 +42,17 @@ pub async fn characters(state: &AiState) -> Result<CharacterList, Problem> {
                 .and_then(|m| card_avatars.get(&m))
                 .map(|v| v.thumb_url.clone())
                 .or_else(|| user_avatar.clone());
-            Some(character(&catalog, card, author, avatar_url, user_avatar))
+            let popular_questions = popular.get(&card.bound_user_id).map_or_else(Vec::new, |q| {
+                crate::popular::shown(q, site.as_deref(), &card.suggested_questions)
+            });
+            Some(character(
+                &catalog,
+                card,
+                author,
+                avatar_url,
+                user_avatar,
+                popular_questions,
+            ))
         })
         .collect();
     Ok(CharacterList { items })
@@ -49,6 +64,7 @@ fn character(
     author: &ik_auth::service::Author,
     avatar_url: Option<String>,
     user_avatar: Option<String>,
+    popular_questions: Vec<String>,
 ) -> Character {
     let default_model_key = card
         .default_model_id
@@ -68,6 +84,7 @@ fn character(
         avatar_url,
         sort_order: card.sort_order,
         suggested_questions: card.suggested_questions.clone(),
+        popular_questions,
         default_model_key,
         allowed_model_keys,
         user: CharacterUser {
