@@ -15,6 +15,7 @@ export default defineNuxtConfig({
       title: '绳网管理后台',
       htmlAttrs: { lang: 'zh-CN' },
       meta: [{ name: 'robots', content: 'noindex, nofollow' }],
+      link: [{ rel: 'icon', type: 'image/png', href: '/admin/favicon.png' }],
     },
   },
   runtimeConfig: {

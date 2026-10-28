@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useColorMode, useStorage } from '@vueuse/core'
-import { ChevronRight, ExternalLink, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, ShieldCheck, Sun } from '@lucide/vue'
+import { ChevronRight, ExternalLink, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Search, Sun } from '@lucide/vue'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -42,9 +42,7 @@ function toggleTheme() {
       )"
     >
       <div :class="cn('flex h-16 shrink-0 items-center gap-2.5', collapsed ? 'justify-center' : 'px-5')">
-        <span class="grid size-8 shrink-0 place-items-center rounded-lg bg-brand text-brand-foreground shadow-[inset_0_-2px_0_oklch(0_0_0/12%)]">
-          <ShieldCheck class="size-[18px]" />
-        </span>
+        <AdminBrandMark />
         <span v-if="!collapsed" class="min-w-0 leading-tight">
           <span class="block truncate text-sm font-semibold tracking-tight">绳网</span>
           <span class="block truncate text-[11px] text-sidebar-muted">管理后台</span>
@@ -77,9 +75,7 @@ function toggleTheme() {
             </SheetTrigger>
             <SheetContent side="left" class="w-64 gap-0 border-sidebar-border bg-sidebar p-0 text-sidebar-foreground">
               <SheetTitle class="flex h-16 items-center gap-2.5 px-5 text-sidebar-foreground">
-                <span class="grid size-8 place-items-center rounded-lg bg-brand text-brand-foreground">
-                  <ShieldCheck class="size-[18px]" />
-                </span>绳网管理后台
+                <AdminBrandMark />绳网管理后台
               </SheetTitle>
               <div class="overflow-y-auto">
                 <AdminNavList />

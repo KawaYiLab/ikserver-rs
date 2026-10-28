@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ShieldCheck } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -44,9 +43,7 @@ async function submit() {
     </div>
     <Card class="relative w-full max-w-sm shadow-lg">
       <CardHeader class="text-center">
-        <span class="mx-auto mb-2 grid size-11 place-items-center rounded-lg bg-brand text-brand-foreground">
-          <ShieldCheck class="size-6" />
-        </span>
+        <AdminBrandMark class="mx-auto mb-2 size-11 rounded-xl" />
         <CardTitle>绳网管理后台</CardTitle>
         <CardDescription>用版主或管理员的论坛账号登录</CardDescription>
       </CardHeader>
