@@ -1988,7 +1988,10 @@ async fn announcement_and_read_only_mode(db: PgPool) {
     let app = setup(&db).await;
     let base = "/v1/admin/settings";
     let (_, site) = call(&app, USER, "GET", "/v1/site", Value::Null).await;
-    assert_eq!(site, json!({ "announcement": null, "readOnly": null }));
+    assert_eq!(
+        site,
+        json!({ "announcement": null, "readOnly": null, "siteUrl": null })
+    );
 
     let (_, settings) = call(&app, ADMIN, "GET", base, Value::Null).await;
     let mut values = settings["values"].clone();
@@ -2024,7 +2027,10 @@ async fn announcement_and_read_only_mode(db: PgPool) {
     let (status, body) = call(&app, ADMIN, "PUT", base, json!({ "values": values })).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let (_, site) = call(&app, USER, "GET", "/v1/site", Value::Null).await;
-    assert_eq!(site, json!({ "announcement": null, "readOnly": null }));
+    assert_eq!(
+        site,
+        json!({ "announcement": null, "readOnly": null, "siteUrl": null })
+    );
     let (status, body) = call(&app, USER, "POST", "/v1/me/check-in", Value::Null).await;
     assert_eq!(status, StatusCode::OK, "{body}");
 }

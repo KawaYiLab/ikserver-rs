@@ -128,6 +128,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | DENNY_ANONYMOUS_POST | 403 | 不能给匿名委托投丁尼 | DENNY-008 |
 | USER_BLOCKED | 403 | 你与对方存在拉黑关系，无法进行此操作 | 任一方向的拉黑；不说明谁拉黑了谁。查看帖子详情时文案为「无法查看该委托」。匿名内容永不返回此码 |
 | REGISTRATION_CLOSED | 403 | 当前不允许注册 | `IK_AUTH__REGISTRATION_OPEN=false` |
+| SETUP_TOKEN_INVALID | 403 | 安装码不对，请在服务的启动日志里找到它 | `POST /v1/setup` |
 | MIHOYO_BIND_REQUIRES_AUTH | 401 | 该操作需要先登录 | 生成绑定用的二维码时没有登录 |
 | STORY_ACCESS_DENIED | 401 | 剧情库访问密钥无效 | `POST /v1/story/mcp`：没带或带错 `Authorization: Bearer <IK_STORY__ACCESS_KEY>`（未设 `IK_STORY__PUBLIC=true` 时）；响应带 `WWW-Authenticate: Bearer` |
 | MIHOYO_BIND_USER_MISMATCH | 403 | 扫码会话与当前登录用户不一致 | 绑定模式只有发起的账号能轮询 |
@@ -161,6 +162,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | ALREADY_EXISTS | 409 | 已存在相同记录 | 通用唯一冲突 |
 | USERNAME_TAKEN | 409 | 该用户名已被占用 | 改名时；区分大小写（D-018），冲突时不扣费 |
 | EMAIL_TAKEN | 409 | 该邮箱已注册 | 仅注册用途；登录/重置用途防枚举，不暴露 |
+| ALREADY_SET_UP | 409 | 站点已经安装过了 | `POST /v1/setup`：已有管理员 |
 | IDEMPOTENCY_IN_PROGRESS | 409 | 相同的请求正在处理，请稍后再试 | 带 `Retry-After: 1` |
 | NOT_PUBLISHED | 409 | 这篇帖子还没有发布 | 对草稿执行下线 / 丢弃修改 |
 | DM_PIN_LIMIT | 409 | 最多置顶 50 个会话 | CONV-023 |
