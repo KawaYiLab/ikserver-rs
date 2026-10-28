@@ -1019,14 +1019,19 @@ impl Config {
             if self.secrets.qr_session_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__QR_SESSION_KEY"));
             }
-            if [&self.secrets.code_hmac_key, &self.secrets.qr_session_key]
-                .iter()
-                .any(|key| EXAMPLE_KEYS.contains(&key.expose()))
-            {
-                return Err(ConfigError::Invalid(
-                    "生产环境不能使用 .env.example 里的示例密钥，用 openssl rand -base64 48 生成"
-                        .to_owned(),
-                ));
+            let example: Vec<&str> = [
+                ("IK_SECRETS__CODE_HMAC_KEY", &self.secrets.code_hmac_key),
+                ("IK_SECRETS__QR_SESSION_KEY", &self.secrets.qr_session_key),
+            ]
+            .into_iter()
+            .filter(|(_, key)| EXAMPLE_KEYS.contains(&key.expose()))
+            .map(|(name, _)| name)
+            .collect();
+            if !example.is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "生产环境不能使用 .env.example 里的示例密钥：{}，用 openssl rand -base64 48 生成",
+                    example.join("、")
+                )));
             }
             if !self.session.cookie_secure {
                 return Err(ConfigError::Invalid(
@@ -1151,7 +1156,7 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(
-            matches!(err, ConfigError::Invalid(ref m) if m.contains("示例密钥")),
+            matches!(err, ConfigError::Invalid(ref m) if m.contains("示例密钥：IK_SECRETS__CODE_HMAC_KEY，")),
             "{err}"
         );
     }
