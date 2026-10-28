@@ -29,7 +29,7 @@ Rust 2024 · Axum · SQLx + PostgreSQL · graphile_worker（任务队列）· Me
 git clone https://github.com/KawaYiLab/ikserver-rs.git
 cd ikserver-rs/deploy/docker
 ./init.sh                     # 生成 .env 和随机密钥
-# 本机试用：.env 里 IK_ENV 改成 dev、IK_SESSION__COOKIE_SECURE 改成 false
+# 本机试用：.env 里 IK_ENV=dev、IK_SESSION__COOKIE_SECURE=false、IK_MAIL__PROVIDER=dev_log
 docker compose up -d
 docker compose logs ik-server | grep setup_token
 ```
