@@ -5,7 +5,7 @@
 模块化单体：一个 `ik-server` 进程承担 HTTP API、WebSocket 网关、后台任务与定时任务、
 AI 编排，并提供编进可执行文件的管理后台页面（`/admin`）。外部依赖只有 PostgreSQL、Meilisearch、S3 兼容对象存储、SMTP/Brevo、米游社 API、
 B 站视频信息接口、大模型 API。没有 Redis，没有 AstrBot，没有独立 worker 进程。
-线上部署拓扑（EdgeOne 直接回源，没有 nginx）见 `deploy/README.md` 与 ADR 0005。
+线上部署拓扑（EdgeOne 直接回源，没有 nginx）见 `deploy/interknot/README.md` 与 ADR 0005。
 
 ```mermaid
 flowchart LR
@@ -25,7 +25,7 @@ flowchart LR
 
 ## crate 划分与依赖方向
 
-每个 crate 的职责见 `AGENTS.md`「目录结构」（只在那里维护）。这里只讲依赖方向：下层不知道上层，
+每个 crate 的职责写在它自己 `Cargo.toml` 的 `description` 里（`cargo metadata` 可以一次列出）。这里只讲依赖方向：下层不知道上层，
 依赖只能从上往下。按层从下到上（同层之间不互相依赖，除非下面单独写明）：
 
 | 层 | crate | 直接依赖（省略 kernel） |

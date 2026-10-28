@@ -14,4 +14,4 @@ Fall back to grep or file reads only for what the graph does not model: literal 
 
 ## Deployment topology
 
-Production has no nginx: `ik.tiwat.cn` is Tencent EdgeOne pulling straight from ik-server's port, the main site `interk.net` is a Cloudflare Pages static build that calls `ik.tiwat.cn` cross-site, and `ik.tiwat.cn/app/*` is routed to the Android update bucket. Read `deploy/README.md` and `docs/adr/0005-edgeone-direct-origin.md` before touching anything about proxies, client IPs, CORS, cookies, caching, or WebSocket.
+Production has no nginx: `ik.tiwat.cn` is Tencent EdgeOne pulling straight from ik-server's port, the main site `interk.net` is a Cloudflare Pages static build that calls `ik.tiwat.cn` cross-site, and `ik.tiwat.cn/app/*` is routed to the Android update bucket. Read `deploy/interknot/README.md` and `docs/adr/0005-edgeone-direct-origin.md` before touching anything about proxies, client IPs, CORS, cookies, caching, or WebSocket.

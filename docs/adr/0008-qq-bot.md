@@ -6,7 +6,7 @@
 - 关联：ADR 0004（工具箱）、ADR 0005（EdgeOne 直接回源）、ADR 0007（AI 记忆）、`docs/business-rules/ai-assistant.md`
 
 > 本文是交给执行者（人或 AI）的实施方案。**动手前先读**：`CLAUDE.md`、`docs/architecture.md`（依赖方向、事务纪律）、
-> ADR 0004、ADR 0005、ADR 0007、`docs/business-rules/ai-assistant.md` 第 5 节（QUOTA）与第 13 节（MEM）、`deploy/README.md`。
+> ADR 0004、ADR 0005、ADR 0007、`docs/business-rules/ai-assistant.md` 第 5 节（QUOTA）与第 13 节（MEM）、`deploy/interknot/README.md`。
 > 第 2 节的 QQ 开放平台事实已于 2026-10-25 对照官方文档和腾讯官方 SDK 源码核实过（来源见第 17 节）。
 > 还剩少数几项标了 **【沙箱实测】**，是文档之间有出入或文档没写的地方，第 0 期在沙箱群实测后写回本文。
 
@@ -310,7 +310,7 @@ id 一律雪花（`ik_kernel::id`），时间 `TIMESTAMPTZ`，与现有表一致
 
 ## 10 配置
 
-部署配置（`ik_kernel::config`，figment，`IK_` 前缀），写进 `deploy/ik-server.env.example`：
+部署配置（`ik_kernel::config`，figment，`IK_` 前缀），写进 `deploy/interknot/ik-server.env`：
 
 ```
 IK_QQBOT__ENABLED=false
@@ -399,7 +399,7 @@ IK_QQBOT__WEBHOOK_MAX_SKEW_SECS=300
 
 每期同步更新文档：新建 `docs/business-rules/qq-bot.md`（规则编号前缀 `QQ-`，把本文第 4～8 节的规则逐条登记）并加进
 `docs/business-rules.md` 的索引表；`docs/schema.md` 加「QQ 机器人」一节；`docs/architecture.md` 加层与说明；
-`docs/api-guidelines.md` 登记接口与错误码；`deploy/README.md` 补 QQ 开放平台的回调地址、IP 白名单、消息 URL 域名配置；
+`docs/api-guidelines.md` 登记接口与错误码；`deploy/interknot/README.md` 补 QQ 开放平台的回调地址、IP 白名单、消息 URL 域名配置；
 改了 SQL 要按 `docs/dev-setup.md` 更新 `.sqlx/` 离线缓存；本文状态改为「已接受」并在分期表里标「已实施」。
 
 主站（InterKnot-Web 仓库）在第 2 期配合做「设置 → 绑定 QQ」：生成码、复制、倒计时、已绑定列表与解绑。

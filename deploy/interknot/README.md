@@ -1,4 +1,6 @@
-# 部署
+# 绳网线上部署（interk.net）
+
+这是绳网自己的线上环境：EdgeOne 直接回源、主站跨站调用接口。通用的部署方法见 [上一级的部署说明](../README.md)。
 
 ## 线上拓扑
 
@@ -15,19 +17,19 @@
 | `interk.net` | Cloudflare Pages 静态站点（InterKnot-Web 仓库） | 主站；构建时 `NUXT_PUBLIC_API_BASE_URL=https://ik.tiwat.cn`，跨站调用接口 |
 | `im.tiwat.cn` | 对象存储的 CDN | 上传的文件（`IK_STORAGE__PUBLIC_BASE_URL`） |
 
-为什么是这样、有什么代价见 [ADR 0005](../docs/adr/0005-edgeone-direct-origin.md)。
+为什么是这样、有什么代价见 [ADR 0005](../../docs/adr/0005-edgeone-direct-origin.md)。
 
 `ik-server` 是一个可执行文件，管理后台（`admin/`）在编译时嵌进去，不需要单独发布。
 依赖的服务：PostgreSQL、Meilisearch、对象存储。
 
 | 文件 | 作用 |
 | --- | --- |
-| [`release.sh`](release.sh) | 编译后台与 ik-server，上传、迁移、重启 |
-| [`../.github/workflows/release.yml`](../.github/workflows/release.yml) | 在 GitHub Actions 上编译同样的可执行文件 |
-| [`systemd/ik-server.service`](systemd/ik-server.service) | 服务定义（发布时自动安装） |
-| [`systemd/ik`](systemd/ik) | 在服务器上跑运维命令的包装（发布时装到 `/usr/local/bin/ik`） |
-| [`ik-server.env.example`](ik-server.env.example) | 生产配置模板 |
-| [`legacy-prepare.sh`](legacy-prepare.sh) | 旧数据导入的准备：导出旧库、恢复到新库的 legacy schema、迁移、预检（见 crates/legacy/README.md） |
+| [`release.sh`](../release.sh) | 编译后台与 ik-server，上传、迁移、重启 |
+| [`.github/workflows/release.yml`](../../.github/workflows/release.yml) | 在 GitHub Actions 上编译同样的可执行文件 |
+| [`systemd/ik-server.service`](../systemd/ik-server.service) | 服务定义（发布时自动安装） |
+| [`systemd/ik`](../systemd/ik) | 在服务器上跑运维命令的包装（发布时装到 `/usr/local/bin/ik`） |
+| [`ik-server.env`](ik-server.env) | 线上配置模板 |
+| [`legacy-prepare.sh`](../legacy-prepare.sh) | 旧数据导入的准备：导出旧库、恢复到新库的 legacy schema、迁移、预检（见 crates/legacy/README.md） |
 
 ## 服务器一次性准备
 
@@ -36,7 +38,7 @@ sudo useradd --system --home-dir /opt/interknot --shell /usr/sbin/nologin interk
 sudo install -d -m 0755 /opt/interknot
 sudo install -d -m 0750 -g interknot /etc/interknot
 # 从仓库拷过去后填写（数据库、密钥、对象存储……）
-sudo install -m 0640 -o root -g interknot ik-server.env.example /etc/interknot/ik-server.env
+sudo install -m 0640 -o root -g interknot deploy/interknot/ik-server.env /etc/interknot/ik-server.env
 ```
 
 数据库要先建好空库和账号，表结构由发布脚本迁移。
@@ -86,7 +88,7 @@ deploy/release.sh root@服务器
 
 脚本依次：
 
-1. `admin/` 下 `pnpm install --frozen-lockfile && pnpm build`（主站地址用 `NUXT_PUBLIC_SITE_URL` 覆盖，默认 `https://interk.net`）；
+1. `admin/` 下 `pnpm install --frozen-lockfile && pnpm build`；
 2. `SQLX_OFFLINE=true cargo build --release --locked -p ik-server`，并确认嵌进去的是刚编译的后台；
 3. 上传可执行文件、服务定义与 `ik` 命令；
 4. 用新版本跑 `ik migrate`（失败就停下，线上的旧版本不受影响）；
@@ -170,14 +172,14 @@ cargo run --release -p ik-server -- story call --source /path/to/corpus \
 `ik_coverage`（合并调用者累计的 `read.coverageDelta`，对照 `catalog.manifest` 核对资料覆盖与缺口）。
 
 版本别名支持 `ik_catalog(path="3.3版本")`、`ik_search(keyword="3.3 核心")` 和
-`ik_read(docId="v3.3")`，限定该版新增主线。别名映射与检索规则见 [剧情库检索说明](../docs/story-search.md)。
+`ik_read(docId="v3.3")`，限定该版新增主线。别名映射与检索规则见 [剧情库检索说明](../../docs/story-search.md)。
 
 ## QQ 官方机器人（ADR 0008）
 
 提供游客对话、站内绑定（个人额度与记忆）、群共享记忆和后台管理。默认关闭。
 
 1. QQ 开放平台建立官方机器人，选择 Webhook，登记服务器调用 OpenAPI 的出口 IP；准备沙箱群。
-2. 按 `ik-server.env.example` 配置 `IK_QQBOT__APPS__MAIN__APP_ID` 与 `SECRET`，启用 `IK_QQBOT__ENABLED=true`。
+2. 按 `ik-server.env` 配置 `IK_QQBOT__APPS__MAIN__APP_ID` 与 `SECRET`，启用 `IK_QQBOT__ENABLED=true`。
    测试时设置 `SANDBOX=true`；未显式设置 API_BASE 时自动选沙箱域名。不要把密钥写入数据库或提交仓库。
 3. 回调地址设置为 `https://ik.tiwat.cn/v1/qq/webhook`，经 EdgeOne 443 直接回源；保留 X-Bot-Appid、签名头及原始请求体。
    此路径禁用缓存，并避免按来源 IP 的边缘限流误伤集中回调（服务内部按 AppID 限流）。
@@ -212,7 +214,7 @@ cargo run --release -p ik-server -- story call --source /path/to/corpus \
 
 本地发送策略：每 AppID 5 POST/秒、最多 4 个在途请求；每进程最多 2 个 QQ 生成。
 每段最多 3 次 POST，HTTP 10 秒，重试延迟 2/5 秒加抖动，输出落库后最多发送 60 秒并受平台截止约束。
-这些是我们的运行策略，不是官方配额。[协议和边界依据](../docs/business-rules/qq-bot.md)随代码维护。
+这些是我们的运行策略，不是官方配额。[协议和边界依据](../../docs/business-rules/qq-bot.md)随代码维护。
 
 ## 回滚
 

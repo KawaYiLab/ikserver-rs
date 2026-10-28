@@ -27,7 +27,7 @@
 
 ## 后果
 
-- 部署说明（`deploy/README.md`）以这个拓扑为准；仓库不再带 nginx 配置。
+- 部署说明（`deploy/interknot/README.md`）以这个拓扑为准；仓库不再带 nginx 配置。
 - 主站每次请求都是跨源的：写请求先发一次 OPTIONS 预检（预检结果缓存 10 分钟，`access-control-max-age: 600`）。
 - 主站登录依赖浏览器接受分区的跨站 Cookie。将来要彻底避开第三方 Cookie 与预检，按 ADR 0002 的思路改成同源：
   例如在 Cloudflare 上用 Worker 把 `interk.net/v1/*`（含 WebSocket）转给 `ik.tiwat.cn`，主站构建时
