@@ -100,7 +100,7 @@ async fn readyz_reports_503_when_database_unreachable() {
 #[tokio::test]
 async fn cross_site_post_is_rejected_by_csrf() {
     let request = Request::post("/v1/anything")
-        .header(header::HOST, "api.interk.net")
+        .header(header::HOST, "api.example.com")
         .header(header::ORIGIN, "https://evil.example")
         .header("sec-fetch-site", "cross-site")
         .body(Body::empty())
@@ -113,7 +113,7 @@ async fn cross_site_post_is_rejected_by_csrf() {
 #[tokio::test]
 async fn trusted_origin_post_passes_csrf() {
     let request = Request::post("/v1/anything")
-        .header(header::HOST, "api.interk.net")
+        .header(header::HOST, "api.example.com")
         .header(header::ORIGIN, "https://interk.net")
         .header("sec-fetch-site", "same-site")
         .body(Body::empty())

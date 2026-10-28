@@ -9,7 +9,8 @@ import type { RowAction } from '~/lib/actions'
 /** 表格行末的「⋯」操作菜单。 */
 const props = defineProps<{ actions: RowAction[], label?: string }>()
 
-const visible = computed(() => props.actions.filter(action => !action.hidden))
+// 既没有链接也没有操作的项（例如没配置主站地址时的「在主站打开」）不显示。
+const visible = computed(() => props.actions.filter(action => !action.hidden && (action.href || action.onSelect)))
 </script>
 
 <template>

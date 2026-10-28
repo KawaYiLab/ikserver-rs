@@ -50,10 +50,19 @@ impl fmt::Debug for Secret {
     }
 }
 
+/// `.env.example` 里给本地开发用的密钥，生产环境拒绝。
+const EXAMPLE_KEYS: [&str; 2] = [
+    "ZGV2LW9ubHktY29kZS1obWFjLWtleS1kby1ub3QtdXNlLWluLXByb2R1Y3Rpb24=",
+    "ZGV2LW9ubHktcXItc2Vzc2lvbi1rZXktZG8tbm90LXVzZS1pbi1wcm9k",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub env: EnvKind,
+    /// 主站（论坛前台）地址，例如 `https://forum.example.com`（`IK_SITE_URL`）。
+    /// 管理后台的「在主站打开」与 QQ 机器人回复里的帖子链接都按它拼；为空时不生成这些链接。
+    pub site_url: String,
     /// 雪花 ID 的节点号（0–1023），多实例部署时每个实例必须不同。
     pub node_id: u16,
     pub http: Http,
@@ -238,7 +247,7 @@ pub struct Mihoyo {
 impl Default for Mihoyo {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             passport_base_url: "https://passport-api.miyoushe.com".to_owned(),
             takumi_base_url: "https://api-takumi.mihoyo.com".to_owned(),
             timeout_secs: 10,
@@ -479,6 +488,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             env: EnvKind::Dev,
+            site_url: String::new(),
             node_id: 1,
             http: Http::default(),
             database: Database::default(),
@@ -831,6 +841,13 @@ impl Config {
         if self.database.url.is_empty() {
             return Err(ConfigError::Missing("IK_DATABASE__URL 或 DATABASE_URL"));
         }
+        if !self.site_url.is_empty()
+            && !(self.site_url.starts_with("https://") || self.site_url.starts_with("http://"))
+        {
+            return Err(ConfigError::Invalid(
+                "IK_SITE_URL 必须以 http:// 或 https:// 开头".to_owned(),
+            ));
+        }
         if self.node_id > crate::id::MAX_NODE_ID {
             return Err(ConfigError::Invalid(format!(
                 "node_id 必须在 0–{} 之间",
@@ -998,6 +1015,15 @@ impl Config {
             if self.secrets.qr_session_key.is_empty() {
                 return Err(ConfigError::Missing("IK_SECRETS__QR_SESSION_KEY"));
             }
+            if [&self.secrets.code_hmac_key, &self.secrets.qr_session_key]
+                .iter()
+                .any(|key| EXAMPLE_KEYS.contains(&key.expose()))
+            {
+                return Err(ConfigError::Invalid(
+                    "生产环境不能使用 .env.example 里的示例密钥，用 openssl rand -base64 48 生成"
+                        .to_owned(),
+                ));
+            }
             if !self.session.cookie_secure {
                 return Err(ConfigError::Invalid(
                     "生产环境必须开启 session.cookie_secure".to_owned(),
@@ -1109,6 +1135,34 @@ mod tests {
             assert_eq!(config.mail.domestic_domains, ["corp.cn"]);
             Ok(())
         });
+    }
+
+    #[test]
+    fn prod_rejects_example_keys() {
+        let err = Config::from_figment(with(&[
+            ("database.url", "postgres://x"),
+            ("env", "prod"),
+            ("secrets.code_hmac_key", EXAMPLE_KEYS[0]),
+            ("secrets.qr_session_key", "a2V5"),
+        ]))
+        .unwrap_err();
+        assert!(
+            matches!(err, ConfigError::Invalid(ref m) if m.contains("示例密钥")),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn site_url_must_be_http() {
+        let base = [("database.url", "postgres://x")];
+        let bad = [base.as_slice(), &[("site_url", "forum.example.com")]].concat();
+        assert!(Config::from_figment(with(&bad)).is_err());
+        let ok = [
+            base.as_slice(),
+            &[("site_url", "https://forum.example.com")],
+        ]
+        .concat();
+        assert!(Config::from_figment(with(&ok)).is_ok());
     }
 
     #[test]

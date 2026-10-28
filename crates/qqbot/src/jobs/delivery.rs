@@ -355,7 +355,10 @@ pub(super) async fn deliver(s: &QqState, l: &Lease) -> Result<(), Problem> {
         {
             let plain = crate::text::format_content(
                 &segment.content,
-                "allow",
+                crate::text::Links {
+                    mode: "allow",
+                    site: &s.site_url,
+                },
                 MessageFormat::Plain,
                 segment.content.chars().count(),
             );

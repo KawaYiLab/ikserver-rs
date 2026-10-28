@@ -62,6 +62,21 @@ enum Piece {
     Wrap(String, Vec<Piece>, String),
     Link(Vec<Piece>, String, bool),
 }
+/// 链接策略（后台「QQ 机器人」的 `link_mode`）与站点地址（`IK_QQBOT__SITE_URL`）。
+/// 站内帖子的相对路径 `/post/<id>` 按站点地址补全；站点地址为空时不补全，按无法直达的链接处理。
+#[derive(Debug, Clone, Copy)]
+pub struct Links<'a> {
+    pub mode: &'a str,
+    pub site: &'a str,
+}
+
+impl Links<'_> {
+    const STRIP: Links<'static> = Links {
+        mode: "strip",
+        site: "",
+    };
+}
+
 fn syntax(s: &str) -> Piece {
     Piece::Syntax(s.to_owned())
 }
@@ -69,18 +84,22 @@ fn is_post_path(path: &str) -> bool {
     path.strip_prefix("/post/")
         .is_some_and(|id| !id.is_empty() && id.bytes().all(|c| c.is_ascii_digit()))
 }
-fn post_path(url: &str) -> Option<&str> {
-    let path = url.strip_prefix("https://interk.net").unwrap_or(url);
+fn post_path<'a>(url: &'a str, site: &str) -> Option<&'a str> {
+    let path = (!site.is_empty())
+        .then(|| url.strip_prefix(site))
+        .flatten()
+        .unwrap_or(url);
     is_post_path(path).then_some(path)
 }
-fn link(label: Vec<Piece>, url: &str, automatic: bool, mode: &str) -> Vec<Piece> {
-    let post = post_path(url);
-    let resolved = post.map_or_else(|| url.to_owned(), |p| format!("https://interk.net{p}"));
+fn link(label: Vec<Piece>, url: &str, automatic: bool, links: Links<'_>) -> Vec<Piece> {
+    let site = links.site.trim_end_matches('/');
+    let post = post_path(url, site);
+    let resolved = post.map_or_else(|| url.to_owned(), |p| format!("{site}{p}"));
     let web =
         reqwest13::Url::parse(&resolved).is_ok_and(|u| matches!(u.scheme(), "http" | "https"));
     let plain_label = render(&label, MessageFormat::Plain, usize::MAX);
     let automatic = automatic || plain_label == url || plain_label == resolved;
-    if web && (mode == "allow" || (mode == "domain" && post.is_some())) {
+    if web && (links.mode == "allow" || (links.mode == "domain" && post.is_some())) {
         // Parentheses and angle brackets must not terminate a Markdown destination.
         let url = resolved
             .replace('(', "%28")
@@ -107,7 +126,7 @@ fn link(label: Vec<Piece>, url: &str, automatic: bool, mode: &str) -> Vec<Piece>
 
 static URLS: LazyLock<Option<Regex>> =
     LazyLock::new(|| Regex::new(r"(?i)(?:[a-z][a-z0-9+.-]*://|www\.)[^\s<>]+|/post/[0-9]+").ok());
-fn text_pieces(value: &str, mode: &str) -> Vec<Piece> {
+fn text_pieces(value: &str, links: Links<'_>) -> Vec<Piece> {
     let Some(re) = &*URLS else {
         return vec![Piece::Text(value.to_owned())];
     };
@@ -118,7 +137,7 @@ fn text_pieces(value: &str, mode: &str) -> Vec<Piece> {
         let url = found.as_str().trim_end_matches([
             '。', '，', '！', '？', '、', '；', '：', '）', ')', ']', '}', '.', ',', '!', '?', ';',
         ]);
-        out.extend(link(vec![Piece::Text(url.to_owned())], url, true, mode));
+        out.extend(link(vec![Piece::Text(url.to_owned())], url, true, links));
         cursor = found.start() + url.len();
     }
     out.push(Piece::Text(value[cursor..].to_owned()));
@@ -138,8 +157,11 @@ fn join(parts: impl IntoIterator<Item = Vec<Piece>>, separator: &str) -> Vec<Pie
     }
     out
 }
-fn children(nodes: &[Node<'_>], mode: &str, format: MessageFormat) -> Vec<Piece> {
-    nodes.iter().flat_map(|n| pieces(n, mode, format)).collect()
+fn children(nodes: &[Node<'_>], links: Links<'_>, format: MessageFormat) -> Vec<Piece> {
+    nodes
+        .iter()
+        .flat_map(|n| pieces(n, links, format))
+        .collect()
 }
 // Indentation belongs to each physical line, including nested lists and quotes.
 fn indent(parts: Vec<Piece>, prefix: &str) -> Vec<Piece> {
@@ -154,10 +176,10 @@ fn indent(parts: Vec<Piece>, prefix: &str) -> Vec<Piece> {
         })
         .collect()
 }
-fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
+fn pieces(node: &Node<'_>, links: Links<'_>, format: MessageFormat) -> Vec<Piece> {
     let md = format == MessageFormat::Markdown;
     match node {
-        Node::Text(s) => text_pieces(s, mode),
+        Node::Text(s) => text_pieces(s, links),
         Node::Break => vec![syntax("\n")],
         Node::Rule => vec![syntax(if md { "---" } else { "——" })],
         Node::Branch(tag, inner) => match tag {
@@ -172,7 +194,7 @@ fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
                     ""
                 }
                 .into(),
-                children(inner, mode, format),
+                children(inner, links, format),
             )],
             Tag::Emphasis | Tag::Strong | Tag::Strikethrough => {
                 let marker = if !md {
@@ -186,7 +208,7 @@ fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
                 };
                 vec![Piece::Wrap(
                     marker.into(),
-                    children(inner, mode, format),
+                    children(inner, links, format),
                     marker.into(),
                 )]
             }
@@ -201,7 +223,7 @@ fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
                 );
                 // Link labels must not themselves be recognized as bare URLs.
                 let label = label_pieces(inner, format);
-                link(label, dest_url, automatic, mode)
+                link(label, dest_url, automatic, links)
             }
             Tag::Image { .. } => label_pieces(inner, format),
             Tag::List(start) => join(
@@ -219,26 +241,26 @@ fn pieces(node: &Node<'_>, mode: &str, format: MessageFormat) -> Vec<Piece> {
                     let continuation = " ".repeat(marker.chars().count());
                     vec![Piece::Wrap(
                         marker,
-                        indent(pieces(item, mode, format), &continuation),
+                        indent(pieces(item, links, format), &continuation),
                         String::new(),
                     )]
                 }),
                 "\n",
             ),
-            Tag::Item => join(inner.iter().map(|n| pieces(n, mode, format)), "\n"),
+            Tag::Item => join(inner.iter().map(|n| pieces(n, links, format)), "\n"),
             Tag::BlockQuote(_) => {
-                let body = join(inner.iter().map(|n| pieces(n, mode, format)), "\n\n");
+                let body = join(inner.iter().map(|n| pieces(n, links, format)), "\n\n");
                 if md {
                     vec![Piece::Wrap("> ".into(), indent(body, "> "), String::new())]
                 } else {
                     body
                 }
             }
-            Tag::Table(_) => join(inner.iter().map(|n| pieces(n, mode, format)), "\n"),
+            Tag::Table(_) => join(inner.iter().map(|n| pieces(n, links, format)), "\n"),
             Tag::TableHead | Tag::TableRow => {
-                join(inner.iter().map(|n| pieces(n, mode, format)), " ｜ ")
+                join(inner.iter().map(|n| pieces(n, links, format)), " ｜ ")
             }
-            _ => children(inner, mode, format),
+            _ => children(inner, links, format),
         },
     }
 }
@@ -249,7 +271,7 @@ fn label_pieces(nodes: &[Node<'_>], format: MessageFormat) -> Vec<Piece> {
             Node::Text(s) => vec![Piece::Text(s.to_string())],
             Node::Break => vec![Piece::Text(" ".into())],
             Node::Branch(Tag::Emphasis | Tag::Strong | Tag::Strikethrough, _) => {
-                pieces(node, "strip", format)
+                pieces(node, Links::STRIP, format)
             }
             Node::Branch(_, inner) => label_pieces(inner, format),
             _ => vec![],
@@ -423,7 +445,7 @@ fn is_heading_chunk(chunk: &[Piece]) -> bool {
     matches!(chunk, [Piece::Heading(_, _)])
 }
 
-fn blocks(value: &str, mode: &str, format: MessageFormat) -> Vec<Vec<Piece>> {
+fn blocks(value: &str, links: Links<'_>, format: MessageFormat) -> Vec<Vec<Piece>> {
     let root = nodes(&mut Parser::new_ext(
         value,
         Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES,
@@ -447,20 +469,20 @@ fn blocks(value: &str, mode: &str, format: MessageFormat) -> Vec<Vec<Piece>> {
                 if !raw.contains("://") {
                     return ik_ai::workflow::split_segments(&raw)
                         .iter()
-                        .map(|s| text_pieces(s, mode))
+                        .map(|s| text_pieces(s, links))
                         .collect();
                 }
             }
-            vec![pieces(node, mode, format)]
+            vec![pieces(node, links, format)]
         })
         .collect()
 }
 
-pub fn clean(value: &str, mode: &str) -> String {
-    format_content(value, mode, MessageFormat::Plain, usize::MAX)
+pub fn clean(value: &str, links: Links<'_>) -> String {
+    format_content(value, links, MessageFormat::Plain, usize::MAX)
 }
-pub fn format_content(value: &str, mode: &str, format: MessageFormat, max: usize) -> String {
-    render(&join(blocks(value, mode, format), "\n\n"), format, max)
+pub fn format_content(value: &str, links: Links<'_>, format: MessageFormat, max: usize) -> String {
+    render(&join(blocks(value, links, format), "\n\n"), format, max)
         .trim()
         .to_owned()
 }
@@ -468,11 +490,15 @@ pub fn format_content(value: &str, mode: &str, format: MessageFormat, max: usize
 /// A persisted plain payload has already been rendered; its literal symbols are not Markdown.
 pub fn without_links(value: &str, format: MessageFormat) -> String {
     if format == MessageFormat::Markdown {
-        format_content(value, "strip", format, value.chars().count())
+        format_content(value, Links::STRIP, format, value.chars().count())
     } else {
-        render(&text_pieces(value, "strip"), format, value.chars().count())
-            .trim()
-            .to_owned()
+        render(
+            &text_pieces(value, Links::STRIP),
+            format,
+            value.chars().count(),
+        )
+        .trim()
+        .to_owned()
     }
 }
 
@@ -481,7 +507,7 @@ pub fn without_links(value: &str, format: MessageFormat) -> String {
 /// while the persisted payload remains the exact rendered prefix.
 pub fn segments(
     values: &[String],
-    mode: &str,
+    links: Links<'_>,
     format: MessageFormat,
     blocked: &[String],
     max_chars: usize,
@@ -489,7 +515,15 @@ pub fn segments(
 ) -> (Vec<String>, bool, bool) {
     let visible = values
         .iter()
-        .map(|v| clean(v, "allow"))
+        .map(|v| {
+            clean(
+                v,
+                Links {
+                    mode: "allow",
+                    ..links
+                },
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let joined = format!("{}\n{visible}", values.join("\n")).to_lowercase();
@@ -505,7 +539,7 @@ pub fn segments(
     let limit = if group { 4 } else { 3 };
     let chunks: Vec<_> = values
         .iter()
-        .flat_map(|v| blocks(v, mode, format))
+        .flat_map(|v| blocks(v, links, format))
         .collect();
     for chunk in &chunks {
         let separator = if out.len() >= limit { "\n\n" } else { "" };
@@ -543,51 +577,60 @@ pub fn segments(
 mod tests {
     use super::*;
     use MessageFormat::{Markdown, Plain};
+    fn l(mode: &str) -> Links<'_> {
+        Links {
+            mode,
+            site: "https://interk.net",
+        }
+    }
     #[test]
     fn links_obey_all_three_policies() {
-        assert_eq!(clean("[攻略](/post/123)", "strip"), "（在绳网搜《攻略》）");
         assert_eq!(
-            clean("[攻略](/post/123)", "domain"),
+            clean("[攻略](/post/123)", l("strip")),
+            "（在绳网搜《攻略》）"
+        );
+        assert_eq!(
+            clean("[攻略](/post/123)", l("domain")),
             "攻略 https://interk.net/post/123"
         );
         assert_eq!(
             clean(
                 "https://interk.net.evil/post/123 https://evil.test",
-                "domain"
+                l("domain")
             ),
             ""
         );
         assert_eq!(
-            format_content("[攻略](/post/123)", "allow", Markdown, 600),
+            format_content("[攻略](/post/123)", l("allow"), Markdown, 600),
             "[攻略](https://interk.net/post/123)"
         );
         assert_eq!(
             clean(
                 "[外链](https://example.com) [邮件](mailto:a@b.com)",
-                "allow"
+                l("allow")
             ),
             "外链 https://example.com 邮件"
         );
         assert!(
-            format_content("<https://example.com>", "allow", Markdown, 600)
+            format_content("<https://example.com>", l("allow"), Markdown, 600)
                 .contains("](https://example.com)")
         );
-        assert_eq!(clean("<https://example.com>", "strip"), "");
+        assert_eq!(clean("<https://example.com>", l("strip")), "");
     }
     #[test]
     fn plain_text_symbols_survive_cleaning() {
         assert_eq!(
-            clean("好耶 ^_^ 3*4=12 snake_case", "strip"),
+            clean("好耶 ^_^ 3*4=12 snake_case", l("strip")),
             "好耶 ^_^ 3*4=12 snake_case"
         );
-        assert_eq!(clean("**重点** *强调* ~~旧~~", "strip"), "重点 强调 旧");
-        let md = format_content("好耶 ^_^ 3*4=12", "allow", Markdown, 600);
-        assert_eq!(clean(&md, "allow"), "好耶 ^_^ 3*4=12");
+        assert_eq!(clean("**重点** *强调* ~~旧~~", l("strip")), "重点 强调 旧");
+        let md = format_content("好耶 ^_^ 3*4=12", l("allow"), Markdown, 600);
+        assert_eq!(clean(&md, l("allow")), "好耶 ^_^ 3*4=12");
     }
     #[test]
     fn supported_structures_and_readable_fallbacks() {
         let raw = "### 标题\n\n**重点** *强调* ~~旧~~\n\n- 第一\n  - 第二\n    1. 第三\n\n> 引用\n> 下一行\n\n---\n\n```rs\nlet x = 1;\n```\n\n| 名字 | 值 |\n| --- | --- |\n| 甲 | 乙 |\n\n![图片说明](https://img.test/a.png)";
-        let out = format_content(raw, "allow", Markdown, 600);
+        let out = format_content(raw, l("allow"), Markdown, 600);
         assert!(out.starts_with("## 标题"));
         assert!(out.contains("**重点** *强调* ~~旧~~"));
         assert!(out.contains("- 第一\n  - 第二\n    1. 第三"), "{out}");
@@ -608,7 +651,7 @@ mod tests {
         for format in [Plain, Markdown] {
             for group in [false, true] {
                 let values = vec!["**你好**".to_owned(); 8];
-                let (out, _, truncated) = segments(&values, "allow", format, &[], 20, group);
+                let (out, _, truncated) = segments(&values, l("allow"), format, &[], 20, group);
                 assert!(out.len() <= if group { 4 } else { 3 });
                 assert!(out.iter().map(|s| s.chars().count()).sum::<usize>() <= 20);
                 assert!(truncated);
@@ -622,21 +665,21 @@ mod tests {
             "长".repeat(500)
         );
         for max in 1..80 {
-            let out = format_content(&long, "allow", Markdown, max);
+            let out = format_content(&long, l("allow"), Markdown, max);
             assert!(out.chars().count() <= max);
             assert!(!out.contains("https"));
             assert_eq!(out.matches("**").count() % 2, 0, "{max}: {out}");
             assert!(!out.ends_with('\\'));
         }
         assert_eq!(
-            format_content("[攻略](https://example.com/long)", "allow", Markdown, 2),
+            format_content("[攻略](https://example.com/long)", l("allow"), Markdown, 2),
             "攻略"
         );
     }
 
     #[test]
     fn truncation_prefers_sentence_boundaries_and_skips_partial_headings() {
-        let out = format_content("第一句完整。第二句还没有结束", "allow", Plain, 8);
+        let out = format_content("第一句完整。第二句还没有结束", l("allow"), Plain, 8);
         assert_eq!(out, "第一句完整。", "{out}");
 
         let (out, _, truncated) = segments(
@@ -644,7 +687,7 @@ mod tests {
                 "第一句完整。第二句还没有结束".into(),
                 "后续内容不应跳过前文".into(),
             ],
-            "allow",
+            l("allow"),
             Plain,
             &[],
             8,
@@ -654,13 +697,14 @@ mod tests {
         assert_eq!(out, ["第一句完整。"]);
 
         let raw = "# 一、第一节标题很长\n\n正文很长。";
-        let (out, blocked, truncated) = segments(&[raw.into()], "allow", Markdown, &[], 5, false);
+        let (out, blocked, truncated) =
+            segments(&[raw.into()], l("allow"), Markdown, &[], 5, false);
         assert!(!blocked);
         assert!(truncated);
         assert!(out.is_empty(), "partial heading leaked: {out:?}");
 
         let raw = "**第一句完整。第二句还没有结束**";
-        let out = format_content(raw, "allow", Markdown, 10);
+        let out = format_content(raw, l("allow"), Markdown, 10);
         assert_eq!(out, "**第一句完整。**", "{out}");
     }
     #[test]
@@ -668,7 +712,7 @@ mod tests {
         for raw in ["敏**感**词", "[普通](https://example.com/敏感词)"] {
             let (out, blocked, truncated) = segments(
                 &[raw.into()],
-                "strip",
+                l("strip"),
                 Markdown,
                 &["敏感词".into()],
                 600,
@@ -684,10 +728,22 @@ mod tests {
     fn automatic_links_never_leave_truncated_urls() {
         for raw in ["<https://example.com/a(b)c>", "/post/1234567890123456789"] {
             for format in [Plain, Markdown] {
-                assert_eq!(format_content(raw, "allow", format, 8), "网页链接");
+                assert_eq!(format_content(raw, l("allow"), format, 8), "网页链接");
             }
         }
-        assert_eq!(clean("/post/123", "allow"), "https://interk.net/post/123");
+        assert_eq!(
+            clean("/post/123", l("allow")),
+            "https://interk.net/post/123"
+        );
+        let no_site = Links {
+            mode: "allow",
+            site: "",
+        };
+        assert_eq!(clean("/post/123", no_site), "（在绳网搜索帖子）");
+        assert_eq!(
+            clean("https://interk.net/post/123", no_site),
+            "https://interk.net/post/123"
+        );
     }
 
     #[test]

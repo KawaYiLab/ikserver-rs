@@ -64,7 +64,7 @@ pnpm build            # nuxt generate → .output/public
 - 没先构建后台就编译的 ik-server 照常运行，只是 `/admin` 是 404，启动日志里有警告。
 - 调试构建（`cargo run`）不嵌入，运行时从 `admin/.output/public` 读，重新 `pnpm build` 后刷新即可。
 
-后台里「查看帖子 / 主页」会链接到主站，地址在构建时用 `NUXT_PUBLIC_SITE_URL` 设置（默认 `https://interk.net`）。
+后台里「查看帖子 / 主页」会链接到主站，地址取自 `GET /v1/site` 的 `siteUrl`（后端配置 `IK_SITE_URL`）；没有配置时不显示这些链接。
 
 ## 约定
 

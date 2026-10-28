@@ -507,7 +507,10 @@ async fn generate(s: &QqState, lease: &dispatch::Lease) -> Result<(), Problem> {
     .await?;
     let (segments, blocked, truncated) = text::segments(
         &reply.segments,
-        &settings.link_mode,
+        text::Links {
+            mode: &settings.link_mode,
+            site: &s.site_url,
+        },
         settings.reply_format,
         &settings.blocked_words,
         settings.max_reply_chars as usize,

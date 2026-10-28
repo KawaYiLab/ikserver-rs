@@ -25,8 +25,7 @@ build() {
     (
         cd admin
         pnpm install --frozen-lockfile
-        # 后台里「查看帖子 / 主页」链接的主站地址，构建时写进页面
-        NUXT_PUBLIC_SITE_URL="${NUXT_PUBLIC_SITE_URL:-https://interk.net}" pnpm build
+        pnpm build
     )
 
     echo "==> 编译 ik-server"

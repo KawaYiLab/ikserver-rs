@@ -20,6 +20,8 @@ pub struct QqState {
     pub(crate) client: Arc<ApiClient>,
     /// 绑定码的 HMAC 密钥（与验证码同一把，`IK_SECRETS__CODE_HMAC_KEY`）。
     pub(crate) code_key: Arc<Vec<u8>>,
+    /// 主站地址（`IK_SITE_URL`），回复里的站内帖子链接按它补全。
+    pub(crate) site_url: Arc<str>,
     settings: Cache<(), Arc<Settings>>,
     rates: Arc<Mutex<BTreeMap<String, (Instant, u32)>>>,
 }
@@ -48,12 +50,19 @@ impl QqState {
             config: Arc::new(config),
             client,
             code_key: Arc::new(code_key),
+            site_url: Arc::from(""),
             settings: Cache::builder()
                 .max_capacity(1)
                 .time_to_live(Duration::from_secs(60))
                 .build(),
             rates: Arc::default(),
         })
+    }
+
+    #[must_use]
+    pub fn with_site_url(mut self, site_url: &str) -> Self {
+        self.site_url = Arc::from(site_url);
+        self
     }
 
     /// Register configured application ids without overwriting administrator choices.

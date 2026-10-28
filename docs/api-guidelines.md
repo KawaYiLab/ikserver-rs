@@ -67,7 +67,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 
 ```json
 {
-  "type": "https://api.interk.net/problems/exam-required",
+  "type": "urn:ik:problem:exam-required",
   "title": "Forbidden",
   "status": 403,
   "detail": "需要先通过入站考试才能执行此操作",

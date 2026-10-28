@@ -157,7 +157,7 @@ impl Problem {
     pub fn to_body(&self) -> ProblemBody {
         let is_server_error = self.status.is_server_error();
         ProblemBody {
-            type_uri: format!("https://api.interk.net/problems/{}", kebab(self.code)),
+            type_uri: format!("urn:ik:problem:{}", kebab(self.code)),
             title: self.status.canonical_reason().unwrap_or("Error").to_owned(),
             status: self.status.as_u16(),
             // 5xx 永远使用固定文案，内部细节只进日志。
@@ -260,10 +260,7 @@ mod tests {
         let body = Problem::field("title", "TOO_LONG", "标题最多 50 个字").to_body();
         assert_eq!(body.status, 400);
         assert_eq!(body.code, "VALIDATION_FAILED");
-        assert_eq!(
-            body.type_uri,
-            "https://api.interk.net/problems/validation-failed"
-        );
+        assert_eq!(body.type_uri, "urn:ik:problem:validation-failed");
         assert_eq!(body.errors.len(), 1);
         assert_eq!(body.errors[0].field, "title");
     }

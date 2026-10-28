@@ -291,7 +291,7 @@ const stats = computed(() => {
           <p v-if="detail.bio" class="mt-2 line-clamp-2 text-sm">「{{ detail.bio }}」</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" as-child>
+          <Button v-if="siteLink(`/profile/${user.id}`)" variant="outline" size="sm" as-child>
             <a :href="siteLink(`/profile/${user.id}`)" target="_blank" rel="noopener"><ExternalLink class="size-4" />主站主页</a>
           </Button>
           <Button v-if="canSanction" variant="outline" size="sm" @click="startReset">

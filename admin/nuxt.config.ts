@@ -1,6 +1,6 @@
 import tailwindcss from '@tailwindcss/vite'
 
-// 管理后台是纯 SPA：`nuxt generate` 的产物编进 ik-server，在 API 域名（ik.tiwat.cn）的 /admin 下提供，
+// 管理后台是纯 SPA：`nuxt generate` 的产物编进 ik-server，在 API 域名的 /admin 下提供，
 // 接口走同源的 /v1（会话 Cookie）。
 export default defineNuxtConfig({
   compatibilityDate: '2026-08-01',
@@ -16,12 +16,6 @@ export default defineNuxtConfig({
       htmlAttrs: { lang: 'zh-CN' },
       meta: [{ name: 'robots', content: 'noindex, nofollow' }],
       link: [{ rel: 'icon', type: 'image/png', href: '/admin/favicon.png' }],
-    },
-  },
-  runtimeConfig: {
-    public: {
-      // 主站地址，用于「查看帖子 / 主页」等链接（RPTADM-015）。构建时用 NUXT_PUBLIC_SITE_URL 覆盖。
-      siteUrl: 'https://interk.net',
     },
   },
   shadcn: {

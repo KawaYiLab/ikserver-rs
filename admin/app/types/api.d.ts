@@ -7966,6 +7966,8 @@ export interface components {
         SiteStatus: {
             announcement?: components["schemas"]["AnnouncementView"] | null;
             readOnly?: components["schemas"]["ReadOnlyView"] | null;
+            /** @description 主站（论坛前台）地址（`IK_SITE_URL`）；没有配置时为空。管理后台用它拼「在主站打开」的链接。 */
+            siteUrl?: string | null;
         };
         /** @description 全部可在线修改的参数。 */
         SiteValues: {

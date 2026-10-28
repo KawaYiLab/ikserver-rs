@@ -24,7 +24,7 @@ const isMac = import.meta.client && /Mac|iPhone|iPad/.test(navigator.platform)
 
 const title = computed(() => navItemFor(route.path)?.label ?? '')
 const section = computed(() => navGroups.find(group => group.items.some(item => item.to === navItemFor(route.path)?.to))?.label ?? '')
-const siteUrl = useRuntimeConfig().public.siteUrl
+const siteUrl = useSiteUrl()
 const initial = computed(() => me.value?.username.slice(0, 1).toUpperCase() ?? '')
 useHead({ title: () => (title.value ? `${title.value} · 绳网管理后台` : '绳网管理后台') })
 
@@ -119,7 +119,7 @@ function toggleTheme() {
                 <div class="text-xs text-muted-foreground">{{ roleLabel[me.role] }}</div>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem as-child>
+              <DropdownMenuItem v-if="siteUrl" as-child>
                 <a :href="siteUrl" target="_blank" rel="noopener"><ExternalLink class="size-4" />打开主站</a>
               </DropdownMenuItem>
               <DropdownMenuSeparator />

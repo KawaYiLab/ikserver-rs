@@ -180,7 +180,9 @@ async fn setup(
     };
     let jobs = Jobs::new(db.clone());
     jobs.migrate().await.unwrap();
-    let state = QqState::new(db.clone(), ids, jobs, ai, config, b"test-key".to_vec()).unwrap();
+    let state = QqState::new(db.clone(), ids, jobs, ai, config, b"test-key".to_vec())
+        .unwrap()
+        .with_site_url("https://interk.net");
     state.initialize().await.unwrap();
     sqlx::query("UPDATE qq_bots SET enabled=TRUE,default_card_slug='fairy'")
         .execute(&db)

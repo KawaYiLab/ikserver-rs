@@ -37,6 +37,8 @@ pub struct SiteStatus {
     /// 当前要显示的公告；没有时为空。
     pub announcement: Option<AnnouncementView>,
     pub read_only: Option<ReadOnlyView>,
+    /// 主站（论坛前台）地址（`IK_SITE_URL`）；没有配置时为空。管理后台用它拼「在主站打开」的链接。
+    pub site_url: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -81,9 +83,11 @@ async fn site_status(State(state): State<AppState>) -> Json<SiteStatus> {
     let read_only = values.read_only.enabled.then(|| ReadOnlyView {
         message: read_only_message(&values.read_only.message),
     });
+    let site_url = &state.config.site_url;
     Json(SiteStatus {
         announcement,
         read_only,
+        site_url: (!site_url.is_empty()).then(|| site_url.trim_end_matches('/').to_owned()),
     })
 }
 

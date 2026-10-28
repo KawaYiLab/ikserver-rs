@@ -43,7 +43,7 @@ fn check_origin(state: &RealtimeState, headers: &HeaderMap) -> Result<(), Proble
 }
 
 /// `Origin` 的主机（含端口）与请求的 `Host` 相同：页面和接口挂在同一个域名下。
-/// 经 CDN / 反向代理时要求回源 `Host` 保持原域名（见 deploy/README.md「EdgeOne」）。
+/// 经 CDN / 反向代理时要求回源 `Host` 保持原域名（见 deploy/interknot/README.md「EdgeOne」）。
 fn same_origin(origin: &str, headers: &HeaderMap) -> bool {
     let Some(host) = headers.get(header::HOST).and_then(|v| v.to_str().ok()) else {
         return false;
