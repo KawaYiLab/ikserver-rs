@@ -168,7 +168,7 @@ async function resolve() {
 
 <template>
   <div>
-    <AdminPageHeader title="举报处理" description="同一目标的多条举报会一并结案；处理结果会通过系统通知告知相关用户。">
+    <AdminPageHeader title="举报处理" description="同一目标的举报会一并结案。">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 

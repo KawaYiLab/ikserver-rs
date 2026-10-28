@@ -70,20 +70,20 @@ const todos = computed<Todo[]>(() => {
   if (!d) return []
   const list: Todo[] = []
   if (d.reports.mine > 0) {
-    list.push({ key: 'mine', icon: Hand, title: `我领取的举报 ${d.reports.mine} 个`, detail: '领取后只有你能结案，处理完或释放给别人', to: { path: '/reports', query: { tab: 'reviewing' } }, tone: 'warning' })
+    list.push({ key: 'mine', icon: Hand, title: `我领取的举报 ${d.reports.mine} 个`, detail: '等你结案', to: { path: '/reports', query: { tab: 'reviewing' } }, tone: 'warning' })
   }
   if (d.reports.pending > 0) {
     list.push({ key: 'pending', icon: Flag, title: `待处理举报 ${d.reports.pending} 个`, detail: `另有 ${d.reports.reviewing} 个复核中`, to: '/reports', tone: 'danger' })
   }
   if (d.exam.enabled < d.exam.questionCount) {
-    list.push({ key: 'exam', icon: ClipboardList, title: '入站题库题目不够', detail: `启用 ${d.exam.enabled} 题，每场考试要抽 ${d.exam.questionCount} 题，新用户无法开考`, to: '/exam', tone: 'danger' })
+    list.push({ key: 'exam', icon: ClipboardList, title: '入站题库题目不够', detail: `启用 ${d.exam.enabled} 题，每场需要 ${d.exam.questionCount} 题`, to: '/exam', tone: 'danger' })
   }
   if (isAdmin.value && d.ai.failedLast24h > 0) {
     list.push({ key: 'ai', icon: Bot, title: `AI 失败任务 ${d.ai.failedLast24h} 个（24 小时）`, detail: '查看失败原因', to: { path: '/ai', query: { tab: 'jobs', jobStatus: 'failed' } }, tone: 'warning' })
   }
   const s = search.value
   if (isAdmin.value && s?.engineConfigured && (s.engineError || s.indexedPosts == null)) {
-    list.push({ key: 'search', icon: SearchX, title: '搜索引擎读不到索引统计', detail: s.engineError ?? '搜索可能正在走数据库兜底', to: '/search', tone: 'warning' })
+    list.push({ key: 'search', icon: SearchX, title: '搜索引擎读不到索引统计', detail: s.engineError ?? '搜索可能已切换到数据库', to: '/search', tone: 'warning' })
   }
   return list
 })
@@ -133,7 +133,7 @@ const aiPercent = computed(() => {
 
 <template>
   <div>
-    <AdminPageHeader :title="greeting" description="按北京时间业务日统计，每天 04:00 切日，今天的数据截至现在。">
+    <AdminPageHeader :title="greeting" description="数据按北京时间统计，每天 04:00 切日。">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
@@ -220,7 +220,7 @@ const aiPercent = computed(() => {
         </div>
         <div class="px-5 pt-5 pb-3">
           <div class="mb-2 text-xs text-muted-foreground">
-            {{ activeMetric.label }} · 最近 {{ range }} 天，较昨天按今天截至现在计算
+            {{ activeMetric.label }} · 最近 {{ range }} 天
           </div>
           <AdminTrendChart v-if="trends" :days="trends.days" :values="series(activeMetric.key)" :label="activeMetric.label" />
         </div>

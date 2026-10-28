@@ -116,7 +116,7 @@ function rowActions(post: Post): RowAction[] {
 
 <template>
   <div>
-    <AdminPageHeader title="帖子" description="不经举报直接隐藏、恢复或删除委托；有待处理举报的请到举报处理里结案。匿名委托不显示作者。">
+    <AdminPageHeader title="帖子" description="直接隐藏、恢复、置顶或删除委托。">
       <AdminRefreshButton :loading="loading" @click="list.refresh" />
     </AdminPageHeader>
 

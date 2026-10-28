@@ -77,7 +77,7 @@ async function save() {
   if (!f.enabled && settings.value?.enabled) {
     const ok = await confirm({
       title: '关闭 AI 记忆？',
-      description: 'AI 将不再读取、记下或整理任何记忆，也不提供记住 / 忘掉 / 翻聊天记录的工具；已有记忆保留，重新打开后恢复。',
+      description: 'AI 将不再读写记忆，已有记忆会保留。',
       confirmLabel: '关闭',
       destructive: true,
     })
@@ -181,7 +181,7 @@ async function clearAll() {
 
 <template>
   <div>
-    <AdminPageHeader title="AI 记忆" description="全站设置在本实例立即生效，其他实例最长 60 秒后生效。用户端没有任何记忆设置。">
+    <AdminPageHeader title="AI 记忆" description="AI 的长期记忆和相关设置。">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
@@ -190,8 +190,7 @@ async function clearAll() {
         <CardHeader>
           <CardTitle>设置</CardTitle>
           <CardDescription>
-            记忆包括会话摘要、跨会话衔接、长期记忆（档案、关系、事件）、待跟进、每晚整理与遗忘。
-            摘要、提炼、整理的模型调用不计入任何额度。
+            记忆相关的模型调用不计入额度。
           </CardDescription>
         </CardHeader>
         <CardContent class="space-y-4">
@@ -212,14 +211,14 @@ async function clearAll() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <span class="text-xs text-muted-foreground">可选择未启用的模型。建议选便宜、擅长输出 JSON 的模型。</span>
+              <span class="text-xs text-muted-foreground">建议选便宜、擅长输出 JSON 的模型。</span>
             </label>
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">对话停下来多久后提炼（秒）</span>
               <Input v-model.number="form.extractDelaySecs" type="number" min="0" max="86400" />
             </label>
             <label class="grid gap-2">
-              <span class="text-sm leading-none font-medium">新会话带上其他会话多久以内的最近几轮（小时，0 关闭）</span>
+              <span class="text-sm leading-none font-medium">跨会话衔接时长（小时，0 关闭）</span>
               <Input v-model.number="form.bridgeHours" type="number" min="0" max="720" />
             </label>
             <div class="grid gap-2">
@@ -290,7 +289,7 @@ async function clearAll() {
     <Card class="mt-4">
       <CardHeader>
         <CardTitle>按用户查看</CardTitle>
-        <CardDescription>处理用户查看或删除记忆的请求。删除与清空都会记入审计日志。</CardDescription>
+        <CardDescription>按用户查看或删除记忆。</CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
         <form class="flex max-w-md gap-2" @submit.prevent="lookup">

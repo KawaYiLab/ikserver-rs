@@ -35,7 +35,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 async function reindex() {
   const ok = await confirm({
     title: '重建搜索索引？',
-    description: '在后台全量对账：补齐缺失的文档、删掉残留的文档。期间搜索照常可用。',
+    description: '在后台补齐缺失、清理残留，期间搜索照常可用。',
     confirmLabel: '开始重建',
   })
   if (!ok) return
@@ -46,7 +46,7 @@ async function reindex() {
 
 <template>
   <div>
-    <AdminPageHeader title="搜索索引" description="索引只收录公开内容，数量略少于数据库是正常的。">
+    <AdminPageHeader title="搜索索引" description="索引只收录公开内容。">
       <AdminRefreshButton :loading="loading" @click="load" />
       <Button size="sm" :disabled="!status?.engineConfigured || status.reindexing" @click="reindex">
         {{ status?.reindexing ? '重建中…' : '重建索引' }}
@@ -57,7 +57,7 @@ async function reindex() {
       <Card v-if="!status.engineConfigured" class="mb-6 border-warning">
         <CardHeader>
           <CardTitle>没有配置搜索引擎</CardTitle>
-          <CardDescription>全部搜索走数据库兜底；配置 Meilisearch 后才能重建索引。</CardDescription>
+          <CardDescription>当前使用数据库搜索，配置 Meilisearch 后可以重建索引。</CardDescription>
         </CardHeader>
       </Card>
       <Card v-else-if="status.engineError" class="mb-6 border-destructive">

@@ -22,12 +22,12 @@ async function setExamRequired(on: boolean) {
   const ok = await confirm(on
     ? {
         title: '开启入站考试？',
-        description: '还没通过考试的账号将不能再发帖、评论、私信、签到等，需要先通过考试。已通过的账号不受影响。',
+        description: '未通过考试的账号将无法发帖、评论和私信。',
         confirmLabel: '开启',
       }
     : {
         title: '关闭入站考试？',
-        description: '所有账号无需考试即可发帖、评论、私信、签到等，等级按经验计算。考试仍可参加，首次通过照常发奖励。',
+        description: '所有账号无需考试即可发言。',
         confirmLabel: '关闭',
         destructive: true,
       })
@@ -66,7 +66,7 @@ useEventListener('scroll', () => {
 
 <template>
   <div class="pb-24">
-    <AdminPageHeader title="系统设置" description="缺省值来自部署配置；在这里改过的项以这里为准，不需要重启。">
+    <AdminPageHeader title="系统设置" description="修改后立即生效，无需重启。">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
@@ -85,7 +85,7 @@ useEventListener('scroll', () => {
             <component :is="section.icon" class="size-4" />{{ section.title }}
           </button>
           <p v-if="settings" class="px-3 pt-4 text-xs text-muted-foreground">
-            {{ overriddenCount ? `共 ${overriddenCount} 项与部署配置不同` : '全部与部署配置一致' }}
+            {{ overriddenCount ? `已修改 ${overriddenCount} 项` : '均为默认值' }}
           </p>
         </div>
       </nav>
@@ -97,7 +97,7 @@ useEventListener('scroll', () => {
               <GraduationCap class="size-4 text-muted-foreground" />入站考试
             </CardTitle>
             <CardDescription>
-              开启时，新账号要先通过入站考试才能发帖、评论、私信、签到等；管理员、版主与 AI 账号不受限制。题目在「入站题库」里维护。
+              开启后，新账号需要通过考试才能发言。题目在「入站题库」里维护。
             </CardDescription>
           </CardHeader>
           <CardContent class="py-4">
@@ -108,7 +108,7 @@ useEventListener('scroll', () => {
                 <Switch :model-value="settings.examRequired" :disabled="saving" @update:model-value="setExamRequired" />
               </label>
               <p class="mt-2 text-xs text-muted-foreground">
-                单独保存，切换时会再确认一次。{{ settings.updatedAt ? `设置最近修改于 ${formatTime(settings.updatedAt)}` : '' }}
+                {{ settings.updatedAt ? `最近修改于 ${formatTime(settings.updatedAt)}` : '' }}
               </p>
             </template>
           </CardContent>

@@ -104,7 +104,7 @@ async function saveEmote() {
 async function removeEmote(item: Emote) {
   const ok = await confirm({
     title: `删除表情「${item.name}」？`,
-    description: `删除后旧评论里的 :${item.code}: 只会显示成文字。只想不再出现在表情面板里的话，请改为下架。`,
+    description: `删除后旧评论里的 :${item.code}: 会显示成文字。只想隐藏请改为下架。`,
     confirmLabel: '删除',
     destructive: true,
   })
@@ -170,7 +170,7 @@ async function removeGroup(item: Group) {
 
 <template>
   <div>
-    <AdminPageHeader title="表情包" description="评论里写作 :代码:，客户端按清单显示成图片。下架的表情不出现在面板里，旧评论照常显示。">
+    <AdminPageHeader title="表情包" description="在评论里用 :代码: 插入表情。">
       <AdminRefreshButton :loading="loading" @click="load" />
       <template v-if="isAdmin">
         <Button variant="outline" size="sm" @click="editGroup()">
@@ -271,7 +271,7 @@ async function removeGroup(item: Group) {
         </DialogHeader>
         <div class="space-y-4">
           <div class="space-y-2">
-            <Label>图标（可选，不设时用组里第一个表情）</Label>
+            <Label>图标（可选）</Label>
             <AdminImagePicker v-model="groupDraft.icon" />
             <Button v-if="groupDraft.icon" size="sm" variant="ghost" @click="groupDraft.icon = null">清除图标</Button>
           </div>
@@ -287,7 +287,7 @@ async function removeGroup(item: Group) {
           </div>
           <div class="flex items-center gap-2">
             <Switch v-model="groupDraft.active" />
-            <span class="text-sm">启用（停用后组里的表情都不出现在面板里）</span>
+            <span class="text-sm">启用</span>
           </div>
         </div>
         <DialogFooter>

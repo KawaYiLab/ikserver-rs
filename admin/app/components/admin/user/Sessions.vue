@@ -31,7 +31,7 @@ onMounted(load)
 
 <template>
   <div>
-    <p class="mb-3 text-xs text-muted-foreground">当前有效的登录会话，最近活跃的在前。要让对方在所有设备上下线，用页头的「强制下线」。</p>
+    <p class="mb-3 text-xs text-muted-foreground">当前有效的登录会话。</p>
     <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
       <Table>
         <TableHeader>

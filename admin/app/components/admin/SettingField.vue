@@ -61,12 +61,12 @@ function onNumber(raw: string | number) {
         <TooltipTrigger as-child>
           <Button
             variant="ghost" size="icon-sm" class="absolute top-0 right-0 text-muted-foreground" :disabled="disabled"
-            :aria-label="`${field.label}恢复为部署配置`" @click="emit('update:modelValue', defaultValue)"
+            :aria-label="`${field.label}恢复默认`" @click="emit('update:modelValue', defaultValue)"
           >
             <RotateCcw />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>恢复为部署配置</TooltipContent>
+        <TooltipContent>恢复默认</TooltipContent>
       </Tooltip>
       <label :for="id" class="flex items-center gap-2 text-sm font-medium">
         {{ field.label }}
@@ -76,7 +76,7 @@ function onNumber(raw: string | number) {
         {{ field.help }}
       </p>
       <p v-if="changed" class="mt-0.5 text-xs text-muted-foreground">
-        部署配置为 {{ display(defaultValue) }}
+        默认 {{ display(defaultValue) }}
       </p>
       <p v-if="error" class="mt-1 text-xs text-destructive" role="alert">
         {{ error }}
@@ -87,12 +87,12 @@ function onNumber(raw: string | number) {
         <TooltipTrigger as-child>
           <Button
             variant="ghost" size="icon-sm" class="text-muted-foreground" :disabled="disabled"
-            :aria-label="`${field.label}恢复为部署配置`" @click="emit('update:modelValue', defaultValue)"
+            :aria-label="`${field.label}恢复默认`" @click="emit('update:modelValue', defaultValue)"
           >
             <RotateCcw />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>恢复为部署配置</TooltipContent>
+        <TooltipContent>恢复默认</TooltipContent>
       </Tooltip>
       <Switch
         v-if="field.kind === 'switch'" :id="id" :model-value="modelValue as boolean" :disabled="disabled"

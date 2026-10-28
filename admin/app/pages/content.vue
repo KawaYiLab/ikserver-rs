@@ -89,7 +89,7 @@ async function saveCategory() {
 async function removeCategory(category: Category) {
   const ok = await confirm({
     title: `删除分区「${category.name}」？`,
-    description: '只有没有帖子和草稿的分区可以删除；不想再用的分区可以改为停用。',
+    description: '只能删除空分区，不用的分区请停用。',
     confirmLabel: '删除',
     destructive: true,
   })
@@ -333,7 +333,7 @@ onMounted(loadCategories)
         </DialogHeader>
         <div class="space-y-2">
           <Input v-model="newName" @keydown.enter="rename" />
-          <p class="text-xs text-muted-foreground">按发帖时的规则归一化，slug 随名称重新生成；已有帖子上的标签一并改名。</p>
+          <p class="text-xs text-muted-foreground">已有帖子上的标签会一起改名。</p>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="renaming = null">取消</Button>

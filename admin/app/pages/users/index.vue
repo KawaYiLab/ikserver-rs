@@ -47,7 +47,7 @@ function rowActions(user: User): RowAction[] {
 
 <template>
   <div>
-    <AdminPageHeader title="账号" :description="isAdmin ? '调整角色、丁尼和经验都会记入审计日志。' : '版主可以查看账号并封禁 / 解封；其他调整需要管理员。'">
+    <AdminPageHeader title="账号" :description="isAdmin ? '查找账号，调整角色、丁尼和经验。' : '查找账号，封禁或解封。'">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 

@@ -61,7 +61,7 @@ function rowActions(post: Post): RowAction[] {
           <SelectItem value="hidden">已隐藏</SelectItem>
         </SelectContent>
       </Select>
-      <span class="text-xs text-muted-foreground">只列实名委托；匿名委托不会和账号关联。</span>
+      <span class="text-xs text-muted-foreground">不含匿名委托。</span>
       <div class="flex-1" />
       <Button variant="ghost" size="sm" as-child>
         <NuxtLink :to="{ path: '/posts', query: { authorId: userId } }">在帖子管理中打开</NuxtLink>

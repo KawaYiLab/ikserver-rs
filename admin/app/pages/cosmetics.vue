@@ -115,7 +115,7 @@ async function remove(type: Draft['type'], item: Avatar | BusinessCard) {
 
 <template>
   <div>
-    <AdminPageHeader title="装扮" description="系统头像与论坛名片的目录；用户在个人设置里装备。图片需要先上传。">
+    <AdminPageHeader title="装扮" description="系统头像与论坛名片。">
       <AdminRefreshButton :loading="loading" @click="load" />
       <Button v-if="isAdmin" size="sm" @click="edit(tab === 'avatars' ? 'avatar' : 'card')">
         <Plus class="size-4" />{{ tab === 'avatars' ? '新建头像' : '新建名片' }}

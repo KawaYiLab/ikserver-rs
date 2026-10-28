@@ -66,7 +66,7 @@ function rowActions(comment: Comment): RowAction[] {
 
 <template>
   <div>
-    <AdminPageHeader title="评论" description="不经举报直接隐藏、恢复或删除评论（删除一级评论会连同回复）。匿名评论不显示作者。">
+    <AdminPageHeader title="评论" description="直接隐藏、恢复或删除评论。">
       <AdminRefreshButton :loading="loading" @click="list.refresh" />
     </AdminPageHeader>
 

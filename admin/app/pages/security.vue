@@ -51,7 +51,7 @@ function toLocalInput(value?: string | null) {
 
 <template>
   <div class="pb-24">
-    <AdminPageHeader title="内容与安全" description="屏蔽词、注册限制、新账号限制与 IP 封禁。版主、管理员与 AI 账号不受这些限制。">
+    <AdminPageHeader title="内容与安全" description="屏蔽词、注册限制、新账号限制与 IP 封禁。">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
@@ -65,7 +65,7 @@ function toLocalInput(value?: string | null) {
           <CardTitle class="flex items-center gap-2 text-base">
             <Ban class="size-4 text-muted-foreground" />屏蔽词
           </CardTitle>
-          <CardDescription>作用于帖子标题与正文、评论和改名。按字面匹配，英文不区分大小写，每行一个。</CardDescription>
+          <CardDescription>作用于帖子、评论和用户名，每行一个。</CardDescription>
         </CardHeader>
         <CardContent class="grid gap-5 py-5 md:grid-cols-2">
           <div class="space-y-2">
@@ -73,7 +73,7 @@ function toLocalInput(value?: string | null) {
               拦截
             </p>
             <p class="text-xs text-muted-foreground">
-              命中时拒绝提交，并提示命中的词。
+              命中时拒绝提交。
             </p>
             <AdminListTextarea
               :model-value="wordsOf('block')" :disabled="saving" :invalid="!!errors['filter.words']" :rows="6"
@@ -85,7 +85,7 @@ function toLocalInput(value?: string | null) {
               替换为 *
             </p>
             <p class="text-xs text-muted-foreground">
-              命中时替换成等长的 * 后照常保存。
+              命中时替换成 * 后保存。
             </p>
             <AdminListTextarea
               :model-value="wordsOf('censor')" :disabled="saving" :invalid="!!errors['filter.words']" :rows="6"
@@ -111,7 +111,7 @@ function toLocalInput(value?: string | null) {
               禁止注册的邮箱域名
             </p>
             <p class="text-xs text-muted-foreground">
-              也会拦它的子域名，每行一个。
+              含子域名，每行一个。
             </p>
             <AdminListTextarea
               :model-value="value('registration.emailDomainBlocklist') as string[]" lowercase placeholder="mailinator.com"
@@ -127,7 +127,7 @@ function toLocalInput(value?: string | null) {
               保留用户名
             </p>
             <p class="text-xs text-muted-foreground">
-              用户不能改成这些名字，整名匹配、不区分大小写；后台改名不受限制。
+              用户不能使用这些名字。
             </p>
             <AdminListTextarea
               :model-value="value('registration.reservedUsernames') as string[]" placeholder="admin"
@@ -146,7 +146,7 @@ function toLocalInput(value?: string | null) {
           <CardTitle class="flex items-center gap-2 text-base">
             <UserCheck class="size-4 text-muted-foreground" />新账号限制
           </CardTitle>
-          <CardDescription>刚注册的账号在一段时间内发得少一点，挡住大部分广告号。</CardDescription>
+          <CardDescription>限制新账号的发言频率，挡住广告号。</CardDescription>
         </CardHeader>
         <CardContent class="divide-y py-0">
           <AdminSettingField
@@ -169,7 +169,7 @@ function toLocalInput(value?: string | null) {
               <CardTitle class="flex items-center gap-2 text-base">
                 <ShieldBan class="size-4 text-muted-foreground" />IP 封禁
               </CardTitle>
-              <CardDescription>命中的地址不能注册、登录和执行写操作，浏览不受影响。支持单个地址或网段。</CardDescription>
+              <CardDescription>被封的地址只能浏览，支持网段。</CardDescription>
             </div>
             <Button variant="outline" size="sm" :disabled="saving" @click="addBan">
               <Plus />添加

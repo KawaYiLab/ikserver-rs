@@ -368,7 +368,7 @@ const stats = computed(() => {
               <h2 class="font-medium">丁尼与经验</h2>
               <div class="space-y-2">
                 <Label>调整丁尼</Label>
-                <p class="text-xs text-muted-foreground">正数发放、负数扣除；余额封顶 9999，不能扣成负数。</p>
+                <p class="text-xs text-muted-foreground">负数为扣除，余额上限 9999。</p>
                 <div class="flex gap-2">
                   <Input v-model.number="dennyAmount" type="number" placeholder="±数量" class="w-28" />
                   <Input v-model="dennyReason" placeholder="原因（必填）" maxlength="200" />
@@ -378,7 +378,7 @@ const stats = computed(() => {
               <Separator />
               <div class="space-y-2">
                 <Label>发放经验</Label>
-                <p class="text-xs text-muted-foreground">不占每日经验上限，发放后按新经验重算等级。</p>
+                <p class="text-xs text-muted-foreground">不占每日经验上限。</p>
                 <div class="flex gap-2">
                   <Input v-model.number="expAmount" type="number" min="1" max="100000" placeholder="1–100000" class="w-28" />
                   <Input v-model="expReason" placeholder="原因（必填）" maxlength="200" />
@@ -447,7 +447,7 @@ const stats = computed(() => {
       <DialogContent v-if="user">
         <DialogHeader>
           <DialogTitle>修改 @{{ user.username }} 的用户名</DialogTitle>
-          <DialogDescription>用于处理违规用户名：不收费，封禁中的账号也能改；规则与用户自己改名一致。</DialogDescription>
+          <DialogDescription>用于处理违规用户名，不收费。</DialogDescription>
         </DialogHeader>
         <div class="space-y-4">
           <label class="grid gap-2">
@@ -474,7 +474,7 @@ const stats = computed(() => {
       <DialogContent v-if="user">
         <DialogHeader>
           <DialogTitle>清理 @{{ user.username }} 的资料</DialogTitle>
-          <DialogDescription>清除违规的签名或自定义头像（不退还设置头像的丁尼）。系统头像与名片不受影响。</DialogDescription>
+          <DialogDescription>清除违规的签名或自定义头像，不退还丁尼。</DialogDescription>
         </DialogHeader>
         <div class="space-y-4">
           <label class="flex items-start gap-2 text-sm">

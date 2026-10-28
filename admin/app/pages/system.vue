@@ -94,7 +94,7 @@ const taskLabel: Record<string, string> = {
   'ai.extract_memories': 'AI 提取记忆',
   'ai.consolidate_memories': 'AI 整理记忆',
   'ai.nightly_memory': 'AI 夜间记忆整理',
-  'ai.reclaim_quota_holds': '回收 AI 额度预占',
+  'ai.reclaim_quota_holds': '回收 AI 额度',
   'ai.refresh_mcp_tools': '刷新 MCP 工具',
   'qq.reply': 'QQ 回复',
   'qq.dispatch': 'QQ 投递',
@@ -205,7 +205,7 @@ async function remove(job: Schemas['QueuedJob']) {
 
 <template>
   <div>
-    <AdminPageHeader title="系统状态" description="本实例的运行情况与各组件的配置。密钥不在这里显示，只说配没配。">
+    <AdminPageHeader title="系统状态" description="运行状态和各组件配置。">
       <AdminRefreshButton :loading="loading" @click="load" />
     </AdminPageHeader>
 
@@ -213,7 +213,7 @@ async function remove(job: Schemas['QueuedJob']) {
       <AdminStatCard title="版本" :value="status?.version ?? '—'" :hint="status ? `节点 ${status.nodeId}${status.cluster ? ' · 多实例' : ''}` : undefined" :icon="Server" />
       <AdminStatCard title="运行时长" :value="uptime" :hint="status ? `启动于 ${formatTime(status.startedAt)}` : undefined" :icon="Clock" />
       <AdminStatCard title="排队中的任务" :value="status ? status.jobs.ready + status.jobs.scheduled : '—'" :hint="status ? `${status.jobs.running} 个正在执行` : undefined" :icon="ListChecks" />
-      <AdminStatCard title="死信任务" :value="status?.jobs.failed ?? '—'" hint="用完重试次数，不再执行" :icon="Skull" :tone="status?.jobs.failed ? 'danger' : 'default'" />
+      <AdminStatCard title="失败任务" :value="status?.jobs.failed ?? '—'" hint="需要手动处理" :icon="Skull" :tone="status?.jobs.failed ? 'danger' : 'default'" />
     </div>
 
     <Card class="mt-6 gap-0 py-0">
@@ -259,7 +259,7 @@ async function remove(job: Schemas['QueuedJob']) {
         <CardTitle class="text-base">
           后台任务
         </CardTitle>
-        <CardDescription>失败的任务按指数退避自动重试；用完重试次数后成为死信，留在这里等你处理。</CardDescription>
+        <CardDescription>失败会自动重试，次数用完后需要手动处理。</CardDescription>
       </CardHeader>
       <CardContent class="p-0">
         <Table v-if="status?.jobs.tasks.length">
@@ -278,7 +278,7 @@ async function remove(job: Schemas['QueuedJob']) {
                 执行中
               </TableHead>
               <TableHead class="pr-6 text-right">
-                死信
+                已失败
               </TableHead>
             </TableRow>
           </TableHeader>
@@ -313,7 +313,7 @@ async function remove(job: Schemas['QueuedJob']) {
           <Tabs v-model="jobState">
             <TabsList>
               <TabsTrigger value="failed">
-                死信
+                已失败
               </TabsTrigger>
               <TabsTrigger value="scheduled">
                 等待中
@@ -372,7 +372,7 @@ async function remove(job: Schemas['QueuedJob']) {
             </TableRow>
             <AdminListState
               :colspan="5" :loading="jobsLoading" :empty="!jobs.length" :failed="jobsFailed"
-              :empty-text="{ failed: '没有死信任务', scheduled: '没有等待中的任务', running: '没有正在执行的任务' }[jobState]"
+              :empty-text="{ failed: '没有失败的任务', scheduled: '没有等待中的任务', running: '没有正在执行的任务' }[jobState]"
               :rows="3" @retry="loadJobs"
             />
           </TableBody>

@@ -41,7 +41,7 @@ function hasDetails(entry: Schemas['AuditEntry']) {
 
 <template>
   <div>
-    <AdminPageHeader title="审计日志" description="后台的每一次修改都会记录操作人、时间、来源与变更内容。">
+    <AdminPageHeader title="审计日志" description="后台的所有修改记录。">
       <AdminRefreshButton :loading="loading" @click="list.refresh" />
     </AdminPageHeader>
 

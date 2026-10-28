@@ -213,7 +213,7 @@ async function toggleIdentityBlock(identity: Identity) {
 async function unbindIdentity(identity: Identity) {
   const ok = await confirm({
     title: '强制解绑这个 QQ 身份？',
-    description: '解绑后按游客的免费次数使用，机器人不再读写这个账号的记忆。已有的记忆不受影响。',
+    description: '解绑后按游客对待，已有记忆保留。',
     confirmLabel: '解绑',
   })
   if (!ok) return
@@ -343,7 +343,7 @@ function refresh() {
 
 <template>
   <div>
-    <AdminPageHeader title="QQ 机器人" description="管理 QQ 群聊、单聊的角色与游客额度。每日额度在北京时间 04:00 重置。">
+    <AdminPageHeader title="QQ 机器人" description="QQ 群聊与单聊的角色、额度和记录。">
       <AdminRefreshButton :loading="loading || groupList.loading.value" @click="refresh" />
     </AdminPageHeader>
 
@@ -359,7 +359,7 @@ function refresh() {
         <Card>
           <CardHeader>
             <CardTitle>对话设置</CardTitle>
-            <CardDescription>游客不读写记忆；至少一段取得平台成功回执才计一次，实际生成的 token 计入全站 AI 额度。</CardDescription>
+            <CardDescription>每天 04:00 重置，token 计入全站 AI 额度。</CardDescription>
           </CardHeader>
           <CardContent>
             <div v-if="failed && !form" class="flex items-center gap-3 text-sm text-muted-foreground">
@@ -377,7 +377,7 @@ function refresh() {
                   暂停生成和发送
                   <Switch v-model="form.dispatchPaused" />
                 </label>
-                <p class="text-xs text-muted-foreground">回调继续接收；在途生成保存结果后等待恢复。排队消息的回复期限不会延长。</p>
+                <p class="text-xs text-muted-foreground">暂停期间消息继续排队，恢复后再发送。</p>
                 <p v-if="dispatch" class="text-xs text-muted-foreground">
                   当前{{ dispatch.paused ? '已暂停' : '运行中' }} · 排队 {{ dispatch.queued }} · 生成 {{ dispatch.generating }} · 待发 {{ dispatch.delivering }} · 执行中 {{ dispatch.activeLeases }}
                 </p>
@@ -415,7 +415,7 @@ function refresh() {
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">单次回复总字数上限</span>
                   <Input v-model.number="form.maxReplyChars" type="number" min="1" max="4000" required />
-                  <span class="text-xs text-muted-foreground">包含 Markdown 标记、链接和换行；超长回复会优先在句末或段落边界结束，范围 1–4000。</span>
+                  <span class="text-xs text-muted-foreground">含 Markdown 标记，范围 1–4000。</span>
                 </label>
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">群聊上下文条数</span>
@@ -440,7 +440,7 @@ function refresh() {
                       <SelectItem value="plain">纯文本</SelectItem>
                     </SelectContent>
                   </Select>
-                  <span class="text-xs text-muted-foreground">用于群聊和单聊，独立于角色卡的站内格式。指令和错误提示使用纯文本。</span>
+                  <span class="text-xs text-muted-foreground">指令和错误提示始终是纯文本。</span>
                 </label>
                 <label class="grid content-start gap-2">
                   <span class="text-sm font-medium">回复里的链接</span>
@@ -452,7 +452,7 @@ function refresh() {
                       <SelectItem value="domain">仅保留绳网帖子链接</SelectItem>
                     </SelectContent>
                   </Select>
-                  <span class="text-xs text-muted-foreground">允许 HTTP/HTTPS 链接；QQ 明确拒绝 URL 时自动去链接重试。</span>
+                  <span class="text-xs text-muted-foreground">QQ 拒绝链接时会去掉链接重试。</span>
                 </label>
                 <label class="grid gap-2">
                   <span class="text-sm font-medium">敏感词（每行一个）</span>
@@ -471,7 +471,7 @@ function refresh() {
         <Card>
           <CardHeader>
             <CardTitle>机器人</CardTitle>
-            <CardDescription>只显示部署配置中的机器人。默认角色需先在「AI 助手 → 角色」开启 QQ 对话。</CardDescription>
+            <CardDescription>机器人在部署配置里添加。</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -485,7 +485,7 @@ function refresh() {
                   <TableCell><Badge :variant="bot.enabled ? 'secondary' : 'outline'">{{ bot.enabled ? '启用' : '停用' }}</Badge></TableCell>
                   <TableCell><AdminRowActions :actions="[{ label: '编辑机器人', icon: Pencil, onSelect: () => editBot(bot) }]" /></TableCell>
                 </TableRow>
-                <AdminListState :colspan="4" :loading="loading" :empty="!bots.length" :failed="failed" empty-text="尚未配置机器人，请在服务器部署配置中添加 QQ AppID 与密钥。" @retry="load" />
+                <AdminListState :colspan="4" :loading="loading" :empty="!bots.length" :failed="failed" empty-text="还没有配置机器人" @retry="load" />
               </TableBody>
             </Table>
           </CardContent>
@@ -496,7 +496,7 @@ function refresh() {
         <Card>
           <CardHeader>
             <CardTitle>群管理</CardTitle>
-            <CardDescription>群角色覆盖机器人默认角色。展示名仅用于后台，今日计数包含正在生成的预占。</CardDescription>
+            <CardDescription>可以给每个群单独指定角色。</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
@@ -525,7 +525,7 @@ function refresh() {
                     ]" />
                   </TableCell>
                 </TableRow>
-                <AdminListState :colspan="7" :loading="groupList.loading.value" :empty="!groups.length" :failed="groupList.failed.value" empty-text="尚未收到群事件，添加机器人到 QQ 群后会显示在这里。" @retry="groupList.refresh" />
+                <AdminListState :colspan="7" :loading="groupList.loading.value" :empty="!groups.length" :failed="groupList.failed.value" empty-text="机器人入群后会显示在这里" @retry="groupList.refresh" />
               </TableBody>
             </Table>
             <AdminPager v-if="groupList.result.value" :page="groupList.page.value" :limit="groupList.result.value.limit" :total="groupList.result.value.total" unit="个群" @change="groupList.setPage" />
@@ -537,7 +537,7 @@ function refresh() {
         <Card>
           <CardHeader>
             <CardTitle>绑定身份</CardTitle>
-            <CardDescription>同一个人在每个群、单聊都是独立的 QQ 身份，各绑一次。openid 只显示后 6 位。</CardDescription>
+            <CardDescription>同一个人在不同群里是不同身份，需要分别绑定。</CardDescription>
           </CardHeader>
           <CardContent>
             <div class="mb-4 max-w-sm"><Input v-model="identityList.filters.user" placeholder="按绳网用户 ID 或用户名筛选" /></div>
@@ -580,7 +580,7 @@ function refresh() {
         <Card>
           <CardHeader>
             <CardTitle>回复记录</CardTitle>
-            <CardDescription>每条触发的消息一条记录，用于排查「机器人没反应」。不含消息正文。</CardDescription>
+            <CardDescription>用于排查机器人没反应，不含消息正文。</CardDescription>
           </CardHeader>
           <CardContent>
             <div class="mb-4 max-w-xs">
@@ -619,7 +619,7 @@ function refresh() {
       <DialogScrollContent class="sm:max-w-4xl">
         <DialogHeader>
           <DialogTitle>发送详情</DialogTitle>
-          <DialogDescription>成功回执表示平台已接受。待审核与结果不确定的分段不会自动补发。</DialogDescription>
+          <DialogDescription>待审核或结果不确定的分段不会自动补发。</DialogDescription>
         </DialogHeader>
         <Skeleton v-if="detailLoading" class="h-40 w-full" />
         <div v-else-if="detailFailed" class="flex items-center gap-3 text-sm">
@@ -659,7 +659,7 @@ function refresh() {
       <DialogScrollContent v-if="memoryGroup" class="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>群共享记忆：{{ memoryGroup.displayName }}</DialogTitle>
-          <DialogDescription>这个群大家共同的事（群规、约定、常聊的话题）。只在这个群里用，绑定用户提问时带上；置顶的不会被自动整理改掉。</DialogDescription>
+          <DialogDescription>群规、约定、常聊的话题等。置顶的不会被自动整理。</DialogDescription>
         </DialogHeader>
         <div class="space-y-3">
           <Skeleton v-if="memoriesLoading && !memories.length" class="h-24 w-full" />

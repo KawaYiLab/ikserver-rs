@@ -574,7 +574,7 @@ const jobFilters = jobList.filters
 
 <template>
   <div>
-    <AdminPageHeader title="AI 助手" description="修改在本实例立即生效，其他实例最长 60 秒后生效。">
+    <AdminPageHeader title="AI 助手" description="模型、角色、额度与工具。">
       <AdminRefreshButton :loading="loading || jobList.loading.value" @click="refresh" />
       <Button v-if="tab === 'providers'" size="sm" @click="editProvider()">
         <Plus class="size-4" />新建提供方
@@ -604,7 +604,7 @@ const jobFilters = jobList.filters
         <Card class="max-w-xl">
           <CardHeader>
             <CardTitle>开关与额度</CardTitle>
-            <CardDescription>额度按模型的成本权重加权计算 token；0 表示不限制。</CardDescription>
+            <CardDescription>token 按模型成本权重折算，0 为不限。</CardDescription>
           </CardHeader>
           <CardContent class="space-y-4">
             <label class="flex items-center justify-between gap-4 text-sm">
@@ -633,8 +633,7 @@ const jobFilters = jobList.filters
 
       <TabsContent value="providers">
         <p class="mb-4 text-sm text-muted-foreground">
-          任何 OpenAI 兼容的接口都可以添加（DeepSeek、通义千问、智谱、Kimi、OpenRouter、硅基流动、本地 Ollama / vLLM……），
-          模型在「模型」里按提供方名字引用。部署配置（<code class="font-mono text-xs">IK_AI__PROVIDERS__…</code>）里的提供方在这里只读。
+          支持任意 OpenAI 兼容接口。部署配置里的提供方在这里只读。
         </p>
         <div class="overflow-hidden rounded-xl border bg-card shadow-[var(--shadow-card)]">
           <Table>
@@ -784,11 +783,10 @@ const jobFilters = jobList.filters
       <TabsContent value="mcp">
         <div class="mb-4 space-y-2 text-sm text-muted-foreground">
           <p>
-            角色除了论坛工具，还可以调用剧情库与站外 MCP 服务（Streamable HTTP）的工具，在「角色」里按角色开启。
-            站外工具拉取后默认不启用；启用前请看清描述——模型会照着它调用工具。远端改了工具定义时会自动停用，等你重新确认。
+            接入站外 MCP 服务后，工具需要逐个启用，再到「角色」里开启。
           </p>
           <p>
-            只能启用只读工具。调用时只发送模型生成的参数，不带用户身份；但参数里可能包含对话内容，请只接入可信的服务。
+            只能启用只读工具。参数里可能带有对话内容，请只接入可信的服务。
           </p>
           <p>
             剧情库：
@@ -963,7 +961,7 @@ const jobFilters = jobList.filters
           <label class="grid gap-2">
             <span class="text-sm leading-none font-medium">接口地址（Base URL）</span>
             <Input v-model="providerDraft.baseUrl" class="font-mono" placeholder="https://api.deepseek.com/v1" />
-            <span class="text-xs text-muted-foreground">OpenAI 兼容接口的根地址，不含 /chat/completions。</span>
+            <span class="text-xs text-muted-foreground">不含 /chat/completions。</span>
           </label>
           <label class="grid gap-2">
             <span class="text-sm leading-none font-medium">API Key</span>
@@ -985,7 +983,7 @@ const jobFilters = jobList.filters
             启用
             <Switch v-model="providerDraft.enabled" />
           </label>
-          <p class="text-xs text-muted-foreground">保存后可以在列表里点「测试」确认连通，并获取上游的模型列表。</p>
+          <p class="text-xs text-muted-foreground">保存后可以在列表里测试连接。</p>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="providerDraft = null">取消</Button>
@@ -1061,7 +1059,7 @@ const jobFilters = jobList.filters
             <Switch v-model="modelDraft.enabled" />
           </label>
           <label class="flex items-center justify-between gap-4 text-sm">
-            支持识图（上游接受图片输入；不支持的模型收到图片会报错）
+            支持识图
             <Switch v-model="modelDraft.vision" />
           </label>
           <label class="flex items-center justify-between gap-4 text-sm">
@@ -1096,7 +1094,7 @@ const jobFilters = jobList.filters
           <label class="grid gap-2">
             <span class="text-sm leading-none font-medium">端点地址（Streamable HTTP）</span>
             <Input v-model="mcpDraft.url" class="font-mono" placeholder="https://example.com/mcp" />
-            <span class="text-xs text-muted-foreground">只接受 https://；http:// 只允许本机与内网地址。</span>
+            <span class="text-xs text-muted-foreground">需要 https://，内网地址可用 http://。</span>
           </label>
           <label class="grid gap-2">
             <span class="text-sm leading-none font-medium">鉴权请求头（整行）</span>
@@ -1128,7 +1126,7 @@ const jobFilters = jobList.filters
             启用
             <Switch v-model="mcpDraft.enabled" />
           </label>
-          <p class="text-xs text-muted-foreground">新接入的服务保存后会自动拉取一次工具清单；工具要逐个启用才会提供给模型。</p>
+          <p class="text-xs text-muted-foreground">保存后会自动拉取工具，需要逐个启用。</p>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="mcpDraft = null">取消</Button>
@@ -1210,7 +1208,7 @@ const jobFilters = jobList.filters
             <label class="flex items-center justify-between gap-4 text-sm">
               <span>
                 剧情库工具（检索、顺读绝区零剧情与设定）
-                <span v-if="!settings?.storyAvailable" class="text-xs text-muted-foreground">——当前没有语料，开启后上传语料才生效</span>
+                <span v-if="!settings?.storyAvailable" class="text-xs text-muted-foreground">（暂无语料）</span>
               </span>
               <Switch v-model="characterDraft.storyTools" />
             </label>

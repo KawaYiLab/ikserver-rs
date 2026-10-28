@@ -73,7 +73,7 @@ async function toggle(question: Question) {
 async function remove(ids: string[]) {
   const ok = await confirm({
     title: `删除 ${ids.length} 道题？`,
-    description: '删除后不可恢复；进行中的考卷不受影响（考卷保存的是快照）。',
+    description: '删除后不可恢复，进行中的考试不受影响。',
     confirmLabel: '删除',
     destructive: true,
   })
@@ -203,7 +203,7 @@ async function save() {
 
 <template>
   <div>
-    <AdminPageHeader title="考试题库" description="入站考试从启用的题目里按权重抽题；考卷保存题目快照，改题不影响进行中的考试。">
+    <AdminPageHeader title="考试题库" description="入站考试按权重从启用的题目中抽题。">
       <AdminRefreshButton :loading="loading" @click="load" />
       <Button v-if="isAdmin" size="sm" @click="edit()">
         <Plus class="size-4" />新建题目
@@ -215,7 +215,7 @@ async function save() {
       <AdminStatCard
         title="已启用"
         :value="stats.enabled"
-        :hint="short ? `少于每张考卷的 ${stats.questionCount} 题，考生将无法开考` : `每张考卷 ${stats.questionCount} 题`"
+        :hint="short ? `不足 ${stats.questionCount} 题，无法开考` : `每张考卷 ${stats.questionCount} 题`"
         :tone="short ? 'danger' : 'default'"
       />
       <AdminStatCard title="单选（启用）" :value="stats.single" />

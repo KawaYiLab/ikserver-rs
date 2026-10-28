@@ -83,9 +83,9 @@ async function submit() {
         <DialogTitle>{{ titles[request.action] }}{{ request.label }}</DialogTitle>
         <DialogDescription>
           <template v-if="request.action === 'hide'">隐藏后只有作者本人能看到，随时可以恢复。</template>
-          <template v-else-if="request.action === 'unhide'">恢复后重新公开，包括多人举报自动隐藏的内容。</template>
+          <template v-else-if="request.action === 'unhide'">恢复后重新公开。</template>
           <template v-else>删除不可恢复{{ request.targetType === 'comment' ? '，回复会一并删除' : '，帖子下的评论会一并删除' }}。</template>
-          有待处理举报的会跳过，请到举报处理里结案。
+          有待处理举报的会被跳过。
         </DialogDescription>
       </DialogHeader>
       <div class="space-y-4">

@@ -21,7 +21,7 @@ async function submit() {
   try {
     await login(identifier.value.trim(), password.value)
     if (!isStaff.value) {
-      error.value = '这个账号没有后台权限（需要版主或管理员）'
+      error.value = '这个账号没有后台权限'
       await logout()
       return
     }
