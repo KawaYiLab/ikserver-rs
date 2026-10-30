@@ -90,6 +90,7 @@ fn api_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(system::router())
         .merge(crate::site::router())
+        .merge(crate::sitemap::router())
         .merge(crate::setup::router())
         .merge(crate::admin_system::router())
         .merge(ik_auth::router())
