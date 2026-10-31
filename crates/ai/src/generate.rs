@@ -43,6 +43,8 @@ const TYPING_EVERY: Duration = Duration::from_secs(2);
 const APPEND_SNAPSHOT_EVERY: u64 = 64;
 /// 正文增长不足 `stream_min_chars` 时，距上次推送超过这么久也推一次，免得尾巴卡住（GEN-004）。
 const STREAM_PUSH_EVERY: Duration = Duration::from_millis(150);
+/// 不限总时长时的截止时间：足够远，等于没有（GEN-020）。
+const UNLIMITED: Duration = Duration::from_secs(30 * 24 * 3600);
 /// 剩余预算少于这么多时，首帧超时后不再退回默认模型（GEN-022）。
 const FALLBACK_MIN_REMAINING: Duration = Duration::from_secs(20);
 /// 上游输出（正文 + 思考 + 工具参数）累计上限（GEN-023、LLM-012）。
@@ -916,9 +918,18 @@ pub(crate) async fn generate(
         model,
         default_model,
         messages,
-        Duration::from_secs(ctx.state.config.reply_timeout_secs),
+        reply_budget(ctx.state.config.reply_timeout_secs),
     )
     .await
+}
+
+/// 配置里的总时长上限（GEN-020），0 表示不限。
+pub(crate) fn reply_budget(secs: u64) -> Duration {
+    if secs == 0 {
+        UNLIMITED
+    } else {
+        Duration::from_secs(secs)
+    }
 }
 
 /// 渠道可以收紧总预算；超时仍通过同一生成出口返回已发生的用量，不能在外层丢弃 future。

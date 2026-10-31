@@ -296,7 +296,8 @@ async fn prepare_inner(
             .join("\n"),
         max_chars: turn.max_chars,
         output_mode: turn.output_mode,
-        budget: Duration::from_secs(turn.timeout_secs.min(state.config.reply_timeout_secs)),
+        budget: Duration::from_secs(turn.timeout_secs)
+            .min(generate::reply_budget(state.config.reply_timeout_secs)),
         estimate,
         follow_ups,
         memory_enabled: memory_on,

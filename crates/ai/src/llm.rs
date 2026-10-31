@@ -423,7 +423,7 @@ pub(crate) fn client_builder() -> Result<reqwest13::ClientBuilder, String> {
 fn build_http_client() -> Result<reqwest13::Client, LlmError> {
     client_builder()
         .map_err(LlmError::Upstream)?
-        // 两帧之间的最长间隔；总时长由生成方的墙钟预算控制（GEN-020）。
+        // 两帧之间的最长间隔：上游卡住不出数据就断开。总时长默认不限（GEN-020）。
         .read_timeout(Duration::from_secs(120))
         .build()
         .map_err(|e| LlmError::Upstream(format!("http client: {e}")))
