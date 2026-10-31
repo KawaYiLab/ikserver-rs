@@ -146,6 +146,7 @@ GET /v1/posts?cursor=eyJ...&limit=20
 | REINDEX_RUNNING | 409 | 索引正在重建，请稍后再试 | |
 | SEARCH_ENGINE_NOT_CONFIGURED | 409 | 没有配置搜索引擎 | 重建索引时 |
 | AI_MODEL_IS_DEFAULT | 409 | 默认模型不能删除，请先把其他模型设为默认 | 管理后台删除模型 |
+| AI_JOB_NOT_FAILED | 409 | 只有失败的任务能重试或删除 | 管理后台重试、删除 AI 任务 |
 | AI_PROVIDER_IN_USE | 409 | 还有模型在用这个提供方，请先把这些模型改到别的提供方或删除 | 管理后台删除提供方 |
 | AI_PROVIDER_FROM_CONFIG | 409 | 部署配置里的提供方只能在部署配置里修改 | 管理后台删除部署配置（`IK_AI__PROVIDERS__…`）里的提供方 |
 | AI_MCP_TOOL_CHANGED | 409 | 工具定义已经变了，请刷新后重新确认 | 管理后台启用 MCP 工具时带的 `digest` 与远端当前定义不同，或远端已没有这个工具（ADR 0004） |
