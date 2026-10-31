@@ -176,7 +176,8 @@ pub struct Ai {
     pub providers: std::collections::BTreeMap<String, AiProvider>,
     /// 预占的存活时长，覆盖一次最坏耗时的生成（QUOTA-010，60–7200 秒）。
     pub hold_ttl_secs: u64,
-    /// 单条回复的总墙钟预算（GEN-020，10–1800 秒）。
+    /// 单条回复的总时长上限（GEN-020）。0 不限（默认），否则 10–86400 秒。卡死由首帧看门狗、
+    /// 帧间读超时和工具各自的超时兜住，不靠它。
     pub reply_timeout_secs: u64,
     /// 首帧看门狗（GEN-021，0 关闭，否则不超过总预算）。
     pub first_delta_timeout_secs: u64,
@@ -206,7 +207,7 @@ impl Default for Ai {
         Self {
             providers: std::collections::BTreeMap::new(),
             hold_ttl_secs: 900,
-            reply_timeout_secs: 300,
+            reply_timeout_secs: 0,
             first_delta_timeout_secs: 90,
             stream_min_chars: 16,
             max_history_messages: 40,
@@ -967,8 +968,9 @@ impl Config {
         }
         let ai = &self.ai;
         if !(60..=7200).contains(&ai.hold_ttl_secs)
-            || !(10..=1800).contains(&ai.reply_timeout_secs)
-            || ai.first_delta_timeout_secs > ai.reply_timeout_secs
+            || (ai.reply_timeout_secs != 0
+                && (!(10..=86_400).contains(&ai.reply_timeout_secs)
+                    || ai.first_delta_timeout_secs > ai.reply_timeout_secs))
             || !(1..=1000).contains(&ai.stream_min_chars)
             || !(1..=200).contains(&ai.max_history_messages)
             || !(0..=100_000).contains(&ai.estimated_context_tokens)
@@ -979,7 +981,7 @@ impl Config {
             })
         {
             return Err(ConfigError::Invalid(
-                "ai 配置不合法：hold_ttl_secs 60–7200，reply_timeout_secs 10–1800，first_delta_timeout_secs 不超过总预算，\
+                "ai 配置不合法：hold_ttl_secs 60–7200，reply_timeout_secs 为 0 或 10–86400，first_delta_timeout_secs 不超过总时长上限，\
                  stream_min_chars 1–1000，max_history_messages 1–200，\
                  estimated_context_tokens 0–100000，max_attempts 1–20，providers 的 base_url 须为 http(s)://"
                     .to_owned(),
@@ -1235,6 +1237,20 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(matches!(err, ConfigError::Invalid(_)));
+    }
+
+    #[test]
+    fn ai_reply_timeout_defaults_to_unlimited() {
+        let base = || with(&[("database.url", "postgres://x")]);
+        let config = Config::from_figment(base()).unwrap();
+        assert_eq!(config.ai.reply_timeout_secs, 0);
+        let set = |secs: u64| {
+            Config::from_figment(base().merge(Serialized::default("ai.reply_timeout_secs", secs)))
+        };
+        assert!(set(3600).is_ok());
+        assert!(matches!(set(5), Err(ConfigError::Invalid(_))));
+        // 设了上限时首帧看门狗不能比它长。
+        assert!(matches!(set(60), Err(ConfigError::Invalid(_))));
     }
 
     #[test]
