@@ -123,6 +123,7 @@ fn external_charge_keeps_unknown_spend_and_guest_context_has_no_account() {
         usage: Default::default(),
         model_key: "base".into(),
         weight: 2.0,
+        cached_weight: 0.2,
         started: true,
         outcome: RunOutcome::Failed("connection lost".into()),
     };

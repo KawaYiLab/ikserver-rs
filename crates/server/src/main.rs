@@ -467,6 +467,10 @@ async fn serve() -> anyhow::Result<()> {
     let node_id = state.config.node_id;
     let presence_db = state.db.clone();
     let presence = ik_realtime::presence::spawn_publisher(state.db.clone(), node_id, hub.clone());
+    // AI 停止信号走 LISTEN/NOTIFY，生成循环只做低频兜底轮询（GEN-011）。
+    if state.config.jobs.run_worker {
+        state.ai.stops.start();
+    }
     let worker = if state.config.jobs.run_worker {
         let worker = std::sync::Arc::new(
             ik_server::jobs::worker_options(&state)?

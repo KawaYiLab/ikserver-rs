@@ -87,6 +87,21 @@ fn scale(tokens: i64, weight: f64) -> i64 {
     }
 }
 
+/// 计入额度的 token（LLM-017）：命中上游缓存的输入按 `cached_weight`（原价的几成）折算，其余按原价。
+pub fn billable_tokens(usage: crate::llm::Usage, cached_weight: f64) -> i64 {
+    let prompt = usage.prompt_tokens.max(0);
+    let cached = usage.cached_tokens.clamp(0, prompt);
+    let weight = if cached_weight.is_finite() {
+        cached_weight.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    let cached_cost = (cached as f64 * weight).ceil() as i64;
+    (prompt - cached)
+        .saturating_add(cached_cost)
+        .saturating_add(usage.completion_tokens.max(0))
+}
+
 /// 一次回复计入的量：总量为 0 记 0，有用量至少记 1（QUOTA-001）。
 pub fn weighted(tokens: i64, weight: f64) -> i64 {
     if tokens <= 0 {
@@ -337,6 +352,23 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn cache_hits_are_charged_at_the_cached_weight() {
+        let usage = crate::llm::Usage {
+            prompt_tokens: 1000,
+            completion_tokens: 100,
+            cached_tokens: 800,
+        };
+        assert_eq!(billable_tokens(usage, 0.2), 200 + 160 + 100);
+        assert_eq!(billable_tokens(usage, 1.0), 1100);
+        // 上游报的命中数超过输入时按输入封顶。
+        let odd = crate::llm::Usage {
+            cached_tokens: 5000,
+            ..usage
+        };
+        assert_eq!(billable_tokens(odd, 0.0), 100);
+    }
 
     #[test]
     fn weighting_follows_quota_001() {

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_settings (id, global_enabled, daily_tokens_per_user, daily_tokens, updated_at,\n                                  trace_enabled)\n         VALUES (1, $1, $2, $3, $4, $5)\n         ON CONFLICT (id) DO UPDATE SET global_enabled = $1, daily_tokens_per_user = $2,\n             daily_tokens = $3, updated_at = $4, trace_enabled = $5",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8",
+        "Int8",
+        "Timestamptz",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "be42f38678db2b49b8ed9ba101121c3009f93e0fbaf899dafad2302dafbb9f4a"
+}

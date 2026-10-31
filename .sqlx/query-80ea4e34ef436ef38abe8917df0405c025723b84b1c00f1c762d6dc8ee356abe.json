@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT queue_name FROM graphile_worker.jobs WHERE key = ANY($1) ORDER BY id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "queue_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "graphile_worker.jobs",
+            "name": "queue_name"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "80ea4e34ef436ef38abe8917df0405c025723b84b1c00f1c762d6dc8ee356abe"
+}

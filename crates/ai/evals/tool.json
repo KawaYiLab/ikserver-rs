@@ -1,0 +1,50 @@
+[
+  {
+    "kind": "tool",
+    "id": "tool-forum-question-searches",
+    "history": [
+      { "text": "论坛里有没有人发过零号空洞的攻略？帮我找找" }
+    ],
+    "expect": { "tools": ["search_posts"] }
+  },
+  {
+    "kind": "tool",
+    "id": "tool-hot-posts",
+    "history": [
+      { "text": "最近论坛上什么帖子最火" }
+    ],
+    "expect": { "tools": ["get_hot_posts", "search_posts"] }
+  },
+  {
+    "kind": "tool",
+    "id": "tool-read-post-by-id",
+    "history": [
+      { "text": "帮我看看 /post/123456 这篇讲了什么" }
+    ],
+    "expect": { "tools": ["get_post_content"] }
+  },
+  {
+    "kind": "tool",
+    "id": "tool-remember-on-request",
+    "history": [
+      { "text": "记住，我的生日是 3 月 14 日" }
+    ],
+    "expect": { "tools": ["remember"] }
+  },
+  {
+    "kind": "tool",
+    "id": "tool-small-talk-uses-none",
+    "history": [
+      { "text": "今天好累啊" }
+    ],
+    "expect": { "tools": [] }
+  },
+  {
+    "kind": "tool",
+    "id": "tool-past-chat-recalls-history",
+    "history": [
+      { "text": "我们上次聊的那个配队方案，你还记得具体是怎么配的吗" }
+    ],
+    "expect": { "tools": ["recall_history"] }
+  }
+]

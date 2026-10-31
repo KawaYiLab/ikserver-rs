@@ -93,5 +93,6 @@ pub fn usage(prompt: i64, completion: i64) -> Step {
     Step::Emit(StreamEvent::Usage(Usage {
         prompt_tokens: prompt,
         completion_tokens: completion,
+        cached_tokens: 0,
     }))
 }

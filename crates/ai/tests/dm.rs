@@ -419,8 +419,10 @@ async fn failures_retry_on_the_same_placeholder(db: PgPool) {
     let trigger = h.send(conversation, "在吗").await;
     let job = h.job_for_trigger(trigger).await;
 
-    h.fake
-        .push(vec![Step::Fail(LlmError::Upstream("boom".into()))]);
+    // 上游拒绝（4xx）不在轮内重发，整个任务稍后重试。
+    h.fake.push(vec![Step::Fail(LlmError::Rejected(
+        "400 bad request".into(),
+    ))]);
     let outcome = dm::run_job(&h.state, job, 1, false).await.unwrap();
     assert!(matches!(outcome, RunOutcome::Retry(_)), "{outcome:?}");
     let (first_reply, text, state, _) = h.reply(job).await;
@@ -704,6 +706,154 @@ async fn regenerate_replaces_the_latest_reply_once(db: PgPool) {
         .await
         .unwrap_err();
     assert_eq!(problem.code(), "AI_NOT_LATEST_REPLY");
+}
+
+async fn job_metrics(db: &PgPool, job: i64) -> (i64, i16, i16) {
+    let row = sqlx::query!(
+        "SELECT cached_tokens, retries, tool_rounds FROM ai_jobs WHERE id = $1",
+        job
+    )
+    .fetch_one(db)
+    .await
+    .unwrap();
+    (row.cached_tokens, row.retries, row.tool_rounds)
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn a_dropped_stream_is_resumed_within_the_round(db: PgPool) {
+    let h = harness(db).await;
+    let conversation = h.session().await;
+    let trigger = h.send(conversation, "讲个故事").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        content("从前有座山，"),
+        Step::Fail(LlmError::Upstream("connection reset".into())),
+    ]);
+    h.fake.push(vec![content("山里有座庙。"), usage(80, 10)]);
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let (_, text, _, _) = h.reply(job).await;
+    assert_eq!(text, "从前有座山，山里有座庙。");
+    // 重发时带上已经发出去的部分，让模型接着写（GEN-025）。
+    let requests = h.fake.requests();
+    assert_eq!(requests.len(), 2);
+    let tail = &requests[1].messages[requests[1].messages.len() - 2..];
+    assert_eq!(tail[0], ChatMessage::assistant("从前有座山，"));
+    assert!(tail[1].text().contains("接着写"), "{:?}", tail[1]);
+    assert_eq!(job_metrics(&h.db, job).await.1, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn a_reply_cut_by_the_output_limit_is_continued_once(db: PgPool) {
+    let h = harness(db).await;
+    let conversation = h.session().await;
+    let trigger = h.send(conversation, "写长一点").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        content("第一段，"),
+        Step::Emit(StreamEvent::Finish("length".into())),
+    ]);
+    h.fake.push(vec![
+        content("第二段，"),
+        Step::Emit(StreamEvent::Finish("length".into())),
+    ]);
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let (_, text, _, _) = h.reply(job).await;
+    assert_eq!(text, "第一段，第二段，");
+    // 只续写一次（GEN-026）。
+    let requests = h.fake.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1]
+            .messages
+            .last()
+            .unwrap()
+            .text()
+            .contains("单次输出长度"),
+        "{:?}",
+        requests[1].messages.last()
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn burst_messages_are_answered_once(db: PgPool) {
+    let h = harness(db).await;
+    let conversation = h.session().await;
+    let first = h.send(conversation, "在吗").await;
+    let second = h.send(conversation, "问个事").await;
+    let (first_job, second_job) = (
+        h.job_for_trigger(first).await,
+        h.job_for_trigger(second).await,
+    );
+    // 同一会话排在同一个队列里（GEN-027）。
+    let queues: Vec<Option<String>> = sqlx::query_scalar!(
+        "SELECT queue_name FROM graphile_worker.jobs WHERE key = ANY($1) ORDER BY id",
+        &[format!("ai:{first_job}"), format!("ai:{second_job}")]
+    )
+    .fetch_all(&h.db)
+    .await
+    .unwrap();
+    let queue = format!("ai:dm:{conversation}");
+    assert_eq!(queues, vec![Some(queue.clone()), Some(queue)]);
+
+    assert_eq!(
+        dm::run_job(&h.state, first_job, 1, false).await.unwrap(),
+        RunOutcome::Skipped("merged")
+    );
+    h.fake.push(vec![content("在的，你说。"), usage(50, 5)]);
+    assert_eq!(
+        dm::run_job(&h.state, second_job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let requests = h.fake.requests();
+    assert_eq!(requests.len(), 1);
+    let texts: Vec<&str> = requests[0].messages.iter().map(ChatMessage::text).collect();
+    assert_eq!(texts[1..], ["user100 说：在吗", "user100 说：问个事"]);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn traces_and_cache_hits_are_recorded(db: PgPool) {
+    let h = harness(db).await;
+    sqlx::query("UPDATE ai_settings SET trace_enabled = TRUE WHERE id = 1")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    h.state.catalog.invalidate().await;
+    let conversation = h.session().await;
+    let trigger = h.send(conversation, "你好").await;
+    let job = h.job_for_trigger(trigger).await;
+    h.fake.push(vec![
+        content("你好呀"),
+        Step::Emit(StreamEvent::Usage(ik_ai::llm::Usage {
+            prompt_tokens: 100,
+            completion_tokens: 20,
+            cached_tokens: 50,
+        })),
+    ]);
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    // 命中缓存的 50 个输入 token 按 0.2 计：50 + 10 + 20。
+    assert_eq!(h.used().await, 80);
+    assert_eq!(job_metrics(&h.db, job).await, (50, 0, 0));
+    let trace = sqlx::query!(
+        "SELECT attempt, model_key, request, reply, outcome FROM ai_job_traces WHERE job_id = $1",
+        job
+    )
+    .fetch_one(&h.db)
+    .await
+    .unwrap();
+    assert_eq!((trace.attempt, trace.model_key.as_str()), (1, "base"));
+    assert_eq!(trace.reply, "你好呀");
+    assert_eq!(trace.outcome, "completed");
+    assert_eq!(trace.request["model"], "fake-base");
+    assert_eq!(trace.request["messages"][1]["content"], "user100 说：你好");
 }
 
 fn tool_call(id: &str, name: &str, arguments: &str) -> Step {

@@ -452,8 +452,8 @@ async fn failures_retry_then_fail_without_a_reply(db: PgPool) {
     let post = h.post(FAIRY, false).await;
     let trigger = h.comment(BOB, post, None, "在吗").await;
     let job = h.job_for(trigger).await.unwrap();
-    h.fake.push(vec![Step::Fail(LlmError::Upstream(
-        "502 bad gateway".into(),
+    h.fake.push(vec![Step::Fail(LlmError::Rejected(
+        "400 bad request".into(),
     ))]);
     assert!(matches!(
         comment::run_job(&h.state, job, 1, false).await.unwrap(),

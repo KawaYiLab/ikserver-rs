@@ -46,6 +46,8 @@ pub struct AdminSettings {
     pub providers: Vec<String>,
     /// 剧情库已加载语料：角色卡开了剧情库工具时才真正提供（ADR 0004）。
     pub story_available: bool,
+    /// 存调用记录（OBS-002）。
+    pub trace_enabled: bool,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -63,6 +65,8 @@ pub struct AdminModel {
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
+    /// 生成参数（LLM-016）。
+    pub params: crate::catalog::ModelParams,
     /// `provider` 可用（部署配置里有，或后台里有且启用）。
     pub provider_configured: bool,
 }
@@ -135,6 +139,8 @@ pub struct AdminCharacter {
     pub story_tools: bool,
     /// 启用的站外 MCP 服务（服务名）。
     pub mcp_servers: Vec<String>,
+    /// 覆盖模型的采样参数（LLM-016）。
+    pub params: crate::catalog::CardParams,
 }
 
 #[derive(Debug, Default, Deserialize, IntoParams)]
@@ -171,8 +177,33 @@ pub struct AdminJob {
     pub model_key: Option<String>,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// 命中缓存的输入 token（OBS-001）。
+    pub cached_tokens: i64,
+    /// 首字延迟、生成耗时（最后一次尝试）。
+    pub first_delta_ms: Option<i32>,
+    pub elapsed_ms: Option<i32>,
+    pub tool_rounds: i16,
+    pub tool_calls: i16,
+    /// 轮内重发次数（GEN-025）。
+    pub retries: i16,
+    /// 有调用记录（OBS-002）。
+    pub has_trace: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// 一次尝试的调用记录（OBS-002）。
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminJobTrace {
+    pub attempt: i16,
+    pub model_key: String,
+    /// 最后一轮发给上游的请求体。
+    #[schema(value_type = Object)]
+    pub request: serde_json::Value,
+    pub reply: String,
+    pub outcome: String,
+    pub created_at: DateTime<Utc>,
 }
 
 // ---------- 服务 ----------
@@ -208,6 +239,7 @@ pub async fn settings(state: &AiState) -> Result<AdminSettings, Problem> {
             .story
             .as_ref()
             .is_some_and(|story| story.current().is_some()),
+        trace_enabled: row.as_ref().is_some_and(|r| r.trace_enabled),
     })
 }
 
@@ -230,6 +262,7 @@ pub async fn models(state: &AiState) -> Result<Vec<AdminModel>, Problem> {
             enabled: m.enabled,
             is_default: m.is_default,
             sort_order: m.sort_order,
+            params: serde_json::from_value(m.params).unwrap_or_default(),
         })
         .collect())
 }
@@ -497,6 +530,7 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
             suggested_questions: c.suggested_questions,
             story_tools: c.story_tools,
             mcp_servers: c.mcp_server_ids.into_iter().filter_map(server_of).collect(),
+            params: serde_json::from_value(c.params).unwrap_or_default(),
         })
         .collect())
 }
@@ -721,6 +755,13 @@ pub async fn jobs(state: &AiState, query: JobQuery) -> Result<Paged<AdminJob>, P
                 model_key: r.model_key,
                 prompt_tokens: r.prompt_tokens,
                 completion_tokens: r.completion_tokens,
+                cached_tokens: r.cached_tokens,
+                first_delta_ms: r.first_delta_ms,
+                elapsed_ms: r.elapsed_ms,
+                tool_rounds: r.tool_rounds,
+                tool_calls: r.tool_calls,
+                retries: r.retries,
+                has_trace: r.has_trace,
                 created_at: r.created_at,
                 updated_at: r.updated_at,
             })
@@ -729,6 +770,22 @@ pub async fn jobs(state: &AiState, query: JobQuery) -> Result<Paged<AdminJob>, P
         page,
         limit,
     })
+}
+
+pub async fn job_traces(state: &AiState, job_id: i64) -> Result<Vec<AdminJobTrace>, Problem> {
+    let mut conn = state.db.acquire().await?;
+    Ok(repo::traces(&mut conn, job_id)
+        .await?
+        .into_iter()
+        .map(|t| AdminJobTrace {
+            attempt: t.attempt,
+            model_key: t.model_key,
+            request: t.request,
+            reply: t.reply,
+            outcome: t.outcome,
+            created_at: t.created_at,
+        })
+        .collect())
 }
 
 /// AI 今日概况（管理后台仪表盘）。
@@ -778,6 +835,7 @@ where
         .routes(routes!(list_characters))
         .routes(routes!(put_character, remove_character))
         .routes(routes!(list_jobs))
+        .routes(routes!(get_job_trace))
         .routes(routes!(list_mcp_servers))
         .routes(routes!(put_mcp_server, remove_mcp_server))
         .routes(routes!(post_mcp_refresh))
@@ -1042,6 +1100,23 @@ async fn list_jobs(
     Query(query): Query<JobQuery>,
 ) -> Result<Json<Paged<AdminJob>>, Problem> {
     Ok(Json(jobs(&state, query).await?))
+}
+
+/// 任务的调用记录（后台开了才有，保留 7 天，OBS-002）
+#[utoipa::path(
+    get,
+    path = "/v1/admin/ai/jobs/{id}/trace",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses((status = 200, body = Vec<AdminJobTrace>))
+)]
+async fn get_job_trace(
+    State(state): State<AiState>,
+    AdminOperator(_): AdminOperator,
+    Path(id): Path<Id>,
+) -> Result<Json<Vec<AdminJobTrace>>, Problem> {
+    Ok(Json(job_traces(&state, id.get()).await?))
 }
 
 /// 站外 MCP 服务（含工具与审批状态；鉴权头只回提示）

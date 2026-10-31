@@ -213,6 +213,55 @@ fn validate_model(index: usize, m: &ModelInput) -> Result<(), Problem> {
     if m.is_default && !m.enabled {
         return Err(field("isDefault", "默认模型必须启用"));
     }
+    validate_sampling(m.params.temperature, m.params.top_p)
+        .map_err(|(name, detail)| field(name, detail))?;
+    let p = &m.params;
+    if p.max_output_tokens
+        .is_some_and(|n| !(16..=131_072).contains(&n))
+    {
+        return Err(field("params.maxOutputTokens", "16–131072"));
+    }
+    if p.context_tokens
+        .is_some_and(|n| !(4096..=4_000_000).contains(&n))
+    {
+        return Err(field("params.contextTokens", "4096–4000000"));
+    }
+    if p.cached_weight
+        .is_some_and(|w| !(w.is_finite() && (0.0..=1.0).contains(&w)))
+    {
+        return Err(field("params.cachedWeight", "0–1"));
+    }
+    if let Some(key) = p
+        .extra_body
+        .keys()
+        .find(|k| crate::llm::RESERVED_BODY_KEYS.contains(&k.as_str()))
+    {
+        return Err(field(
+            "params.extraBody",
+            &format!("不能写 {key}（用对应的参数项）"),
+        ));
+    }
+    if serde_json::Value::Object(p.extra_body.clone())
+        .to_string()
+        .len()
+        > 4096
+    {
+        return Err(field("params.extraBody", "最多 4KB"));
+    }
+    Ok(())
+}
+
+/// 采样参数的范围（LLM-016）：temperature 0～2，topP (0, 1]。
+fn validate_sampling(
+    temperature: Option<f64>,
+    top_p: Option<f64>,
+) -> Result<(), (&'static str, &'static str)> {
+    if temperature.is_some_and(|t| !(t.is_finite() && (0.0..=2.0).contains(&t))) {
+        return Err(("params.temperature", "0–2"));
+    }
+    if top_p.is_some_and(|t| !(t.is_finite() && t > 0.0 && t <= 1.0)) {
+        return Err(("params.topP", "大于 0、不超过 1"));
+    }
     Ok(())
 }
 
@@ -235,6 +284,8 @@ fn validate_character(index: usize, c: &CharacterInput) -> Result<(), Problem> {
     if c.suggested_questions.len() > 10 {
         return Err(field("suggestedQuestions", "最多 10 条"));
     }
+    validate_sampling(c.params.temperature, c.params.top_p)
+        .map_err(|(name, detail)| field(name, detail))?;
     Ok(())
 }
 
@@ -288,6 +339,7 @@ pub(crate) async fn apply(
             settings.global_enabled,
             settings.daily_tokens_per_user,
             settings.daily_tokens,
+            settings.trace_enabled,
             now,
         )
         .await?;
@@ -296,6 +348,7 @@ pub(crate) async fn apply(
         repo::clear_default_model(tx).await?;
     }
     for model in &file.models {
+        let params = serde_json::to_value(&model.params).map_err(|e| Problem::internal_from(&e))?;
         repo::upsert_model(
             tx,
             &repo::NewModel {
@@ -311,6 +364,7 @@ pub(crate) async fn apply(
                 enabled: model.enabled,
                 is_default: model.is_default,
                 sort_order: model.sort_order,
+                params: &params,
                 now,
             },
         )
@@ -399,6 +453,7 @@ pub(crate) async fn apply(
             ));
         };
         let examples = serde_json::to_value(&c.examples).map_err(|e| Problem::internal_from(&e))?;
+        let params = serde_json::to_value(&c.params).map_err(|e| Problem::internal_from(&e))?;
         let questions: Vec<String> = c
             .suggested_questions
             .iter()
@@ -428,6 +483,7 @@ pub(crate) async fn apply(
                 suggested_questions: &questions,
                 story_tools: c.story_tools,
                 mcp_server_ids: &mcp_server_ids,
+                params: &params,
                 now,
             },
         )

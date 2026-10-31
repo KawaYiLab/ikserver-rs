@@ -60,6 +60,7 @@ impl ChatProvider for FakeAi {
             Ok(StreamEvent::Usage(Usage {
                 prompt_tokens: 10,
                 completion_tokens: 10,
+                cached_tokens: 0,
             })),
         ])))
     }

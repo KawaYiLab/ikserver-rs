@@ -9,7 +9,7 @@ use std::time::Duration;
 use ik_kernel::Problem;
 
 use crate::AiState;
-use crate::catalog::{Model, OutputMode, RoleCard};
+use crate::catalog::{CardParams, Model, OutputMode, RoleCard};
 use crate::generate::{self, End, StreamCtx};
 use crate::llm::{ChatMessage, Providers, Usage};
 use crate::memory::{self, MemoryScope};
@@ -65,6 +65,7 @@ pub struct PreparedTurn {
     providers: Providers,
     tools: ToolContext,
     toolbox: Toolbox,
+    card_params: CardParams,
     messages: Vec<ChatMessage>,
     prompt_text: String,
     max_chars: usize,
@@ -88,6 +89,8 @@ pub struct ExternalReply {
     pub usage: Usage,
     pub model_key: String,
     pub weight: f64,
+    /// 命中缓存的输入按这个折扣计费（LLM-017）。
+    pub cached_weight: f64,
     pub started: bool,
     pub outcome: RunOutcome,
 }
@@ -98,7 +101,10 @@ impl ExternalReply {
         if self.started && self.usage.is_zero() {
             reserved.max(0)
         } else {
-            quota::weighted(self.usage.total(), self.weight)
+            quota::weighted(
+                quota::billable_tokens(self.usage, self.cached_weight),
+                self.weight,
+            )
         }
     }
 }
@@ -208,7 +214,7 @@ async fn prepare_inner(
     if memory_on {
         let mut conn = state.db.acquire().await?;
         if let Some(memory) = &turn.memory {
-            let (note, due) = memory::external_note(
+            let note = memory::external_note(
                 &mut conn,
                 memory.user_id,
                 card.bound_user_id,
@@ -217,10 +223,13 @@ async fn prepare_inner(
                 Utc::now(),
             )
             .await?;
-            if let Some(note) = note {
-                memory::append_system(&mut messages, &note);
+            if let Some(stable) = note.stable {
+                memory::append_system(&mut messages, &stable);
             }
-            follow_ups = due;
+            if let Some(turn) = note.turn {
+                memory::append_turn(&mut messages, &turn);
+            }
+            follow_ups = note.follow_ups;
         }
         if let Some(scope) = turn.shared_scope.as_deref()
             && let Some(note) =
@@ -241,7 +250,7 @@ async fn prepare_inner(
             )
             .await
         {
-            memory::append_system(&mut messages, &note);
+            memory::append_turn(&mut messages, &note);
         }
     }
     let tools = match turn.viewer {
@@ -276,6 +285,7 @@ async fn prepare_inner(
         providers: catalog.providers.clone(),
         tools,
         toolbox,
+        card_params: card.params.clone(),
         messages,
         prompt_text: turn
             .history
@@ -363,6 +373,9 @@ pub async fn reply(state: &AiState, turn: &PreparedTurn, job_id: i64) -> Externa
         max_chars: turn.max_chars,
         tools: Some(turn.tools.clone()),
         toolbox: turn.toolbox.clone(),
+        card_params: Some(turn.card_params.clone()),
+        // 渠道的任务不在 ai_jobs 里，不写调用记录。
+        trace: false,
     };
     let generated = generate::generate_with_budget(
         &ctx,
@@ -411,6 +424,7 @@ pub async fn reply(state: &AiState, turn: &PreparedTurn, job_id: i64) -> Externa
         usage: streamed.charged,
         model_key: generated.model.key.clone(),
         weight: generated.model.weight(),
+        cached_weight: generated.model.cached_weight(),
         started: streamed.started,
         outcome,
     }

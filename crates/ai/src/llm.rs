@@ -175,7 +175,39 @@ pub struct ChatRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<ToolSpec>,
+    /// 采样参数与上游扩展字段（`ai_models.params`，LLM-016）。全空时请求里不带。
+    pub params: GenParams,
 }
+
+impl ChatRequest {
+    /// 实际发给上游的请求体（调用记录用，OBS-002）。
+    pub fn body(&self) -> serde_json::Value {
+        serde_json::to_value(WireRequest::new(self)).unwrap_or_default()
+    }
+}
+
+/// 请求里的采样参数（LLM-016）：没配的不发，用上游默认值。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GenParams {
+    pub temperature: Option<f64>,
+    pub top_p: Option<f64>,
+    pub max_tokens: Option<u32>,
+    /// 原样合进请求体的上游扩展字段（如思考开关 `enable_thinking`、`thinking`）。
+    /// 不会覆盖 `model`、`messages` 等本模块自己写的字段。
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 扩展字段不能占用的键（请求体里本模块自己写的字段）。
+pub const RESERVED_BODY_KEYS: [&str; 8] = [
+    "model",
+    "messages",
+    "tools",
+    "stream",
+    "stream_options",
+    "temperature",
+    "top_p",
+    "max_tokens",
+];
 
 #[derive(Serialize)]
 struct WireRequest<'a> {
@@ -185,6 +217,34 @@ struct WireRequest<'a> {
     tools: &'a [ToolSpec],
     stream: bool,
     stream_options: StreamOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tokens: Option<u32>,
+    #[serde(flatten)]
+    extra: serde_json::Map<String, serde_json::Value>,
+}
+
+impl<'a> WireRequest<'a> {
+    fn new(request: &'a ChatRequest) -> Self {
+        let mut extra = request.params.extra.clone();
+        extra.retain(|key, _| !RESERVED_BODY_KEYS.contains(&key.as_str()));
+        Self {
+            model: &request.model,
+            messages: &request.messages,
+            tools: &request.tools,
+            stream: true,
+            stream_options: StreamOptions {
+                include_usage: true,
+            },
+            temperature: request.params.temperature,
+            top_p: request.params.top_p,
+            max_tokens: request.params.max_tokens,
+            extra,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -197,6 +257,8 @@ struct StreamOptions {
 pub struct Usage {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// `prompt_tokens` 里命中上游前缀缓存的部分（LLM-017）。上游不报时为 0。
+    pub cached_tokens: i64,
 }
 
 impl Usage {
@@ -237,9 +299,12 @@ pub enum LlmError {
     RateLimited(String),
     #[error("upstream timeout")]
     Timeout,
-    /// 其他上游错误。文本只进日志与审计，绝不作为回复正文（GEN-024）。
+    /// 其他上游错误（5xx、断流、连接失败）。文本只进日志与审计，绝不作为回复正文（GEN-024）。
     #[error("upstream error: {0}")]
     Upstream(String),
+    /// 上游拒绝了这个请求（429、408 以外的 4xx：参数、鉴权、内容审核）。重试也一样，不重试。
+    #[error("upstream rejected: {0}")]
+    Rejected(String),
     /// 模型指向的提供方没有配置（LLM-011）。
     #[error("provider not configured: {0}")]
     UnknownProvider(String),
@@ -248,6 +313,14 @@ pub enum LlmError {
 impl LlmError {
     pub fn is_rate_limited(&self) -> bool {
         matches!(self, Self::RateLimited(_))
+    }
+
+    /// 换个时间再发一次可能成功（GEN-025）：限流、超时、5xx 与断流。
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::RateLimited(_) | Self::Timeout | Self::Upstream(_)
+        )
     }
 }
 
@@ -276,10 +349,11 @@ impl From<OpenAIError> for LlmError {
         match error {
             OpenAIError::ApiError(response) => {
                 let message = format!("{} {}", response.status_code, response.api_error.message);
-                if response.status_code.as_u16() == 429 {
-                    Self::RateLimited(message)
-                } else {
-                    classify(message)
+                match response.status_code.as_u16() {
+                    429 => Self::RateLimited(message),
+                    408 => Self::Timeout,
+                    400..=499 if !looks_rate_limited(&message) => Self::Rejected(message),
+                    _ => classify(message),
                 }
             }
             OpenAIError::Reqwest(error) if error.is_timeout() => Self::Timeout,
@@ -470,6 +544,21 @@ struct WireUsage {
     prompt_tokens: Option<i64>,
     #[serde(default)]
     completion_tokens: Option<i64>,
+    /// DeepSeek。
+    #[serde(default)]
+    prompt_cache_hit_tokens: Option<i64>,
+    /// OpenAI、通义、智谱。
+    #[serde(default)]
+    prompt_tokens_details: Option<WirePromptDetails>,
+    /// Kimi。
+    #[serde(default)]
+    cached_tokens: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WirePromptDetails {
+    #[serde(default)]
+    cached_tokens: Option<i64>,
 }
 
 fn non_empty(text: Option<String>) -> Option<String> {
@@ -511,9 +600,16 @@ fn split_chunk(chunk: WireChunk) -> Result<Vec<StreamEvent>, LlmError> {
         }
     }
     if let Some(usage) = chunk.usage {
+        let prompt_tokens = usage.prompt_tokens.unwrap_or(0).max(0);
+        let cached = usage
+            .prompt_cache_hit_tokens
+            .or(usage.prompt_tokens_details.and_then(|d| d.cached_tokens))
+            .or(usage.cached_tokens)
+            .unwrap_or(0);
         let usage = Usage {
-            prompt_tokens: usage.prompt_tokens.unwrap_or(0).max(0),
+            prompt_tokens,
             completion_tokens: usage.completion_tokens.unwrap_or(0).max(0),
+            cached_tokens: cached.clamp(0, prompt_tokens),
         };
         // 全 0 的统计帧不算用量（GEN-080）。
         if !usage.is_zero() {
@@ -526,15 +622,7 @@ fn split_chunk(chunk: WireChunk) -> Result<Vec<StreamEvent>, LlmError> {
 #[async_trait::async_trait]
 impl ChatProvider for OpenAiCompatible {
     async fn stream(&self, request: &ChatRequest) -> Result<EventStream, LlmError> {
-        let body = WireRequest {
-            model: &request.model,
-            messages: &request.messages,
-            tools: &request.tools,
-            stream: true,
-            stream_options: StreamOptions {
-                include_usage: true,
-            },
-        };
+        let body = WireRequest::new(request);
         let raw = self
             .client
             .chat()
@@ -773,6 +861,66 @@ mod tests {
         let error: WireChunk =
             serde_json::from_str(r#"{"error":{"message":"rate limit exceeded"}}"#).unwrap();
         assert!(split_chunk(error).unwrap_err().is_rate_limited());
+    }
+
+    #[test]
+    fn usage_reads_cache_hits_of_each_provider() {
+        for raw in [
+            r#"{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":5,"prompt_cache_hit_tokens":64}}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":64}}}"#,
+            r#"{"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":5,"cached_tokens":64}}"#,
+        ] {
+            let events = split_chunk(serde_json::from_str(raw).unwrap()).unwrap();
+            assert_eq!(
+                events,
+                vec![StreamEvent::Usage(Usage {
+                    prompt_tokens: 100,
+                    completion_tokens: 5,
+                    cached_tokens: 64,
+                })],
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn params_merge_into_the_body_without_overriding_core_fields() {
+        let mut extra = serde_json::Map::new();
+        extra.insert("enable_thinking".into(), false.into());
+        extra.insert("model".into(), "evil".into());
+        let request = ChatRequest {
+            model: "m".into(),
+            messages: vec![ChatMessage::user("hi")],
+            tools: Vec::new(),
+            params: GenParams {
+                temperature: Some(0.7),
+                top_p: None,
+                max_tokens: Some(800),
+                extra,
+            },
+        };
+        let body = serde_json::to_value(WireRequest::new(&request)).unwrap();
+        assert_eq!(body["model"], "m");
+        assert_eq!(body["temperature"], 0.7);
+        assert_eq!(body["max_tokens"], 800);
+        assert_eq!(body["enable_thinking"], false);
+        assert!(body.get("top_p").is_none());
+        let bare = ChatRequest {
+            params: GenParams::default(),
+            ..request
+        };
+        let body = serde_json::to_value(WireRequest::new(&bare)).unwrap();
+        assert!(body.get("temperature").is_none());
+        assert!(body.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn client_errors_are_not_retried() {
+        assert!(LlmError::Upstream("502".into()).is_retryable());
+        assert!(LlmError::RateLimited("429".into()).is_retryable());
+        assert!(LlmError::Timeout.is_retryable());
+        assert!(!LlmError::Rejected("400 bad request".into()).is_retryable());
+        assert!(!LlmError::UnknownProvider("x".into()).is_retryable());
     }
 
     #[test]

@@ -816,6 +816,7 @@ mod tests {
         wf.finish(Usage {
             prompt_tokens: 5,
             completion_tokens: 6,
+            cached_tokens: 0,
         });
         let events = wf.take_pending();
         let types: Vec<&str> = events.iter().map(|e| e["type"].as_str().unwrap()).collect();

@@ -353,7 +353,14 @@ pub async fn regenerate(
     )
     .await?;
     if let Some(new_job) = created {
-        dm::enqueue(&state.jobs, &mut tx, new_job, state.config.max_attempts).await?;
+        dm::enqueue(
+            &state.jobs,
+            &mut tx,
+            new_job,
+            conversation_id,
+            state.config.max_attempts,
+        )
+        .await?;
         repo::request_stop(&mut tx, job.id, now).await?;
         ik_messaging::interop::withdraw_by_system(&mut tx, message_id, now, &mut effects).await?;
     }
@@ -448,7 +455,14 @@ impl MessageHooks for Hooks {
         )
         .await?;
         if let Some(job_id) = created {
-            dm::enqueue(&self.jobs, conn, job_id, self.max_attempts).await?;
+            dm::enqueue(
+                &self.jobs,
+                conn,
+                job_id,
+                message.conversation_id,
+                self.max_attempts,
+            )
+            .await?;
         }
         Ok(())
     }

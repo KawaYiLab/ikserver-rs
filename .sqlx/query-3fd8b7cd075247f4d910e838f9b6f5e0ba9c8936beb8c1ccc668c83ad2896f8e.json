@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_models (id, key, display_name, description, badge, provider, provider_model,\n                                cost_weight, enabled, is_default, sort_order, created_at, updated_at,\n                                vision, params)\n         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14)\n         ON CONFLICT (key) DO UPDATE SET display_name = $3, description = $4, badge = $5,\n             provider = $6, provider_model = $7, cost_weight = $8, enabled = $9,\n             is_default = $10, sort_order = $11, updated_at = $12, vision = $13, params = $14\n         RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "ai_models",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Float8",
+        "Bool",
+        "Bool",
+        "Int4",
+        "Timestamptz",
+        "Bool",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3fd8b7cd075247f4d910e838f9b6f5e0ba9c8936beb8c1ccc668c83ad2896f8e"
+}

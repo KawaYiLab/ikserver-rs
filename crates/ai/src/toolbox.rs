@@ -339,6 +339,17 @@ impl Toolbox {
         let Some(entry) = self.entry(name) else {
             return error_output(format!("未知工具：{name}"));
         };
+        // 参数不对的不执行，把原因告诉模型让它改（TOOL-014）。论坛工具认别名参数，必填项由它自己检查。
+        let args = match tools::strict_args(arguments) {
+            Ok(args) => args,
+            Err(message) => return error_output(message),
+        };
+        if !matches!(entry.source, Source::Forum) {
+            let missing = missing_required(&entry.spec.parameters, &args);
+            if !missing.is_empty() {
+                return error_output(format!("缺少必填参数：{}，没有执行。", missing.join("、")));
+            }
+        }
         match &entry.source {
             Source::Forum => tools::execute(state, ctx, name, arguments).await,
             Source::Story => story(state, name, arguments).await,
@@ -365,10 +376,9 @@ impl Toolbox {
                     auth_header: &server.auth_header,
                     timeout: server.timeout.min(remaining).max(Duration::from_millis(1)),
                 };
-                let args = Value::Object(tools::parse_args(arguments));
-                match mcp.call_tool(endpoint, tool, args).await {
+                match mcp.call_tool(endpoint, tool, Value::Object(args)).await {
                     Ok(output) => ToolOutput {
-                        text: truncate(&output.text, server.max_result_chars),
+                        text: tools::truncate_marked(&output.text, server.max_result_chars),
                         is_error: output.is_error,
                         meta: ToolMeta::None,
                         images: Vec::new(),
@@ -403,7 +413,7 @@ async fn story(state: &AiState, name: &str, arguments: &str) -> ToolOutput {
     .await;
     match outcome {
         Ok(Ok(Ok(output))) => ToolOutput {
-            text: truncate(&output.text, STORY_MAX_RESULT_CHARS),
+            text: tools::truncate_marked(&output.text, STORY_MAX_RESULT_CHARS),
             is_error: false,
             meta: ToolMeta::None,
             images: Vec::new(),
@@ -423,6 +433,19 @@ async fn story(state: &AiState, name: &str, arguments: &str) -> ToolOutput {
     }
 }
 
+/// schema 里 `required` 列出、调用里没给（或给了 null）的参数。
+fn missing_required(schema: &Value, args: &serde_json::Map<String, Value>) -> Vec<String> {
+    schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|key| args.get(*key).is_none_or(Value::is_null))
+        .map(str::to_owned)
+        .collect()
+}
+
 fn error_output(text: String) -> ToolOutput {
     ToolOutput {
         text,
@@ -439,6 +462,17 @@ fn truncate(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_required_lists_absent_and_null_keys() {
+        let schema = serde_json::json!({ "type": "object", "required": ["content", "kind"] });
+        let args = serde_json::json!({ "content": "x", "kind": null })
+            .as_object()
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(missing_required(&schema, &args), ["kind"]);
+        assert!(missing_required(&serde_json::json!({}), &args).is_empty());
+    }
 
     #[test]
     fn story_specs_are_function_tools() {

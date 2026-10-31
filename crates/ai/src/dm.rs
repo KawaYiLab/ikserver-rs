@@ -41,16 +41,19 @@ pub struct DmReply {
     pub job_id: i64,
 }
 
-/// 在调用方的事务里入队（TRIG-031：与触发消息同一事务）。
+/// 在调用方的事务里入队（TRIG-031：与触发消息同一事务）。同一会话的回复排进同一个队列，一条一条来
+/// （GEN-027）：后一条能看到前一条的回复，也不会两条同时往会话里写。
 pub(crate) async fn enqueue(
     jobs: &Jobs,
     conn: &mut PgConnection,
     job_id: i64,
+    conversation_id: i64,
     max_attempts: i16,
 ) -> Result<(), Problem> {
     let spec = JobSpec {
         max_attempts: Some(max_attempts),
         job_key: Some(format!("ai:{job_id}")),
+        queue_name: Some(format!("ai:dm:{conversation_id}")),
         ..JobSpec::default()
     };
     jobs.enqueue(conn, DmReply { job_id }, spec).await
@@ -214,8 +217,6 @@ fn date_note(now: DateTime<Utc>) -> String {
     )
 }
 
-/// 最近几条 AI 回复附工具记录（CTX-012）；更早的只留正文，控制上下文长度。
-const DIGEST_REPLIES: usize = 6;
 /// 私信历史最多带几张图给识图模型：从最新的消息往前数，更早的只留「[图片]」占位（LLM-015）。
 const HISTORY_IMAGES: usize = 4;
 
@@ -235,7 +236,7 @@ const DIGEST_NOTE: &str = "\n\n【工具记录】历史里你的部分回复开�
     它不是你写的，回复时不要写这样的行，也不要向用户复述它。需要帖子细节时仍应重新读取。";
 
 /// 对话消息（LLM-001、CTX-011）：用户消息带发送者昵称（`<昵称> 说：<正文>`），AI 自己的回复按 assistant；
-/// 最近几条 AI 回复前附上当时的工具记录（CTX-012），追问时模型知道之前查过、读过哪些帖子。
+/// AI 回复前附上当时的工具记录（CTX-012），追问时模型知道之前查过、读过哪些帖子。
 /// 带图的消息正文末尾加图片占位；`images`（媒体 id → 地址）里有的图片挂在那条消息上（LLM-015）。
 pub(crate) fn build_messages(
     card: &RoleCard,
@@ -244,16 +245,15 @@ pub(crate) fn build_messages(
     names: &HashMap<i64, String>,
     images: &HashMap<i64, String>,
 ) -> Vec<ChatMessage> {
-    let mut digests: Vec<Option<String>> = vec![None; history.len()];
-    let recent_ai = history
+    // 窗口里的 AI 回复都附：只附最近几条的话，每来一轮就有一条丢掉记录，前缀缓存跟着失效（LLM-017）。
+    let digests: Vec<Option<String>> = history
         .iter()
-        .enumerate()
-        .rev()
-        .filter(|(_, item)| item.sender_id == ai_user_id)
-        .take(DIGEST_REPLIES);
-    for (index, item) in recent_ai {
-        digests[index] = item.workflow.as_ref().and_then(workflow::digest);
-    }
+        .map(|item| {
+            (item.sender_id == ai_user_id)
+                .then(|| item.workflow.as_ref().and_then(workflow::digest))
+                .flatten()
+        })
+        .collect();
     let mut system = system_prompt(card, card.output_mode);
     if digests.iter().any(Option::is_some) {
         system.push_str(DIGEST_NOTE);
@@ -309,6 +309,8 @@ struct Prepared {
     follow_ups: Vec<i64>,
     /// 记忆开着时：定稿后过多久提炼（秒，MEM-020）。
     extract_delay: Option<i64>,
+    /// 写调用记录（OBS-002）。
+    trace: bool,
 }
 
 enum Prepare {
@@ -393,6 +395,10 @@ async fn prepare(
     if session.context_epoch != job.generation_epoch {
         skip_with!("context_reset");
     }
+    // 连发合并（GEN-027）：还没开始回的这条之后，对方又发了消息，交给后面那条一起回。
+    if job.reply_message_id.is_none() && repo::superseded(&mut tx, job_id).await? {
+        skip_with!("merged");
+    }
     let trigger = ik_messaging::interop::message(&mut tx, trigger_id).await?;
     let Some(trigger) = trigger.filter(|m| m.withdrawn_at.is_none() && m.kind == "text") else {
         skip_with!("trigger_withdrawn");
@@ -446,12 +452,18 @@ async fn prepare(
         .filter(|m| catalog.providers.contains(&m.provider))
         .cloned();
 
-    // 历史（LLM-001）：当前代际、触发消息为止、最近 N 条。
+    // 记忆（ADR 0007）：全站开关在管理后台（MEM-030）。
+    let memory_on = catalog.memory.enabled;
+    // 历史（LLM-001）：当前代际、触发消息为止、最近 N 条；记忆开着且有摘要时只取摘要之后的（MEM-001）。
     let limit = i64::try_from(state.config.max_history_messages).unwrap_or(40);
     let history = ik_messaging::interop::history(
         &mut tx,
         conversation_id,
-        session.context_from,
+        if memory_on {
+            memory::history_from(&session)
+        } else {
+            session.context_from
+        },
         trigger.created_at,
         limit,
     )
@@ -475,8 +487,6 @@ async fn prepare(
     };
     let mut messages = build_messages(&card, &history, job.ai_user_id, &names, &images);
     let mut toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
-    // 记忆（ADR 0007）：全站开关在管理后台（MEM-030）。
-    let memory_on = catalog.memory.enabled;
     if memory_on {
         toolbox = toolbox.with_memory(
             job.quota_user_id,
@@ -493,7 +503,7 @@ async fn prepare(
         let recall = memory::recall(&mut tx, &catalog.memory, &session, &history, now).await?;
         memory::annotate(&mut messages, &recall);
         follow_ups = recall.follow_ups.iter().map(|(id, _)| *id).collect();
-        if memory::needs_summary(&session, &history, state.config.max_history_messages) {
+        if memory::needs_summary(&history, state.config.max_history_messages) {
             memory_jobs::enqueue_summary(&state.jobs, &mut tx, conversation_id).await?;
         }
     }
@@ -604,6 +614,7 @@ async fn prepare(
         event_query,
         follow_ups,
         extract_delay,
+        trace: catalog.trace_enabled,
     })))
 }
 
@@ -632,7 +643,7 @@ pub async fn run_job(
         )
         .await
     {
-        memory::append_system(&mut prepared.messages, &note);
+        memory::append_turn(&mut prepared.messages, &note);
     }
 
     let conversation_id = prepared.session.conversation_id;
@@ -659,6 +670,8 @@ pub async fn run_job(
         max_chars: sanitize::DM_MAX_CHARS,
         tools: Some(ToolContext::new(state, prepared.job.quota_user_id).await?),
         toolbox: prepared.toolbox.clone(),
+        card_params: Some(prepared.card.params.clone()),
+        trace: prepared.trace,
     };
     let mut workflow = Workflow::new(attempt, prepared.card.output_mode);
     let generated = generate(
@@ -741,7 +754,7 @@ async fn finalize(
     let job_id = prepared.job.id;
     let mode = prepared.card.output_mode;
     let usage = streamed.charged;
-    let charge = quota::weighted(usage.total(), model.weight());
+    let charge = model.charge(usage);
     let answer = match streamed.end {
         End::Finished => sanitize::sanitize(&streamed.content, mode, sanitize::DM_MAX_CHARS),
         _ => String::new(),
@@ -836,6 +849,16 @@ async fn finalize(
         },
     )
     .await?;
+    crate::generate::record_run(
+        &mut tx,
+        job_id,
+        attempt,
+        &model.key,
+        &streamed,
+        reason.as_deref().unwrap_or(status),
+        now,
+    )
+    .await?;
     // 这次提了的待跟进记为已问起（MEM-056），之后不再反复问。
     if matches!(outcome, RunOutcome::Completed) && !prepared.follow_ups.is_empty() {
         repo::mark_followed_up(&mut tx, &prepared.follow_ups, now).await?;
@@ -900,6 +923,7 @@ mod tests {
             suggested_questions: Vec::new(),
             story_tools: false,
             mcp_server_ids: Vec::new(),
+            params: crate::catalog::CardParams::default(),
         }
     }
 
@@ -955,7 +979,7 @@ mod tests {
     }
 
     #[test]
-    fn recent_ai_replies_carry_tool_digest() {
+    fn ai_replies_carry_tool_digest() {
         let at = Utc::now();
         let workflow = serde_json::json!([
             {"type": "forum.search.start", "stepId": "s1", "seq": 1, "at": "", "data": {"query": "攻略"}},

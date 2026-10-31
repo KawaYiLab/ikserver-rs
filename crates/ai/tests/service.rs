@@ -336,6 +336,7 @@ fn request() -> ChatRequest {
         model: "m".into(),
         messages: vec![ChatMessage::system("s"), ChatMessage::user("hi")],
         tools: Vec::new(),
+        params: ik_ai::llm::GenParams::default(),
     }
 }
 
@@ -376,6 +377,7 @@ async fn streams_reasoning_content_tool_calls_and_usage() {
             StreamEvent::Usage(ik_ai::llm::Usage {
                 prompt_tokens: 120,
                 completion_tokens: 30,
+                cached_tokens: 0,
             }),
         ]
     );
@@ -397,7 +399,9 @@ async fn upstream_errors_are_classified() {
     )
     .await;
     let error = provider(base).stream(&request()).await.err().unwrap();
-    assert!(matches!(error, LlmError::Upstream(_)), "{error:?}");
+    // 4xx 是请求本身的问题，不在轮内重发（GEN-025）。
+    assert!(matches!(error, LlmError::Rejected(_)), "{error:?}");
+    assert!(!error.is_retryable());
 
     // 200 的流里以错误对象结束。
     let base = stub(

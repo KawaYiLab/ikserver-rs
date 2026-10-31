@@ -1,10 +1,12 @@
 //! AI 记忆（ADR 0007，ai-assistant.md 第 13 节 MEM）。
 //!
-//! 进 system prompt 末尾的几段（人格、日期等稳定的前缀不变，不破坏上游前缀缓存）：
+//! 不常变的几段追加到 system prompt 末尾（人格、日期等更稳定的在前）：
 //! - **长期记忆**（MEM-010～016）：用户档案（所有角色共享）与关系记忆（每个角色单独），每次都带；
+//! - **会话摘要**（MEM-001～004）：摘要之前的消息不再作为原文发送，后台滚动更新。
+//!
+//! 每次可能不同的几段附在最后一条用户消息后面（[`append_turn`]），不破坏上游前缀缓存（LLM-017）：
 //! - **久别重逢**（MEM-100）：隔了一周以上再来，让角色自然地说声好久不见；
 //! - **待跟进**（MEM-055～057）：到期的事件，在会话开场或久别重逢时让角色自然地问起；
-//! - **会话摘要**（MEM-001～004）：历史窗口装不下的更早消息压成一段摘要，后台滚动更新；
 //! - **跨会话衔接**（MEM-005）：新会话开头带上同一角色其他会话里最近的几轮；
 //! - **相关往事**（MEM-050～054）：事件记忆按与当前话题的相关度检索（关键词 + 语义向量 + 时间 + 重要度），
 //!   在事务之外、生成之前取。
@@ -267,8 +269,8 @@ fn push_list(note: &mut String, items: &[String]) {
     }
 }
 
-/// 记忆段的文本（追加到 system prompt 末尾）；什么都没有时为 None。
-pub(crate) fn note(recall: &Recall) -> Option<String> {
+/// 记忆段里不常变的部分（档案、关系、会话摘要）：追加到 system prompt 末尾。什么都没有时为 None。
+pub(crate) fn stable_note(recall: &Recall) -> Option<String> {
     let mut note = String::new();
     if !recall.profile.is_empty() || !recall.relation.is_empty() {
         note.push_str(MEMORY_NOTE);
@@ -281,6 +283,17 @@ pub(crate) fn note(recall: &Recall) -> Option<String> {
             push_list(&mut note, &recall.relation);
         }
     }
+    if let Some(summary) = &recall.summary {
+        note.push_str(SUMMARY_NOTE);
+        note.push_str(summary);
+    }
+    (!note.is_empty()).then_some(note)
+}
+
+/// 记忆段里每次可能不同的部分（久别重逢、待跟进、跨会话衔接）：附在最后一条用户消息后面
+/// （[`append_turn`]），免得它们一变就让 system prompt 和整段历史的前缀缓存失效（LLM-017）。
+pub(crate) fn turn_note(recall: &Recall) -> Option<String> {
+    let mut note = String::new();
     if let Some((days, last)) = recall.reunion {
         note.push_str(&format!(
             "\n\n【久别重逢】你们上次聊天是 {last}，已经过了 {days} 天。可以自然地说声好久不见、\
@@ -291,10 +304,6 @@ pub(crate) fn note(recall: &Recall) -> Option<String> {
         note.push_str(FOLLOW_UP_NOTE);
         let lines: Vec<String> = recall.follow_ups.iter().map(|(_, l)| l.clone()).collect();
         push_list(&mut note, &lines);
-    }
-    if let Some(summary) = &recall.summary {
-        note.push_str(SUMMARY_NOTE);
-        note.push_str(summary);
     }
     if !recall.bridge.is_empty() {
         note.push_str(BRIDGE_NOTE);
@@ -313,10 +322,44 @@ pub(crate) fn append_system(messages: &mut [ChatMessage], text: &str) {
     }
 }
 
-/// 把记忆段追加到 system prompt 末尾。
+/// 附注的头尾：说明这段不是对方说的。
+const TURN_NOTE_HEAD: &str = "\n\n【系统附注：以下是系统补充的背景资料，不是对方说的话】";
+const TURN_NOTE_TAIL: &str = "\n【附注结束】";
+
+/// 把一段背景资料附在最后一条用户消息后面（LLM-017）。已经附过的并进同一段。没有用户消息时退回
+/// system prompt。
+pub(crate) fn append_turn(messages: &mut [ChatMessage], text: &str) {
+    let body = text.trim_start_matches('\n');
+    if body.is_empty() {
+        return;
+    }
+    let last_user = messages.iter_mut().rev().find_map(|m| match m {
+        ChatMessage::User { content } => Some(content),
+        _ => None,
+    });
+    let Some(content) = last_user else {
+        append_system(messages, text);
+        return;
+    };
+    let text = &mut content.text;
+    if text.ends_with(TURN_NOTE_TAIL) && text.contains(TURN_NOTE_HEAD) {
+        text.truncate(text.len() - TURN_NOTE_TAIL.len());
+        text.push_str("\n\n");
+    } else {
+        text.push_str(TURN_NOTE_HEAD);
+        text.push('\n');
+    }
+    text.push_str(body);
+    text.push_str(TURN_NOTE_TAIL);
+}
+
+/// 把记忆段分别放进 system prompt 与最后一条用户消息。
 pub(crate) fn annotate(messages: &mut [ChatMessage], recall: &Recall) {
-    if let Some(note) = note(recall) {
+    if let Some(note) = stable_note(recall) {
         append_system(messages, &note);
+    }
+    if let Some(note) = turn_note(recall) {
+        append_turn(messages, &note);
     }
 }
 
@@ -344,9 +387,17 @@ pub(crate) async fn public_note(
     Ok(Some(note))
 }
 
+/// 外部渠道的记忆段：进 system prompt 的、附在最后一条用户消息后的、这次提起的待跟进。
+#[derive(Debug, Default)]
+pub(crate) struct ExternalNote {
+    pub stable: Option<String>,
+    pub turn: Option<String>,
+    pub follow_ups: Vec<i64>,
+}
+
 /// 外部渠道（QQ，ADR 0008）的记忆段：私下场合（`public` 为空）用全部档案与关系记忆，开场时带上到期的待跟进；
 /// 公开场合只用这里看得见的档案与关系记忆（[`visible_in`]），不带待跟进。只在记忆开着时调用。
-/// 返回记忆段与这次提起的待跟进（回复完成后标记已问起）。
+/// 待跟进在回复完成后标记已问起。
 pub(crate) async fn external_note(
     conn: &mut PgConnection,
     user_id: i64,
@@ -354,7 +405,7 @@ pub(crate) async fn external_note(
     public: Option<&str>,
     opening: bool,
     now: DateTime<Utc>,
-) -> Result<(Option<String>, Vec<i64>), Problem> {
+) -> Result<ExternalNote, Problem> {
     let mut recall = Recall::default();
     for row in repo::memories_for(conn, user_id, ai_user_id).await? {
         if !visible_in(&row, public) {
@@ -377,13 +428,17 @@ pub(crate) async fn external_note(
                 .collect();
     }
     let follow_ups = recall.follow_ups.iter().map(|(id, _)| *id).collect();
-    let mut text = note(&recall);
+    let mut stable = stable_note(&recall);
     if public.is_some()
-        && let Some(text) = text.as_mut()
+        && let Some(text) = stable.as_mut()
     {
         *text = text.replacen(MEMORY_NOTE, SCOPED_MEMORY_NOTE, 1);
     }
-    Ok((text, follow_ups))
+    Ok(ExternalNote {
+        stable,
+        turn: turn_note(&recall),
+        follow_ups,
+    })
 }
 
 /// 待跟进已问起（MEM-056），外部渠道在回复完成后调用。
@@ -398,18 +453,20 @@ pub(crate) async fn mark_followed_up(
     Ok(())
 }
 
-/// 该不该（在后台）更新会话摘要（MEM-002）：历史窗口满了，且摘要没有覆盖到窗口的前四分之一——
-/// 再来四分之一个窗口的消息，最早的那些就要掉出窗口了，提前压进摘要，不留空档。
-pub(crate) fn needs_summary(session: &SessionRow, history: &[HistoryItem], limit: usize) -> bool {
-    if limit == 0 || history.len() < limit {
-        return false;
+/// 私信历史从哪里取起（MEM-001）：有当前代际的摘要时，只取摘要之后的原文。窗口的起点在两次摘要之间
+/// 不动，请求的前缀就不变（LLM-017）。
+pub(crate) fn history_from(session: &SessionRow) -> Option<DateTime<Utc>> {
+    match (session.current_summary(), session.context_from) {
+        (Some((_, until)), Some(from)) => Some(until.max(from)),
+        (Some((_, until)), None) => Some(until),
+        (None, from) => from,
     }
-    let Some(probe) = history.get(limit / 4) else {
-        return false;
-    };
-    session
-        .current_summary()
-        .is_none_or(|(_, until)| until < probe.created_at)
+}
+
+/// 该不该（在后台）更新会话摘要（MEM-002）：摘要之后的原文（[`history_from`]）攒到窗口的四分之三。
+/// 再攒下去最早的就要掉出窗口了，提前压进摘要，不留空档。
+pub(crate) fn needs_summary(history: &[HistoryItem], limit: usize) -> bool {
+    limit > 0 && history.len() >= limit - limit / 4
 }
 
 /// 检索往事用的查询：最近两条用户消息（MEM-052）。没有用户消息时为 None。
@@ -529,7 +586,7 @@ async fn embed(state: &AiState, inputs: &[String]) -> Option<(String, Vec<Vec<f3
     }
 }
 
-/// 取相关往事（MEM-052）：在事务之外、生成之前调用。返回要追加到 system prompt 的一段；
+/// 取相关往事（MEM-052）：在事务之外、生成之前调用。返回要附在最后一条用户消息后的一段（[`append_turn`]）；
 /// 没有相关的、或出错时为 None（不影响回复）。
 /// `public` 是公开场合的键（ADR 0008）：只在来源就是这个场合的事件里找。
 pub(crate) async fn recall_events(
@@ -1218,7 +1275,8 @@ mod tests {
 
     #[test]
     fn note_lists_sections_in_order() {
-        assert_eq!(note(&Recall::default()), None);
+        assert_eq!(stable_note(&Recall::default()), None);
+        assert_eq!(turn_note(&Recall::default()), None);
         let recall = Recall {
             profile: vec!["对方叫阿哲".into()],
             relation: vec!["你们约好周五一起打空洞".into()],
@@ -1227,30 +1285,42 @@ mod tests {
             summary: Some("之前聊了新角色的配队。".into()),
             bridge: vec![(false, "我明天考试".into()), (true, "加油！".into())],
         };
-        let text = note(&recall).unwrap();
-        let order = [
-            "【记忆】",
-            "关于对方：\n- 对方叫阿哲",
-            "你们之间：\n- 你们约好周五一起打空洞",
-            "【久别重逢】你们上次聊天是 2026-10-13，已经过了 12 天。",
-            "【待跟进】",
-            "\n- 2026-10-26 对方考试",
-            "【更早的对话摘要】",
-            "之前聊了新角色的配队。",
-            "【最近在另一个对话里】",
-            "\n对方：我明天考试\n你：加油！",
-        ];
-        let mut at = 0;
-        for part in order {
-            let found = text[at..]
-                .find(part)
-                .unwrap_or_else(|| panic!("缺少或顺序不对：{part}"));
-            at += found + part.len();
-        }
+        let in_order = |text: &str, order: &[&str]| {
+            let mut at = 0;
+            for part in order {
+                let found = text[at..]
+                    .find(part)
+                    .unwrap_or_else(|| panic!("缺少或顺序不对：{part}"));
+                at += found + part.len();
+            }
+        };
+        let stable = stable_note(&recall).unwrap();
+        in_order(
+            &stable,
+            &[
+                "【记忆】",
+                "关于对方：\n- 对方叫阿哲",
+                "你们之间：\n- 你们约好周五一起打空洞",
+                "【更早的对话摘要】",
+                "之前聊了新角色的配队。",
+            ],
+        );
         // 分清人（MEM-025）：说明「对方」是谁，别的名字不是马甲。
-        assert!(text.contains("不是对方的马甲"), "{text}");
+        assert!(stable.contains("不是对方的马甲"), "{stable}");
+        let turn = turn_note(&recall).unwrap();
+        in_order(
+            &turn,
+            &[
+                "【久别重逢】你们上次聊天是 2026-10-13，已经过了 12 天。",
+                "【待跟进】",
+                "\n- 2026-10-26 对方考试",
+                "【最近在另一个对话里】",
+                "\n对方：我明天考试\n你：加油！",
+            ],
+        );
+        assert!(!stable.contains("【久别重逢】") && !turn.contains("【记忆】"));
         // 只有摘要时没有记忆段的说明。
-        let only_summary = note(&Recall {
+        let only_summary = stable_note(&Recall {
             summary: Some("摘要".into()),
             ..Recall::default()
         })
@@ -1259,22 +1329,41 @@ mod tests {
     }
 
     #[test]
+    fn turn_notes_go_after_the_last_user_message() {
+        let mut messages = vec![
+            ChatMessage::system("人格"),
+            ChatMessage::user("早"),
+            ChatMessage::assistant("早呀"),
+            ChatMessage::user("阿哲 说：在吗"),
+        ];
+        append_turn(&mut messages, "\n\n【久别重逢】好久不见");
+        append_turn(&mut messages, "\n\n【相关往事】考试");
+        assert_eq!(messages[0].text(), "人格");
+        assert_eq!(messages[1].text(), "早");
+        let last = messages[3].text();
+        assert!(last.starts_with("阿哲 说：在吗\n\n【系统附注"), "{last}");
+        assert_eq!(last.matches("【系统附注").count(), 1, "{last}");
+        assert!(last.ends_with("【相关往事】考试\n【附注结束】"), "{last}");
+        assert!(last.contains("好久不见\n\n【相关往事】"), "{last}");
+        // 没有用户消息时退回 system prompt。
+        let mut only_system = vec![ChatMessage::system("人格")];
+        append_turn(&mut only_system, "\n\n【相关往事】考试");
+        assert_eq!(only_system[0].text(), "人格\n\n【相关往事】考试");
+    }
+
+    #[test]
     fn summary_is_refreshed_before_messages_fall_out_of_the_window() {
         let items = history(40);
-        // 窗口没满：不用摘要。
-        assert!(!needs_summary(&session(None, 0, 0), &items[..39], 40));
-        // 窗口满了、还没有摘要：要。
-        assert!(needs_summary(&session(None, 0, 0), &items, 40));
-        // 摘要覆盖到窗口的前四分之一之后：暂时不用。
+        // 摘要之后的原文还没攒到窗口的四分之三：不用摘要。
+        assert!(!needs_summary(&items[..29], 40));
+        assert!(needs_summary(&items[..30], 40));
+        assert!(!needs_summary(&items, 0));
+        // 历史从当前代际的摘要之后取起；旧代际的摘要不算。
         let covered = session(Some(("摘要", items[20].created_at)), 0, 0);
-        assert!(!needs_summary(&covered, &items, 40));
-        // 只覆盖到窗口最前面：要。
-        let behind = session(Some(("摘要", items[2].created_at)), 0, 0);
-        assert!(needs_summary(&behind, &items, 40));
-        // 旧代际的摘要不算。
+        assert_eq!(history_from(&covered), Some(items[20].created_at));
         let stale = session(Some(("摘要", items[20].created_at)), 1, 0);
-        assert!(needs_summary(&stale, &items, 40));
         assert_eq!(stale.current_summary(), None);
+        assert_eq!(history_from(&stale), stale.context_from);
     }
 
     #[test]

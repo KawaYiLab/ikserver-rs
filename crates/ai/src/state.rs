@@ -43,6 +43,8 @@ pub struct AiState {
     pub story: Option<StoryState>,
     /// 站外 MCP 服务的客户端（连接池、会话、熔断）。
     pub mcp: McpClient,
+    /// 停止信号（GEN-011）：服务启动时打开监听。
+    pub stops: crate::stops::StopSignals,
 }
 
 /// 论坛工具读取的各域：都以游客身份调用它们的 service，只读公开内容（TOOL-001/008）。
@@ -86,6 +88,7 @@ impl Forum {
 impl AiState {
     /// 数据库、ID、事件总线、媒体与私信共用。
     pub fn new(messaging: MessagingState, forum: Forum, config: Ai, providers: Providers) -> Self {
+        let stops = crate::stops::StopSignals::new(messaging.db.clone());
         Self {
             catalog: CatalogCache::new(messaging.db.clone(), providers.clone()),
             popular: PopularCache::new(messaging.db.clone()),
@@ -101,6 +104,7 @@ impl AiState {
             config: Arc::new(config),
             story: None,
             mcp: McpClient::default(),
+            stops,
         }
     }
 

@@ -149,7 +149,7 @@ pub struct ToolOutput {
 }
 
 impl ToolOutput {
-    fn error(text: impl Into<String>) -> Self {
+    pub(crate) fn error(text: impl Into<String>) -> Self {
         Self {
             is_error: true,
             ..Self::text(text)
@@ -331,6 +331,41 @@ fn truncate(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
+/// 截断工具结果，并告诉模型后面还有多少（TOOL-015）：免得它把半截结果当成全部。
+pub(crate) fn truncate_marked(text: &str, max: usize) -> String {
+    let total = text.chars().count();
+    if total <= max {
+        return text.to_owned();
+    }
+    let mut out = truncate(text, max);
+    out.push_str(&format!(
+        "\n…（结果过长，已截断，后面还有约 {} 字）",
+        total - max
+    ));
+    out
+}
+
+/// 严格解析工具参数（TOOL-014）：空串当作没有参数；被转义成字符串的对象也接受；其余不是 JSON 对象的
+/// 返回给模型的错误说明。
+pub(crate) fn strict_args(raw: &str) -> Result<serde_json::Map<String, Value>, String> {
+    if raw.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+    let value = serde_json::from_str::<Value>(raw)
+        .ok()
+        .map(|value| match value {
+            Value::String(inner) => serde_json::from_str(&inner).unwrap_or(Value::Null),
+            other => other,
+        });
+    match value {
+        Some(Value::Object(map)) => Ok(map),
+        _ => Err(format!(
+            "参数不是合法的 JSON 对象，没有执行。收到的是：{}",
+            truncate(raw, 200)
+        )),
+    }
+}
+
 fn collapse(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
@@ -428,7 +463,7 @@ pub async fn execute(
     };
     match result {
         Ok(mut output) => {
-            output.text = truncate(&output.text, MAX_RESULT_CHARS);
+            output.text = truncate_marked(&output.text, MAX_RESULT_CHARS);
             output
         }
         Err(problem) => {
@@ -1161,6 +1196,24 @@ async fn posts_by_category(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_args_reject_broken_json_but_accept_empty_and_escaped() {
+        assert!(strict_args("").unwrap().is_empty());
+        assert_eq!(strict_args(r#"{"q":"a"}"#).unwrap()["q"], "a");
+        assert_eq!(strict_args(r#""{\"q\":\"a\"}""#).unwrap()["q"], "a");
+        let error = strict_args(r#"{"q":"a"#).unwrap_err();
+        assert!(error.contains("没有执行"));
+        assert!(strict_args("[1]").is_err());
+    }
+
+    #[test]
+    fn truncation_tells_how_much_is_left() {
+        assert_eq!(truncate_marked("短", 10), "短");
+        let text = truncate_marked(&"字".repeat(15), 10);
+        assert!(text.starts_with(&"字".repeat(10)));
+        assert!(text.ends_with("后面还有约 5 字）"));
+    }
 
     #[test]
     fn specs_match_the_whitelist() {

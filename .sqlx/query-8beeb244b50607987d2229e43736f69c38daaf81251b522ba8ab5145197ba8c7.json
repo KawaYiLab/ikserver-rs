@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_jobs SET cached_tokens = cached_tokens + $2, first_delta_ms = $3, elapsed_ms = $4,\n             tool_rounds = tool_rounds + $5, tool_calls = tool_calls + $6, retries = retries + $7\n         WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int4",
+        "Int4",
+        "Int2",
+        "Int2",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8beeb244b50607987d2229e43736f69c38daaf81251b522ba8ab5145197ba8c7"
+}

@@ -109,6 +109,9 @@ pub struct SettingsInput {
     pub daily_tokens_per_user: i64,
     /// 全站每日加权 token，0 不限制。
     pub daily_tokens: i64,
+    /// 保存调用记录（OBS-002）：发给模型的请求与回复保留 7 天，只有管理员能看。默认关。
+    #[serde(default)]
+    pub trace_enabled: bool,
 }
 
 /// 管理后台维护的上游提供方（OpenAI 兼容接口）。按 `name` 新增或更新。
@@ -153,6 +156,9 @@ pub struct ModelInput {
     pub is_default: bool,
     #[serde(default)]
     pub sort_order: i32,
+    /// 生成参数（LLM-016），不填的项用默认值。
+    #[serde(default)]
+    pub params: crate::catalog::ModelParams,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -198,6 +204,9 @@ pub struct CharacterInput {
     /// 启用的站外 MCP 服务（服务名）。
     #[serde(default)]
     pub mcp_servers: Vec<String>,
+    /// 覆盖模型的采样参数（LLM-016）。
+    #[serde(default)]
+    pub params: crate::catalog::CardParams,
 }
 
 fn one() -> f64 {

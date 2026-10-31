@@ -10,7 +10,7 @@ use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 
-use crate::llm::{ChatProvider, OpenAiCompatible, Providers};
+use crate::llm::{ChatProvider, GenParams, OpenAiCompatible, Providers};
 use crate::quota::{self, Limits};
 use crate::repo;
 
@@ -31,12 +31,85 @@ pub struct Model {
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
+    /// 生成参数（LLM-016）。
+    pub params: ModelParams,
 }
 
 impl Model {
     pub fn weight(&self) -> f64 {
         quota::sane_weight(self.cost_weight)
     }
+
+    /// 一次用量的计费额度：命中缓存的输入按折扣算，再乘模型倍率（QUOTA-001、LLM-017）。
+    pub fn charge(&self, usage: crate::llm::Usage) -> i64 {
+        quota::weighted(
+            quota::billable_tokens(usage, self.cached_weight()),
+            self.weight(),
+        )
+    }
+
+    /// 上下文窗口（token，LLM-018）。
+    pub fn context_tokens(&self) -> i64 {
+        i64::from(self.params.context_tokens.unwrap_or(DEFAULT_CONTEXT_TOKENS))
+    }
+
+    /// 命中缓存的输入按原价的几成计入额度（LLM-017）。
+    pub fn cached_weight(&self) -> f64 {
+        self.params
+            .cached_weight
+            .filter(|w| w.is_finite() && (0.0..=1.0).contains(w))
+            .unwrap_or(DEFAULT_CACHED_WEIGHT)
+    }
+
+    /// 发给上游的采样参数：角色卡填了的覆盖模型的（LLM-016）。
+    pub fn gen_params(&self, card: Option<&CardParams>) -> GenParams {
+        GenParams {
+            temperature: card.and_then(|c| c.temperature).or(self.params.temperature),
+            top_p: card.and_then(|c| c.top_p).or(self.params.top_p),
+            max_tokens: self.params.max_output_tokens,
+            extra: self.params.extra_body.clone(),
+        }
+    }
+}
+
+/// 没填上下文窗口时按这么多 token 算（主流对话模型都不小于它）。
+pub const DEFAULT_CONTEXT_TOKENS: u32 = 65_536;
+/// 没填时命中缓存的输入按原价的两成计入额度（各家缓存价大多是原价的一到两成多，取偏高的）。
+pub const DEFAULT_CACHED_WEIGHT: f64 = 0.2;
+
+/// 模型的生成参数（LLM-016，`ai_models.params`）。不填的项用上游默认值或内置默认值。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct ModelParams {
+    /// 0～2。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    /// (0, 1]。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
+    /// 单次请求的输出上限（`max_tokens`）。不填由上游决定。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    /// 上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 65536。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u32>,
+    /// 命中缓存的输入按原价的几成计入额度，0～1（LLM-017）。不填按 0.2。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_weight: Option<f64>,
+    /// 原样合进请求体的上游扩展字段，例如思考开关 `{"enable_thinking": false}`。
+    #[serde(skip_serializing_if = "serde_json::Map::is_empty")]
+    #[schema(value_type = Object)]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
+}
+
+/// 角色卡覆盖模型的采样参数（`ai_role_cards.params`）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct CardParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f64>,
 }
 
 /// 输出模式（AI-007）。
@@ -97,6 +170,8 @@ pub struct RoleCard {
     pub story_tools: bool,
     /// 启用的站外 MCP 服务。
     pub mcp_server_ids: Vec<i64>,
+    /// 覆盖模型的采样参数。
+    pub params: CardParams,
 }
 
 impl RoleCard {
@@ -142,6 +217,8 @@ pub struct Catalog {
     pub mcp_servers: Vec<Arc<McpServer>>,
     /// AI 记忆的全站设置（ADR 0007，管理后台「AI 记忆」页）。
     pub memory: MemoryConfig,
+    /// 保存调用记录（OBS-002）。
+    pub trace_enabled: bool,
 }
 
 /// AI 记忆的全站设置（MEM-030）。没有配置行时按默认值。
@@ -281,7 +358,9 @@ impl CatalogCache {
 async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
     let mut conn = db.acquire().await?;
     // 配置行不存在时按默认值（AI-002）。
-    let limits = repo::settings(&mut conn).await?.map_or(
+    let settings = repo::settings(&mut conn).await?;
+    let trace_enabled = settings.as_ref().is_some_and(|row| row.trace_enabled);
+    let limits = settings.map_or(
         Limits {
             global_enabled: true,
             per_user: 1_000_000,
@@ -323,6 +402,8 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
             enabled: row.enabled,
             is_default: row.is_default,
             sort_order: row.sort_order,
+            // 坏数据按没填处理，不阻塞生成。
+            params: serde_json::from_value(row.params).unwrap_or_default(),
         })
         .collect();
     let cards = repo::cards(&mut conn)
@@ -354,6 +435,7 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
                 .collect(),
             story_tools: row.story_tools,
             mcp_server_ids: row.mcp_server_ids,
+            params: serde_json::from_value(row.params).unwrap_or_default(),
         })
         .collect();
     let mcp_servers = load_mcp(&mut conn).await?;
@@ -374,6 +456,7 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
         cards,
         mcp_servers,
         memory,
+        trace_enabled,
     })
 }
 
@@ -450,6 +533,7 @@ pub(crate) mod tests {
             enabled,
             is_default,
             sort_order: 0,
+            params: ModelParams::default(),
         }
     }
 
@@ -475,6 +559,7 @@ pub(crate) mod tests {
             suggested_questions: Vec::new(),
             story_tools: false,
             mcp_server_ids: Vec::new(),
+            params: CardParams::default(),
         }
     }
 
@@ -490,6 +575,7 @@ pub(crate) mod tests {
             cards: Vec::new(),
             mcp_servers: Vec::new(),
             memory: MemoryConfig::default(),
+            trace_enabled: false,
         }
     }
 

@@ -256,6 +256,47 @@
         ]
       }
     },
+    "/v1/admin/ai/jobs/{id}/trace": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "任务的调用记录（后台开了才有，保留 7 天，OBS-002）",
+        "operationId": "get_job_trace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AdminJobTrace"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/ai/mcp-servers": {
       "get": {
         "tags": [
@@ -13132,6 +13173,31 @@
         }
       }
     },
+    "/v1/sitemap.xml": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "站点地图",
+        "description": "公开帖子（已发布、未隐藏）、有公开帖子的作者主页（未隐藏、未注销）和有足够公开帖子的标签（未屏蔽）。\n各自按最近更新倒序。",
+        "operationId": "sitemap",
+        "responses": {
+          "200": {
+            "description": "sitemaps.org 格式",
+            "content": {
+              "application/xml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "没有配置 IK_SITE_URL"
+          }
+        }
+      }
+    },
     "/v1/story/mcp": {
       "post": {
         "tags": [
@@ -14276,7 +14342,8 @@
           "allowedModelKeys",
           "suggestedQuestions",
           "storyTools",
-          "mcpServers"
+          "mcpServers",
+          "params"
         ],
         "properties": {
           "allowedModelKeys": {
@@ -14331,6 +14398,10 @@
           },
           "outputMode": {
             "$ref": "#/components/schemas/OutputMode"
+          },
+          "params": {
+            "$ref": "#/components/schemas/CardParams",
+            "description": "覆盖模型的采样参数（LLM-016）。"
           },
           "qqEnabled": {
             "type": "boolean"
@@ -14618,6 +14689,11 @@
           "attempts",
           "promptTokens",
           "completionTokens",
+          "cachedTokens",
+          "toolRounds",
+          "toolCalls",
+          "retries",
+          "hasTrace",
           "createdAt",
           "updatedAt"
         ],
@@ -14628,6 +14704,11 @@
           "attempts": {
             "type": "integer",
             "format": "int32"
+          },
+          "cachedTokens": {
+            "type": "integer",
+            "format": "int64",
+            "description": "命中缓存的输入 token（OBS-001）。"
           },
           "completionTokens": {
             "type": "integer",
@@ -14642,6 +14723,25 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "elapsedMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "firstDeltaMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "首字延迟、生成耗时（最后一次尝试）。"
+          },
+          "hasTrace": {
+            "type": "boolean",
+            "description": "有调用记录（OBS-002）。"
           },
           "id": {
             "type": "string"
@@ -14672,8 +14772,21 @@
             ],
             "description": "失败、跳过的原因（TRIG-036）。"
           },
+          "retries": {
+            "type": "integer",
+            "format": "int32",
+            "description": "轮内重发次数（GEN-025）。"
+          },
           "status": {
             "type": "string"
+          },
+          "toolCalls": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "toolRounds": {
+            "type": "integer",
+            "format": "int32"
           },
           "updatedAt": {
             "type": "string",
@@ -14681,6 +14794,41 @@
           },
           "userId": {
             "type": "string"
+          }
+        }
+      },
+      "AdminJobTrace": {
+        "type": "object",
+        "description": "一次尝试的调用记录（OBS-002）。",
+        "required": [
+          "attempt",
+          "modelKey",
+          "request",
+          "reply",
+          "outcome",
+          "createdAt"
+        ],
+        "properties": {
+          "attempt": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "modelKey": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "reply": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object",
+            "description": "最后一轮发给上游的请求体。"
           }
         }
       },
@@ -14971,6 +15119,7 @@
           "enabled",
           "isDefault",
           "sortOrder",
+          "params",
           "providerConfigured"
         ],
         "properties": {
@@ -14998,6 +15147,10 @@
           },
           "key": {
             "type": "string"
+          },
+          "params": {
+            "$ref": "#/components/schemas/ModelParams",
+            "description": "生成参数（LLM-016）。"
           },
           "provider": {
             "type": "string"
@@ -15266,7 +15419,8 @@
           "dailyTokensPerUser",
           "dailyTokens",
           "providers",
-          "storyAvailable"
+          "storyAvailable",
+          "traceEnabled"
         ],
         "properties": {
           "dailyTokens": {
@@ -15292,6 +15446,10 @@
           "storyAvailable": {
             "type": "boolean",
             "description": "剧情库已加载语料：角色卡开了剧情库工具时才真正提供（ADR 0004）。"
+          },
+          "traceEnabled": {
+            "type": "boolean",
+            "description": "存调用记录（OBS-002）。"
           }
         }
       },
@@ -16398,6 +16556,29 @@
           }
         }
       },
+      "CardParams": {
+        "type": "object",
+        "description": "角色卡覆盖模型的采样参数（`ai_role_cards.params`）。",
+        "properties": {
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "default": null
+          },
+          "topP": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "default": null
+          }
+        },
+        "additionalProperties": false
+      },
       "CardVideo": {
         "type": "object",
         "description": "卡片上的视频摘要。",
@@ -16709,6 +16890,10 @@
           },
           "outputMode": {
             "$ref": "#/components/schemas/OutputMode"
+          },
+          "params": {
+            "$ref": "#/components/schemas/CardParams",
+            "description": "覆盖模型的采样参数（LLM-016）。"
           },
           "qqEnabled": {
             "type": "boolean",
@@ -19455,6 +19640,10 @@
           "key": {
             "type": "string"
           },
+          "params": {
+            "$ref": "#/components/schemas/ModelParams",
+            "description": "生成参数（LLM-016），不填的项用默认值。"
+          },
           "provider": {
             "type": "string",
             "description": "提供方名字：管理后台「提供方」里的，或部署配置里的（`IK_AI__PROVIDERS__<名字>__…`）。"
@@ -19487,6 +19676,64 @@
             }
           }
         }
+      },
+      "ModelParams": {
+        "type": "object",
+        "description": "模型的生成参数（LLM-016，`ai_models.params`）。不填的项用上游默认值或内置默认值。",
+        "properties": {
+          "cachedWeight": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "命中缓存的输入按原价的几成计入额度，0～1（LLM-017）。不填按 0.2。",
+            "default": null
+          },
+          "contextTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 65536。",
+            "default": null,
+            "minimum": 0
+          },
+          "extraBody": {
+            "type": "object",
+            "description": "原样合进请求体的上游扩展字段，例如思考开关 `{\"enable_thinking\": false}`。"
+          },
+          "maxOutputTokens": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "单次请求的输出上限（`max_tokens`）。不填由上游决定。",
+            "default": null,
+            "minimum": 0
+          },
+          "temperature": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "0～2。",
+            "default": null
+          },
+          "topP": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "(0, 1]。",
+            "default": null
+          }
+        },
+        "additionalProperties": false
       },
       "ModelView": {
         "type": "object",
@@ -21173,6 +21420,11 @@
                 "attempts",
                 "promptTokens",
                 "completionTokens",
+                "cachedTokens",
+                "toolRounds",
+                "toolCalls",
+                "retries",
+                "hasTrace",
                 "createdAt",
                 "updatedAt"
               ],
@@ -21183,6 +21435,11 @@
                 "attempts": {
                   "type": "integer",
                   "format": "int32"
+                },
+                "cachedTokens": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "命中缓存的输入 token（OBS-001）。"
                 },
                 "completionTokens": {
                   "type": "integer",
@@ -21197,6 +21454,25 @@
                 "createdAt": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "elapsedMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32"
+                },
+                "firstDeltaMs": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32",
+                  "description": "首字延迟、生成耗时（最后一次尝试）。"
+                },
+                "hasTrace": {
+                  "type": "boolean",
+                  "description": "有调用记录（OBS-002）。"
                 },
                 "id": {
                   "type": "string"
@@ -21227,8 +21503,21 @@
                   ],
                   "description": "失败、跳过的原因（TRIG-036）。"
                 },
+                "retries": {
+                  "type": "integer",
+                  "format": "int32",
+                  "description": "轮内重发次数（GEN-025）。"
+                },
                 "status": {
                   "type": "string"
+                },
+                "toolCalls": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "toolRounds": {
+                  "type": "integer",
+                  "format": "int32"
                 },
                 "updatedAt": {
                   "type": "string",
@@ -25653,6 +25942,10 @@
           },
           "globalEnabled": {
             "type": "boolean"
+          },
+          "traceEnabled": {
+            "type": "boolean",
+            "description": "保存调用记录（OBS-002）：发给模型的请求与回复保留 7 天，只有管理员能看。默认关。"
           }
         },
         "additionalProperties": false

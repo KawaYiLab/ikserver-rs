@@ -9,12 +9,14 @@ pub(crate) struct SettingsRow {
     pub global_enabled: bool,
     pub daily_tokens_per_user: i64,
     pub daily_tokens: i64,
+    pub trace_enabled: bool,
 }
 
 pub(crate) async fn settings(conn: &mut PgConnection) -> sqlx::Result<Option<SettingsRow>> {
     sqlx::query_as!(
         SettingsRow,
-        "SELECT global_enabled, daily_tokens_per_user, daily_tokens FROM ai_settings WHERE id = 1"
+        "SELECT global_enabled, daily_tokens_per_user, daily_tokens, trace_enabled
+         FROM ai_settings WHERE id = 1"
     )
     .fetch_optional(conn)
     .await
@@ -25,17 +27,20 @@ pub(crate) async fn upsert_settings(
     global_enabled: bool,
     daily_tokens_per_user: i64,
     daily_tokens: i64,
+    trace_enabled: bool,
     now: DateTime<Utc>,
 ) -> sqlx::Result<()> {
     sqlx::query!(
-        "INSERT INTO ai_settings (id, global_enabled, daily_tokens_per_user, daily_tokens, updated_at)
-         VALUES (1, $1, $2, $3, $4)
+        "INSERT INTO ai_settings (id, global_enabled, daily_tokens_per_user, daily_tokens, updated_at,
+                                  trace_enabled)
+         VALUES (1, $1, $2, $3, $4, $5)
          ON CONFLICT (id) DO UPDATE SET global_enabled = $1, daily_tokens_per_user = $2,
-             daily_tokens = $3, updated_at = $4",
+             daily_tokens = $3, updated_at = $4, trace_enabled = $5",
         global_enabled,
         daily_tokens_per_user,
         daily_tokens,
         now,
+        trace_enabled,
     )
     .execute(conn)
     .await?;
@@ -135,13 +140,14 @@ pub(crate) struct ModelRow {
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
+    pub params: serde_json::Value,
 }
 
 pub(crate) async fn models(conn: &mut PgConnection) -> sqlx::Result<Vec<ModelRow>> {
     sqlx::query_as!(
         ModelRow,
         "SELECT id, key, display_name, description, badge, provider, provider_model, cost_weight,
-                vision, enabled, is_default, sort_order
+                vision, enabled, is_default, sort_order, params
          FROM ai_models ORDER BY sort_order, id"
     )
     .fetch_all(conn)
@@ -161,6 +167,7 @@ pub(crate) struct NewModel<'a> {
     pub enabled: bool,
     pub is_default: bool,
     pub sort_order: i32,
+    pub params: &'a serde_json::Value,
     pub now: DateTime<Utc>,
 }
 
@@ -169,11 +176,11 @@ pub(crate) async fn upsert_model(conn: &mut PgConnection, m: &NewModel<'_>) -> s
     sqlx::query_scalar!(
         "INSERT INTO ai_models (id, key, display_name, description, badge, provider, provider_model,
                                 cost_weight, enabled, is_default, sort_order, created_at, updated_at,
-                                vision)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13)
+                                vision, params)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12, $13, $14)
          ON CONFLICT (key) DO UPDATE SET display_name = $3, description = $4, badge = $5,
              provider = $6, provider_model = $7, cost_weight = $8, enabled = $9,
-             is_default = $10, sort_order = $11, updated_at = $12, vision = $13
+             is_default = $10, sort_order = $11, updated_at = $12, vision = $13, params = $14
          RETURNING id",
         m.id,
         m.key,
@@ -188,6 +195,7 @@ pub(crate) async fn upsert_model(conn: &mut PgConnection, m: &NewModel<'_>) -> s
         m.sort_order,
         m.now,
         m.vision,
+        m.params,
     )
     .fetch_one(conn)
     .await
@@ -222,6 +230,7 @@ pub(crate) struct CardRow {
     pub suggested_questions: Vec<String>,
     pub story_tools: bool,
     pub mcp_server_ids: Vec<i64>,
+    pub params: serde_json::Value,
 }
 
 pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>> {
@@ -229,7 +238,8 @@ pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>>
         CardRow,
         "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,
                 dm_enabled, comment_enabled, qq_enabled, sort_order, output_mode, system_prompt, examples,
-                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids
+                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids,
+                params
          FROM ai_role_cards ORDER BY sort_order, id"
     )
     .fetch_all(conn)
@@ -257,6 +267,7 @@ pub(crate) struct NewCard<'a> {
     pub suggested_questions: &'a [String],
     pub story_tools: bool,
     pub mcp_server_ids: &'a [i64],
+    pub params: &'a serde_json::Value,
     pub now: DateTime<Utc>,
 }
 
@@ -267,15 +278,15 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
                                     enabled, knock_visible, dm_enabled, comment_enabled, sort_order,
                                     output_mode, system_prompt, examples, default_model_id,
                                     allowed_model_ids, suggested_questions, story_tools,
-                                    mcp_server_ids, created_at, updated_at, qq_enabled)
+                                    mcp_server_ids, created_at, updated_at, qq_enabled, params)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $19,
-                 $20, $18, $18, $21)
+                 $20, $18, $18, $21, $22)
          ON CONFLICT (slug) DO UPDATE SET display_name = $3, bio = $4, avatar_media_id = $5,
              bound_user_id = $6, enabled = $7, knock_visible = $8, dm_enabled = $9,
              comment_enabled = $10, sort_order = $11, output_mode = $12, system_prompt = $13,
              examples = $14, default_model_id = $15, allowed_model_ids = $16,
              suggested_questions = $17, story_tools = $19, mcp_server_ids = $20, updated_at = $18,
-             qq_enabled = $21
+             qq_enabled = $21, params = $22
          RETURNING id",
         c.id,
         c.slug,
@@ -298,6 +309,7 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
         c.story_tools,
         c.mcp_server_ids,
         c.qq_enabled,
+        c.params,
     )
     .fetch_one(conn)
     .await
@@ -758,6 +770,123 @@ pub(crate) async fn record_outcome(
     Ok(())
 }
 
+/// 一次尝试的运行指标（OBS-001）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct JobMetrics {
+    pub cached_tokens: i64,
+    pub first_delta_ms: Option<i32>,
+    pub elapsed_ms: i32,
+    pub tool_rounds: i16,
+    pub tool_calls: i16,
+    pub retries: i16,
+}
+
+/// 记一次尝试的指标：缓存命中、调用次数与重试逐次累加，延迟与耗时记最后一次。
+pub(crate) async fn record_metrics(
+    conn: &mut PgConnection,
+    id: i64,
+    m: &JobMetrics,
+) -> sqlx::Result<()> {
+    sqlx::query!(
+        "UPDATE ai_jobs SET cached_tokens = cached_tokens + $2, first_delta_ms = $3, elapsed_ms = $4,
+             tool_rounds = tool_rounds + $5, tool_calls = tool_calls + $6, retries = retries + $7
+         WHERE id = $1",
+        id,
+        m.cached_tokens,
+        m.first_delta_ms,
+        m.elapsed_ms,
+        m.tool_rounds,
+        m.tool_calls,
+        m.retries,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) struct NewTrace<'a> {
+    pub job_id: i64,
+    pub attempt: i16,
+    pub model_key: &'a str,
+    pub request: &'a serde_json::Value,
+    pub reply: &'a str,
+    pub outcome: &'a str,
+    pub now: DateTime<Utc>,
+}
+
+/// 存一次尝试的调用记录（OBS-002）。同一次尝试重复写时覆盖。
+pub(crate) async fn insert_trace(conn: &mut PgConnection, t: &NewTrace<'_>) -> sqlx::Result<()> {
+    sqlx::query!(
+        "INSERT INTO ai_job_traces (job_id, attempt, model_key, request, reply, outcome, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (job_id, attempt) DO UPDATE
+         SET model_key = EXCLUDED.model_key, request = EXCLUDED.request, reply = EXCLUDED.reply,
+             outcome = EXCLUDED.outcome, created_at = EXCLUDED.created_at",
+        t.job_id,
+        t.attempt,
+        t.model_key,
+        t.request,
+        t.reply,
+        t.outcome,
+        t.now,
+    )
+    .execute(conn)
+    .await?;
+    Ok(())
+}
+
+pub(crate) struct TraceRow {
+    pub attempt: i16,
+    pub model_key: String,
+    pub request: serde_json::Value,
+    pub reply: String,
+    pub outcome: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub(crate) async fn traces(conn: &mut PgConnection, job_id: i64) -> sqlx::Result<Vec<TraceRow>> {
+    sqlx::query_as!(
+        TraceRow,
+        "SELECT attempt, model_key, request, reply, outcome, created_at
+         FROM ai_job_traces WHERE job_id = $1 ORDER BY attempt",
+        job_id,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 删掉过期的调用记录（OBS-002：保留 7 天）。
+pub(crate) async fn prune_traces(
+    conn: &mut PgConnection,
+    before: DateTime<Utc>,
+) -> sqlx::Result<u64> {
+    Ok(
+        sqlx::query!("DELETE FROM ai_job_traces WHERE created_at < $1", before)
+            .execute(conn)
+            .await?
+            .rows_affected(),
+    )
+}
+
+/// 同一会话里有没有更新的消息触发的回复任务（连发合并，GEN-027）。只看普通消息触发的（`dm:`），
+/// 重新生成不参与合并。
+pub(crate) async fn superseded(conn: &mut PgConnection, id: i64) -> sqlx::Result<bool> {
+    sqlx::query_scalar!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM ai_jobs me
+               JOIN ai_jobs n ON n.conversation_id = me.conversation_id
+                             AND n.ai_user_id = me.ai_user_id
+                             AND n.generation_epoch = me.generation_epoch
+                             AND n.trigger_message_id > me.trigger_message_id
+               WHERE me.id = $1 AND me.execution_key LIKE 'dm:%' AND n.execution_key LIKE 'dm:%'
+                 AND n.status IN ('queued', 'processing', 'completed')
+           ) AS "superseded!""#,
+        id,
+    )
+    .fetch_one(conn)
+    .await
+}
+
 pub(crate) async fn stop_requested(
     conn: &mut PgConnection,
     id: i64,
@@ -881,6 +1010,13 @@ pub(crate) struct AdminJobRow {
     pub model_key: Option<String>,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    pub cached_tokens: i64,
+    pub first_delta_ms: Option<i32>,
+    pub elapsed_ms: Option<i32>,
+    pub tool_rounds: i16,
+    pub tool_calls: i16,
+    pub retries: i16,
+    pub has_trace: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -905,12 +1041,15 @@ pub(crate) async fn list_jobs(
 ) -> sqlx::Result<Vec<AdminJobRow>> {
     sqlx::query_as!(
         AdminJobRow,
-        "SELECT id, kind, status, reason, quota_user_id, ai_user_id, conversation_id, post_id,
-                attempts, model_key, prompt_tokens, completion_tokens, created_at, updated_at
+        r#"SELECT id, kind, status, reason, quota_user_id, ai_user_id, conversation_id, post_id,
+                attempts, model_key, prompt_tokens, completion_tokens, cached_tokens, first_delta_ms,
+                elapsed_ms, tool_rounds, tool_calls, retries,
+                EXISTS (SELECT 1 FROM ai_job_traces t WHERE t.job_id = ai_jobs.id) AS "has_trace!",
+                created_at, updated_at
          FROM ai_jobs
          WHERE ($1::text IS NULL OR status = $1) AND ($2::text IS NULL OR kind = $2)
          ORDER BY updated_at DESC, id DESC
-         LIMIT $3 OFFSET $4",
+         LIMIT $3 OFFSET $4"#,
         f.status,
         f.kind,
         limit,

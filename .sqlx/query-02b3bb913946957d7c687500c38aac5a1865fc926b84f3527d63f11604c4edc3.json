@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT attempt, model_key, request, reply, outcome FROM ai_job_traces WHERE job_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "attempt",
+        "type_info": "Int2",
+        "origin": {
+          "Table": {
+            "table": "ai_job_traces",
+            "name": "attempt"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "model_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_job_traces",
+            "name": "model_key"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "request",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "ai_job_traces",
+            "name": "request"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "reply",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_job_traces",
+            "name": "reply"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_job_traces",
+            "name": "outcome"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "02b3bb913946957d7c687500c38aac5a1865fc926b84f3527d63f11604c4edc3"
+}

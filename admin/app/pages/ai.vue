@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download, Plus, RefreshCw, X } from '@lucide/vue'
+import { Download, FileText, Plus, RefreshCw, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,7 +46,7 @@ async function loadConfig() {
   ])
   settings.value = s
   providers.value = p
-  settingsForm.value = { globalEnabled: s.globalEnabled, dailyTokens: s.dailyTokens, dailyTokensPerUser: s.dailyTokensPerUser }
+  settingsForm.value = { globalEnabled: s.globalEnabled, dailyTokens: s.dailyTokens, dailyTokensPerUser: s.dailyTokensPerUser, traceEnabled: s.traceEnabled }
   models.value = m
   characters.value = c
   mcpServers.value = x
@@ -73,7 +73,7 @@ function refresh() {
 }
 
 // ---------- 全局设置 ----------
-const settingsForm = ref<Schemas['SettingsInput']>({ globalEnabled: false, dailyTokens: 0, dailyTokensPerUser: 0 })
+const settingsForm = ref<Schemas['SettingsInput']>({ globalEnabled: false, dailyTokens: 0, dailyTokensPerUser: 0, traceEnabled: false })
 
 async function saveSettings() {
   const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/settings', { body: settingsForm.value })), '设置已保存')
@@ -182,9 +182,57 @@ async function testProvider(name: string, quiet = false) {
 const providerSourceLabel: Record<Schemas['ProviderSource'], string> = { admin: '后台', config: '部署配置' }
 
 // ---------- 模型 ----------
-interface ModelDraft extends Required<Omit<Schemas['ModelInput'], 'badge'>> {
+/** 数字参数在表单里是字符串：留空 = 不填。 */
+interface ParamsDraft {
+  temperature: string
+  topP: string
+  maxOutputTokens: string
+  contextTokens: string
+  cachedWeight: string
+  extraBody: string
+}
+
+interface ModelDraft extends Required<Omit<Schemas['ModelInput'], 'badge' | 'params'>> {
   badge: string
+  params: ParamsDraft
   isNew: boolean
+}
+
+const text = (value?: number | null) => (value == null ? '' : String(value))
+// type="number" 的输入框会把值转成数字，空串保持空串。
+const numberOrNull = (value: string | number) => (String(value).trim() === '' ? null : Number(value))
+
+function paramsDraft(params?: Schemas['ModelParams']): ParamsDraft {
+  return {
+    temperature: text(params?.temperature),
+    topP: text(params?.topP),
+    maxOutputTokens: text(params?.maxOutputTokens),
+    contextTokens: text(params?.contextTokens),
+    cachedWeight: text(params?.cachedWeight),
+    extraBody: params?.extraBody && Object.keys(params.extraBody).length ? JSON.stringify(params.extraBody, null, 2) : '',
+  }
+}
+
+/** 附加参数不是 JSON 对象时返回 null。 */
+function modelParams(d: ParamsDraft): Schemas['ModelParams'] | null {
+  let extraBody: unknown = {}
+  if (d.extraBody.trim()) {
+    try {
+      extraBody = JSON.parse(d.extraBody)
+    }
+    catch {
+      return null
+    }
+    if (typeof extraBody !== 'object' || extraBody === null || Array.isArray(extraBody)) return null
+  }
+  return {
+    temperature: numberOrNull(d.temperature),
+    topP: numberOrNull(d.topP),
+    maxOutputTokens: numberOrNull(d.maxOutputTokens),
+    contextTokens: numberOrNull(d.contextTokens),
+    cachedWeight: numberOrNull(d.cachedWeight),
+    extraBody: extraBody as Schemas['ModelParams']['extraBody'],
+  }
 }
 
 const modelDraft = ref<ModelDraft | null>(null)
@@ -205,6 +253,7 @@ function editModel(model?: Model) {
         enabled: model.enabled,
         isDefault: model.isDefault,
         sortOrder: model.sortOrder,
+        params: paramsDraft(model.params),
         isNew: false,
       }
     : {
@@ -219,6 +268,7 @@ function editModel(model?: Model) {
         enabled: true,
         isDefault: false,
         sortOrder: (models.value?.length ?? 0) * 10,
+        params: paramsDraft(),
         isNew: true,
       }
 }
@@ -226,10 +276,15 @@ function editModel(model?: Model) {
 async function saveModel() {
   const draft = modelDraft.value
   if (!draft) return
-  const { isNew: _isNew, badge, ...rest } = draft
+  const { isNew: _isNew, badge, params: paramsText, ...rest } = draft
+  const params = modelParams(paramsText)
+  if (!params) {
+    failure(new Error('附加请求参数要是 JSON 对象，例如 {"enable_thinking": false}'))
+    return
+  }
   const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/models/{key}', {
     params: { path: { key: draft.key } },
-    body: { ...rest, badge: badge.trim() || null },
+    body: { ...rest, badge: badge.trim() || null, params },
   })), '模型已保存')
   if (saved) {
     modelDraft.value = null
@@ -272,6 +327,8 @@ interface CharacterDraft {
   suggestedQuestions: string
   storyTools: boolean
   mcpServers: string[]
+  temperature: string
+  topP: string
 }
 
 const characterDraft = ref<CharacterDraft | null>(null)
@@ -304,6 +361,8 @@ function editCharacter(character?: Character) {
         suggestedQuestions: character.suggestedQuestions.join('\n'),
         storyTools: character.storyTools,
         mcpServers: [...character.mcpServers],
+        temperature: text(character.params.temperature),
+        topP: text(character.params.topP),
       }
     : {
         isNew: true,
@@ -327,6 +386,8 @@ function editCharacter(character?: Character) {
         suggestedQuestions: '',
         storyTools: false,
         mcpServers: [],
+        temperature: '',
+        topP: '',
       }
 }
 
@@ -369,6 +430,7 @@ async function saveCharacter() {
     suggestedQuestions: d.suggestedQuestions.split('\n').map(q => q.trim()).filter(Boolean),
     storyTools: d.storyTools,
     mcpServers: d.mcpServers,
+    params: { temperature: numberOrNull(d.temperature), topP: numberOrNull(d.topP) },
   }
   const saved = await run(() => unwrap(api.PUT('/v1/admin/ai/characters/{slug}', {
     params: { path: { slug: d.slug } },
@@ -570,6 +632,32 @@ const jobList = useListQuery({
 })
 const jobs = jobList.result
 const jobFilters = jobList.filters
+
+const ms = (value?: number | null) => (value == null ? '—' : value < 1000 ? `${value} ms` : `${(value / 1000).toFixed(1)} s`)
+
+const trace = ref<{ job: Schemas['AdminJob'], items: Schemas['AdminJobTrace'][] } | null>(null)
+
+async function openTrace(job: Schemas['AdminJob']) {
+  const items = await run(() => unwrap(api.GET('/v1/admin/ai/jobs/{id}/trace', { params: { path: { id: job.id } } })))
+  if (items) trace.value = { job, items }
+}
+
+/** 请求里的消息：角色 + 正文（工具调用写成一行）。 */
+function traceMessages(request: unknown) {
+  const messages = (request as { messages?: Record<string, unknown>[] })?.messages ?? []
+  return messages.map((m) => {
+    const content = m.content
+    const body = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map(part => (part as { text?: string }).text ?? '[图片]').join('\n')
+        : ''
+    const calls = (m.tool_calls as { function?: { name?: string, arguments?: string } }[] | undefined)
+      ?.map(c => `→ ${c.function?.name}(${c.function?.arguments ?? ''})`)
+      .join('\n')
+    return { role: String(m.role ?? ''), text: [body, calls].filter(Boolean).join('\n') }
+  })
+}
 </script>
 
 <template>
@@ -618,6 +706,13 @@ const jobFilters = jobList.filters
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">全站每日加权 token</span>
               <Input v-model.number="settingsForm.dailyTokens" type="number" min="0" />
+            </label>
+            <label class="flex items-center justify-between gap-4 text-sm">
+              <span>
+                保存调用记录
+                <span class="block text-xs text-muted-foreground">在「任务」里查看发给模型的内容，只留 7 天。会存下私聊原文，排查完记得关。</span>
+              </span>
+              <Switch v-model="settingsForm.traceEnabled" />
             </label>
             <div class="text-sm text-muted-foreground">
               可用的提供方：
@@ -909,8 +1004,10 @@ const jobFilters = jobList.filters
                 <TableHead>状态</TableHead>
                 <TableHead class="hidden md:table-cell">模型</TableHead>
                 <TableHead class="hidden md:table-cell text-right">token（入 / 出）</TableHead>
+                <TableHead class="hidden lg:table-cell text-right">首字 / 总耗时</TableHead>
                 <TableHead class="hidden lg:table-cell">用户 / AI 账号</TableHead>
                 <TableHead>原因</TableHead>
+                <TableHead class="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -925,12 +1022,28 @@ const jobFilters = jobList.filters
                   <span v-if="job.attempts > 1" class="ml-1 text-xs text-muted-foreground">第 {{ job.attempts }} 次</span>
                 </TableCell>
                 <TableCell class="hidden md:table-cell font-mono text-xs">{{ job.modelKey ?? '—' }}</TableCell>
-                <TableCell class="hidden md:table-cell text-right tabular-nums">{{ formatNumber(job.promptTokens) }} / {{ formatNumber(job.completionTokens) }}</TableCell>
+                <TableCell class="hidden md:table-cell text-right tabular-nums">
+                  {{ formatNumber(job.promptTokens) }} / {{ formatNumber(job.completionTokens) }}
+                  <span v-if="job.cachedTokens" class="block text-xs text-muted-foreground">缓存 {{ formatNumber(job.cachedTokens) }}</span>
+                </TableCell>
+                <TableCell class="hidden lg:table-cell text-right tabular-nums">
+                  {{ ms(job.firstDeltaMs) }} / {{ ms(job.elapsedMs) }}
+                  <span v-if="job.toolCalls || job.retries" class="block text-xs text-muted-foreground">
+                    <template v-if="job.toolCalls">工具 {{ job.toolCalls }} 次</template>
+                    <template v-if="job.toolCalls && job.retries">，</template>
+                    <template v-if="job.retries">重发 {{ job.retries }} 次</template>
+                  </span>
+                </TableCell>
                 <TableCell class="hidden lg:table-cell font-mono text-xs">{{ job.userId }} → {{ job.aiUserId }}</TableCell>
                 <TableCell class="max-w-xs truncate text-xs text-muted-foreground" :title="job.reason ?? ''">{{ job.reason ?? '' }}</TableCell>
+                <TableCell>
+                  <Button v-if="job.hasTrace" size="icon" variant="ghost" aria-label="调用记录" @click="openTrace(job)">
+                    <FileText class="size-4" />
+                  </Button>
+                </TableCell>
               </TableRow>
               <AdminListState
-                :colspan="7" :loading="jobList.loading.value" :failed="jobList.failed.value" :filtered="jobList.active.value"
+                :colspan="9" :loading="jobList.loading.value" :failed="jobList.failed.value" :filtered="jobList.active.value"
                 :empty="!jobs?.items.length" empty-text="还没有 AI 任务"
                 @retry="jobList.refresh" @reset="jobList.reset"
               />
@@ -1066,6 +1179,35 @@ const jobFilters = jobList.filters
             设为默认模型（同时取消其他模型的默认）
             <Switch v-model="modelDraft.isDefault" />
           </label>
+          <div class="space-y-2">
+            <Label>生成参数（留空用默认）</Label>
+            <div class="grid gap-4 sm:grid-cols-3">
+              <label class="grid gap-2">
+                <span class="text-sm leading-none font-medium">温度</span>
+                <Input v-model="modelDraft.params.temperature" type="number" min="0" max="2" step="0.1" placeholder="上游默认" />
+              </label>
+              <label class="grid gap-2">
+                <span class="text-sm leading-none font-medium">top_p</span>
+                <Input v-model="modelDraft.params.topP" type="number" min="0" max="1" step="0.05" placeholder="上游默认" />
+              </label>
+              <label class="grid gap-2">
+                <span class="text-sm leading-none font-medium">单次最多输出 token</span>
+                <Input v-model="modelDraft.params.maxOutputTokens" type="number" min="16" placeholder="上游默认" />
+              </label>
+              <label class="grid gap-2">
+                <span class="text-sm leading-none font-medium">上下文长度 token</span>
+                <Input v-model="modelDraft.params.contextTokens" type="number" min="4096" placeholder="65536" />
+              </label>
+              <label class="grid gap-2">
+                <span class="text-sm leading-none font-medium">缓存命中按几成计</span>
+                <Input v-model="modelDraft.params.cachedWeight" type="number" min="0" max="1" step="0.05" placeholder="0.2" />
+              </label>
+            </div>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">附加请求参数（JSON）</span>
+              <Textarea v-model="modelDraft.params.extraBody" rows="2" class="font-mono text-xs" placeholder='{"enable_thinking": false}' />
+            </label>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="modelDraft = null">取消</Button>
@@ -1193,6 +1335,14 @@ const jobFilters = jobList.filters
               <span class="text-sm leading-none font-medium">排序</span>
               <Input v-model.number="characterDraft.sortOrder" type="number" />
             </label>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">温度</span>
+              <Input v-model="characterDraft.temperature" type="number" min="0" max="2" step="0.1" placeholder="跟随模型" />
+            </label>
+            <label class="grid gap-2">
+              <span class="text-sm leading-none font-medium">top_p</span>
+              <Input v-model="characterDraft.topP" type="number" min="0" max="1" step="0.05" placeholder="跟随模型" />
+            </label>
           </div>
           <div class="space-y-2">
             <Label>可选模型（都不勾 = 全部启用的模型）</Label>
@@ -1253,6 +1403,35 @@ const jobFilters = jobList.filters
         <DialogFooter>
           <Button variant="outline" @click="characterDraft = null">取消</Button>
           <Button :disabled="!characterDraft.slug.trim() || !characterDraft.username.trim()" @click="saveCharacter">保存</Button>
+        </DialogFooter>
+      </DialogScrollContent>
+    </Dialog>
+
+    <!-- 调用记录 -->
+    <Dialog :open="!!trace" @update:open="(v) => { if (!v) trace = null }">
+      <DialogScrollContent v-if="trace" class="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>调用记录 · {{ jobKindLabel[trace.job.kind] ?? trace.job.kind }} {{ formatTime(trace.job.updatedAt) }}</DialogTitle>
+        </DialogHeader>
+        <div v-for="item in trace.items" :key="item.attempt" class="space-y-3">
+          <div class="flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant="outline">第 {{ item.attempt }} 次</Badge>
+            <span class="font-mono text-xs">{{ item.modelKey }}</span>
+            <span class="text-xs text-muted-foreground">{{ item.outcome }} · {{ formatTime(item.createdAt) }}</span>
+          </div>
+          <div class="space-y-2">
+            <div v-for="(m, index) in traceMessages(item.request)" :key="index" class="rounded-md border p-2">
+              <div class="mb-1 text-xs font-medium text-muted-foreground">{{ m.role }}</div>
+              <pre class="text-xs whitespace-pre-wrap break-words">{{ m.text }}</pre>
+            </div>
+            <div class="rounded-md border border-primary/40 p-2">
+              <div class="mb-1 text-xs font-medium text-muted-foreground">回复</div>
+              <pre class="text-xs whitespace-pre-wrap break-words">{{ item.reply || '（空）' }}</pre>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="trace = null">关闭</Button>
         </DialogFooter>
       </DialogScrollContent>
     </Dialog>

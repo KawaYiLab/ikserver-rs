@@ -319,6 +319,9 @@ struct Prepared {
     toolbox: Toolbox,
     /// 帖子标题 + 正文（沉浸守卫判定防诈骗帖用）。
     post_text: String,
+    card_params: crate::catalog::CardParams,
+    /// 写调用记录（OBS-002）。
+    trace: bool,
 }
 
 enum Prepare {
@@ -564,6 +567,8 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
         messages,
         toolbox,
         post_text: format!("{}\n{}", post_context.title, post_context.body),
+        card_params: card.params.clone(),
+        trace: catalog.trace_enabled,
         job,
     })))
 }
@@ -589,6 +594,8 @@ pub async fn run_job(
         max_chars: sanitize::COMMENT_MAX_CHARS,
         tools: Some(crate::tools::ToolContext::new(state, prepared.job.quota_user_id).await?),
         toolbox: prepared.toolbox.clone(),
+        card_params: Some(prepared.card_params.clone()),
+        trace: prepared.trace,
     };
     let mut workflow = crate::workflow::Workflow::disabled();
     let generated = generate::generate(
@@ -636,7 +643,7 @@ async fn finalize(
 ) -> Result<RunOutcome, Problem> {
     let job_id = prepared.job.id;
     let usage = streamed.charged;
-    let charge = quota::weighted(usage.total(), model.weight());
+    let charge = model.charge(usage);
     let text = match streamed.end {
         // 只用最后一轮：前几轮多是调用工具前的过程话。
         End::Finished => finished_reply(&streamed.final_text, &prepared.post_text, job_id),
@@ -715,6 +722,16 @@ async fn finalize(
             completion_tokens: usage.completion_tokens,
             now,
         },
+    )
+    .await?;
+    generate::record_run(
+        &mut tx,
+        job_id,
+        attempt,
+        &model.key,
+        &streamed,
+        reason.as_deref().unwrap_or(status),
+        now,
     )
     .await?;
     tx.commit().await?;

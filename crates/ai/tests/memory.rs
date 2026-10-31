@@ -119,6 +119,16 @@ fn system_of(request: &ChatRequest) -> &str {
     content
 }
 
+/// 最后一条用户消息：每次可能不同的记忆段附在这里（LLM-017）。
+fn turn_of(request: &ChatRequest) -> &str {
+    request
+        .messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m, ChatMessage::User { .. }))
+        .map_or("", ChatMessage::text)
+}
+
 fn code<T: std::fmt::Debug>(result: Result<T, ik_kernel::Problem>) -> (u16, String) {
     let problem = result.unwrap_err();
     (problem.status().as_u16(), problem.code().to_owned())
@@ -336,15 +346,19 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
         system.contains("你们之间：\n- 对方明天考试，你给他打了气"),
         "{system}"
     );
+    // 衔接每次可能不同，附在最后一条用户消息后面，不进 system prompt。
+    let turn = turn_of(&request);
     assert!(
-        system.contains("【最近在另一个对话里】")
-            && system.contains("\n对方：我叫阿哲，住在上海，明天要考试\n你：加油阿哲！"),
-        "{system}"
+        turn.contains("【最近在另一个对话里】")
+            && turn.contains("\n对方：我叫阿哲，住在上海，明天要考试\n你：加油阿哲！"),
+        "{turn}"
     );
+    assert!(!system.contains("【最近在另一个对话里】"), "{system}");
     // 历史轮次只有本会话的。
-    assert_eq!(
-        &request.messages[1..],
-        &[ChatMessage::user("user100 说：考完了！")]
+    assert_eq!(request.messages.len(), 2);
+    assert!(
+        turn.starts_with("user100 说：考完了！\n\n【系统附注"),
+        "{turn}"
     );
 
     // 另一个角色：共享档案，但看不到与 Fairy 的关系记忆，也不带 Fairy 会话里的衔接。
@@ -353,7 +367,7 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
     let system = system_of(&request);
     assert!(system.contains("对方叫阿哲"), "{system}");
     assert!(!system.contains("你们之间"), "{system}");
-    assert!(!system.contains("【最近在另一个对话里】"), "{system}");
+    assert!(!turn_of(&request).contains("【最近在另一个对话里】"));
 
     // 置顶的不会被自动整理删掉或改写；冲突的说法用 update 改那一条。
     let items = h.items().await;
@@ -418,11 +432,11 @@ async fn rolling_summary_covers_what_falls_out_of_the_window(db: PgPool) {
     .await;
     let conversation = h.session("fairy").await;
     h.turn(conversation, "我们聊聊配队", "好呀").await;
-    h.turn(conversation, "主C 用谁", "推荐艾莲").await;
     assert_eq!(h.queued(format!("ai-summary:{conversation}")).await, 0);
-    // 第三句时窗口满了（4 条）：排一个摘要任务（MEM-002）。
-    h.turn(conversation, "辅助呢", "莱卡恩不错").await;
+    // 第二句时原文攒到窗口的四分之三（3 条）：排一个摘要任务（MEM-002）。
+    h.turn(conversation, "主C 用谁", "推荐艾莲").await;
     assert_eq!(h.queued(format!("ai-summary:{conversation}")).await, 1);
+    h.turn(conversation, "辅助呢", "莱卡恩不错").await;
 
     h.fake
         .push(vec![content("对方在问配队，你推荐了艾莲当主C。")]);
@@ -448,8 +462,19 @@ async fn rolling_summary_covers_what_falls_out_of_the_window(db: PgPool) {
             && system.contains("对方在问配队，你推荐了艾莲当主C。"),
         "{system}"
     );
-    // 窗口里仍是最近 4 条原文。
-    assert_eq!(request.messages.len(), 5);
+    // 摘要之前的不再作为原文发送：只有摘要之后的 2 条与这一句。
+    let texts: Vec<&str> = request.messages[1..]
+        .iter()
+        .map(ChatMessage::text)
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            "user100 说：辅助呢",
+            "莱卡恩不错",
+            "user100 说：那就这么定了"
+        ]
+    );
 
     // 重置后旧摘要不再使用（MEM-001）。
     sessions::reset(&h.state, &h.me, conversation)
@@ -808,10 +833,10 @@ async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgP
     // 新会话开场：到期的待跟进让角色主动问起（MEM-055）。
     let second = h.session("fairy").await;
     let request = h.turn(second, "在吗", "在呀，科目二考得怎么样？").await;
-    let system = system_of(&request);
+    let turn = turn_of(&request);
     assert!(
-        system.contains("【待跟进】") && system.contains(&format!("- {today} 对方考驾照科目二")),
-        "{system}"
+        turn.contains("【待跟进】") && turn.contains(&format!("- {today} 对方考驾照科目二")),
+        "{turn}"
     );
     // 回复完成后记为已问起（MEM-056），之后不再提。
     let exam = h
@@ -826,12 +851,13 @@ async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgP
     let request = h
         .turn(second, "团子又生病了，不吃饭", "带它去看看医生吧")
         .await;
-    let system = system_of(&request);
-    assert!(!system.contains("【待跟进】"), "{system}");
+    let turn = turn_of(&request);
+    assert!(!turn.contains("【待跟进】"), "{turn}");
     assert!(
-        system.contains("【相关往事】") && system.contains("对方的猫团子生病了"),
-        "{system}"
+        turn.contains("【相关往事】") && turn.contains("对方的猫团子生病了"),
+        "{turn}"
     );
+    assert!(!system_of(&request).contains("【相关往事】"));
     assert_eq!(
         h.fake.embedded().last().map(String::as_str),
         Some("在吗 团子又生病了，不吃饭")
@@ -840,8 +866,8 @@ async fn events_come_back_by_topic_and_due_follow_ups_open_the_next_chat(db: PgP
     // 另一个角色看不到与 Fairy 的事件。
     let other = h.session("other").await;
     let request = h.turn(other, "团子生病了", "抱抱").await;
-    assert!(!system_of(&request).contains("【相关往事】"));
-    assert!(!system_of(&request).contains("【待跟进】"));
+    assert!(!turn_of(&request).contains("【相关往事】"));
+    assert!(!turn_of(&request).contains("【待跟进】"));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -949,14 +975,19 @@ async fn coming_back_after_a_week_is_a_reunion(db: PgPool) {
     .unwrap();
     let second = h.session("fairy").await;
     let request = h.turn(second, "我回来啦", "好久不见！").await;
-    let system = system_of(&request);
+    let turn = turn_of(&request);
     assert!(
-        system.contains("【久别重逢】") && system.contains("已经过了 10 天"),
-        "{system}"
+        turn.contains("【久别重逢】") && turn.contains("已经过了 10 天"),
+        "{turn}"
     );
-    // 接着聊就不再提。
+    // 接着聊就不再提；上一句的附注也不留在历史里。
     let request = h.turn(second, "最近好忙", "辛苦了").await;
-    assert!(!system_of(&request).contains("【久别重逢】"));
+    assert!(
+        request
+            .messages
+            .iter()
+            .all(|m| !m.text().contains("【久别重逢】"))
+    );
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

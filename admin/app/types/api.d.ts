@@ -90,6 +90,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/ai/jobs/{id}/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 任务的调用记录（后台开了才有，保留 7 天，OBS-002） */
+        get: operations["get_job_trace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/ai/mcp-servers": {
         parameters: {
             query?: never;
@@ -3808,6 +3825,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/sitemap.xml": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 站点地图
+         * @description 公开帖子（已发布、未隐藏）、有公开帖子的作者主页（未隐藏、未注销）和有足够公开帖子的标签（未屏蔽）。
+         *     各自按最近更新倒序。
+         */
+        get: operations["sitemap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/story/mcp": {
         parameters: {
             query?: never;
@@ -4128,6 +4166,8 @@ export interface components {
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers: string[];
             outputMode: components["schemas"]["OutputMode"];
+            /** @description 覆盖模型的采样参数（LLM-016）。 */
+            params: components["schemas"]["CardParams"];
             qqEnabled: boolean;
             slug: string;
             /** Format: int32 */
@@ -4202,11 +4242,25 @@ export interface components {
             aiUserId: string;
             /** Format: int32 */
             attempts: number;
+            /**
+             * Format: int64
+             * @description 命中缓存的输入 token（OBS-001）。
+             */
+            cachedTokens: number;
             /** Format: int64 */
             completionTokens: number;
             conversationId?: string | null;
             /** Format: date-time */
             createdAt: string;
+            /** Format: int32 */
+            elapsedMs?: number | null;
+            /**
+             * Format: int32
+             * @description 首字延迟、生成耗时（最后一次尝试）。
+             */
+            firstDeltaMs?: number | null;
+            /** @description 有调用记录（OBS-002）。 */
+            hasTrace: boolean;
             id: string;
             kind: string;
             modelKey?: string | null;
@@ -4215,10 +4269,31 @@ export interface components {
             promptTokens: number;
             /** @description 失败、跳过的原因（TRIG-036）。 */
             reason?: string | null;
+            /**
+             * Format: int32
+             * @description 轮内重发次数（GEN-025）。
+             */
+            retries: number;
             status: string;
+            /** Format: int32 */
+            toolCalls: number;
+            /** Format: int32 */
+            toolRounds: number;
             /** Format: date-time */
             updatedAt: string;
             userId: string;
+        };
+        /** @description 一次尝试的调用记录（OBS-002）。 */
+        AdminJobTrace: {
+            /** Format: int32 */
+            attempt: number;
+            /** Format: date-time */
+            createdAt: string;
+            modelKey: string;
+            outcome: string;
+            reply: string;
+            /** @description 最后一轮发给上游的请求体。 */
+            request: Record<string, never>;
         };
         AdminMcpServer: {
             /** @description 鉴权头的提示：名字加值的末尾几位（如 `Authorization: …a1b2`），没有时为 null。值本身不回传。 */
@@ -4330,6 +4405,8 @@ export interface components {
             enabled: boolean;
             isDefault: boolean;
             key: string;
+            /** @description 生成参数（LLM-016）。 */
+            params: components["schemas"]["ModelParams"];
             provider: string;
             /** @description `provider` 可用（部署配置里有，或后台里有且启用）。 */
             providerConfigured: boolean;
@@ -4420,6 +4497,8 @@ export interface components {
             providers: string[];
             /** @description 剧情库已加载语料：角色卡开了剧情库工具时才真正提供（ADR 0004）。 */
             storyAvailable: boolean;
+            /** @description 存调用记录（OBS-002）。 */
+            traceEnabled: boolean;
         };
         AdminTag: {
             /** Format: date-time */
@@ -4806,6 +4885,19 @@ export interface components {
             items: components["schemas"]["CardView"][];
             nextCursor?: string | null;
         };
+        /** @description 角色卡覆盖模型的采样参数（`ai_role_cards.params`）。 */
+        CardParams: {
+            /**
+             * Format: double
+             * @default null
+             */
+            temperature: number | null;
+            /**
+             * Format: double
+             * @default null
+             */
+            topP: number | null;
+        };
         /** @description 卡片上的视频摘要。 */
         CardVideo: {
             /** @description B 站图床地址，加载时用 `referrerpolicy="no-referrer"`。 */
@@ -4902,6 +4994,8 @@ export interface components {
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers?: string[];
             outputMode?: components["schemas"]["OutputMode"];
+            /** @description 覆盖模型的采样参数（LLM-016）。 */
+            params?: components["schemas"]["CardParams"];
             /** @description 允许在 QQ 渠道使用此角色，默认关闭（ADR 0008）。 */
             qqEnabled?: boolean;
             slug: string;
@@ -5937,6 +6031,8 @@ export interface components {
             enabled?: boolean;
             isDefault?: boolean;
             key: string;
+            /** @description 生成参数（LLM-016），不填的项用默认值。 */
+            params?: components["schemas"]["ModelParams"];
             /** @description 提供方名字：管理后台「提供方」里的，或部署配置里的（`IK_AI__PROVIDERS__<名字>__…`）。 */
             provider: string;
             /** @description 上游的模型名。 */
@@ -5948,6 +6044,41 @@ export interface components {
         };
         ModelList: {
             items: components["schemas"]["ModelView"][];
+        };
+        /** @description 模型的生成参数（LLM-016，`ai_models.params`）。不填的项用上游默认值或内置默认值。 */
+        ModelParams: {
+            /**
+             * Format: double
+             * @description 命中缓存的输入按原价的几成计入额度，0～1（LLM-017）。不填按 0.2。
+             * @default null
+             */
+            cachedWeight: number | null;
+            /**
+             * Format: int32
+             * @description 上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 65536。
+             * @default null
+             */
+            contextTokens: number | null;
+            /** @description 原样合进请求体的上游扩展字段，例如思考开关 `{"enable_thinking": false}`。 */
+            extraBody?: Record<string, never>;
+            /**
+             * Format: int32
+             * @description 单次请求的输出上限（`max_tokens`）。不填由上游决定。
+             * @default null
+             */
+            maxOutputTokens: number | null;
+            /**
+             * Format: double
+             * @description 0～2。
+             * @default null
+             */
+            temperature: number | null;
+            /**
+             * Format: double
+             * @description (0, 1]。
+             * @default null
+             */
+            topP: number | null;
         };
         /** @description 可选模型（AI-022）。不含上游标识与倍率。 */
         ModelView: {
@@ -6448,11 +6579,25 @@ export interface components {
                 aiUserId: string;
                 /** Format: int32 */
                 attempts: number;
+                /**
+                 * Format: int64
+                 * @description 命中缓存的输入 token（OBS-001）。
+                 */
+                cachedTokens: number;
                 /** Format: int64 */
                 completionTokens: number;
                 conversationId?: string | null;
                 /** Format: date-time */
                 createdAt: string;
+                /** Format: int32 */
+                elapsedMs?: number | null;
+                /**
+                 * Format: int32
+                 * @description 首字延迟、生成耗时（最后一次尝试）。
+                 */
+                firstDeltaMs?: number | null;
+                /** @description 有调用记录（OBS-002）。 */
+                hasTrace: boolean;
                 id: string;
                 kind: string;
                 modelKey?: string | null;
@@ -6461,7 +6606,16 @@ export interface components {
                 promptTokens: number;
                 /** @description 失败、跳过的原因（TRIG-036）。 */
                 reason?: string | null;
+                /**
+                 * Format: int32
+                 * @description 轮内重发次数（GEN-025）。
+                 */
+                retries: number;
                 status: string;
+                /** Format: int32 */
+                toolCalls: number;
+                /** Format: int32 */
+                toolRounds: number;
                 /** Format: date-time */
                 updatedAt: string;
                 userId: string;
@@ -7912,6 +8066,8 @@ export interface components {
              */
             dailyTokensPerUser: number;
             globalEnabled: boolean;
+            /** @description 保存调用记录（OBS-002）：发给模型的请求与回复保留 7 天，只有管理员能看。默认关。 */
+            traceEnabled?: boolean;
         };
         SetupInput: {
             email: string;
@@ -8578,6 +8734,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Paged_AdminJob"];
+                };
+            };
+        };
+    };
+    get_job_trace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminJobTrace"][];
                 };
             };
         };
@@ -16956,6 +17133,33 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SiteStatus"];
                 };
+            };
+        };
+    };
+    sitemap: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description sitemaps.org 格式 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/xml": string;
+                };
+            };
+            /** @description 没有配置 IK_SITE_URL */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
