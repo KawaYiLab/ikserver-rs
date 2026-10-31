@@ -5,8 +5,8 @@
 //! - 查看者（触发者）只来自可信的执行上下文 [`ToolContext`]，绝不从参数里读（TOOL-004）；
 //! - 与查看者有拉黑关系的人的实名内容、主页不出现，匿名内容不做拉黑过滤（D-084 方案 A）；
 //! - 按用户名找人只做精确匹配（D-085 方案 A），隐藏主页的人当作查无此人（TOOL-005）；
-//! - 帖子一律写成 `[标题](/post/<id>)`（TOOL-003）；结果截 4000 字；执行出错只告诉模型
-//!   `工具执行失败：<名>`（TOOL-002）。
+//! - 帖子一律写成 `[标题](/post/<id>)`（TOOL-003）；列表与正文按 4000 字分页，结果本身不截断；
+//!   执行出错只告诉模型 `工具执行失败：<名>`（TOOL-002）。
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use crate::AiState;
 use crate::llm::ToolSpec;
 
-/// 工具结果的上限（TOOL-002、LLM-012）。
+/// 论坛工具一页的大小：列表与帖子正文按它分页，续读走 `next_offset`（TOOL-020 表）。
 pub const MAX_RESULT_CHARS: usize = 4000;
 /// 评论预览的上限（TOOL-006）。
 const COMMENT_PREVIEW_CHARS: usize = 160;
@@ -331,20 +331,6 @@ fn truncate(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-/// 截断工具结果，并告诉模型后面还有多少（TOOL-015）：免得它把半截结果当成全部。
-pub(crate) fn truncate_marked(text: &str, max: usize) -> String {
-    let total = text.chars().count();
-    if total <= max {
-        return text.to_owned();
-    }
-    let mut out = truncate(text, max);
-    out.push_str(&format!(
-        "\n…（结果过长，已截断，后面还有约 {} 字）",
-        total - max
-    ));
-    out
-}
-
 /// 严格解析工具参数（TOOL-014）：空串当作没有参数；被转义成字符串的对象也接受；其余不是 JSON 对象的
 /// 返回给模型的错误说明。
 pub(crate) fn strict_args(raw: &str) -> Result<serde_json::Map<String, Value>, String> {
@@ -462,10 +448,7 @@ pub async fn execute(
         _ => user_activity(state, ctx, &args).await,
     };
     match result {
-        Ok(mut output) => {
-            output.text = truncate_marked(&output.text, MAX_RESULT_CHARS);
-            output
-        }
+        Ok(output) => output,
         Err(problem) => {
             tracing::warn!(tool = name, ?problem, "AI 工具执行失败");
             ToolOutput {
@@ -1205,14 +1188,6 @@ mod tests {
         let error = strict_args(r#"{"q":"a"#).unwrap_err();
         assert!(error.contains("没有执行"));
         assert!(strict_args("[1]").is_err());
-    }
-
-    #[test]
-    fn truncation_tells_how_much_is_left() {
-        assert_eq!(truncate_marked("短", 10), "短");
-        let text = truncate_marked(&"字".repeat(15), 10);
-        assert!(text.starts_with(&"字".repeat(10)));
-        assert!(text.ends_with("后面还有约 5 字）"));
     }
 
     #[test]

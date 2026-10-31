@@ -14839,7 +14839,6 @@
           "displayName",
           "url",
           "timeoutMs",
-          "maxResultChars",
           "enabled",
           "sortOrder",
           "tools",
@@ -14879,10 +14878,6 @@
               "null"
             ],
             "format": "date-time"
-          },
-          "maxResultChars": {
-            "type": "integer",
-            "format": "int32"
           },
           "name": {
             "type": "string"
@@ -19285,11 +19280,6 @@
           },
           "enabled": {
             "type": "boolean"
-          },
-          "maxResultChars": {
-            "type": "integer",
-            "format": "int32",
-            "description": "结果截断上限，500–16000 字符。"
           },
           "name": {
             "type": "string",

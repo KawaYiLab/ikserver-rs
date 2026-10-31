@@ -64,7 +64,7 @@ enum Source {
 - 角色卡开关 `story_tools`（默认关）；语料未上传（`state.current()` 为 `None`）时不提供这些工具；
 - 名字保留 `ik_catalog`、`ik_search` 等原名（本身带 `ik_` 前缀，不会与论坛工具冲突）。
 
-剧情库结果截 12000 字，`ik_read` 的 `maxChars` 不超过 6000（不传按 6000），续读走结果里的 `nextCall`；
+剧情库结果截 12000 字（2026-10-31 改为不截断，见 ai-assistant.md TOOL-015），`ik_read` 的 `maxChars` 不超过 6000（不传按 6000），续读走结果里的 `nextCall`；
 `ik_read` 定义里顶层的 `anyOf` 去掉（有的上游不接受），三选一的约束写在描述里，参数错了工具自己会说明。
 
 剧情库是游戏文本，HTTP 端点默认不公开；这里只把结果交给模型，不原样下发给客户端（工作流事件本来就不带工具结果，见 7.1 节），
@@ -112,7 +112,7 @@ enum Source {
 | 查看者身份（TOOL-004） | 不注入任何用户 id、用户名、会话 id；参数只有模型生成的内容。远端拿不到「谁在问」 |
 | 超时 | 每次调用默认 15 秒（每服务可配 1–60），且不超过本次回复的总预算 `deadline` |
 | 响应大小 | 读响应体上限 1 MiB，超了按失败处理 |
-| 结果 | 只取 `content` 里的 `text` 块（图片、音频、资源链接忽略，记 `[非文本内容]`）；`isError=true` 照样回灌但标错误；截到每服务的上限（默认 4000，最高 16000，剧情库原文较长时需要放宽） |
+| 结果 | 只取 `content` 里的 `text` 块（图片、音频、资源链接忽略，记 `[非文本内容]`）；`isError=true` 照样回灌但标错误；截到每服务的上限（默认 4000，最高 16000，剧情库原文较长时需要放宽）。2026-10-31 起不截断，去掉每服务的上限，见 TOOL-015 |
 | 出错 | 网络错误、协议错误、超时一律只告诉模型 `工具执行失败：<名>`，细节进日志（TOOL-002） |
 | 熔断 | 同一服务连续失败 5 次，60 秒内不再提供它的工具；不影响论坛工具和回复本身（LLM-011） |
 | 重定向 | 不跟随 |
@@ -133,7 +133,7 @@ enum Source {
 迁移 `migrations/20261109000001_ai_mcp.sql`，说明见 `docs/schema.md`「AI 调用 MCP 工具」：
 
 - `ai_mcp_servers`：`name`（工具名前缀，`^[a-z0-9][a-z0-9_-]{0,31}$`，留出 32 字符给工具名）、`display_name`、`url`、
-  `auth_header`（整行请求头，只回提示）、`timeout_ms`（1000–60000）、`max_result_chars`（500–16000）、`enabled`、
+  `auth_header`（整行请求头，只回提示）、`timeout_ms`（1000–60000）、`max_result_chars`（500–16000，2026-10-31 已去掉）、`enabled`、
   `sort_order`、`last_listed_at` / `last_error`。
 - `ai_mcp_tools`：`remote` / `remote_digest`（最近一次拉到的定义）、`approved` / `approved_digest`（管理员确认过的定义）、
   `exposed_name`（全表唯一）、`enabled`、`timeline_text`、`missing`。定义的形状是 `{title, description, inputSchema, readOnly}`，

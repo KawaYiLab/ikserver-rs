@@ -72,8 +72,8 @@ impl Model {
     }
 }
 
-/// 没填上下文窗口时按这么多 token 算（主流对话模型都不小于它）。
-pub const DEFAULT_CONTEXT_TOKENS: u32 = 65_536;
+/// 没填上下文窗口时按这么多 token 算（站里接的模型都是 1M 上下文）。
+pub const DEFAULT_CONTEXT_TOKENS: u32 = 1_048_576;
 /// 没填时命中缓存的输入按原价的两成计入额度（各家缓存价大多是原价的一到两成多，取偏高的）。
 pub const DEFAULT_CACHED_WEIGHT: f64 = 0.2;
 
@@ -90,7 +90,7 @@ pub struct ModelParams {
     /// 单次请求的输出上限（`max_tokens`）。不填由上游决定。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
-    /// 上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 65536。
+    /// 上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 1048576（1M）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u32>,
     /// 命中缓存的输入按原价的几成计入额度，0～1（LLM-017）。不填按 0.2。
@@ -190,7 +190,6 @@ pub struct McpServer {
     pub url: String,
     pub auth_header: String,
     pub timeout: Duration,
-    pub max_result_chars: usize,
     pub tools: Vec<McpTool>,
 }
 
@@ -506,7 +505,6 @@ async fn load_mcp(conn: &mut sqlx::PgConnection) -> Result<Vec<Arc<McpServer>>, 
             url: row.url,
             auth_header: row.auth_header,
             timeout: Duration::from_millis(u64::try_from(row.timeout_ms).unwrap_or(15_000)),
-            max_result_chars: usize::try_from(row.max_result_chars).unwrap_or(4000),
             tools: server_tools,
         }));
     }

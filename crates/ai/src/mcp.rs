@@ -142,7 +142,6 @@ pub struct AdminMcpServer {
     /// 鉴权头的提示：名字加值的末尾几位（如 `Authorization: …a1b2`），没有时为 null。值本身不回传。
     pub auth_header_hint: Option<String>,
     pub timeout_ms: i32,
-    pub max_result_chars: i32,
     pub enabled: bool,
     pub sort_order: i32,
     pub last_listed_at: Option<DateTime<Utc>>,
@@ -167,9 +166,6 @@ pub struct McpServerInput {
     /// 单次调用超时，1000–60000 毫秒。
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: i32,
-    /// 结果截断上限，500–16000 字符。
-    #[serde(default = "default_max_result_chars")]
-    pub max_result_chars: i32,
     #[serde(default = "yes")]
     pub enabled: bool,
     #[serde(default)]
@@ -178,10 +174,6 @@ pub struct McpServerInput {
 
 fn default_timeout_ms() -> i32 {
     15_000
-}
-
-fn default_max_result_chars() -> i32 {
-    4_000
 }
 
 fn yes() -> bool {
@@ -293,7 +285,6 @@ fn server_view(
         display_name: row.display_name,
         url: row.url,
         timeout_ms: row.timeout_ms,
-        max_result_chars: row.max_result_chars,
         enabled: row.enabled,
         sort_order: row.sort_order,
         last_listed_at: row.last_listed_at,
@@ -394,9 +385,6 @@ fn validate_server(input: &mut McpServerInput) -> Result<(), Problem> {
     if !(1000..=60_000).contains(&input.timeout_ms) {
         return Err(field("timeoutMs", "1000–60000"));
     }
-    if !(500..=16_000).contains(&input.max_result_chars) {
-        return Err(field("maxResultChars", "500–16000"));
-    }
     Ok(())
 }
 
@@ -428,7 +416,6 @@ pub async fn save_server(
             url: &input.url,
             auth_header: input.auth_header.as_deref(),
             timeout_ms: input.timeout_ms,
-            max_result_chars: input.max_result_chars,
             enabled: input.enabled,
             sort_order: input.sort_order,
             now,
@@ -449,7 +436,6 @@ pub async fn save_server(
                 "url": input.url,
                 "enabled": input.enabled,
                 "timeoutMs": input.timeout_ms,
-                "maxResultChars": input.max_result_chars,
                 "authHeaderChanged": input.auth_header.is_some(),
             }),
         },
