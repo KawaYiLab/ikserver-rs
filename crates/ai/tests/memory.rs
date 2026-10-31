@@ -304,6 +304,11 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
     let prompt = h.fake.requests().last().unwrap().clone();
     let input = prompt.messages[1].text();
     assert!(input.contains("已有记忆：\n（无）"), "{input}");
+    // 身份锚点（MEM-025）：模型知道「对方」是哪个账号。
+    assert!(
+        input.contains(&format!("「对方」是论坛用户「user{HUMAN}」本人")),
+        "{input}"
+    );
     assert!(
         input.contains("对方：我叫阿哲，住在上海，明天要考试\n"),
         "{input}"
