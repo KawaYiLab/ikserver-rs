@@ -1192,7 +1192,7 @@ function traceMessages(request: unknown) {
               </label>
               <label class="grid gap-2">
                 <span class="text-sm leading-none font-medium">上下文长度 token</span>
-                <Input v-model="modelDraft.params.contextTokens" type="number" min="4096" placeholder="65536" />
+                <Input v-model="modelDraft.params.contextTokens" type="number" min="4096" placeholder="1048576" />
               </label>
               <label class="grid gap-2">
                 <span class="text-sm leading-none font-medium">缓存命中按几成计</span>

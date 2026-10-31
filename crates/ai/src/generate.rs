@@ -864,33 +864,18 @@ async fn run_rounds(
         }
         drop(pending);
         let mut images = Vec::new();
-        let mut results = Vec::with_capacity(outputs.len());
-        for output in outputs {
-            let Some(output) = output else {
-                results.push(String::new());
-                continue;
-            };
-            results.push(output.text);
-            images.extend(output.images);
-        }
-        // 结果不按固定字数截断，放不下时才腾地方或截短（TOOL-002、LLM-018）。
-        let fitted = context::fit_results(&mut messages, &mut results, budget, keep);
-        keep -= fitted.removed;
-        if fitted != context::Fitted::default() {
-            tracing::info!(
-                job = ctx.job_id,
-                cut = fitted.cut,
-                pruned = fitted.pruned,
-                removed = fitted.removed,
-                budget,
-                "工具结果超出上下文预算，已裁剪"
-            );
-        }
-        for (call, content) in round.tool_calls.iter().zip(results) {
+        for (call, output) in round.tool_calls.iter().zip(outputs) {
+            let output = output.unwrap_or_else(|| tools::ToolOutput {
+                text: String::new(),
+                is_error: false,
+                meta: tools::ToolMeta::None,
+                images: Vec::new(),
+            });
             messages.push(ChatMessage::Tool {
                 tool_call_id: call.id.clone(),
-                content,
+                content: output.text,
             });
+            images.extend(output.images);
         }
         // 工具消息只能是文本：识图模型的图片另起一条用户消息跟在工具结果后面（LLM-015）。
         if model.vision {

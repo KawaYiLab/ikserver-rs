@@ -5,8 +5,8 @@
 //! - 查看者（触发者）只来自可信的执行上下文 [`ToolContext`]，绝不从参数里读（TOOL-004）；
 //! - 与查看者有拉黑关系的人的实名内容、主页不出现，匿名内容不做拉黑过滤（D-084 方案 A）；
 //! - 按用户名找人只做精确匹配（D-085 方案 A），隐藏主页的人当作查无此人（TOOL-005）；
-//! - 帖子一律写成 `[标题](/post/<id>)`（TOOL-003）；列表与正文按 4000 字分页，结果本身不再截断
-//!   （放不下时由上下文预算处理，LLM-018）；执行出错只告诉模型 `工具执行失败：<名>`（TOOL-002）。
+//! - 帖子一律写成 `[标题](/post/<id>)`（TOOL-003）；列表与正文按 4000 字分页，结果本身不截断；
+//!   执行出错只告诉模型 `工具执行失败：<名>`（TOOL-002）。
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -329,20 +329,6 @@ fn id_arg(args: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<Result
 
 fn truncate(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
-}
-
-/// 截断工具结果，并告诉模型后面还有多少（TOOL-015）：免得它把半截结果当成全部。
-pub(crate) fn truncate_marked(text: &str, max: usize) -> String {
-    let total = text.chars().count();
-    if total <= max {
-        return text.to_owned();
-    }
-    let mut out = truncate(text, max);
-    out.push_str(&format!(
-        "\n…（结果太长，上下文放不下，已截断，后面还有约 {} 字；需要的话缩小范围再查）",
-        total - max
-    ));
-    out
 }
 
 /// 严格解析工具参数（TOOL-014）：空串当作没有参数；被转义成字符串的对象也接受；其余不是 JSON 对象的
@@ -1202,14 +1188,6 @@ mod tests {
         let error = strict_args(r#"{"q":"a"#).unwrap_err();
         assert!(error.contains("没有执行"));
         assert!(strict_args("[1]").is_err());
-    }
-
-    #[test]
-    fn truncation_tells_how_much_is_left() {
-        assert_eq!(truncate_marked("短", 10), "短");
-        let text = truncate_marked(&"字".repeat(15), 10);
-        assert!(text.starts_with(&"字".repeat(10)));
-        assert!(text.contains("后面还有约 5 字"));
     }
 
     #[test]
