@@ -356,10 +356,7 @@ async fn long_term_memory_and_recent_turns_follow_into_a_new_session(db: PgPool)
     assert!(!system.contains("【最近在另一个对话里】"), "{system}");
     // 历史轮次只有本会话的。
     assert_eq!(request.messages.len(), 2);
-    assert!(
-        turn.starts_with("user100 说：考完了！\n\n【系统附注"),
-        "{turn}"
-    );
+    assert!(turn.starts_with("考完了！\n\n【系统附注"), "{turn}");
 
     // 另一个角色：共享档案，但看不到与 Fairy 的关系记忆，也不带 Fairy 会话里的衔接。
     let other = h.session("other").await;
@@ -467,14 +464,7 @@ async fn rolling_summary_covers_what_falls_out_of_the_window(db: PgPool) {
         .iter()
         .map(ChatMessage::text)
         .collect();
-    assert_eq!(
-        texts,
-        [
-            "user100 说：辅助呢",
-            "莱卡恩不错",
-            "user100 说：那就这么定了"
-        ]
-    );
+    assert_eq!(texts, ["辅助呢", "莱卡恩不错", "那就这么定了"]);
 
     // 重置后旧摘要不再使用（MEM-001）。
     sessions::reset(&h.state, &h.me, conversation)

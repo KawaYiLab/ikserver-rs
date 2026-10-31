@@ -245,7 +245,7 @@ async fn message_triggers_a_streamed_reply(db: PgPool) {
     assert!(
         matches!(&request.messages[0], ChatMessage::System { content } if content.starts_with("你是 Fairy。"))
     );
-    assert_eq!(request.messages[1], ChatMessage::user("user100 说：你好"));
+    assert_eq!(request.messages[1], ChatMessage::user("你好"));
 
     // 同一任务重放：已有结果，不再调用上游（TRIG-037）。
     assert_eq!(
@@ -274,9 +274,9 @@ async fn history_carries_prior_turns_until_reset(db: PgPool) {
     assert_eq!(
         &messages[1..],
         &[
-            ChatMessage::user("user100 说：第一句"),
+            ChatMessage::user("第一句"),
             ChatMessage::assistant("收到第一句"),
-            ChatMessage::user("user100 说：第二句"),
+            ChatMessage::user("第二句"),
         ]
     );
 
@@ -291,7 +291,7 @@ async fn history_carries_prior_turns_until_reset(db: PgPool) {
         .await
         .unwrap();
     let messages = &h.fake.requests()[2].messages;
-    assert_eq!(&messages[1..], &[ChatMessage::user("user100 说：第三句")]);
+    assert_eq!(&messages[1..], &[ChatMessage::user("第三句")]);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -585,10 +585,7 @@ async fn images_reach_vision_models_only(db: PgPool) {
     assert_eq!(request.model, "fake-eye");
     assert_eq!(
         request.messages[1],
-        ChatMessage::user_with_images(
-            "user100 说：[图片]",
-            vec!["https://cdn.test/m/900.png".into()]
-        )
+        ChatMessage::user_with_images("[图片]", vec!["https://cdn.test/m/900.png".into()])
     );
 
     // 换成不识图的模型：历史里的图片只剩占位。
@@ -602,8 +599,8 @@ async fn images_reach_vision_models_only(db: PgPool) {
         .unwrap();
     let request = &h.fake.requests()[1];
     assert_eq!(request.model, "fake-base");
-    assert_eq!(request.messages[1], ChatMessage::user("user100 说：[图片]"));
-    assert_eq!(request.messages[3], ChatMessage::user("user100 说：再看看"));
+    assert_eq!(request.messages[1], ChatMessage::user("[图片]"));
+    assert_eq!(request.messages[3], ChatMessage::user("再看看"));
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -813,7 +810,7 @@ async fn burst_messages_are_answered_once(db: PgPool) {
     let requests = h.fake.requests();
     assert_eq!(requests.len(), 1);
     let texts: Vec<&str> = requests[0].messages.iter().map(ChatMessage::text).collect();
-    assert_eq!(texts[1..], ["user100 说：在吗", "user100 说：问个事"]);
+    assert_eq!(texts[1..], ["在吗", "问个事"]);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -853,7 +850,7 @@ async fn traces_and_cache_hits_are_recorded(db: PgPool) {
     assert_eq!(trace.reply, "你好呀");
     assert_eq!(trace.outcome, "completed");
     assert_eq!(trace.request["model"], "fake-base");
-    assert_eq!(trace.request["messages"][1]["content"], "user100 说：你好");
+    assert_eq!(trace.request["messages"][1]["content"], "你好");
 }
 
 fn tool_call(id: &str, name: &str, arguments: &str) -> Step {

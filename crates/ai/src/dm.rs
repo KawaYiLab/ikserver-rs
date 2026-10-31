@@ -235,14 +235,14 @@ const DIGEST_NOTE: &str = "\n\n【工具记录】历史里你的部分回复开�
     是系统自动记下的你当时查过的内容（检索词、命中与读过的帖子），供你接着之前的话题回答；\
     它不是你写的，回复时不要写这样的行，也不要向用户复述它。需要帖子细节时仍应重新读取。";
 
-/// 对话消息（LLM-001、CTX-011）：用户消息带发送者昵称（`<昵称> 说：<正文>`），AI 自己的回复按 assistant；
+/// 对话消息（LLM-001、CTX-011）：system 末尾写明对话对象（`user_name`），用户消息只放正文，AI 自己的回复按 assistant；
 /// AI 回复前附上当时的工具记录（CTX-012），追问时模型知道之前查过、读过哪些帖子。
 /// 带图的消息正文末尾加图片占位；`images`（媒体 id → 地址）里有的图片挂在那条消息上（LLM-015）。
 pub(crate) fn build_messages(
     card: &RoleCard,
     history: &[HistoryItem],
     ai_user_id: i64,
-    names: &HashMap<i64, String>,
+    user_name: Option<&str>,
     images: &HashMap<i64, String>,
 ) -> Vec<ChatMessage> {
     // 窗口里的 AI 回复都附：只附最近几条的话，每来一轮就有一条丢掉记录，前缀缓存跟着失效（LLM-017）。
@@ -258,6 +258,13 @@ pub(crate) fn build_messages(
     if digests.iter().any(Option::is_some) {
         system.push_str(DIGEST_NOTE);
     }
+    // 不在每条消息前写「<昵称> 说：」：模型会把它读成转述别人的话，把用户本人当成第三者（CTX-011）。
+    if let Some(name) = user_name {
+        system.push_str(&format!(
+            "\n\n【对话对象】和你私聊的是论坛用户「{name}」，用户消息都是他本人发的；\
+             人设里对用户的称呼（如「主人」）指的就是他。"
+        ));
+    }
     let mut messages = Vec::with_capacity(history.len() + 1);
     messages.push(ChatMessage::system(system));
     for (item, digest) in history.iter().zip(digests) {
@@ -268,7 +275,6 @@ pub(crate) fn build_messages(
             };
             messages.push(ChatMessage::assistant(content));
         } else {
-            let name = names.get(&item.sender_id).map_or("用户", String::as_str);
             let marker = crate::comment::image_marker(item.image_ids.len());
             let text = match (item.content.trim().is_empty(), marker.is_empty()) {
                 (true, _) => marker,
@@ -280,10 +286,7 @@ pub(crate) fn build_messages(
                 .iter()
                 .filter_map(|id| images.get(id).cloned())
                 .collect();
-            messages.push(ChatMessage::user_with_images(
-                format!("{name} 说：{text}"),
-                urls,
-            ));
+            messages.push(ChatMessage::user_with_images(text, urls));
         }
     }
     messages
@@ -468,14 +471,11 @@ async fn prepare(
         limit,
     )
     .await?;
-    let mut senders: Vec<i64> = history.iter().map(|h| h.sender_id).collect();
-    senders.sort_unstable();
-    senders.dedup();
-    let names: HashMap<i64, String> = ik_auth::service::authors(&mut tx, &senders)
+    let user_name = ik_auth::service::authors(&mut tx, &[session.user_id])
         .await?
-        .into_iter()
-        .map(|(id, a)| (id, a.username))
-        .collect();
+        .remove(&session.user_id)
+        .filter(|a| !a.gone)
+        .map(|a| a.username);
     // 图片（LLM-015）：只有识图模型才取地址；首帧超时退回不识图的默认模型时在生成阶段去掉。
     let images = if model.vision {
         state
@@ -485,7 +485,13 @@ async fn prepare(
     } else {
         HashMap::new()
     };
-    let mut messages = build_messages(&card, &history, job.ai_user_id, &names, &images);
+    let mut messages = build_messages(
+        &card,
+        &history,
+        job.ai_user_id,
+        user_name.as_deref(),
+        &images,
+    );
     let mut toolbox = Toolbox::for_card(state, &catalog, &card, &state.mcp);
     if memory_on {
         toolbox = toolbox.with_memory(
@@ -970,10 +976,11 @@ mod tests {
                 workflow: None,
             },
         ];
-        let names = HashMap::from([(5, "绳匠".to_owned())]);
-        let messages = build_messages(&card(), &history, 9, &names, &HashMap::new());
+        let messages = build_messages(&card(), &history, 9, Some("绳匠"), &HashMap::new());
         assert_eq!(messages.len(), 3);
-        assert_eq!(messages[1], ChatMessage::user("绳匠 说：在吗"));
+        // 名字写在 system 里，用户消息只放正文（CTX-011）。
+        assert!(messages[0].text().contains("和你私聊的是论坛用户「绳匠」"));
+        assert_eq!(messages[1], ChatMessage::user("在吗"));
         assert_eq!(messages[2], ChatMessage::assistant("在。"));
         assert!(!messages[0].text().contains("系统自动记下"));
     }
@@ -1004,7 +1011,7 @@ mod tests {
                 workflow: Some(workflow),
             },
         ];
-        let messages = build_messages(&card(), &history, 9, &HashMap::new(), &HashMap::new());
+        let messages = build_messages(&card(), &history, 9, None, &HashMap::new());
         assert_eq!(
             messages[2],
             ChatMessage::assistant(
@@ -1036,12 +1043,11 @@ mod tests {
             .into_iter()
             .map(|id| (id, format!("https://cdn.test/{id}.png")))
             .collect();
-        let names = HashMap::from([(5, "绳匠".to_owned())]);
-        let messages = build_messages(&card(), &history, 9, &names, &urls);
+        let messages = build_messages(&card(), &history, 9, Some("绳匠"), &urls);
         assert_eq!(
             messages[1],
             ChatMessage::user_with_images(
-                "绳匠 说：[图片×3]",
+                "[图片×3]",
                 vec![
                     "https://cdn.test/12.png".into(),
                     "https://cdn.test/13.png".into()
@@ -1051,7 +1057,7 @@ mod tests {
         assert_eq!(
             messages[3],
             ChatMessage::user_with_images(
-                "绳匠 说：这张呢 [图片×2]",
+                "这张呢 [图片×2]",
                 vec![
                     "https://cdn.test/14.png".into(),
                     "https://cdn.test/15.png".into()
@@ -1059,8 +1065,8 @@ mod tests {
             )
         );
         // 不识图（没有地址）时只有占位。
-        let plain = build_messages(&card(), &history, 9, &names, &HashMap::new());
-        assert_eq!(plain[1], ChatMessage::user("绳匠 说：[图片×3]"));
+        let plain = build_messages(&card(), &history, 9, Some("绳匠"), &HashMap::new());
+        assert_eq!(plain[1], ChatMessage::user("[图片×3]"));
     }
 
     #[test]
