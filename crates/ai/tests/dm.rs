@@ -220,7 +220,7 @@ async fn message_triggers_a_streamed_reply(db: PgPool) {
     ]);
     let mut rx = h.bus.subscribe();
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let (_, text, state, model) = h.reply(job).await;
@@ -249,7 +249,7 @@ async fn message_triggers_a_streamed_reply(db: PgPool) {
 
     // 同一任务重放：已有结果，不再调用上游（TRIG-037）。
     assert_eq!(
-        dm::run_job(&h.state, job, 2, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::AlreadyDone
     );
     assert_eq!(h.fake.requests().len(), 1);
@@ -261,13 +261,13 @@ async fn history_carries_prior_turns_until_reset(db: PgPool) {
     let conversation = h.session().await;
     let first = h.send(conversation, "第一句").await;
     h.fake.push(vec![content("收到第一句"), usage(10, 5)]);
-    dm::run_job(&h.state, h.job_for_trigger(first).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(first).await, false)
         .await
         .unwrap();
 
     let second = h.send(conversation, "第二句").await;
     h.fake.push(vec![content("收到第二句"), usage(10, 5)]);
-    dm::run_job(&h.state, h.job_for_trigger(second).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(second).await, false)
         .await
         .unwrap();
     let messages = &h.fake.requests()[1].messages;
@@ -287,7 +287,7 @@ async fn history_carries_prior_turns_until_reset(db: PgPool) {
     assert_eq!(marker.kind, "system");
     let third = h.send(conversation, "第三句").await;
     h.fake.push(vec![content("收到第三句"), usage(10, 5)]);
-    dm::run_job(&h.state, h.job_for_trigger(third).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(third).await, false)
         .await
         .unwrap();
     let messages = &h.fake.requests()[2].messages;
@@ -367,7 +367,7 @@ async fn stop_keeps_partial_answer(db: PgPool) {
     let job = h.job_for_trigger(trigger).await;
     h.fake.push(vec![content("从前有座山，"), Step::Hang]);
     let state = h.state.clone();
-    let running = tokio::spawn(async move { dm::run_job(&state, job, 1, false).await });
+    let running = tokio::spawn(async move { dm::run_job(&state, job, false).await });
     // 等占位出现后停止。
     let reply = loop {
         let row = sqlx::query_scalar!("SELECT reply_message_id FROM ai_jobs WHERE id = $1", job)
@@ -405,7 +405,7 @@ async fn withdrawn_trigger_cancels_before_generation(db: PgPool) {
         .unwrap();
     let job = h.job_for_trigger(trigger).await;
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Skipped("cancelled")
     );
     assert!(h.fake.requests().is_empty());
@@ -423,15 +423,15 @@ async fn failures_retry_on_the_same_placeholder(db: PgPool) {
     h.fake.push(vec![Step::Fail(LlmError::Rejected(
         "400 bad request".into(),
     ))]);
-    let outcome = dm::run_job(&h.state, job, 1, false).await.unwrap();
+    let outcome = dm::run_job(&h.state, job, false).await.unwrap();
     assert!(matches!(outcome, RunOutcome::Retry(_)), "{outcome:?}");
     let (first_reply, text, state, _) = h.reply(job).await;
-    assert_eq!(text, "（生成失败，请重试）");
+    assert_eq!(text, "（生成失败，稍后自动重试）");
     assert_eq!(state.as_deref(), Some("failed"));
 
     h.fake.push(vec![content("在的"), usage(30, 3)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 2, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let (reply, text, state, _) = h.reply(job).await;
@@ -443,13 +443,44 @@ async fn failures_retry_on_the_same_placeholder(db: PgPool) {
     let again = h.send(conversation, "再来").await;
     let job = h.job_for_trigger(again).await;
     h.fake.push(vec![content("<br>"), usage(1, 1)]);
-    let outcome = dm::run_job(&h.state, job, 3, true).await.unwrap();
+    let outcome = dm::run_job(&h.state, job, true).await.unwrap();
     assert!(matches!(outcome, RunOutcome::Failed(_)), "{outcome:?}");
     let status = sqlx::query_scalar!("SELECT status FROM ai_jobs WHERE id = $1", job)
         .fetch_one(&h.db)
         .await
         .unwrap();
     assert_eq!(status, "failed");
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn a_newer_message_ends_a_pending_retry(db: PgPool) {
+    let h = harness(db).await;
+    let conversation = h.session().await;
+    let first = h.send(conversation, "在吗").await;
+    let job = h.job_for_trigger(first).await;
+    h.fake.push(vec![Step::Fail(LlmError::Rejected(
+        "400 bad request".into(),
+    ))]);
+    let outcome = dm::run_job(&h.state, job, false).await.unwrap();
+    assert!(matches!(outcome, RunOutcome::Retry(_)), "{outcome:?}");
+
+    // 等重试的时候对方又发了一条：交给新的那条一起回，旧的不再隔很久补一条（GEN-027）。
+    h.send(conversation, "人呢").await;
+    let calls = h.fake.requests().len();
+    assert_eq!(
+        dm::run_job(&h.state, job, false).await.unwrap(),
+        RunOutcome::Skipped("merged")
+    );
+    assert_eq!(h.fake.requests().len(), calls);
+    let (_, text, state, _) = h.reply(job).await;
+    assert_eq!(text, "（已停止）");
+    assert_eq!(state.as_deref(), Some("stopped"));
+    let attempts: i16 = sqlx::query_scalar("SELECT attempts FROM ai_jobs WHERE id = $1")
+        .bind(job)
+        .fetch_one(&h.db)
+        .await
+        .unwrap();
+    assert_eq!(attempts, 2, "尝试次数一直往上加");
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -477,7 +508,7 @@ async fn first_delta_timeout_falls_back_to_default_model(db: PgPool) {
     h.fake.push(vec![Step::Hang]);
     h.fake.push(vec![content("默认模型来了"), usage(10, 5)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.fake.requests();
@@ -516,7 +547,7 @@ async fn model_choice_rules(db: PgPool) {
         .unwrap();
     let trigger = h.send(conversation, "hi").await;
     h.fake.push(vec![content("ok"), usage(1, 1)]);
-    dm::run_job(&h.state, h.job_for_trigger(trigger).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(trigger).await, false)
         .await
         .unwrap();
     assert_eq!(h.fake.requests()[0].model, "fake-base");
@@ -578,7 +609,7 @@ async fn images_reach_vision_models_only(db: PgPool) {
     assert_eq!(view.content.as_deref(), Some(""));
     assert_eq!(view.images.len(), 1);
     h.fake.push(vec![content("是一张图。"), usage(1000, 5)]);
-    dm::run_job(&h.state, h.job_for_trigger(view.id.get()).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(view.id.get()).await, false)
         .await
         .unwrap();
     let request = &h.fake.requests()[0];
@@ -594,7 +625,7 @@ async fn images_reach_vision_models_only(db: PgPool) {
         .unwrap();
     let trigger = h.send(conversation, "再看看").await;
     h.fake.push(vec![content("我看不到图片。"), usage(10, 5)]);
-    dm::run_job(&h.state, h.job_for_trigger(trigger).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(trigger).await, false)
         .await
         .unwrap();
     let request = &h.fake.requests()[1];
@@ -629,7 +660,7 @@ async fn quota_denial_posts_a_free_notice(db: PgPool) {
     let conversation = h.session().await;
     let trigger = h.send(conversation, "还能聊吗").await;
     assert_eq!(
-        dm::run_job(&h.state, h.job_for_trigger(trigger).await, 1, false)
+        dm::run_job(&h.state, h.job_for_trigger(trigger).await, false)
             .await
             .unwrap(),
         RunOutcome::Skipped("daily_token_budget_exceeded")
@@ -656,7 +687,7 @@ async fn regenerate_replaces_the_latest_reply_once(db: PgPool) {
     let trigger = h.send(conversation, "写首诗").await;
     let job = h.job_for_trigger(trigger).await;
     h.fake.push(vec![content("第一版"), usage(5, 5)]);
-    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    dm::run_job(&h.state, job, false).await.unwrap();
     let (old_reply, _, _, _) = h.reply(job).await;
 
     let request = || RegenerateRequest {
@@ -681,7 +712,7 @@ async fn regenerate_replaces_the_latest_reply_once(db: PgPool) {
     let new_job = h.job_for(&format!("regenerate:{old_reply}")).await;
     h.fake.push(vec![content("第二版"), usage(5, 5)]);
     assert_eq!(
-        dm::run_job(&h.state, new_job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, new_job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let (_, text, _, model) = h.reply(new_job).await;
@@ -696,7 +727,7 @@ async fn regenerate_replaces_the_latest_reply_once(db: PgPool) {
     let (new_reply, _, _, _) = h.reply(new_job).await;
     let later = h.send(conversation, "再写一首").await;
     h.fake.push(vec![content("第三首"), usage(5, 5)]);
-    dm::run_job(&h.state, h.job_for_trigger(later).await, 1, false)
+    dm::run_job(&h.state, h.job_for_trigger(later).await, false)
         .await
         .unwrap();
     let problem = sessions::regenerate(&h.state, &h.me, new_reply, RegenerateRequest::default())
@@ -728,7 +759,7 @@ async fn a_dropped_stream_is_resumed_within_the_round(db: PgPool) {
     ]);
     h.fake.push(vec![content("山里有座庙。"), usage(80, 10)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let (_, text, _, _) = h.reply(job).await;
@@ -757,7 +788,7 @@ async fn a_reply_cut_by_the_output_limit_is_continued_once(db: PgPool) {
         Step::Emit(StreamEvent::Finish("length".into())),
     ]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let (_, text, _, _) = h.reply(job).await;
@@ -799,12 +830,12 @@ async fn burst_messages_are_answered_once(db: PgPool) {
     assert_eq!(queues, vec![Some(queue.clone()), Some(queue)]);
 
     assert_eq!(
-        dm::run_job(&h.state, first_job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, first_job, false).await.unwrap(),
         RunOutcome::Skipped("merged")
     );
     h.fake.push(vec![content("在的，你说。"), usage(50, 5)]);
     assert_eq!(
-        dm::run_job(&h.state, second_job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, second_job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.fake.requests();
@@ -833,7 +864,7 @@ async fn traces_and_cache_hits_are_recorded(db: PgPool) {
         })),
     ]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     // 命中缓存的 50 个输入 token 按 0.2 计：50 + 10 + 20。
@@ -910,7 +941,7 @@ async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
     ]);
     let mut rx = h.bus.subscribe();
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
 
@@ -1024,7 +1055,7 @@ async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
     let follow_job = h.job_for_trigger(follow).await;
     h.fake.push(vec![content("好的。"), usage(10, 1)]);
     assert_eq!(
-        dm::run_job(&h.state, follow_job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, follow_job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.fake.requests();
@@ -1066,7 +1097,7 @@ async fn tools_in_one_round_run_together_and_reply_in_call_order(db: PgPool) {
     ]);
     h.fake.push(vec![content("看完了。"), usage(10, 1)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.fake.requests();
@@ -1124,7 +1155,7 @@ async fn tool_rounds_are_capped(db: PgPool) {
     ]);
     h.fake.push(vec![content("目前没有热帖。"), usage(10, 1)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.fake.requests();

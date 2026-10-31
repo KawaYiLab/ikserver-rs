@@ -2590,3 +2590,83 @@ async fn system_status_and_dead_jobs(db: PgPool) {
         ["system.job.retry", "system.job.delete", "system.mail.test"]
     );
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn failed_ai_jobs_can_be_retried_or_deleted(db: PgPool) {
+    let app = setup(&db).await;
+    // 一个重试用完、最终失败的 AI 评论任务。
+    sqlx::query(
+        "INSERT INTO ai_jobs (id, kind, execution_key, status, quota_user_id, ai_user_id,
+                              attempts, reason, finished_at)
+         VALUES (900, 'comment', 'comment:1', 'failed', 3, 1, 10, 'boom', now())",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let state = || async {
+        sqlx::query_as::<_, (String, Option<String>, bool)>(
+            "SELECT status, reason, finished_at IS NOT NULL FROM ai_jobs WHERE id = 900",
+        )
+        .fetch_optional(&db)
+        .await
+        .unwrap()
+    };
+
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/ai/jobs/900/retry",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "只有管理员能重试");
+
+    // 重试：改回排队、重新入队，原因清掉。
+    let (status, body) = call(
+        &app,
+        ADMIN,
+        "POST",
+        "/v1/admin/ai/jobs/900/retry",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(state().await, Some(("queued".to_owned(), None, false)));
+    let queued: (String, i16, i16) = sqlx::query_as(
+        "SELECT t.identifier, j.attempts, j.max_attempts
+           FROM graphile_worker._private_jobs j
+           JOIN graphile_worker._private_tasks t ON t.id = j.task_id
+          WHERE j.key = 'ai:900'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(queued, ("ai.comment_reply".to_owned(), 0, 10));
+
+    // 不是失败状态的不能再重试、也不能删。
+    for (method, path) in [
+        ("POST", "/v1/admin/ai/jobs/900/retry"),
+        ("DELETE", "/v1/admin/ai/jobs/900"),
+    ] {
+        let (status, body) = call(&app, ADMIN, method, path, Value::Null).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{method} {path}");
+        assert_eq!(body["code"], "AI_JOB_NOT_FAILED");
+    }
+
+    // 删除：连同记录一起删掉。
+    sqlx::query("UPDATE ai_jobs SET status = 'failed' WHERE id = 900")
+        .execute(&db)
+        .await
+        .unwrap();
+    let (status, _) = call(&app, ADMIN, "DELETE", "/v1/admin/ai/jobs/900", Value::Null).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(state().await, None);
+
+    let audited: Vec<String> =
+        sqlx::query_scalar("SELECT action FROM admin_audit_log ORDER BY created_at, id")
+            .fetch_all(&db)
+            .await
+            .unwrap();
+    assert_eq!(audited, vec!["ai.job.retry", "ai.job.delete"]);
+}

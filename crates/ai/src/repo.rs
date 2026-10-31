@@ -636,6 +636,35 @@ pub(crate) async fn lock_job(conn: &mut PgConnection, id: i64) -> sqlx::Result<O
     .await
 }
 
+/// 后台手动重试：把失败的任务改回排队，返回类型与会话（重新入队用）。不是失败状态时为 `None`。
+pub(crate) async fn requeue_failed(
+    conn: &mut PgConnection,
+    id: i64,
+    now: DateTime<Utc>,
+) -> sqlx::Result<Option<(String, Option<i64>)>> {
+    let row = sqlx::query!(
+        "UPDATE ai_jobs SET status = 'queued', reason = NULL, finished_at = NULL, updated_at = $2
+         WHERE id = $1 AND status = 'failed'
+         RETURNING kind, conversation_id",
+        id,
+        now,
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|r| (r.kind, r.conversation_id)))
+}
+
+/// 后台删除失败的任务（调用记录一起删）。返回是否删掉了。
+pub(crate) async fn delete_failed(conn: &mut PgConnection, id: i64) -> sqlx::Result<bool> {
+    let result = sqlx::query!(
+        "DELETE FROM ai_jobs WHERE id = $1 AND status = 'failed'",
+        id
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 pub(crate) async fn job_by_reply(
     conn: &mut PgConnection,
     reply_message_id: i64,
@@ -652,22 +681,21 @@ pub(crate) async fn job_by_reply(
     .await
 }
 
-/// 开始一次尝试。
+/// 开始一次尝试，返回这是第几次。次数一直往上加，后台手动重试后也不从 1 重来
+/// （调用记录按次数存、时间线的 seq 按次数分段，WF-006）。
 pub(crate) async fn start_attempt(
     conn: &mut PgConnection,
     id: i64,
-    attempt: i16,
     now: DateTime<Utc>,
-) -> sqlx::Result<()> {
-    sqlx::query!(
-        "UPDATE ai_jobs SET status = 'processing', attempts = $2, updated_at = $3 WHERE id = $1",
+) -> sqlx::Result<i16> {
+    sqlx::query_scalar!(
+        "UPDATE ai_jobs SET status = 'processing', attempts = attempts + 1, updated_at = $2
+         WHERE id = $1 RETURNING attempts",
         id,
-        attempt,
         now,
     )
-    .execute(conn)
-    .await?;
-    Ok(())
+    .fetch_one(conn)
+    .await
 }
 
 pub(crate) async fn set_job_reply(

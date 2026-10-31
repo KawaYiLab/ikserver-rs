@@ -256,6 +256,86 @@
         ]
       }
     },
+    "/v1/admin/ai/jobs/{id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "删除失败的 AI 任务",
+        "description": "连同调用记录一起删。只有失败的任务能删（409 `AI_JOB_NOT_FAILED`）。",
+        "operationId": "remove_ai_job",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/admin/ai/jobs/{id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "重试失败的 AI 任务",
+        "description": "改回排队马上执行，再给一轮完整的重试次数。只有失败的任务能重试（409 `AI_JOB_NOT_FAILED`）。",
+        "operationId": "post_ai_job_retry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {},
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/admin/ai/jobs/{id}/trace": {
       "get": {
         "tags": [
@@ -19686,7 +19766,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 65536。",
+            "description": "上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 1048576（1M）。",
             "default": null,
             "minimum": 0
           },

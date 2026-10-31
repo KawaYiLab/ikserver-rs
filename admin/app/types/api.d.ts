@@ -90,6 +90,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/ai/jobs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * 删除失败的 AI 任务
+         * @description 连同调用记录一起删。只有失败的任务能删（409 `AI_JOB_NOT_FAILED`）。
+         */
+        delete: operations["remove_ai_job"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/ai/jobs/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 重试失败的 AI 任务
+         * @description 改回排队马上执行，再给一轮完整的重试次数。只有失败的任务能重试（409 `AI_JOB_NOT_FAILED`）。
+         */
+        post: operations["post_ai_job_retry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/ai/jobs/{id}/trace": {
         parameters: {
             query?: never;
@@ -6048,7 +6088,7 @@ export interface components {
             cachedWeight: number | null;
             /**
              * Format: int32
-             * @description 上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 65536。
+             * @description 上下文窗口（token），用来裁剪历史与工具结果（LLM-018）。不填按 1048576（1M）。
              * @default null
              */
             contextTokens: number | null;
@@ -8727,6 +8767,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Paged_AdminJob"];
+                };
+            };
+        };
+    };
+    remove_ai_job: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    post_ai_job_retry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
                 };
             };
         };

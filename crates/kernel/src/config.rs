@@ -188,7 +188,8 @@ pub struct Ai {
     pub max_tool_rounds: u32,
     /// 预占估算与无用量时的估算用的上下文基数（QUOTA-007、GEN-081，0–100000）。
     pub estimated_context_tokens: i64,
-    /// 单个任务最多尝试几次（TRIG-033，1–10）。
+    /// 单个任务最多尝试几次（TRIG-033，1–20）。间隔按 graphile_worker 的指数退避越拉越长
+    /// （约 3 秒、7 秒、20 秒、1 分钟……封顶 6 小时），默认 10 次大约覆盖 3.5 小时。
     pub max_attempts: i16,
 }
 
@@ -211,7 +212,7 @@ impl Default for Ai {
             max_history_messages: 40,
             max_tool_rounds: 8,
             estimated_context_tokens: 4000,
-            max_attempts: 3,
+            max_attempts: 10,
         }
     }
 }
@@ -971,7 +972,7 @@ impl Config {
             || !(1..=1000).contains(&ai.stream_min_chars)
             || !(1..=200).contains(&ai.max_history_messages)
             || !(0..=100_000).contains(&ai.estimated_context_tokens)
-            || !(1..=10).contains(&ai.max_attempts)
+            || !(1..=20).contains(&ai.max_attempts)
             || ai.providers.iter().any(|(name, p)| {
                 name.is_empty()
                     || !(p.base_url.starts_with("https://") || p.base_url.starts_with("http://"))
@@ -980,7 +981,7 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "ai 配置不合法：hold_ttl_secs 60–7200，reply_timeout_secs 10–1800，first_delta_timeout_secs 不超过总预算，\
                  stream_min_chars 1–1000，max_history_messages 1–200，\
-                 estimated_context_tokens 0–100000，max_attempts 1–10，providers 的 base_url 须为 http(s)://"
+                 estimated_context_tokens 0–100000，max_attempts 1–20，providers 的 base_url 须为 http(s)://"
                     .to_owned(),
             ));
         }

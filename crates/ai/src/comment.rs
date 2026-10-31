@@ -68,9 +68,8 @@ impl TaskHandler for CommentReply {
         let Some(state) = ctx.get_ext::<AiState>() else {
             return Err("执行器没有注册 AiState".to_owned());
         };
-        let attempt = *ctx.job().attempts();
-        let last = attempt >= *ctx.job().max_attempts();
-        match run_job(state, self.job_id, attempt, last).await {
+        let last = ctx.job().attempts() >= ctx.job().max_attempts();
+        match run_job(state, self.job_id, last).await {
             Ok(RunOutcome::Retry(reason)) => Err(reason),
             Ok(outcome) => {
                 tracing::debug!(job = self.job_id, ?outcome, "AI 评论任务结束");
@@ -307,6 +306,8 @@ pub(crate) fn build_messages(
 /// 准备阶段的结果。
 struct Prepared {
     job: JobRow,
+    /// 第几次尝试（[`repo::start_attempt`]）。
+    attempt: i16,
     trigger_id: i64,
     trigger_author: (i64, String),
     model: Model,
@@ -351,7 +352,7 @@ async fn skip(
     Ok(Prepare::Done(RunOutcome::Skipped(reason)))
 }
 
-async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, Problem> {
+async fn prepare(state: &AiState, job_id: i64) -> Result<Prepare, Problem> {
     let now = Utc::now();
     let mut tx = state.db.begin().await?;
     let Some(job) = repo::lock_job(&mut tx, job_id).await? else {
@@ -363,7 +364,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
     {
         return Ok(Prepare::Done(RunOutcome::AlreadyDone));
     }
-    repo::start_attempt(&mut tx, job_id, attempt, now).await?;
+    let attempt = repo::start_attempt(&mut tx, job_id, now).await?;
 
     macro_rules! skip_with {
         ($reason:expr) => {{
@@ -558,6 +559,7 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
     };
     tx.commit().await?;
     Ok(Prepare::Ready(Box::new(Prepared {
+        attempt,
         trigger_id,
         trigger_author: (commenter.id, commenter.username),
         model,
@@ -577,10 +579,9 @@ async fn prepare(state: &AiState, job_id: i64, attempt: i16) -> Result<Prepare, 
 pub async fn run_job(
     state: &AiState,
     job_id: i64,
-    attempt: i16,
     last_attempt: bool,
 ) -> Result<RunOutcome, Problem> {
-    let prepared = match prepare(state, job_id, attempt).await? {
+    let prepared = match prepare(state, job_id).await? {
         Prepare::Done(outcome) => return Ok(outcome),
         Prepare::Ready(prepared) => *prepared,
     };
@@ -611,7 +612,6 @@ pub async fn run_job(
         &prepared,
         &generated.model,
         generated.streamed,
-        attempt,
         last_attempt,
     )
     .await
@@ -638,10 +638,10 @@ async fn finalize(
     prepared: &Prepared,
     model: &Model,
     streamed: generate::Streamed,
-    attempt: i16,
     last_attempt: bool,
 ) -> Result<RunOutcome, Problem> {
     let job_id = prepared.job.id;
+    let attempt = prepared.attempt;
     let usage = streamed.charged;
     let charge = model.charge(usage);
     let text = match streamed.end {

@@ -178,7 +178,7 @@ impl Harness {
 
     async fn run(&self, trigger: i64) -> RunOutcome {
         let job = self.job_for(trigger).await.expect("没有建任务");
-        comment::run_job(&self.state, job, 1, false).await.unwrap()
+        comment::run_job(&self.state, job, false).await.unwrap()
     }
 
     /// (回复 id, 回复了哪条, 正文)
@@ -285,7 +285,7 @@ async fn mention_triggers_a_reply_under_the_comment(db: PgPool) {
     // 重放：已有回复，不再调用模型（TRIG-037）。
     let calls = h.fake.requests().len();
     assert_eq!(
-        comment::run_job(&h.state, job, 2, false).await.unwrap(),
+        comment::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::AlreadyDone
     );
     assert_eq!(h.fake.requests().len(), calls);
@@ -401,7 +401,7 @@ async fn removed_trigger_is_skipped_without_charging(db: PgPool) {
     .await
     .unwrap();
     assert_eq!(
-        comment::run_job(&h.state, job, 1, false).await.unwrap(),
+        comment::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Skipped("trigger_removed")
     );
     assert!(h.fake.requests().is_empty());
@@ -456,14 +456,14 @@ async fn failures_retry_then_fail_without_a_reply(db: PgPool) {
         "400 bad request".into(),
     ))]);
     assert!(matches!(
-        comment::run_job(&h.state, job, 1, false).await.unwrap(),
+        comment::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Retry(_)
     ));
     assert_eq!(h.job_state(trigger).await.0, "processing");
     // 上游的错误文本不作为回复（GEN-024）；最后一次失败记最终失败。
     h.fake.push(vec![content("   ")]);
     assert!(matches!(
-        comment::run_job(&h.state, job, 3, true).await.unwrap(),
+        comment::run_job(&h.state, job, true).await.unwrap(),
         RunOutcome::Failed(_)
     ));
     let (status, reason) = h.job_state(trigger).await;

@@ -192,7 +192,7 @@ impl Harness {
         self.fake.push(vec![content(reply), usage(10, 5)]);
         let job = self.job_for_trigger(trigger).await;
         assert_eq!(
-            dm::run_job(&self.state, job, 1, false).await.unwrap(),
+            dm::run_job(&self.state, job, false).await.unwrap(),
             RunOutcome::Completed
         );
         self.fake.requests().last().unwrap().clone()
@@ -491,7 +491,7 @@ async fn remember_and_forget_take_effect_during_the_reply(db: PgPool) {
     ]);
     h.fake.push(vec![content("记住啦！"), usage(10, 5)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.fake.requests();
@@ -527,7 +527,7 @@ async fn remember_and_forget_take_effect_during_the_reply(db: PgPool) {
         usage(10, 5),
     ]);
     h.fake.push(vec![content("好，忘掉了。"), usage(10, 5)]);
-    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    dm::run_job(&h.state, job, false).await.unwrap();
     assert!(h.items().await.is_empty());
     let events = h.workflow(job).await;
     let forgotten = events
@@ -879,7 +879,7 @@ async fn remember_can_record_an_event_with_a_follow_up(db: PgPool) {
     ]);
     h.fake
         .push(vec![content("记下啦，到时候问你！"), usage(10, 5)]);
-    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    dm::run_job(&h.state, job, false).await.unwrap();
     let items = h.items().await;
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].kind, MemoryKind::Event);
@@ -929,7 +929,7 @@ async fn recall_history_reads_old_turns_after_each_reset(db: PgPool) {
         content("第一次你是来聊零号空洞的打法的。"),
         usage(10, 5),
     ]);
-    dm::run_job(&h.state, job, 1, false).await.unwrap();
+    dm::run_job(&h.state, job, false).await.unwrap();
     let requests = h.fake.requests();
     let ChatMessage::Tool {
         content: result, ..

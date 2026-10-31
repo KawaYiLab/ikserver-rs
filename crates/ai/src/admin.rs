@@ -772,6 +772,64 @@ pub async fn jobs(state: &AiState, query: JobQuery) -> Result<Paged<AdminJob>, P
     })
 }
 
+fn job_not_failed() -> Problem {
+    Problem::conflict("AI_JOB_NOT_FAILED", "只有失败的任务能重试或删除")
+}
+
+/// 手动重试失败的任务：改回排队并重新入队，再给一轮完整的重试次数。私信接着写原来那条占位。
+pub async fn retry_job(state: &AiState, op: &Operator, job_id: i64) -> Result<(), Problem> {
+    let now = Utc::now();
+    let mut tx = state.db.begin().await?;
+    let Some((kind, conversation_id)) = repo::requeue_failed(&mut tx, job_id, now).await? else {
+        return Err(job_not_failed());
+    };
+    let attempts = state.config.max_attempts;
+    match conversation_id {
+        Some(conversation_id) if kind == "dm" => {
+            crate::dm::enqueue(&state.jobs, &mut tx, job_id, conversation_id, attempts).await?;
+        }
+        _ => crate::comment::enqueue(&state.jobs, &mut tx, job_id, attempts).await?,
+    }
+    admin::record(
+        &mut tx,
+        &state.ids,
+        op,
+        Audit {
+            action: "ai.job.retry",
+            target_type: "ai_job",
+            target_id: Some(job_id.to_string()),
+            details: serde_json::json!({ "kind": kind }),
+        },
+        now,
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// 删除失败的任务（连同调用记录）。
+pub async fn delete_job(state: &AiState, op: &Operator, job_id: i64) -> Result<(), Problem> {
+    let mut tx = state.db.begin().await?;
+    if !repo::delete_failed(&mut tx, job_id).await? {
+        return Err(job_not_failed());
+    }
+    admin::record(
+        &mut tx,
+        &state.ids,
+        op,
+        Audit {
+            action: "ai.job.delete",
+            target_type: "ai_job",
+            target_id: Some(job_id.to_string()),
+            details: serde_json::json!({}),
+        },
+        Utc::now(),
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn job_traces(state: &AiState, job_id: i64) -> Result<Vec<AdminJobTrace>, Problem> {
     let mut conn = state.db.acquire().await?;
     Ok(repo::traces(&mut conn, job_id)
@@ -836,6 +894,8 @@ where
         .routes(routes!(put_character, remove_character))
         .routes(routes!(list_jobs))
         .routes(routes!(get_job_trace))
+        .routes(routes!(post_ai_job_retry))
+        .routes(routes!(remove_ai_job))
         .routes(routes!(list_mcp_servers))
         .routes(routes!(put_mcp_server, remove_mcp_server))
         .routes(routes!(post_mcp_refresh))
@@ -1100,6 +1160,52 @@ async fn list_jobs(
     Query(query): Query<JobQuery>,
 ) -> Result<Json<Paged<AdminJob>>, Problem> {
     Ok(Json(jobs(&state, query).await?))
+}
+
+/// 重试失败的 AI 任务
+///
+/// 改回排队马上执行，再给一轮完整的重试次数。只有失败的任务能重试（409 `AI_JOB_NOT_FAILED`）。
+#[utoipa::path(
+    post,
+    path = "/v1/admin/ai/jobs/{id}/retry",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 409, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn post_ai_job_retry(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path(id): Path<Id>,
+) -> Result<StatusCode, Problem> {
+    retry_job(&state, &op, id.get()).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// 删除失败的 AI 任务
+///
+/// 连同调用记录一起删。只有失败的任务能删（409 `AI_JOB_NOT_FAILED`）。
+#[utoipa::path(
+    delete,
+    path = "/v1/admin/ai/jobs/{id}",
+    tag = "admin",
+    params(("id" = String, Path)),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 204),
+        (status = 409, body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn remove_ai_job(
+    State(state): State<AiState>,
+    AdminOperator(op): AdminOperator,
+    Path(id): Path<Id>,
+) -> Result<StatusCode, Problem> {
+    delete_job(&state, &op, id.get()).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// 任务的调用记录（后台开了才有，保留 7 天，OBS-002）

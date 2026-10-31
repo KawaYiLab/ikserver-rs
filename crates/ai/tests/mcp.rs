@@ -584,7 +584,7 @@ async fn approved_mcp_tools_reach_the_model_and_changes_need_review(db: PgPool) 
     ]);
     h.llm.push(vec![content("查到了。"), usage(200, 20)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.llm.requests();
@@ -691,7 +691,7 @@ async fn long_tool_results_reach_the_model_in_full(db: PgPool) {
     ]);
     h.llm.push(vec![content("好。"), usage(200, 20)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.llm.requests();
@@ -724,7 +724,7 @@ async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
     ]);
     h.llm.push(vec![content("是一片空洞。"), usage(200, 20)]);
     assert_eq!(
-        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        dm::run_job(&h.state, job, false).await.unwrap(),
         RunOutcome::Completed
     );
     let requests = h.llm.requests();

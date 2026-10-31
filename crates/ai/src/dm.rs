@@ -31,10 +31,12 @@ use crate::workflow::{self, Workflow};
 use crate::{memory, memory_jobs};
 
 const FAILED_TEXT: &str = "（生成失败，请重试）";
+/// 还会自动重试时占位上的字；下次尝试开始时清空重写。
+const RETRY_TEXT: &str = "（生成失败，稍后自动重试）";
 const STOPPED_TEXT: &str = "（已停止）";
 
 /// 后台任务：生成一条 AI 私聊回复。重试次数取配置 `ai.max_attempts`（TRIG-033），
-/// 退避用 graphile_worker 的指数退避。
+/// 间隔用 graphile_worker 的指数退避，越往后等得越久。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DmReply {
@@ -66,9 +68,8 @@ impl TaskHandler for DmReply {
         let Some(state) = ctx.get_ext::<AiState>() else {
             return Err("执行器没有注册 AiState".to_owned());
         };
-        let attempt = *ctx.job().attempts();
-        let last = attempt >= *ctx.job().max_attempts();
-        match run_job(state, self.job_id, attempt, last).await {
+        let last = ctx.job().attempts() >= ctx.job().max_attempts();
+        match run_job(state, self.job_id, last).await {
             Ok(RunOutcome::Retry(reason)) => Err(reason),
             Ok(outcome) => {
                 tracing::debug!(job = self.job_id, ?outcome, "AI 私聊任务结束");
@@ -295,6 +296,8 @@ pub(crate) fn build_messages(
 /// 准备阶段的结果。
 struct Prepared {
     job: JobRow,
+    /// 第几次尝试（[`repo::start_attempt`]）。
+    attempt: i16,
     session: SessionRow,
     card: RoleCard,
     model: Model,
@@ -357,12 +360,7 @@ async fn skip(
     Ok(Prepare::Done(RunOutcome::Skipped(reason)))
 }
 
-async fn prepare(
-    state: &AiState,
-    job_id: i64,
-    attempt: i16,
-    effects: &mut Effects,
-) -> Result<Prepare, Problem> {
+async fn prepare(state: &AiState, job_id: i64, effects: &mut Effects) -> Result<Prepare, Problem> {
     let now = Utc::now();
     let mut tx = state.db.begin().await?;
     let Some(job) = repo::lock_job(&mut tx, job_id).await? else {
@@ -382,7 +380,7 @@ async fn prepare(
         tx.commit().await?;
         return Ok(outcome);
     };
-    repo::start_attempt(&mut tx, job_id, attempt, now).await?;
+    let attempt = repo::start_attempt(&mut tx, job_id, now).await?;
 
     macro_rules! skip_with {
         ($reason:expr) => {{
@@ -398,8 +396,9 @@ async fn prepare(
     if session.context_epoch != job.generation_epoch {
         skip_with!("context_reset");
     }
-    // 连发合并（GEN-027）：还没开始回的这条之后，对方又发了消息，交给后面那条一起回。
-    if job.reply_message_id.is_none() && repo::superseded(&mut tx, job_id).await? {
+    // 连发合并（GEN-027）：这条之后对方又发了消息，交给后面那条一起回。重试等待期间
+    // 来了新消息也一样，免得隔了很久再回一条旧的。
+    if repo::superseded(&mut tx, job_id).await? {
         skip_with!("merged");
     }
     let trigger = ik_messaging::interop::message(&mut tx, trigger_id).await?;
@@ -608,6 +607,7 @@ async fn prepare(
     tx.commit().await?;
     Ok(Prepare::Ready(Box::new(Prepared {
         job,
+        attempt,
         session,
         card,
         model,
@@ -628,11 +628,10 @@ async fn prepare(
 pub async fn run_job(
     state: &AiState,
     job_id: i64,
-    attempt: i16,
     last_attempt: bool,
 ) -> Result<RunOutcome, Problem> {
     let mut effects = Effects::new();
-    let prepared = prepare(state, job_id, attempt, &mut effects).await?;
+    let prepared = prepare(state, job_id, &mut effects).await?;
     effects.dispatch(state.bus.as_ref());
     let mut prepared = match prepared {
         Prepare::Done(outcome) => return Ok(outcome),
@@ -679,7 +678,7 @@ pub async fn run_job(
         card_params: Some(prepared.card.params.clone()),
         trace: prepared.trace,
     };
-    let mut workflow = Workflow::new(attempt, prepared.card.output_mode);
+    let mut workflow = Workflow::new(prepared.attempt, prepared.card.output_mode);
     let generated = generate(
         &ctx,
         &mut workflow,
@@ -695,7 +694,6 @@ pub async fn run_job(
         &generated.model,
         generated.streamed,
         workflow,
-        attempt,
         last_attempt,
     )
     .await
@@ -754,10 +752,10 @@ async fn finalize(
     model: &Model,
     streamed: Streamed,
     mut workflow: Workflow,
-    attempt: i16,
     last_attempt: bool,
 ) -> Result<RunOutcome, Problem> {
     let job_id = prepared.job.id;
+    let attempt = prepared.attempt;
     let mode = prepared.card.output_mode;
     let usage = streamed.charged;
     let charge = model.charge(usage);
@@ -808,7 +806,7 @@ async fn finalize(
         };
         if retryable && !last_attempt {
             (
-                FAILED_TEXT.to_owned(),
+                RETRY_TEXT.to_owned(),
                 "failed",
                 "processing",
                 Some(message.clone()),

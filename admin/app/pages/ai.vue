@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Download, FileText, Plus, RefreshCw, X } from '@lucide/vue'
+import { Download, FileText, Plus, RefreshCw, RotateCcw, Trash2, X } from '@lucide/vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -633,6 +633,28 @@ const ms = (value?: number | null) => (value == null ? '—' : value < 1000 ? `$
 
 const trace = ref<{ job: Schemas['AdminJob'], items: Schemas['AdminJobTrace'][] } | null>(null)
 
+async function retryJob(job: Schemas['AdminJob']) {
+  const done = await run(() => unwrap(api.POST('/v1/admin/ai/jobs/{id}/retry', { params: { path: { id: job.id } } })).then(() => true), '已重新排队')
+  if (done) {
+    jobList.refresh()
+    badges.refresh()
+  }
+}
+async function removeJob(job: Schemas['AdminJob']) {
+  const ok = await confirm({
+    title: '删除这个任务？',
+    description: '任务记录和调用记录会一起删掉。',
+    confirmLabel: '删除',
+    destructive: true,
+  })
+  if (!ok) return
+  const done = await run(() => unwrap(api.DELETE('/v1/admin/ai/jobs/{id}', { params: { path: { id: job.id } } })).then(() => true), '已删除')
+  if (done) {
+    jobList.refresh()
+    badges.refresh()
+  }
+}
+
 async function openTrace(job: Schemas['AdminJob']) {
   const items = await run(() => unwrap(api.GET('/v1/admin/ai/jobs/{id}/trace', { params: { path: { id: job.id } } })))
   if (items) trace.value = { job, items }
@@ -1033,9 +1055,19 @@ function traceMessages(request: unknown) {
                 <TableCell class="hidden lg:table-cell font-mono text-xs">{{ job.userId }} → {{ job.aiUserId }}</TableCell>
                 <TableCell class="max-w-xs truncate text-xs text-muted-foreground" :title="job.reason ?? ''">{{ job.reason ?? '' }}</TableCell>
                 <TableCell>
-                  <Button v-if="job.hasTrace" size="icon" variant="ghost" aria-label="调用记录" @click="openTrace(job)">
-                    <FileText class="size-4" />
-                  </Button>
+                  <div class="flex justify-end gap-1">
+                    <template v-if="job.status === 'failed'">
+                      <Button size="icon-sm" variant="ghost" aria-label="重试" title="重试" @click="retryJob(job)">
+                        <RotateCcw class="size-4" />
+                      </Button>
+                      <Button size="icon-sm" variant="ghost" class="text-muted-foreground" aria-label="删除" title="删除" @click="removeJob(job)">
+                        <Trash2 class="size-4" />
+                      </Button>
+                    </template>
+                    <Button v-if="job.hasTrace" size="icon-sm" variant="ghost" aria-label="调用记录" title="调用记录" @click="openTrace(job)">
+                      <FileText class="size-4" />
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
               <AdminListState
