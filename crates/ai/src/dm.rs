@@ -232,6 +232,11 @@ pub(crate) fn recent_image_ids(history: &[HistoryItem], ai_user_id: i64) -> Vec<
         .collect()
 }
 
+/// 私信里调工具前先说一句（GEN-052）：工具跑起来要好几秒，什么字都没有的话看着像卡住了。
+/// 这句话随工具调用一起推出去，单独成一个气泡；评论和站外渠道是一次性发出，不加。
+const PROGRESS_NOTE: &str = "\n\n【查资料前先说一声】需要调用工具时，先用一句很短的话（保持你的语气）告诉对方你要去做什么，\
+    比如「我去翻翻相关的帖子。」，然后直接调用；要连着查好几次时，每次调用前都这样说一句。";
+
 const DIGEST_NOTE: &str = "\n\n【工具记录】历史里你的部分回复开头附有一行「【工具记录】……」，\
     是系统自动记下的你当时查过的内容（检索词、命中与读过的帖子），供你接着之前的话题回答；\
     它不是你写的，回复时不要写这样的行，也不要向用户复述它。需要帖子细节时仍应重新读取。";
@@ -256,6 +261,7 @@ pub(crate) fn build_messages(
         })
         .collect();
     let mut system = system_prompt(card, card.output_mode);
+    system.push_str(PROGRESS_NOTE);
     if digests.iter().any(Option::is_some) {
         system.push_str(DIGEST_NOTE);
     }
@@ -981,6 +987,8 @@ mod tests {
         assert_eq!(messages[1], ChatMessage::user("在吗"));
         assert_eq!(messages[2], ChatMessage::assistant("在。"));
         assert!(!messages[0].text().contains("系统自动记下"));
+        // 调工具前先说一句（GEN-052）。
+        assert!(messages[0].text().contains("【查资料前先说一声】"));
     }
 
     #[test]
