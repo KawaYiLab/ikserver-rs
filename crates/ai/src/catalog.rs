@@ -190,7 +190,6 @@ pub struct McpServer {
     pub url: String,
     pub auth_header: String,
     pub timeout: Duration,
-    pub max_result_chars: usize,
     pub tools: Vec<McpTool>,
 }
 
@@ -506,7 +505,6 @@ async fn load_mcp(conn: &mut sqlx::PgConnection) -> Result<Vec<Arc<McpServer>>, 
             url: row.url,
             auth_header: row.auth_header,
             timeout: Duration::from_millis(u64::try_from(row.timeout_ms).unwrap_or(15_000)),
-            max_result_chars: usize::try_from(row.max_result_chars).unwrap_or(4000),
             tools: server_tools,
         }));
     }

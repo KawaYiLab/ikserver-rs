@@ -465,7 +465,6 @@ interface McpServerDraft {
   clearAuthHeader: boolean
   authHeaderHint: string | null
   timeoutMs: number
-  maxResultChars: number
   enabled: boolean
   sortOrder: number
 }
@@ -484,7 +483,6 @@ function editMcpServer(server?: McpServer) {
         clearAuthHeader: false,
         authHeaderHint: server.authHeaderHint ?? null,
         timeoutMs: server.timeoutMs,
-        maxResultChars: server.maxResultChars,
         enabled: server.enabled,
         sortOrder: server.sortOrder,
       }
@@ -497,7 +495,6 @@ function editMcpServer(server?: McpServer) {
         clearAuthHeader: false,
         authHeaderHint: null,
         timeoutMs: 15000,
-        maxResultChars: 4000,
         enabled: true,
         sortOrder: (mcpServers.value?.length ?? 0) * 10,
       }
@@ -515,7 +512,6 @@ async function saveMcpServer() {
       url: d.url.trim(),
       authHeader,
       timeoutMs: d.timeoutMs,
-      maxResultChars: d.maxResultChars,
       enabled: d.enabled,
       sortOrder: d.sortOrder,
     },
@@ -902,7 +898,7 @@ function traceMessages(request: unknown) {
                     <div class="truncate font-mono text-xs" :title="server.url">{{ server.url }}</div>
                     <div class="text-xs">
                       鉴权头：<span class="font-mono">{{ server.authHeaderHint ?? '无' }}</span>
-                      · 超时 {{ server.timeoutMs / 1000 }} 秒 · 结果上限 {{ formatNumber(server.maxResultChars) }} 字
+                      · 超时 {{ server.timeoutMs / 1000 }} 秒
                       · 角色：{{ server.characters.length ? server.characters.join('、') : '未启用' }}
                     </div>
                     <div class="text-xs">
@@ -1250,14 +1246,10 @@ function traceMessages(request: unknown) {
             <Checkbox v-model="mcpDraft.clearAuthHeader" />
             清除鉴权头
           </label>
-          <div class="grid gap-4 sm:grid-cols-3">
+          <div class="grid gap-4 sm:grid-cols-2">
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">超时（毫秒）</span>
               <Input v-model.number="mcpDraft.timeoutMs" type="number" min="1000" max="60000" step="1000" />
-            </label>
-            <label class="grid gap-2">
-              <span class="text-sm leading-none font-medium">结果上限（字）</span>
-              <Input v-model.number="mcpDraft.maxResultChars" type="number" min="500" max="16000" step="500" />
             </label>
             <label class="grid gap-2">
               <span class="text-sm leading-none font-medium">排序</span>

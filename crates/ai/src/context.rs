@@ -2,6 +2,9 @@
 //!
 //! - 预算 = 上下文窗口 − 给回复留的量（模型的输出上限，没填按 8192）− 工具清单本身；
 //! - 准备阶段之后、第一次请求之前：历史超出「预算 − 工具回灌预留」时从最早的消息删起，保留 system 与触发消息；
+//! - 工具结果回灌之前（TOOL-002）：工具结果不按固定字数截断，放得下就原样回灌；放不下先占用剩余空间，
+//!   不够时最多占到预算的一半（省略较早轮次的工具结果、删最早的历史腾地方），仍放不下才把本轮最长的几条截短，
+//!   并注明后面还有多少（TOOL-015）；
 //! - 工具循环里每轮请求之前：还超就把较早轮次里的大段工具结果换成一句省略说明，最新一轮的结果不动；
 //!   再超才继续删最早的历史。
 //!
@@ -11,6 +14,7 @@
 use crate::catalog::Model;
 use crate::llm::{ChatMessage, ToolSpec};
 use crate::quota;
+use crate::tools;
 
 /// 换掉的工具结果。
 pub(crate) const PRUNED_NOTE: &str =
@@ -25,6 +29,8 @@ const TOOL_RESERVE_MAX: i64 = 16_384;
 const PER_MESSAGE: i64 = 8;
 /// 预算的下限：窗口填得离谱时也留一点余地。
 const MIN_BUDGET: i64 = 2048;
+/// 截短时每条工具结果至少留这么多字：上下文再紧也让模型看到开头。
+const RESULT_FLOOR_CHARS: usize = 500;
 
 /// 一次请求里消息部分能用的 token。
 pub(crate) fn budget(model: &Model, tools: &[ToolSpec]) -> i64 {
@@ -110,27 +116,116 @@ pub(crate) fn prune_tool_results(messages: &mut [ChatMessage], budget: i64) -> u
     if total <= budget {
         return 0;
     }
-    let latest = messages
-        .iter()
-        .rposition(
-            |m| matches!(m, ChatMessage::Assistant { tool_calls, .. } if !tool_calls.is_empty()),
-        )
-        .unwrap_or(0);
+    let latest = latest_tool_call(messages);
     let mut pruned = 0;
     for message in &mut messages[..latest] {
         if total <= budget {
             break;
         }
-        if let ChatMessage::Tool { content, .. } = message
-            && content.chars().count() > PRUNE_MIN_CHARS
+        if let Some(saved) = prune_saving(message)
+            && let ChatMessage::Tool { content, .. } = message
         {
-            total -=
-                quota::estimate_text_tokens(content) - quota::estimate_text_tokens(PRUNED_NOTE);
+            total -= saved;
             PRUNED_NOTE.clone_into(content);
             pruned += 1;
         }
     }
     pruned
+}
+
+/// 最后一条带工具调用的回复的位置（它之后的工具结果是模型马上要用的）。
+fn latest_tool_call(messages: &[ChatMessage]) -> usize {
+    messages
+        .iter()
+        .rposition(
+            |m| matches!(m, ChatMessage::Assistant { tool_calls, .. } if !tool_calls.is_empty()),
+        )
+        .unwrap_or(0)
+}
+
+/// 这条消息若是值得省略的工具结果，省略后能省下的 token。
+fn prune_saving(message: &ChatMessage) -> Option<i64> {
+    match message {
+        ChatMessage::Tool { content, .. } if content.chars().count() > PRUNE_MIN_CHARS => {
+            Some(quota::estimate_text_tokens(content) - quota::estimate_text_tokens(PRUNED_NOTE))
+        }
+        _ => None,
+    }
+}
+
+/// [`fit_results`] 做了什么。
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Fitted {
+    /// 换成省略说明的较早工具结果。
+    pub pruned: usize,
+    /// 删掉的最早历史。
+    pub removed: usize,
+    /// 截短的本轮结果。
+    pub cut: usize,
+}
+
+/// 把本轮的工具结果放进上下文（TOOL-002、TOOL-015）。本轮结果最多占「剩余空间（较早轮次的工具结果可以省略）」
+/// 与「预算的一半」中较大的那个：超出时先把最长的几条截短（短的原样保留，长的平分剩下的）；再为它们腾地方，
+/// 先省略较早轮次的工具结果，再删最早的历史（`keep_from` 起的消息不删）。平常放得下时什么都不动。
+pub(crate) fn fit_results(
+    messages: &mut Vec<ChatMessage>,
+    results: &mut [String],
+    budget: i64,
+    keep_from: usize,
+) -> Fitted {
+    let mut fitted = Fitted::default();
+    let overhead = PER_MESSAGE * i64::try_from(results.len()).unwrap_or(i64::MAX);
+    let prunable: i64 = messages[..latest_tool_call(messages)]
+        .iter()
+        .filter_map(prune_saving)
+        .sum();
+    let room = (budget - estimate(messages) + prunable).max(budget / 2) - overhead;
+    let sizes: Vec<i64> = results
+        .iter()
+        .map(|r| quota::estimate_text_tokens(r))
+        .collect();
+    if sizes.iter().sum::<i64>() > room {
+        for ((result, size), cap) in results.iter_mut().zip(&sizes).zip(share(&sizes, room)) {
+            if *size > cap {
+                let total = result.chars().count();
+                // token 与字数大致成正比：按比例算出能留的字数。
+                let keep = usize::try_from(
+                    i128::from(cap.max(0)) * i128::try_from(total).unwrap_or(i128::MAX)
+                        / i128::from(*size),
+                )
+                .unwrap_or(total)
+                .max(RESULT_FLOOR_CHARS);
+                if keep < total {
+                    *result = tools::truncate_marked(result, keep);
+                    fitted.cut += 1;
+                }
+            }
+        }
+    }
+    let need: i64 = results
+        .iter()
+        .map(|r| quota::estimate_text_tokens(r))
+        .sum::<i64>()
+        + overhead;
+    if estimate(messages) + need > budget {
+        fitted.pruned = prune_tool_results(messages, budget - need);
+        fitted.removed = trim_history(messages, budget - need, keep_from);
+    }
+    fitted
+}
+
+/// 把 `total` 分给各条：比平均份额小的拿走自己要的，剩下的由长的平分。
+fn share(sizes: &[i64], total: i64) -> Vec<i64> {
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by_key(|&i| sizes[i]);
+    let mut caps = vec![0; sizes.len()];
+    let mut left = total.max(0);
+    for (taken, &i) in order.iter().enumerate() {
+        let fair = left / i64::try_from(sizes.len() - taken).unwrap_or(1);
+        caps[i] = sizes[i].min(fair);
+        left -= caps[i];
+    }
+    caps
 }
 
 #[cfg(test)]
@@ -218,5 +313,75 @@ mod tests {
         assert_eq!(pruned, 1);
         assert_eq!(messages[3].text(), PRUNED_NOTE);
         assert_eq!(messages[5].text(), big);
+    }
+
+    #[test]
+    fn results_that_fit_are_left_alone() {
+        let mut messages = vec![ChatMessage::system("s"), ChatMessage::user("问")];
+        let mut results = vec!["结".repeat(3000)];
+        let fitted = fit_results(&mut messages, &mut results, 10_000, 2);
+        assert_eq!(fitted, Fitted::default());
+        assert_eq!(results[0].chars().count(), 3000);
+    }
+
+    #[test]
+    fn older_results_make_room_before_the_new_one_is_cut() {
+        let big = "帖".repeat(3000);
+        let [c1, r1] = round("a", &big);
+        let [c2, _] = round("b", "");
+        let mut messages = vec![
+            ChatMessage::system("s"),
+            ChatMessage::user("问"),
+            c1,
+            r1,
+            c2,
+        ];
+        let mut results = vec!["新".repeat(4000)];
+        let fitted = fit_results(&mut messages, &mut results, 6000, 2);
+        assert_eq!(fitted.pruned, 1);
+        assert_eq!(fitted.cut, 0);
+        assert_eq!(messages[3].text(), PRUNED_NOTE);
+        assert_eq!(results[0].chars().count(), 4000);
+    }
+
+    #[test]
+    fn oversized_results_are_cut_longest_first_and_say_how_much_is_left() {
+        let mut messages = vec![ChatMessage::system("s"), ChatMessage::user("问")];
+        let short = "短".repeat(300);
+        let mut results = vec!["长".repeat(20_000), short.clone()];
+        let fitted = fit_results(&mut messages, &mut results, 6000, 2);
+        assert_eq!(fitted.cut, 1);
+        assert_eq!(results[1], short);
+        assert!(results[0].contains("已截断"));
+        let used = estimate(&messages)
+            + results
+                .iter()
+                .map(|r| quota::estimate_text_tokens(r) + PER_MESSAGE)
+                .sum::<i64>();
+        assert!(used <= 6000 + 64, "{used}");
+    }
+
+    #[test]
+    fn a_huge_result_does_not_wipe_out_the_history() {
+        let line = "聊".repeat(500);
+        let mut messages = vec![ChatMessage::system("s")];
+        for _ in 0..8 {
+            messages.push(ChatMessage::user(line.clone()));
+            messages.push(ChatMessage::assistant(line.clone()));
+        }
+        messages.push(ChatMessage::user("最新的问题"));
+        let keep = messages.len();
+        let mut results = vec!["页".repeat(100_000)];
+        let fitted = fit_results(&mut messages, &mut results, 8000, keep);
+        assert_eq!(fitted.cut, 1);
+        // 结果最多占一半预算，历史至少留下一半左右。
+        assert!(estimate(&messages) >= 3000, "{}", estimate(&messages));
+    }
+
+    #[test]
+    fn share_gives_short_ones_what_they_need() {
+        assert_eq!(share(&[100, 5000, 50], 1000), vec![100, 850, 50]);
+        assert_eq!(share(&[900, 900], 1000), vec![500, 500]);
+        assert_eq!(share(&[10], -5), vec![0]);
     }
 }

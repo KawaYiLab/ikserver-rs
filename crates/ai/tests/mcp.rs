@@ -121,6 +121,9 @@ async fn fake_mcp(State(fake): State<Arc<Fake>>, headers: HeaderMap, body: Bytes
             ]
         }),
         "tools/call" => match body["params"]["name"].as_str() {
+            Some("search") if body["params"]["arguments"]["q"] == "全部" => json!({
+                "content": [{ "type": "text", "text": "资".repeat(20_000) }]
+            }),
             Some("search") => json!({
                 "content": [{ "type": "text", "text": format!("结果：{}", body["params"]["arguments"]["q"]) }]
             }),
@@ -650,6 +653,55 @@ async fn approved_mcp_tools_reach_the_model_and_changes_need_review(db: PgPool) 
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn long_tool_results_reach_the_model_in_full(db: PgPool) {
+    let (_fake, url) = fake_server().await;
+    let h = harness(db, json!({})).await;
+    let op = operator();
+    mcp::save_server(&h.state, &op, "kb", server_input(&url))
+        .await
+        .unwrap();
+    h.import_character(json!({ "mcpServers": ["kb"] })).await;
+    let refreshed = mcp::refresh_server(&h.state, "kb").await.unwrap();
+    let search = refreshed
+        .server
+        .tools
+        .iter()
+        .find(|t| t.remote_name == "search")
+        .unwrap();
+    mcp::update_tool(
+        &h.state,
+        &op,
+        "kb",
+        "search",
+        McpToolInput {
+            enabled: true,
+            digest: Some(search.digest.clone()),
+            timeline_text: None,
+        },
+    )
+    .await
+    .unwrap();
+
+    // 2 万字的结果放得进上下文：原样回灌，不截断（TOOL-002）。
+    let job = h.ask("全部列出来").await;
+    h.llm.push(vec![
+        tool_call("call_1", "kb__search", r#"{"q":"全部"}"#),
+        Step::Emit(StreamEvent::Finish("tool_calls".into())),
+        usage(100, 10),
+    ]);
+    h.llm.push(vec![content("好。"), usage(200, 20)]);
+    assert_eq!(
+        dm::run_job(&h.state, job, 1, false).await.unwrap(),
+        RunOutcome::Completed
+    );
+    let requests = h.llm.requests();
+    let ChatMessage::Tool { content, .. } = requests[1].messages.last().unwrap() else {
+        panic!()
+    };
+    assert_eq!(content, &"资".repeat(20_000));
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
     let h = harness(db, json!({})).await;
     let catalog = h.state.catalog.get().await.unwrap();
@@ -719,7 +771,6 @@ async fn server_input_is_validated(db: PgPool) {
         json!({ "url": "http://169.254.169.254/latest" }),
         json!({ "authHeader": "just-a-token" }),
         json!({ "timeoutMs": 100 }),
-        json!({ "maxResultChars": 100_000 }),
         json!({ "displayName": " " }),
     ] {
         let err = mcp::save_server(&h.state, &op, "kb", bad(patch.clone()))

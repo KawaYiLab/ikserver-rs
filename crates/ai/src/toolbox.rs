@@ -24,8 +24,8 @@ use crate::tools::{self, ToolContext, ToolMeta, ToolOutput};
 
 /// 单次提供给模型的工具总数上限（论坛最多 7 + 记忆最多 3 + 剧情最多 6 + 站外工具）。
 pub const MAX_TOOLS: usize = 32;
-/// 剧情库结果的上限：比论坛工具宽，原文较长。
-pub const STORY_MAX_RESULT_CHARS: usize = 12_000;
+/// 预占估算里每次剧情库、站外工具结果按多少字算（TOOL-036）。结果本身不截断。
+const ESTIMATE_RESULT_CHARS: i64 = 12_000;
 /// `ik_read` 每次最多读这么多字（不传时也按它），续读走结果里的 nextCall。
 const STORY_READ_MAX_CHARS: u64 = 6_000;
 /// 剧情库在时间线上的来源名。
@@ -264,27 +264,24 @@ impl Toolbox {
     }
 
     /// 预占估算（QUOTA-007）要多算的 token：剧情库与站外工具的清单本身，加上每轮回灌比论坛工具
-    /// 多出来的部分（按结果上限的一半估）。只有论坛工具时为 0。宁可估高。
+    /// 多出来的部分（按 [`ESTIMATE_RESULT_CHARS`] 的一半估）。只有论坛工具时为 0。宁可估高。
     pub fn extra_estimate_tokens(&self, tool_rounds: u32) -> i64 {
         let mut specs = 0i64;
-        let mut largest = 0usize;
+        let mut external = false;
         for entry in &self.entries {
-            let cap = match &entry.source {
-                Source::Forum | Source::Memory { .. } => continue,
-                Source::Story => STORY_MAX_RESULT_CHARS,
-                Source::Remote { server, .. } => server.max_result_chars,
-            };
-            largest = largest.max(cap);
+            if matches!(entry.source, Source::Forum | Source::Memory { .. }) {
+                continue;
+            }
+            external = true;
             specs = specs.saturating_add(quota::estimate_text_tokens(&entry.spec.description));
             specs = specs.saturating_add(
                 i64::try_from(entry.spec.parameters.to_string().len() / 4).unwrap_or(i64::MAX),
             );
         }
-        if largest == 0 {
+        if !external {
             return 0;
         }
-        let per_round =
-            (i64::try_from(largest / 2).unwrap_or(i64::MAX) - quota::TOOL_FEEDBACK_TOKENS).max(0);
+        let per_round = (ESTIMATE_RESULT_CHARS / 2 - quota::TOOL_FEEDBACK_TOKENS).max(0);
         specs.saturating_add(per_round.saturating_mul(i64::from(tool_rounds)))
     }
 
@@ -378,7 +375,7 @@ impl Toolbox {
                 };
                 match mcp.call_tool(endpoint, tool, Value::Object(args)).await {
                     Ok(output) => ToolOutput {
-                        text: tools::truncate_marked(&output.text, server.max_result_chars),
+                        text: output.text,
                         is_error: output.is_error,
                         meta: ToolMeta::None,
                         images: Vec::new(),
@@ -413,7 +410,7 @@ async fn story(state: &AiState, name: &str, arguments: &str) -> ToolOutput {
     .await;
     match outcome {
         Ok(Ok(Ok(output))) => ToolOutput {
-            text: tools::truncate_marked(&output.text, STORY_MAX_RESULT_CHARS),
+            text: output.text,
             is_error: false,
             meta: ToolMeta::None,
             images: Vec::new(),
@@ -518,7 +515,6 @@ mod tests {
             url: "https://example.invalid/mcp".into(),
             auth_header: String::new(),
             timeout: Duration::from_secs(1),
-            max_result_chars: 4000,
             tools: Vec::new(),
         });
         let mut toolbox = Toolbox::forum();

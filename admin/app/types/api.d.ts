@@ -4306,8 +4306,6 @@ export interface components {
             lastError?: string | null;
             /** Format: date-time */
             lastListedAt?: string | null;
-            /** Format: int32 */
-            maxResultChars: number;
             name: string;
             /** Format: int32 */
             sortOrder: number;
@@ -5894,11 +5892,6 @@ export interface components {
             authHeader?: string | null;
             displayName: string;
             enabled?: boolean;
-            /**
-             * Format: int32
-             * @description 结果截断上限，500–16000 字符。
-             */
-            maxResultChars?: number;
             /** @description 小写字母、数字、下划线、连字符，1–32 字符；是工具名的前缀。 */
             name: string;
             /** Format: int32 */

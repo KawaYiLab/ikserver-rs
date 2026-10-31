@@ -1080,7 +1080,6 @@ pub(crate) struct McpServerRow {
     pub url: String,
     pub auth_header: String,
     pub timeout_ms: i32,
-    pub max_result_chars: i32,
     pub enabled: bool,
     pub sort_order: i32,
     pub last_listed_at: Option<DateTime<Utc>>,
@@ -1090,7 +1089,7 @@ pub(crate) struct McpServerRow {
 pub(crate) async fn mcp_servers(conn: &mut PgConnection) -> sqlx::Result<Vec<McpServerRow>> {
     sqlx::query_as!(
         McpServerRow,
-        "SELECT id, name, display_name, url, auth_header, timeout_ms, max_result_chars, enabled,
+        "SELECT id, name, display_name, url, auth_header, timeout_ms, enabled,
                 sort_order, last_listed_at, last_error
          FROM ai_mcp_servers ORDER BY sort_order, id"
     )
@@ -1104,7 +1103,7 @@ pub(crate) async fn mcp_server(
 ) -> sqlx::Result<Option<McpServerRow>> {
     sqlx::query_as!(
         McpServerRow,
-        "SELECT id, name, display_name, url, auth_header, timeout_ms, max_result_chars, enabled,
+        "SELECT id, name, display_name, url, auth_header, timeout_ms, enabled,
                 sort_order, last_listed_at, last_error
          FROM ai_mcp_servers WHERE name = $1",
         name,
@@ -1121,7 +1120,6 @@ pub(crate) struct NewMcpServer<'a> {
     /// None = 保留原有的（新建时为空串）。
     pub auth_header: Option<&'a str>,
     pub timeout_ms: i32,
-    pub max_result_chars: i32,
     pub enabled: bool,
     pub sort_order: i32,
     pub now: DateTime<Utc>,
@@ -1133,11 +1131,11 @@ pub(crate) async fn upsert_mcp_server(
 ) -> sqlx::Result<i64> {
     sqlx::query_scalar!(
         "INSERT INTO ai_mcp_servers (id, name, display_name, url, auth_header, timeout_ms,
-                                     max_result_chars, enabled, sort_order, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6, $7, $8, $9, $10, $10)
+                                     enabled, sort_order, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, COALESCE($5, ''), $6, $7, $8, $9, $9)
          ON CONFLICT (name) DO UPDATE SET display_name = $3, url = $4,
              auth_header = COALESCE($5, ai_mcp_servers.auth_header), timeout_ms = $6,
-             max_result_chars = $7, enabled = $8, sort_order = $9, updated_at = $10
+             enabled = $7, sort_order = $8, updated_at = $9
          RETURNING id",
         s.id,
         s.name,
@@ -1145,7 +1143,6 @@ pub(crate) async fn upsert_mcp_server(
         s.url,
         s.auth_header,
         s.timeout_ms,
-        s.max_result_chars,
         s.enabled,
         s.sort_order,
         s.now,
