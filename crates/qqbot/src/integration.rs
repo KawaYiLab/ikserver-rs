@@ -36,8 +36,8 @@ struct FakeAi {
     /// 每次请求的全部消息正文（按顺序拼起来），用来断言记忆段有没有进提示词。
     prompts: Mutex<Vec<String>>,
 }
-const PERSONAL_EXTRACT: &str = "你负责维护 AI 角色对用户的长期记忆";
-const SHARED_EXTRACT: &str = "你负责维护 AI 角色对一个 QQ 群";
+const PERSONAL_EXTRACT: &str = "根据「新的对话」更新你对对方的长期记忆";
+const SHARED_EXTRACT: &str = "根据「新的对话」更新你对这个 QQ 群";
 #[async_trait::async_trait]
 impl ChatProvider for FakeAi {
     async fn stream(&self, request: &ChatRequest) -> Result<EventStream, LlmError> {
