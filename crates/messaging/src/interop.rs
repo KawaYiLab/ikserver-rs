@@ -57,6 +57,29 @@ pub async fn active_peer(
     Ok(repo::active_peer(conn, conversation_id, user_id).await?)
 }
 
+/// 在场会话的成员身份。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Membership {
+    /// 对方 id。
+    pub peer_id: i64,
+    /// 一对一私聊。只有这种会话混排对方发来的通知；AI 会话（同一个 AI 可以有多条）不混，
+    /// AI 在评论区回复、提及你的通知留在它自己的通知分组里。
+    pub direct: bool,
+}
+
+/// 在场会话的成员身份；不是在场成员时为 None。
+pub async fn membership(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    user_id: i64,
+) -> Result<Option<Membership>, Problem> {
+    let row = repo::active_membership(conn, conversation_id, user_id).await?;
+    Ok(row.map(|(peer_id, kind)| Membership {
+        peer_id,
+        direct: kind == "direct",
+    }))
+}
+
 /// 全部置顶会话（置顶时间倒序）。
 pub async fn pinned(
     db: &PgPool,

@@ -3,7 +3,8 @@
 //! 两个数据源各自按 `(时间, 键)` 倒序游标分页，这里做双源归并。同一时刻通知排在私信前面
 //! （CONV-025），所以游标记下「落在哪个数据源的哪一项上」，另一个数据源据此判断同一时刻的项
 //! 是否已经出过（`ik_messaging::interop::Before`）。与某人有在场私聊时，他发来的通知分组
-//! 在数据源里就被排除，合并进那个会话（未读相加，预览取更新的一条）。
+//! 在数据源里就被排除，合并进那个会话（未读相加，预览取更新的一条）。只有一对一私聊这样合并：
+//! AI 会话不混通知，AI 在评论区回复、提及你的通知留在它自己的通知分组里。
 
 use std::collections::HashMap;
 
@@ -153,6 +154,11 @@ struct EntryCursor {
     k: Option<String>,
 }
 
+/// 只有一对一私聊混排对方发来的通知。
+fn is_direct(cv: &ConversationView) -> bool {
+    cv.kind == "direct"
+}
+
 enum Source {
     Conversation(ConversationView),
     Bucket(BucketRow),
@@ -236,13 +242,14 @@ pub async fn list(
         _ => None,
     };
 
-    // 私聊会话合并对方的通知分组。
+    // 一对一私聊合并对方的通知分组；AI 会话不合并。
     let merged_keys: Vec<String> = pinned
         .iter()
         .chain(merged.iter().filter_map(|s| match s {
             Source::Conversation(c) => Some(c),
             Source::Bucket(_) => None,
         }))
+        .filter(|c| is_direct(c))
         .map(|c| user_bucket(c.peer_user_id))
         .collect();
     let mut conn = state.db.acquire().await?;
@@ -261,7 +268,9 @@ pub async fn list(
     let authors = sender_map(state, &mut conn, bucket_peers.into_iter()).await?;
 
     let to_entry = |cv: ConversationView| {
-        let bucket = stats.get(&user_bucket(cv.peer_user_id));
+        let bucket = is_direct(&cv)
+            .then(|| stats.get(&user_bucket(cv.peer_user_id)))
+            .flatten();
         conversation_entry(me, cv, bucket)
     };
     let mut items: Vec<InboxEntry> = pinned.into_iter().map(to_entry).collect();
@@ -292,8 +301,8 @@ struct ItemCursor {
     n: Option<i64>,
 }
 
-/// 收件箱条目的时间线（新的在前）。私聊会话混排对方发来的通知（MSG-011），
-/// 通知分组只有通知。
+/// 收件箱条目的时间线（新的在前）。一对一私聊混排对方发来的通知（MSG-011），
+/// AI 会话只有消息，通知分组只有通知。
 pub async fn items(
     state: &NotifyState,
     principal: &Principal,
@@ -319,7 +328,7 @@ pub async fn items(
     let mut conn = state.db.acquire().await?;
     let (messages, bucket_key) = match key {
         Key::Conversation(id) => {
-            let peer = dm::active_peer(&mut conn, id, me)
+            let member = dm::membership(&mut conn, id, me)
                 .await?
                 .ok_or_else(not_found)?;
             let before = after.as_ref().map(|c| match c.m {
@@ -328,20 +337,25 @@ pub async fn items(
             });
             (
                 dm::messages(&mut conn, &state.media, id, before, limit + 1).await?,
-                user_bucket(peer),
+                member.direct.then(|| user_bucket(member.peer_id)),
             )
         }
-        Key::Bucket(key) => (Vec::new(), key),
+        Key::Bucket(key) => (Vec::new(), Some(key)),
     };
-    let rows = repo::list(
-        &mut conn,
-        me,
-        Some(&bucket_key),
-        false,
-        after.as_ref().map(|c| (c.t, c.n)),
-        limit + 1,
-    )
-    .await?;
+    let rows = match &bucket_key {
+        Some(bucket_key) => {
+            repo::list(
+                &mut conn,
+                me,
+                Some(bucket_key),
+                false,
+                after.as_ref().map(|c| (c.t, c.n)),
+                limit + 1,
+            )
+            .await?
+        }
+        None => Vec::new(),
+    };
     let authors = sender_map(state, &mut conn, rows.iter().filter_map(|r| r.sender_id)).await?;
     let notifications: Vec<NotificationView> =
         rows.into_iter().map(|r| view(r, &authors)).collect();
@@ -390,8 +404,8 @@ fn read_event(user_id: i64, key: &str, result: &InboxReadResult) -> Result<Event
     )
 }
 
-/// 把一个收件箱条目标为已读。私聊会话：推进已读水位，并把对方发来的通知一并标为已读
-/// （点开会话就等于看过了两者，CONV-034）。只标调用时刻及之前的通知。
+/// 把一个收件箱条目标为已读。一对一私聊：推进已读水位，并把对方发来的通知一并标为已读
+/// （点开会话就等于看过了两者，CONV-034）；AI 会话只推进水位。只标调用时刻及之前的通知。
 pub async fn mark_read(
     state: &NotifyState,
     principal: &Principal,
@@ -403,18 +417,21 @@ pub async fn mark_read(
     let mut tx = state.db.begin().await?;
     let result = match parsed {
         Key::Conversation(id) => {
-            let peer = dm::mark_read(&mut tx, me, id, now)
+            let member = dm::membership(&mut tx, id, me)
                 .await?
                 .ok_or_else(not_found)?;
+            dm::mark_read(&mut tx, me, id, now)
+                .await?
+                .ok_or_else(not_found)?;
+            let notifications_updated = if member.direct {
+                repo::mark_all_read(&mut tx, me, Some(&user_bucket(member.peer_id)), Some(now))
+                    .await?
+            } else {
+                0
+            };
             InboxReadResult {
                 last_read_at: Some(now),
-                notifications_updated: repo::mark_all_read(
-                    &mut tx,
-                    me,
-                    Some(&user_bucket(peer)),
-                    Some(now),
-                )
-                .await?,
+                notifications_updated,
             }
         }
         Key::Bucket(bucket) => InboxReadResult {

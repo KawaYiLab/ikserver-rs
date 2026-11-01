@@ -449,6 +449,42 @@ async fn conversation_timeline_mixes_messages_and_notifications(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn ai_sessions_do_not_mix_in_the_ais_notifications(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1).await;
+    h.user(3).await;
+    h.post(10, 1).await;
+    // 3 是 AI：一条 AI 会话，外加它在评论区发来的通知。
+    let ai = h.conversation(&h.user_ref(3), 1, 10).await;
+    sqlx::query!("UPDATE conversations SET kind = 'ai' WHERE id = $1", ai)
+        .execute(&h.db)
+        .await
+        .unwrap();
+    h.like(1, 3, 10, 20).await;
+
+    let key = format!("dm-{ai}");
+    let page = inbox::list(&h.notify, &me, first()).await.unwrap();
+    let keys: Vec<&str> = page.items.iter().map(|e| e.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        vec!["user-3", key.as_str()],
+        "通知单独成项，不推进 AI 会话"
+    );
+    let entry = find(&page.items, &key);
+    assert_eq!(entry.unread_count, 1, "只算私信");
+    assert_eq!(entry.preview.as_ref().unwrap().kind, "message");
+    assert_eq!(find(&page.items, "user-3").unread_count, 1);
+
+    let timeline = inbox::items(&h.notify, &me, &key, first()).await.unwrap();
+    assert_eq!(timeline.items.len(), 1);
+    assert!(matches!(timeline.items[0], InboxItem::Message { .. }));
+
+    let read = inbox::mark_read(&h.notify, &me, &key).await.unwrap();
+    assert_eq!(read.notifications_updated, 0, "读 AI 会话不顺带读通知");
+    assert_eq!(inbox::unread_count(&h.notify, &me).await.unwrap().count, 1);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn notifications_bump_the_conversation_but_do_not_revive_it(db: PgPool) {
     let h = harness(db);
     let me = h.user(1).await;

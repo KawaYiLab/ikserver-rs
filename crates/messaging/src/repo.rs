@@ -166,6 +166,24 @@ pub(crate) async fn active_peer(
     .await
 }
 
+/// 在场成员身份，返回对方 id 与会话类型（`direct` | `ai`）。
+pub(crate) async fn active_membership(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    user_id: i64,
+) -> sqlx::Result<Option<(i64, String)>> {
+    let row = sqlx::query!(
+        "SELECT m.peer_id, c.kind FROM conversation_members m
+         JOIN conversations c ON c.id = m.conversation_id
+         WHERE m.conversation_id = $1 AND m.user_id = $2 AND m.left_at IS NULL",
+        conversation_id,
+        user_id,
+    )
+    .fetch_optional(conn)
+    .await?;
+    Ok(row.map(|r| (r.peer_id, r.kind)))
+}
+
 /// 新消息：推进全部成员的排序键，并让移除了会话的成员重新看到它。返回在场成员。
 pub(crate) async fn bump_members(
     conn: &mut PgConnection,
