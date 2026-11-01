@@ -75,6 +75,22 @@ pub(crate) async fn set_title(
     Ok(())
 }
 
+/// 还没有标题的 AI 会话补上标题；已有标题不动。返回是否写入。
+pub(crate) async fn fill_title(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    title: &str,
+) -> sqlx::Result<bool> {
+    let done = sqlx::query!(
+        "UPDATE conversations SET title = $2 WHERE id = $1 AND kind = 'ai' AND title IS NULL",
+        conversation_id,
+        title,
+    )
+    .execute(conn)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
 /// 会话类型（`direct` / `ai`）。
 pub(crate) async fn conversation_kind(
     conn: &mut PgConnection,
@@ -451,6 +467,52 @@ pub(crate) async fn stream_summaries(
         at,
         key,
         inclusive,
+        limit,
+    )
+    .fetch_all(conn)
+    .await
+}
+
+/// 自己和某个 AI 账号之间在场的 AI 会话（含置顶），按 `(activity_at, conversation_id)` 倒序，严格早于游标。
+pub(crate) async fn ai_session_summaries(
+    conn: &mut PgConnection,
+    user_id: i64,
+    peer_id: i64,
+    before: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> sqlx::Result<Vec<SummaryRow>> {
+    let (at, key) = before.unzip();
+    sqlx::query_as!(
+        SummaryRow,
+        r#"SELECT m.conversation_id, cv.kind AS conv_kind, cv.title, m.peer_id, m.activity_at, m.last_read_at, m.muted, m.pinned_at,
+                  (SELECT count(*) FROM messages x
+                   WHERE x.conversation_id = m.conversation_id AND x.sender_id <> m.user_id
+                     AND x.withdrawn_at IS NULL
+                     AND (m.last_read_at IS NULL OR x.created_at > m.last_read_at)) AS "unread!",
+                  l.id AS "last_id?", l.sender_id AS "last_sender_id?", l.kind AS "last_kind?",
+                  CASE WHEN l.content = '' AND cardinality(l.image_ids) > 0 THEN '[图片]'
+                       ELSE l.content END AS "last_content?", l.withdrawn_at AS "last_withdrawn_at?",
+                  l.created_at AS "last_created_at?"
+           FROM (
+               SELECT c.* FROM conversation_members c
+               JOIN conversations k ON k.id = c.conversation_id AND k.kind = 'ai'
+               WHERE c.user_id = $1 AND c.peer_id = $2 AND c.left_at IS NULL
+                 AND ($3::timestamptz IS NULL OR c.activity_at < $3
+                      OR (c.activity_at = $3 AND c.conversation_id < $4::bigint))
+               ORDER BY c.activity_at DESC, c.conversation_id DESC
+               LIMIT $5
+           ) m
+           LEFT JOIN LATERAL (
+               SELECT x.id, x.sender_id, x.kind, x.content, x.withdrawn_at, x.created_at, x.image_ids
+               FROM messages x WHERE x.conversation_id = m.conversation_id
+               ORDER BY x.created_at DESC, x.id DESC LIMIT 1
+           ) l ON TRUE
+           JOIN conversations cv ON cv.id = m.conversation_id
+           ORDER BY m.activity_at DESC, m.conversation_id DESC"#,
+        user_id,
+        peer_id,
+        at,
+        key,
         limit,
     )
     .fetch_all(conn)

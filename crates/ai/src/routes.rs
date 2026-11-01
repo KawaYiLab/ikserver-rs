@@ -4,8 +4,9 @@
 use axum::extract::{FromRef, State};
 use http::StatusCode;
 use ik_auth::{AuthState, CurrentUser};
+use ik_kernel::cursor::Page;
 use ik_kernel::error::ProblemBody;
-use ik_kernel::extract::{Json, Path};
+use ik_kernel::extract::{Json, Path, Query};
 use ik_kernel::id::marker::{Conversation, Message};
 use ik_kernel::{Id, Problem};
 use ik_messaging::dto::{ConversationView, MessageView};
@@ -14,8 +15,8 @@ use utoipa_axum::routes;
 
 use crate::AiState;
 use crate::dto::{
-    AssistantView, CharacterList, CreateSessionRequest, ModelList, QuotaView, RegenerateAccepted,
-    RegenerateRequest, SessionView, UpdateSessionRequest,
+    AssistantView, CharacterList, CreateSessionRequest, ListSessionsQuery, ModelList, QuotaView,
+    RegenerateAccepted, RegenerateRequest, SessionView, UpdateSessionRequest,
 };
 use crate::{service, sessions};
 
@@ -30,7 +31,7 @@ where
         .routes(routes!(models))
         .routes(routes!(quota))
         .routes(routes!(assistant))
-        .routes(routes!(create_session))
+        .routes(routes!(list_sessions, create_session))
         .routes(routes!(session, update_session))
         .routes(routes!(reset_session))
         .routes(routes!(stop))
@@ -99,6 +100,29 @@ async fn quota(
 )]
 async fn assistant(CurrentUser(_principal): CurrentUser) -> Json<AssistantView> {
     Json(service::assistant())
+}
+
+/// 我的 AI 会话
+///
+/// 自己和某个角色的会话，最近活动的在前。标题为空表示还没发过消息（首条消息会自动起名）。
+#[utoipa::path(
+    get,
+    path = "/v1/ai/sessions",
+    tag = "ai",
+    params(ListSessionsQuery),
+    security(("session_cookie" = []), ("bearer" = [])),
+    responses(
+        (status = 200, body = Page<ConversationView>),
+        (status = 400, description = "CURSOR_INVALID", body = ProblemBody, content_type = "application/problem+json"),
+        (status = 404, description = "AI_CHARACTER_NOT_FOUND", body = ProblemBody, content_type = "application/problem+json"),
+    )
+)]
+async fn list_sessions(
+    State(state): State<AiState>,
+    CurrentUser(principal): CurrentUser,
+    Query(query): Query<ListSessionsQuery>,
+) -> Result<Json<Page<ConversationView>>, Problem> {
+    Ok(Json(sessions::list(&state, &principal, query).await?))
 }
 
 /// 新建 AI 会话

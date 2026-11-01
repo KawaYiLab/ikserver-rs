@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE conversations SET title = $2 WHERE id = $1 AND kind = 'ai' AND title IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f480a9763ad24a8bf9f7c0451801d44c0c9756cc851969abf0b7f6aef2de90c"
+}

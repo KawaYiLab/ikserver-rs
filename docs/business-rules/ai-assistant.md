@@ -108,6 +108,7 @@ Worker（`server/agent-worker/`）：`README.md`（AstrBot 契约核验）、`sr
 - **TRIG-023** 执行时复核发送者：消息未撤回、发送者未封禁、`confirmed !== false`、`accountStatus` 不是 `blocked|merged|deleted`、发送者仍是会话活跃成员；群聊重新做提及解析。`execute.ts:97-130`
 - **TRIG-024** 新建 AI 会话（旧 `POST /api/dm/conversations/ai-session {targetUserId, title?}`）每次都新建一条一对一会话（支持同一角色多会话）；目标必须是 AI 用户、未封禁、`confirmed !== false`、双方无拉黑、不能是自己；标题 trim 后截 64。`conversation.ts:887-950`、`dm-helpers.ts:371`
 - **TRIG-025** 只有 AI 私聊可以设会话标题（普通私聊返回 `only ai sessions can have title`）。`conversation.ts:1115`
+- **TRIG-026**（新）`GET /v1/ai/sessions?character=<slug>` 列出自己和该角色的在场 AI 会话，按最后活动倒序，游标分页（默认 30、最多 50），置顶不另排；角色下线后仍能列出。没有标题的会话在用户发出第一条文字消息时自动起名：取第一行、合并空白、最多 24 字（超出加「…」），已有标题不覆盖；写入推 `dm.conversation.updated {conversationId, title}`。
 - **GEN-027** 同一会话串行、连发合并（新设计）：同一会话的回复任务排进同一个队列（`ai:dm:<会话>`），一条执行完才开始下一条，后一条能看到前一条的回复。任务开始时还没建占位、且同一会话同一代际里有更晚的消息触发的任务（排队、执行中或已完成）时，跳过并记原因 `merged`，由后面那条连同这条一起回。只看普通消息触发的任务，重新生成不参与合并。
 
 ### 3.4 去重、outbox 与执行队列

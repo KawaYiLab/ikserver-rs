@@ -1794,7 +1794,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * 我的 AI 会话
+         * @description 自己和某个角色的会话，最近活动的在前。标题为空表示还没发过消息（首条消息会自动起名）。
+         */
+        get: operations["list_sessions"];
         put?: never;
         /**
          * 新建 AI 会话
@@ -6312,6 +6316,33 @@ export interface components {
                  */
                 replyCount: number;
                 replyTo?: components["schemas"]["ReplyToView"] | null;
+            }[];
+            nextCursor?: string | null;
+        };
+        /** @description 游标分页的统一响应形状。 */
+        Page_ConversationView: {
+            items: {
+                /**
+                 * Format: date-time
+                 * @description 收件箱排序时间：最后一条消息，或对方最后一条通知的时间。
+                 */
+                activityAt: string;
+                id: string;
+                /** @description `direct`（一对一私聊）| `ai`（AI 会话，同一个 AI 可以有多条）。 */
+                kind: string;
+                lastMessage?: components["schemas"]["LastMessageView"] | null;
+                /** Format: date-time */
+                lastReadAt?: string | null;
+                muted: boolean;
+                peer: components["schemas"]["PeerView"];
+                pinned: boolean;
+                /** @description AI 会话的标题。 */
+                title?: string | null;
+                /**
+                 * Format: int64
+                 * @description 未读消息数（不含对方发来的通知；合并后的数字见收件箱）。
+                 */
+                unreadCount: number;
             }[];
             nextCursor?: string | null;
         };
@@ -12336,6 +12367,49 @@ export interface operations {
                 };
             };
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+        };
+    };
+    list_sessions: {
+        parameters: {
+            query: {
+                /** @description 角色（`/v1/ai/characters` 的 slug）。 */
+                character: string;
+                cursor?: string;
+                /** @description 默认 30，最大 50。 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ConversationView"];
+                };
+            };
+            /** @description CURSOR_INVALID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemBody"];
+                };
+            };
+            /** @description AI_CHARACTER_NOT_FOUND */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

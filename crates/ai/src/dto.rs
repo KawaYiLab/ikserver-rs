@@ -2,7 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use ik_kernel::Id;
 use ik_kernel::id::marker::User;
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::catalog::{Example, OutputMode};
 
@@ -235,6 +235,17 @@ pub struct CreateSessionRequest {
     /// 标题，最多 64 字（超出截断）。
     #[serde(default)]
     pub title: Option<String>,
+}
+
+/// 列出 AI 会话。
+#[derive(Debug, Clone, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListSessionsQuery {
+    /// 角色（`/v1/ai/characters` 的 slug）。
+    pub character: String,
+    pub cursor: Option<String>,
+    /// 默认 30，最大 50。
+    pub limit: Option<u32>,
 }
 
 /// AI 会话的设置。OpenAPI 里叫 `AiSessionView`，与登录会话的 `SessionView` 区分。

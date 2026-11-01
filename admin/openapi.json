@@ -6028,6 +6028,83 @@
       }
     },
     "/v1/ai/sessions": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "我的 AI 会话",
+        "description": "自己和某个角色的会话，最近活动的在前。标题为空表示还没发过消息（首条消息会自动起名）。",
+        "operationId": "list_sessions",
+        "parameters": [
+          {
+            "name": "character",
+            "in": "query",
+            "description": "角色（`/v1/ai/characters` 的 slug）。",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "默认 30，最大 50。",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ConversationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "CURSOR_INVALID",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "AI_CHARACTER_NOT_FOUND",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          },
+          {
+            "bearer": []
+          }
+        ]
+      },
       "post": {
         "tags": [
           "ai"
@@ -20441,6 +20518,88 @@
                       "type": "null"
                     }
                   ]
+                }
+              }
+            }
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "Page_ConversationView": {
+        "type": "object",
+        "description": "游标分页的统一响应形状。",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "kind",
+                "peer",
+                "muted",
+                "pinned",
+                "activityAt",
+                "unreadCount"
+              ],
+              "properties": {
+                "activityAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "收件箱排序时间：最后一条消息，或对方最后一条通知的时间。"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string",
+                  "description": "`direct`（一对一私聊）| `ai`（AI 会话，同一个 AI 可以有多条）。"
+                },
+                "lastMessage": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LastMessageView"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "lastReadAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "muted": {
+                  "type": "boolean"
+                },
+                "peer": {
+                  "$ref": "#/components/schemas/PeerView"
+                },
+                "pinned": {
+                  "type": "boolean"
+                },
+                "title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "AI 会话的标题。"
+                },
+                "unreadCount": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "未读消息数（不含对方发来的通知；合并后的数字见收件箱）。"
                 }
               }
             }

@@ -161,6 +161,29 @@ pub async fn set_title(
     Ok(repo::set_title(conn, conversation_id, title).await?)
 }
 
+/// 还没有标题的 AI 会话补上标题（首条消息自动起名）。返回是否写入。
+pub async fn fill_title(
+    conn: &mut PgConnection,
+    conversation_id: i64,
+    title: &str,
+) -> Result<bool, Problem> {
+    Ok(repo::fill_title(conn, conversation_id, title).await?)
+}
+
+/// 自己和某个 AI 账号之间在场的 AI 会话，最近活动的在前，严格早于 `before = (activityAt, id)`。
+/// 多取一条判断下一页由调用方决定（`limit` 原样传给 SQL）。
+pub async fn ai_sessions(
+    conn: &mut PgConnection,
+    media: &ik_media::MediaState,
+    user_id: i64,
+    ai_user_id: i64,
+    before: Option<(DateTime<Utc>, i64)>,
+    limit: i64,
+) -> Result<Vec<ConversationView>, Problem> {
+    let rows = repo::ai_session_summaries(conn, user_id, ai_user_id, before, limit).await?;
+    conversation_views(conn, media, rows).await
+}
+
 /// 在场成员。
 pub async fn active_members(
     conn: &mut PgConnection,

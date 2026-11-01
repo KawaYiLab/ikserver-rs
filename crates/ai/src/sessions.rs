@@ -3,10 +3,11 @@
 //! 业务规则：ai-assistant.md 第 3.3、4.3、4.4、6.2 节。会话与消息本身在 ik-messaging（`kind = 'ai'`），
 //! 代际与模型选择在 `ai_sessions`，任务在 `ai_jobs`。
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use http::StatusCode;
 use ik_auth::Principal;
 use ik_kernel::bus::{Audience, Effects, Event};
+use ik_kernel::cursor::{self, Page};
 use ik_kernel::jobs::Jobs;
 use ik_kernel::{Id, Problem, Snowflake};
 use ik_messaging::dto::{ConversationView, MessageView};
@@ -18,12 +19,18 @@ use crate::AiState;
 use crate::catalog::{Catalog, CatalogCache, RoleCard};
 use crate::dm;
 use crate::dto::{
-    CreateSessionRequest, RegenerateAccepted, RegenerateRequest, SessionView, UpdateSessionRequest,
+    CreateSessionRequest, ListSessionsQuery, RegenerateAccepted, RegenerateRequest, SessionView,
+    UpdateSessionRequest,
 };
 use crate::repo::{self, NewJob, SessionRow};
 
 /// 标题最多 64 字（TRIG-024）。
 const TITLE_MAX_CHARS: usize = 64;
+/// 首条消息自动起的标题最多几个字。
+const AUTO_TITLE_CHARS: usize = 24;
+/// 会话列表每页默认 / 最多几条。
+const LIST_DEFAULT: u32 = 30;
+const LIST_MAX: u32 = 50;
 /// 重置分界消息（CTX-021）。
 pub const RESET_MARKER: &str = "[对话已重置]";
 /// 判定「最后一条 AI 回复」看最近多少条文本消息（GEN-013）。
@@ -73,6 +80,18 @@ fn clean_title(raw: Option<&str>) -> Option<String> {
     raw.map(str::trim)
         .filter(|t| !t.is_empty())
         .map(|t| t.chars().take(TITLE_MAX_CHARS).collect())
+}
+
+/// 用首条消息起标题：取第一行非空文字，空白合并成一个空格，最多 [`AUTO_TITLE_CHARS`] 字。
+fn auto_title(content: &str) -> Option<String> {
+    let line = content.lines().map(str::trim).find(|l| !l.is_empty())?;
+    let words: Vec<&str> = line.split_whitespace().collect();
+    let joined = words.join(" ");
+    let mut title: String = joined.chars().take(AUTO_TITLE_CHARS).collect();
+    if joined.chars().nth(AUTO_TITLE_CHARS).is_some() {
+        title.push('…');
+    }
+    Some(title)
 }
 
 /// 校验模型 key：启用、在角色卡白名单内（CTX-032）。空串视为没给。
@@ -157,6 +176,45 @@ pub async fn create(
     repo::insert_session(&mut tx, id, me, target.id, now).await?;
     tx.commit().await?;
     ik_messaging::service::conversation(&state.messaging, principal, id).await
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SessionCursor {
+    a: DateTime<Utc>,
+    i: i64,
+}
+
+/// 自己和某个角色的 AI 会话，最近活动的在前（含置顶，不另排）。角色下线后仍能列出历史。
+pub async fn list(
+    state: &AiState,
+    principal: &Principal,
+    query: ListSessionsQuery,
+) -> Result<Page<ConversationView>, Problem> {
+    let before = query
+        .cursor
+        .as_deref()
+        .map(cursor::decode::<SessionCursor>)
+        .transpose()?
+        .map(|c| (c.a, c.i));
+    let limit = query.limit.unwrap_or(LIST_DEFAULT).clamp(1, LIST_MAX);
+    let catalog = state.catalog.get().await?;
+    let card = catalog
+        .card_by_slug(query.character.trim())
+        .ok_or_else(character_not_found)?;
+    let mut conn = state.db.acquire().await?;
+    let rows = ik_messaging::interop::ai_sessions(
+        &mut conn,
+        &state.media,
+        principal.user_id.get(),
+        card.bound_user_id,
+        before,
+        i64::from(limit) + 1,
+    )
+    .await?;
+    Page::from_rows(rows, limit as usize, |c| SessionCursor {
+        a: c.activity_at,
+        i: c.id.get(),
+    })
 }
 
 fn session_view(catalog: &Catalog, session: &SessionRow, title: Option<String>) -> SessionView {
@@ -408,6 +466,19 @@ impl MessageHooks for Hooks {
         if message.sender_id == session.ai_user_id || message.sender_id != session.user_id {
             return Ok(());
         }
+        // 还没有标题的会话用第一条消息起名，会话列表里好区分。
+        if let Some(title) = auto_title(&message.content)
+            && ik_messaging::interop::fill_title(conn, message.conversation_id, &title).await?
+        {
+            effects.publish(Event::new(
+                "dm.conversation.updated",
+                Audience::User(session.user_id),
+                &serde_json::json!({
+                    "conversationId": Id::<ik_kernel::id::marker::Conversation>::new(message.conversation_id),
+                    "title": title,
+                }),
+            )?);
+        }
         let catalog = match self.catalog.get().await {
             Ok(catalog) => catalog,
             Err(problem) => {
@@ -484,6 +555,25 @@ impl MessageHooks for Hooks {
 mod tests {
     use super::*;
     use crate::dm::DmReply;
+
+    #[test]
+    fn auto_titles_use_first_line() {
+        assert_eq!(auto_title(""), None);
+        assert_eq!(auto_title(" \n  \n"), None);
+        assert_eq!(
+            auto_title("\n  帮我  查查\t艾莲 \n第二行").as_deref(),
+            Some("帮我 查查 艾莲")
+        );
+        let long = "字".repeat(30);
+        assert_eq!(
+            auto_title(&long).as_deref(),
+            Some(format!("{}…", "字".repeat(24)).as_str())
+        );
+        assert_eq!(
+            auto_title(&"字".repeat(24)).map(|t| t.chars().count()),
+            Some(24)
+        );
+    }
 
     #[test]
     fn titles_are_trimmed_and_capped() {

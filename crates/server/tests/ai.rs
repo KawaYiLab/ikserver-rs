@@ -198,3 +198,88 @@ async fn converse(app: &Router, state: &AppState) {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(quota["available"], true);
 }
+
+/// 同一角色多个会话：列表按最近活动排序、分页；首条消息给没标题的会话自动起名。
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn ai_sessions_list_and_auto_title(db: PgPool) {
+    let (app, _state) = setup(&db, ProviderFrom::Config).await;
+    let mut ids = Vec::new();
+    for _ in 0..2 {
+        let (status, conversation) = call(
+            &app,
+            "POST",
+            "/v1/ai/sessions",
+            serde_json::json!({ "character": "fairy" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{conversation}");
+        assert!(conversation.get("title").is_none(), "{conversation}");
+        ids.push(conversation["id"].as_str().unwrap().to_owned());
+    }
+
+    // 给先建的那条发消息：它变成最近活动的一条，并用消息起标题。
+    let (status, sent) = call(
+        &app,
+        "POST",
+        &format!("/v1/dm/conversations/{}/messages", ids[0]),
+        serde_json::json!({ "content": "  帮我查查\n艾莲的技能" }),
+    )
+    .await;
+    assert!(status.is_success(), "{status} {sent}");
+
+    let (status, page) = call(
+        &app,
+        "GET",
+        "/v1/ai/sessions?character=fairy",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2, "{page}");
+    assert_eq!(items[0]["id"], ids[0].as_str());
+    assert_eq!(items[0]["title"], "帮我查查");
+    assert_eq!(items[1]["id"], ids[1].as_str());
+    assert!(items[1].get("title").is_none());
+    assert!(page.get("nextCursor").is_none());
+
+    // 已有标题不会被后面的消息覆盖。
+    let (status, _) = call(
+        &app,
+        "POST",
+        &format!("/v1/dm/conversations/{}/messages", ids[0]),
+        serde_json::json!({ "content": "再来一条" }),
+    )
+    .await;
+    assert!(status.is_success());
+
+    let (status, first) = call(
+        &app,
+        "GET",
+        "/v1/ai/sessions?character=fairy&limit=1",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["items"][0]["title"], "帮我查查");
+    let cursor = first["nextCursor"].as_str().unwrap().to_owned();
+    let (status, second) = call(
+        &app,
+        "GET",
+        &format!("/v1/ai/sessions?character=fairy&limit=1&cursor={cursor}"),
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(second["items"][0]["id"], ids[1].as_str());
+    assert!(second.get("nextCursor").is_none());
+
+    let (status, _) = call(
+        &app,
+        "GET",
+        "/v1/ai/sessions?character=nobody",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

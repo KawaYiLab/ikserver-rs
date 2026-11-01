@@ -18,6 +18,8 @@
 - AI 任务记录缓存命中、首字延迟、生成耗时、工具调用与重发次数；后台可打开「保存调用记录」查看发给模型的内容（只留 7 天），新接口 `GET /v1/admin/ai/jobs/{id}/trace`。
 - AI 行为评估集（`crates/ai/evals/`），配上真实模型后用 `cargo test -p ik-ai --lib evals -- --ignored` 运行。
 - 管理后台 AI 任务列表可以重试、删除失败的任务（`POST /v1/admin/ai/jobs/{id}/retry`、`DELETE /v1/admin/ai/jobs/{id}`）。
+- `GET /v1/ai/sessions?character=<slug>`：自己和某个 AI 角色的全部会话，最近活动的在前，游标分页。
+- AI 会话没有标题时，用户发的第一条消息自动成为标题（第一行，最多 24 字），并推 `dm.conversation.updated`。
 
 ### 变更
 
