@@ -20,6 +20,7 @@
 - 管理后台 AI 任务列表可以重试、删除失败的任务（`POST /v1/admin/ai/jobs/{id}/retry`、`DELETE /v1/admin/ai/jobs/{id}`）。
 - `GET /v1/ai/sessions?character=<slug>`：自己和某个 AI 角色的全部会话，最近活动的在前，游标分页。
 - AI 会话没有标题时，用户发的第一条消息自动成为标题（第一行，最多 24 字），并推 `dm.conversation.updated`。
+- 用户搜索（`GET /v1/users/search`）每项新增 `equippedCard`：装备的论坛名片，没有装备时省略。
 
 ### 变更
 

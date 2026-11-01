@@ -434,6 +434,7 @@ pub(crate) struct FoundUserRow {
     pub id: i64,
     pub username: String,
     pub level: i16,
+    pub equipped_card_id: Option<i64>,
 }
 
 /// `query` 原文用于完全匹配与前缀排序，`escaped` 是转义过 LIKE 元字符的同一个词。
@@ -445,7 +446,7 @@ pub(crate) async fn search_users(
 ) -> sqlx::Result<Vec<FoundUserRow>> {
     sqlx::query_as!(
         FoundUserRow,
-        r"SELECT id, username, level FROM users
+        r"SELECT id, username, level, equipped_card_id FROM users
           WHERE status = 'active' AND username ILIKE '%' || $2 || '%' ESCAPE '\'
           ORDER BY (lower(username) = lower($1)) DESC,
                    (username ILIKE $2 || '%' ESCAPE '\') DESC,

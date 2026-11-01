@@ -181,6 +181,9 @@ pub struct UserSearchItem {
     pub follower_count: i64,
     /// 未登录时恒为 false。
     pub is_following: bool,
+    /// 装备的论坛名片，没有装备时省略。隐藏主页的用户本来就搜不到（PROFILE-022）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub equipped_card: Option<ik_cosmetics::dto::CardView>,
 }
 
 /// @ 提及候选。

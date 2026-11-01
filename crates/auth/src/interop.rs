@@ -158,6 +158,8 @@ pub struct FoundUser {
     pub id: i64,
     pub username: String,
     pub level: i16,
+    /// 装备的论坛名片。
+    pub equipped_card_id: Option<i64>,
 }
 
 /// 按用户名子串搜索状态正常的账号（不区分大小写）。完全匹配排最前，其次前缀匹配，同档按用户名排序
@@ -175,6 +177,7 @@ pub async fn search_users(
             id: row.id,
             username: row.username,
             level: row.level,
+            equipped_card_id: row.equipped_card_id,
         })
         .collect())
 }
