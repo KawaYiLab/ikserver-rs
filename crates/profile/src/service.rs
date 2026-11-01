@@ -660,9 +660,14 @@ pub async fn search(
         None => HashSet::new(),
     };
     let avatars = avatar_urls(state, &mut conn, &ids).await?;
+    // 名片查询自己取连接，先把手里的还回去。
+    drop(conn);
+    let card_ids: Vec<i64> = found.iter().filter_map(|u| u.equipped_card_id).collect();
+    let cards = ik_cosmetics::service::cards_by_ids(&state.cosmetics, &card_ids).await?;
     Ok(found
         .into_iter()
         .map(|u| UserSearchItem {
+            equipped_card: u.equipped_card_id.and_then(|id| cards.get(&id).cloned()),
             avatar_url: avatars.get(&u.id).cloned(),
             id: Id::new(u.id),
             bio: bios

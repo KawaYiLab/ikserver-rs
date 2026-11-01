@@ -267,6 +267,15 @@ async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
         .unwrap();
     assert_eq!(view.equipped_avatar.unwrap().name, "头像");
     assert_eq!(view.equipped_card.unwrap().name, "名片");
+    // 用户搜索结果也带装备的名片；没装备的省略。
+    let found = service::search(&h.state, Some(&stranger), IP, search("author"))
+        .await
+        .unwrap();
+    assert_eq!(found[0].equipped_card.as_ref().unwrap().name, "名片");
+    let found = service::search(&h.state, None, IP, search("stranger"))
+        .await
+        .unwrap();
+    assert!(found[0].equipped_card.is_none());
     let zzz = view.zzz.unwrap();
     assert_eq!((zzz.uid.as_str(), zzz.level), ("10000001", 45));
 
