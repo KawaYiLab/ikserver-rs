@@ -982,6 +982,8 @@ fn me_view(row: MeRow) -> MeView {
 #[derive(Debug, Clone)]
 pub struct Author {
     pub id: Id<User>,
+    /// 会员号（展示编号，也是主页地址里的编号）。
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     /// 已注销或已合并的账号：调用方应显示为「已注销用户」，不链接主页。
@@ -1006,6 +1008,7 @@ pub async fn authors(
             let gone = matches!(row.status.as_str(), "deleted" | "merged");
             let author = Author {
                 id: Id::new(row.id),
+                member_no: row.member_no,
                 gone,
                 username: row.username,
                 level: row.level,

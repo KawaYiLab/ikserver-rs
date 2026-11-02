@@ -216,6 +216,52 @@ async fn profile_counts_only_public_named_content(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn profile_is_found_by_member_no_or_id(db: PgPool) {
+    let h = harness(db);
+    // 新注册的账号：雪花 id，会员号是小整数。
+    let snowflake = 5_000_000_000_i64;
+    sqlx::query("INSERT INTO users (id, member_no, username, email) VALUES ($1, 42, 'newbie', 'n@example.com')")
+        .bind(snowflake)
+        .execute(&h.db)
+        .await
+        .unwrap();
+    let author = Principal {
+        user_id: Id::new(snowflake),
+        session_id: Id::new(snowflake),
+        role: Role::User,
+        exam_passed: true,
+        is_ai_agent: false,
+        level: 1,
+    };
+    h.post(&author, "实名", false).await;
+
+    for user_ref in [42, snowflake] {
+        let view = service::profile(&h.state, None, user_ref).await.unwrap();
+        assert_eq!(
+            (view.id.get(), view.member_no),
+            (snowflake, 42),
+            "{user_ref}"
+        );
+        let posts = service::posts(&h.state, None, user_ref, all_posts())
+            .await
+            .unwrap();
+        assert_eq!(posts.items.len(), 1, "{user_ref}");
+        assert!(
+            service::comments(&h.state, None, user_ref, page())
+                .await
+                .is_ok()
+        );
+    }
+    assert_eq!(
+        service::profile(&h.state, None, 43)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn blocked_and_hidden_profiles_are_reduced(db: PgPool) {
     let h = harness(db);
     let author = h.user(1, "author").await;

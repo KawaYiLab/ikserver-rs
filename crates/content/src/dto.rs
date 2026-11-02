@@ -145,6 +145,9 @@ pub struct UnpublishRequest {
 pub struct AuthorView {
     #[schema(value_type = Option<String>)]
     pub id: Option<Id<User>>,
+    /// 会员号，主页地址用它（`/profile/{memberNo}`）。跟 `id` 同时为空。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_no: Option<i64>,
     pub name: String,
     pub level: Option<i16>,
     pub anonymous: bool,

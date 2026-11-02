@@ -16268,6 +16268,14 @@
             ],
             "format": "int32"
           },
+          "memberNo": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "会员号，主页地址用它（`/profile/{memberNo}`）。跟 `id` 同时为空。"
+          },
           "name": {
             "type": "string"
           }
@@ -22768,6 +22776,14 @@
             ],
             "format": "int32"
           },
+          "memberNo": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "会员号，主页地址用它。跟 `id` 同时省略。"
+          },
           "name": {
             "type": "string"
           }
@@ -27396,6 +27412,7 @@
         "description": "用户搜索结果。",
         "required": [
           "id",
+          "memberNo",
           "username",
           "level",
           "bio",
@@ -27414,6 +27431,17 @@
             "type": "string",
             "description": "签名（最多 120 字）。"
           },
+          "equippedCard": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardView",
+                "description": "装备的论坛名片，没有装备时省略。隐藏主页的用户本来就搜不到（PROFILE-022）。"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "followerCount": {
             "type": "integer",
             "format": "int64"
@@ -27428,6 +27456,11 @@
           "level": {
             "type": "integer",
             "format": "int32"
+          },
+          "memberNo": {
+            "type": "integer",
+            "format": "int64",
+            "description": "会员号，主页地址用它。"
           },
           "username": {
             "type": "string"

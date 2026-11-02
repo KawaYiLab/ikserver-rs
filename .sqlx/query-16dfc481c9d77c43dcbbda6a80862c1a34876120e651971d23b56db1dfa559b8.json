@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, username, status, level,\n                  COALESCE(equipped_avatar_media_id, avatar_media_id) AS avatar_media_id\n           FROM users WHERE id = ANY($1)",
+  "query": "SELECT id, member_no, username, level, equipped_card_id FROM users\n          WHERE status = 'active' AND username ILIKE '%' || $2 || '%' ESCAPE '\\'\n          ORDER BY (lower(username) = lower($1)) DESC,\n                   (username ILIKE $2 || '%' ESCAPE '\\') DESC,\n                   username, id\n          LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -16,23 +16,23 @@
       },
       {
         "ordinal": 1,
+        "name": "member_no",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "member_no"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "username",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "users",
             "name": "username"
-          }
-        }
-      },
-      {
-        "ordinal": 2,
-        "name": "status",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "users",
-            "name": "status"
           }
         }
       },
@@ -49,14 +49,21 @@
       },
       {
         "ordinal": 4,
-        "name": "avatar_media_id",
+        "name": "equipped_card_id",
         "type_info": "Int8",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "users",
+            "name": "equipped_card_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8Array"
+        "Text",
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -64,8 +71,8 @@
       false,
       false,
       false,
-      null
+      true
     ]
   },
-  "hash": "9f6a91b753b96643e89651b1a0d655998fa3138299992bda071be10e5dea725b"
+  "hash": "16dfc481c9d77c43dcbbda6a80862c1a34876120e651971d23b56db1dfa559b8"
 }

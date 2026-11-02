@@ -4784,6 +4784,11 @@ export interface components {
             id?: string | null;
             /** Format: int32 */
             level?: number | null;
+            /**
+             * Format: int64
+             * @description 会员号，主页地址用它（`/profile/{memberNo}`）。跟 `id` 同时为空。
+             */
+            memberNo?: number | null;
             name: string;
         };
         AvatarInput: {
@@ -7060,6 +7065,11 @@ export interface components {
             id?: string | null;
             /** Format: int32 */
             level?: number | null;
+            /**
+             * Format: int64
+             * @description 会员号，主页地址用它。跟 `id` 同时省略。
+             */
+            memberNo?: number | null;
             name: string;
         };
         /** @description 主页精选的候选帖子。 */
@@ -8534,6 +8544,7 @@ export interface components {
             avatarUrl?: string | null;
             /** @description 签名（最多 120 字）。 */
             bio: string;
+            equippedCard?: components["schemas"]["CardView"] | null;
             /** Format: int64 */
             followerCount: number;
             id: string;
@@ -8541,6 +8552,11 @@ export interface components {
             isFollowing: boolean;
             /** Format: int32 */
             level: number;
+            /**
+             * Format: int64
+             * @description 会员号，主页地址用它。
+             */
+            memberNo: number;
             username: string;
         };
         UsernameUpdate: {

@@ -1029,6 +1029,7 @@ pub fn author_view(
     if is_anonymous {
         return AuthorView {
             id: None,
+            member_no: None,
             name: anonymous::display_name(seed.unwrap_or(ANONYMOUS_FALLBACK_SEED)),
             level: None,
             anonymous: true,
@@ -1038,6 +1039,7 @@ pub fn author_view(
     match authors.map.get(&author_id) {
         Some(author) if !author.gone => AuthorView {
             id: Some(author.id),
+            member_no: Some(author.member_no),
             name: author.username.clone(),
             level: Some(author.level),
             anonymous: false,
@@ -1045,6 +1047,7 @@ pub fn author_view(
         },
         _ => AuthorView {
             id: None,
+            member_no: None,
             name: GONE_USER_NAME.to_owned(),
             level: None,
             anonymous: false,

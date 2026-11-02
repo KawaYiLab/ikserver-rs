@@ -34,11 +34,11 @@ async fn get(db: &PgPool, site_url: &str) -> (StatusCode, Option<String>, String
 #[sqlx::test(migrator = "MIGRATOR")]
 async fn lists_public_posts_and_profiles(db: PgPool) {
     sqlx::query(
-        "INSERT INTO users (id, username, email, status) VALUES
-           (10, 'alice', 'a@example.com', 'active'),
-           (11, 'hidden', 'h@example.com', 'active'),
-           (12, 'gone', 'g@example.com', 'deleted'),
-           (13, 'anon', 'n@example.com', 'active')",
+        "INSERT INTO users (id, member_no, username, email, status) VALUES
+           (10, 20, 'alice', 'a@example.com', 'active'),
+           (11, 21, 'hidden', 'h@example.com', 'active'),
+           (12, 22, 'gone', 'g@example.com', 'deleted'),
+           (13, 23, 'anon', 'n@example.com', 'active')",
     )
     .execute(&db)
     .await
@@ -88,13 +88,15 @@ async fn lists_public_posts_and_profiles(db: PgPool) {
     for id in [101, 102] {
         assert!(!xml.contains(&format!("/post/{id}<")), "post {id}");
     }
-    assert!(xml.contains("<loc>https://interk.net/profile/10</loc>"));
+    // 主页地址用会员号。
+    assert!(xml.contains("<loc>https://interk.net/profile/20</loc>"));
+    assert!(!xml.contains("/profile/10<"));
     // 「single」只有一篇公开帖（101 被隐藏），「blocked」被屏蔽。
     assert!(xml.contains("<loc>https://interk.net/tags/%E6%94%BB%E7%95%A5</loc>"));
     assert!(!xml.contains("/tags/single<"));
     assert!(!xml.contains("/tags/blocked<"));
-    for id in [11, 12, 13] {
-        assert!(!xml.contains(&format!("/profile/{id}<")), "profile {id}");
+    for no in [21, 22, 23] {
+        assert!(!xml.contains(&format!("/profile/{no}<")), "profile {no}");
     }
 }
 

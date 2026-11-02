@@ -55,14 +55,14 @@ async fn sitemap(State(state): State<AppState>) -> Result<Response, Problem> {
     let remaining = MAX_URLS - posts.len() as i64;
     let authors: Vec<(i64, DateTime<Utc>)> = if remaining > 0 {
         sqlx::query_as(
-            "SELECT p.author_id, MAX(COALESCE(p.edited_at, p.published_at)) AS lastmod
+            "SELECT u.member_no, MAX(COALESCE(p.edited_at, p.published_at)) AS lastmod
              FROM posts p
              JOIN users u ON u.id = p.author_id
              LEFT JOIN user_profiles up ON up.user_id = p.author_id
              WHERE p.status = 'published' AND p.hidden_at IS NULL AND NOT p.is_anonymous
                AND u.status NOT IN ('deleted', 'merged')
                AND NOT COALESCE(up.hidden, false)
-             GROUP BY p.author_id
+             GROUP BY u.member_no
              ORDER BY lastmod DESC
              LIMIT $1",
         )
@@ -101,8 +101,12 @@ async fn sitemap(State(state): State<AppState>) -> Result<Response, Problem> {
     for (id, lastmod) in &posts {
         push_url(&mut xml, &format!("{site}/post/{id}"), Some(*lastmod));
     }
-    for (id, lastmod) in &authors {
-        push_url(&mut xml, &format!("{site}/profile/{id}"), Some(*lastmod));
+    for (member_no, lastmod) in &authors {
+        push_url(
+            &mut xml,
+            &format!("{site}/profile/{member_no}"),
+            Some(*lastmod),
+        );
     }
     for (slug, lastmod) in &tags {
         push_url(

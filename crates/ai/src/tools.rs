@@ -1251,6 +1251,7 @@ mod tests {
             video: None,
             author: AuthorView {
                 id: Some(ik_kernel::Id::new(1)),
+                member_no: Some(1),
                 name: "作者".to_owned(),
                 level: Some(1),
                 anonymous: false,

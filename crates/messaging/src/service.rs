@@ -147,12 +147,14 @@ pub(crate) fn peer_view(
     match authors.get(&peer_id) {
         Some(a) if !a.gone => PeerView {
             id: Some(a.id),
+            member_no: Some(a.member_no),
             name: a.username.clone(),
             level: Some(a.level),
             avatar_url: avatars.get(&peer_id).cloned(),
         },
         _ => PeerView {
             id: None,
+            member_no: None,
             name: GONE_USER_NAME.to_owned(),
             level: None,
             avatar_url: None,

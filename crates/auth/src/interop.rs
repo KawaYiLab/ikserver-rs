@@ -134,6 +134,15 @@ pub async fn profile_user(
         }))
 }
 
+/// 主页地址里的编号换成用户 id。雪花 id（>= 2^22）原样返回；更小的数先当会员号查，
+/// 查不到再当 id（迁移来的账号会员号就是旧 id，两者一致）。都不存在时返回 None。
+pub async fn resolve_user_ref(conn: &mut PgConnection, raw: i64) -> Result<Option<i64>, Problem> {
+    if ik_kernel::id::timestamp_ms(raw).is_some() {
+        return Ok(Some(raw));
+    }
+    Ok(repo::user_id_by_member_no_or_id(conn, raw).await?)
+}
+
 /// 改用户名。调用方负责校验格式、扣费，并已锁住用户行。
 /// 名字已被占用 → 409 `USERNAME_TAKEN`（调用方的事务随之回滚，扣费一并撤销）。
 pub async fn rename(
@@ -156,6 +165,7 @@ pub async fn rename(
 #[derive(Debug, Clone)]
 pub struct FoundUser {
     pub id: i64,
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     /// 装备的论坛名片。
@@ -175,6 +185,7 @@ pub async fn search_users(
         .into_iter()
         .map(|row| FoundUser {
             id: row.id,
+            member_no: row.member_no,
             username: row.username,
             level: row.level,
             equipped_card_id: row.equipped_card_id,

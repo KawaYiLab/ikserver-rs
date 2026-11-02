@@ -171,6 +171,8 @@ pub struct SearchQuery {
 pub struct UserSearchItem {
     #[schema(value_type = String)]
     pub id: Id<User>,
+    /// 会员号，主页地址用它。
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     /// 头像（360 宽缩略图），没有设置时省略。

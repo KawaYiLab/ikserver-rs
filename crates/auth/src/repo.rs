@@ -412,6 +412,19 @@ pub(crate) async fn profile_user(
     .await
 }
 
+/// 会员号优先，其次按 id（迁移来的账号两者相同）。
+pub(crate) async fn user_id_by_member_no_or_id(
+    conn: &mut PgConnection,
+    value: i64,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM users WHERE member_no = $1 OR id = $1 ORDER BY member_no = $1 DESC LIMIT 1",
+        value,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
 /// 只改状态正常的账号；返回是否命中。
 pub(crate) async fn rename(
     conn: &mut PgConnection,
@@ -432,6 +445,7 @@ pub(crate) async fn rename(
 
 pub(crate) struct FoundUserRow {
     pub id: i64,
+    pub member_no: i64,
     pub username: String,
     pub level: i16,
     pub equipped_card_id: Option<i64>,
@@ -446,7 +460,7 @@ pub(crate) async fn search_users(
 ) -> sqlx::Result<Vec<FoundUserRow>> {
     sqlx::query_as!(
         FoundUserRow,
-        r"SELECT id, username, level, equipped_card_id FROM users
+        r"SELECT id, member_no, username, level, equipped_card_id FROM users
           WHERE status = 'active' AND username ILIKE '%' || $2 || '%' ESCAPE '\'
           ORDER BY (lower(username) = lower($1)) DESC,
                    (username ILIKE $2 || '%' ESCAPE '\') DESC,
@@ -793,6 +807,7 @@ pub(crate) async fn revoke_user_sessions(
 
 pub(crate) struct AuthorRow {
     pub id: i64,
+    pub member_no: i64,
     pub username: String,
     pub status: String,
     pub level: i16,
@@ -802,7 +817,7 @@ pub(crate) struct AuthorRow {
 pub(crate) async fn authors(conn: &mut PgConnection, ids: &[i64]) -> sqlx::Result<Vec<AuthorRow>> {
     sqlx::query_as!(
         AuthorRow,
-        r#"SELECT id, username, status, level,
+        r#"SELECT id, member_no, username, status, level,
                   COALESCE(equipped_avatar_media_id, avatar_media_id) AS avatar_media_id
            FROM users WHERE id = ANY($1)"#,
         ids,

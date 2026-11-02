@@ -85,6 +85,13 @@ struct Target {
 }
 
 /// 读出主页主人并判断访客能看到什么。已注销、已合并的账号 404。
+/// 主页地址里的编号（会员号或用户 id）换成用户 id，找不到时 404。
+async fn resolve_user_ref(conn: &mut PgConnection, user_ref: i64) -> Result<i64, Problem> {
+    ik_auth::interop::resolve_user_ref(conn, user_ref)
+        .await?
+        .ok_or_else(user_not_found)
+}
+
 async fn target(
     conn: &mut PgConnection,
     viewer: Option<&Principal>,
@@ -129,9 +136,10 @@ async fn target(
 pub async fn profile(
     state: &ProfileState,
     viewer: Option<&Principal>,
-    user_id: i64,
+    user_ref: i64,
 ) -> Result<ProfileView, Problem> {
     let mut conn = state.db.acquire().await?;
+    let user_id = resolve_user_ref(&mut conn, user_ref).await?;
     let t = target(&mut conn, viewer, user_id).await?;
     let viewer_id = viewer.map(|p| p.user_id.get());
 
@@ -224,10 +232,11 @@ pub async fn profile(
 pub async fn posts(
     state: &ProfileState,
     viewer: Option<&Principal>,
-    user_id: i64,
+    user_ref: i64,
     query: ProfilePostsQuery,
 ) -> Result<ProfilePostsPage, Problem> {
     let mut conn = state.db.acquire().await?;
+    let user_id = resolve_user_ref(&mut conn, user_ref).await?;
     let t = target(&mut conn, viewer, user_id).await?;
     drop(conn);
     if t.access != Access::Full {
@@ -274,10 +283,11 @@ pub async fn posts(
 pub async fn comments(
     state: &ProfileState,
     viewer: Option<&Principal>,
-    user_id: i64,
+    user_ref: i64,
     query: PageQuery,
 ) -> Result<Page<ik_comments::dto::AuthorCommentView>, Problem> {
     let mut conn = state.db.acquire().await?;
+    let user_id = resolve_user_ref(&mut conn, user_ref).await?;
     let t = target(&mut conn, viewer, user_id).await?;
     drop(conn);
     if t.access != Access::Full {
@@ -670,6 +680,7 @@ pub async fn search(
             equipped_card: u.equipped_card_id.and_then(|id| cards.get(&id).cloned()),
             avatar_url: avatars.get(&u.id).cloned(),
             id: Id::new(u.id),
+            member_no: u.member_no,
             bio: bios
                 .get(&u.id)
                 .map(|b| b.chars().take(SEARCH_BIO_CHARS).collect())
