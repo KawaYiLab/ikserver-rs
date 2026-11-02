@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT setval('posts_post_no_seq', (SELECT COALESCE(max(post_no), 0) FROM posts) + 1, false)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "setval",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "764d1fc53336ca2baa6c1c415c24473581fad524cb35aeb3dc750a19b340dfdc"
+}

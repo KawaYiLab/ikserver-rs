@@ -1139,6 +1139,7 @@ async fn cards(
         .into_iter()
         .map(|row| PostCard {
             id: Id::new(row.id),
+            post_no: row.post_no,
             author: author_view(
                 row.author_id,
                 row.is_anonymous,
@@ -1558,12 +1559,25 @@ fn blocked_post() -> Problem {
 
 /// 公开详情。草稿、不存在一律 404；被隐藏的帖子只有作者本人能看。
 /// 读者与作者之间存在拉黑时，非匿名帖返回 403 `USER_BLOCKED`（BLOCK-012）；匿名帖照常可看。
+/// 帖子地址里的编号换成帖子 id。雪花 id（>= 2^22）原样返回；更小的数先当帖子编号查，
+/// 查不到再当 id（迁移来的帖子编号就是旧 id，两者一致）。都不存在时 404。
+async fn resolve_post_ref(conn: &mut PgConnection, raw: i64) -> Result<i64, Problem> {
+    if ik_kernel::id::timestamp_ms(raw).is_some() {
+        return Ok(raw);
+    }
+    repo::post_id_by_no_or_id(conn, raw)
+        .await?
+        .ok_or_else(post_not_found)
+}
+
+/// 帖子详情。`post_ref` 是帖子 id 或帖子编号（`/post/{postNo}`）。
 pub async fn detail(
     state: &ContentState,
     viewer: Option<&Principal>,
-    post_id: i64,
+    post_ref: i64,
 ) -> Result<PostDetail, Problem> {
     let mut conn = state.db.acquire().await?;
+    let post_id = resolve_post_ref(&mut conn, post_ref).await?;
     let row = repo::get_post(&mut conn, post_id)
         .await?
         .ok_or_else(post_not_found)?;
@@ -1612,6 +1626,7 @@ pub async fn detail(
 
     Ok(PostDetail {
         id: Id::new(row.id),
+        post_no: row.post_no,
         author: author_view(
             row.author_id,
             row.is_anonymous,

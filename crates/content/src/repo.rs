@@ -191,6 +191,7 @@ pub(crate) async fn set_post_tags(
 
 pub(crate) struct PostRow {
     pub id: i64,
+    pub post_no: i64,
     pub author_id: i64,
     pub category_id: Option<i64>,
     pub status: String,
@@ -220,7 +221,7 @@ pub(crate) struct PostRow {
 pub(crate) async fn get_post(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<PostRow>> {
     sqlx::query_as!(
         PostRow,
-        "SELECT id, author_id, category_id, status, title, body, editor_state, external_videos, cover_ids,
+        "SELECT id, post_no, author_id, category_id, status, title, body, editor_state, external_videos, cover_ids,
                 is_anonymous, anonymous_seed, revision, first_published_at, published_at, edited_at,
                 bumped_at, pinned_at, solved_at, hidden_at, view_count, like_count, comment_count,
                 favorite_count, denny_count, updated_at
@@ -231,11 +232,24 @@ pub(crate) async fn get_post(conn: &mut PgConnection, id: i64) -> sqlx::Result<O
     .await
 }
 
+/// 帖子编号优先，其次按 id（迁移来的帖子两者相同）。
+pub(crate) async fn post_id_by_no_or_id(
+    conn: &mut PgConnection,
+    value: i64,
+) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar!(
+        "SELECT id FROM posts WHERE post_no = $1 OR id = $1 ORDER BY post_no = $1 DESC LIMIT 1",
+        value,
+    )
+    .fetch_optional(conn)
+    .await
+}
+
 /// 锁住帖子行，串行化同一帖子的编辑、发布、下线、删除。
 pub(crate) async fn lock_post(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<PostRow>> {
     sqlx::query_as!(
         PostRow,
-        "SELECT id, author_id, category_id, status, title, body, editor_state, external_videos, cover_ids,
+        "SELECT id, post_no, author_id, category_id, status, title, body, editor_state, external_videos, cover_ids,
                 is_anonymous, anonymous_seed, revision, first_published_at, published_at, edited_at,
                 bumped_at, pinned_at, solved_at, hidden_at, view_count, like_count, comment_count,
                 favorite_count, denny_count, updated_at
@@ -504,6 +518,7 @@ pub(crate) async fn delete_draft(conn: &mut PgConnection, post_id: i64) -> sqlx:
 
 pub(crate) struct CardRow {
     pub id: i64,
+    pub post_no: i64,
     pub author_id: i64,
     pub title: String,
     pub excerpt_source: String,
@@ -569,7 +584,7 @@ pub(crate) async fn feed(
     let (after_at, after_id) = filter.after.unzip();
     sqlx::query_as!(
         CardRow,
-        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+        r#"SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
@@ -611,7 +626,7 @@ pub(crate) async fn pinned_cards(
 ) -> sqlx::Result<Vec<CardRow>> {
     sqlx::query_as!(
         CardRow,
-        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+        r#"SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
@@ -956,6 +971,7 @@ pub(crate) async fn viewer_marks(
 pub(crate) struct SavedCardRow {
     pub saved_at: DateTime<Utc>,
     pub id: i64,
+    pub post_no: i64,
     pub author_id: i64,
     pub title: String,
     pub excerpt_source: String,
@@ -983,6 +999,7 @@ impl SavedCardRow {
             self.saved_at,
             CardRow {
                 id: self.id,
+                post_no: self.post_no,
                 author_id: self.author_id,
                 title: self.title,
                 excerpt_source: self.excerpt_source,
@@ -1019,7 +1036,7 @@ pub(crate) async fn liked_cards(
     sqlx::query_as!(
         SavedCardRow,
         r#"SELECT s.created_at AS saved_at,
-                  p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
@@ -1055,7 +1072,7 @@ pub(crate) async fn favorite_cards(
     sqlx::query_as!(
         SavedCardRow,
         r#"SELECT s.created_at AS saved_at,
-                  p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+                  p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
@@ -1123,7 +1140,7 @@ pub(crate) async fn author_cards(
     let (after_at, after_id) = after.unzip();
     sqlx::query_as!(
         CardRow,
-        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+        r#"SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
@@ -1154,7 +1171,7 @@ pub(crate) async fn author_cards_by_ids(
 ) -> sqlx::Result<Vec<CardRow>> {
     sqlx::query_as!(
         CardRow,
-        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+        r#"SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",
@@ -1296,7 +1313,7 @@ pub(crate) async fn public_cards_by_ids(
 ) -> sqlx::Result<Vec<CardRow>> {
     sqlx::query_as!(
         CardRow,
-        r#"SELECT p.id, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
+        r#"SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS "excerpt_source!",
                   p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,
                   p.view_count, p.like_count, p.comment_count,
                   p.published_at AS "published_at!", p.bumped_at AS "bumped_at!",

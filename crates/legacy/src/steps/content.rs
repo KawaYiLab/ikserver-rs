@@ -58,12 +58,12 @@ async fn tags(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Resul
 /// 隐藏：旧 `isHidden` 为 NULL 视为可见（D-012）。
 async fn posts(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Result<u64> {
     let result = sqlx::query!(
-        r#"INSERT INTO posts (id, author_id, category_id, status, title, body, editor_state,
+        r#"INSERT INTO posts (id, post_no, author_id, category_id, status, title, body, editor_state,
                               external_videos, is_anonymous, anonymous_seed, first_published_at,
                               published_at, edited_at, bumped_at, last_bumped_by, pinned_at,
                               pinned_by, solved_at, hidden_at, hidden_reason, view_count, legacy_id,
                               created_at, updated_at, cover_ids)
-           SELECT p.post_id, p.author_id, cat.id,
+           SELECT p.post_id, p.post_id, p.author_id, cat.id,
                   CASE WHEN p.published THEN 'published' ELSE 'draft' END,
                   coalesce(nullif(left(btrim(coalesce(p.title, '')), 50), ''), '无标题'),
                   left(legacy.ik_fix_hosts(p.text), 16000),
@@ -103,9 +103,21 @@ async fn posts(conn: &mut PgConnection, options: &ImportOptions) -> anyhow::Resu
         options.legacy_timezone,
         options.now,
     )
-    .execute(conn)
+    .execute(&mut *conn)
     .await?;
+    continue_post_numbers(conn).await?;
     Ok(result.rows_affected())
+}
+
+/// 帖子编号：旧帖沿用旧 id（旧链接 `/post/<id>` 不变），之后发的帖子接着最大的旧 id 往后排。
+/// 导入只对全新的库执行（`import` 开头检查），所以不会和已有帖子撞号。
+async fn continue_post_numbers(conn: &mut PgConnection) -> anyhow::Result<()> {
+    sqlx::query!(
+        "SELECT setval('posts_post_no_seq', (SELECT COALESCE(max(post_no), 0) FROM posts) + 1, false)"
+    )
+    .fetch_one(conn)
+    .await?;
+    Ok(())
 }
 
 /// 已发布帖子的待发布修改（草稿行与发布行内容不同）。

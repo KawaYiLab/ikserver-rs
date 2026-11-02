@@ -21215,6 +21215,7 @@
               "description": "信息流卡片。",
               "required": [
                 "id",
+                "postNo",
                 "title",
                 "excerpt",
                 "author",
@@ -21298,6 +21299,11 @@
                 "likeCount": {
                   "type": "integer",
                   "format": "int32"
+                },
+                "postNo": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "帖子短编号，帖子地址用它（`/post/{postNo}`）。"
                 },
                 "publishedAt": {
                   "type": "string",
@@ -22852,6 +22858,7 @@
         "description": "信息流卡片。",
         "required": [
           "id",
+          "postNo",
           "title",
           "excerpt",
           "author",
@@ -22936,6 +22943,11 @@
             "type": "integer",
             "format": "int32"
           },
+          "postNo": {
+            "type": "integer",
+            "format": "int64",
+            "description": "帖子短编号，帖子地址用它（`/post/{postNo}`）。"
+          },
           "publishedAt": {
             "type": "string",
             "format": "date-time"
@@ -22971,6 +22983,7 @@
         "description": "公开详情。",
         "required": [
           "id",
+          "postNo",
           "title",
           "body",
           "covers",
@@ -23093,6 +23106,11 @@
               "null"
             ],
             "format": "date-time"
+          },
+          "postNo": {
+            "type": "integer",
+            "format": "int64",
+            "description": "帖子短编号，帖子地址用它（`/post/{postNo}`）。"
           },
           "publishedAt": {
             "type": "string",
@@ -25698,6 +25716,7 @@
               "description": "信息流卡片。",
               "required": [
                 "id",
+                "postNo",
                 "title",
                 "excerpt",
                 "author",
@@ -25781,6 +25800,11 @@
                 "likeCount": {
                   "type": "integer",
                   "format": "int32"
+                },
+                "postNo": {
+                  "type": "integer",
+                  "format": "int64",
+                  "description": "帖子短编号，帖子地址用它（`/post/{postNo}`）。"
                 },
                 "publishedAt": {
                   "type": "string",

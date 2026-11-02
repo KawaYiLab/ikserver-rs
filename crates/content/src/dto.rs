@@ -178,6 +178,8 @@ pub struct CardVideo {
 pub struct PostCard {
     #[schema(value_type = String)]
     pub id: Id<Post>,
+    /// 帖子短编号，帖子地址用它（`/post/{postNo}`）。
+    pub post_no: i64,
     pub title: String,
     /// 正文开头（最多 120 字，空白折叠）。
     pub excerpt: String,
@@ -235,6 +237,8 @@ pub struct FeedQuery {
 pub struct PostDetail {
     #[schema(value_type = String)]
     pub id: Id<Post>,
+    /// 帖子短编号，帖子地址用它（`/post/{postNo}`）。
+    pub post_no: i64,
     pub title: String,
     pub body: String,
     /// 全部封面（有序）。

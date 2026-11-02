@@ -1245,6 +1245,7 @@ mod tests {
     fn card_budget_keeps_complete_entries_and_matching_citations() {
         let first = PostCard {
             id: ik_kernel::Id::new(7),
+            post_no: 7,
             title: "甲".repeat(50),
             excerpt: "乙".repeat(120),
             cover: None,
@@ -1273,6 +1274,7 @@ mod tests {
         };
         let second = PostCard {
             id: ik_kernel::Id::new(8),
+            post_no: 8,
             ..first.clone()
         };
         let (one, _) = card_lines_budget(&[&first], MAX_RESULT_CHARS);

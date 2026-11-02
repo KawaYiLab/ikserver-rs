@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT s.created_at AS saved_at,\n                  p.id, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS \"cover_id?\",\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM post_favorites s\n           JOIN posts p ON p.id = s.post_id\n           LEFT JOIN categories c ON c.id = p.category_id\n           WHERE s.user_id = $1 AND p.status = 'published' AND p.hidden_at IS NULL\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))\n             AND ($3::timestamptz IS NULL OR (s.created_at, s.post_id) < ($3, $4::bigint))\n           ORDER BY s.created_at DESC, s.post_id DESC\n           LIMIT $5",
+  "query": "SELECT s.created_at AS saved_at,\n                  p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS \"cover_id?\",\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM post_likes s\n           JOIN posts p ON p.id = s.post_id\n           LEFT JOIN categories c ON c.id = p.category_id\n           WHERE s.user_id = $1 AND p.status = 'published' AND p.hidden_at IS NULL\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))\n             AND ($3::timestamptz IS NULL OR (s.created_at, s.post_id) < ($3, $4::bigint))\n           ORDER BY s.created_at DESC, s.post_id DESC\n           LIMIT $5",
   "describe": {
     "columns": [
       {
@@ -9,7 +9,7 @@
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
-            "table": "post_favorites",
+            "table": "post_likes",
             "name": "created_at"
           }
         }
@@ -27,6 +27,17 @@
       },
       {
         "ordinal": 2,
+        "name": "post_no",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "post_no"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
         "name": "author_id",
         "type_info": "Int8",
         "origin": {
@@ -37,7 +48,7 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "title",
         "type_info": "Text",
         "origin": {
@@ -48,13 +59,13 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "excerpt_source!",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "is_anonymous",
         "type_info": "Bool",
         "origin": {
@@ -65,7 +76,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "anonymous_seed",
         "type_info": "Text",
         "origin": {
@@ -76,7 +87,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "pinned_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -87,7 +98,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "solved_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -98,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "view_count",
         "type_info": "Int8",
         "origin": {
@@ -109,7 +120,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "like_count",
         "type_info": "Int4",
         "origin": {
@@ -120,7 +131,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "comment_count",
         "type_info": "Int4",
         "origin": {
@@ -131,7 +142,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "published_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -142,7 +153,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "bumped_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -153,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "edited_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -164,7 +175,7 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "last_bumped_by",
         "type_info": "Int8",
         "origin": {
@@ -175,13 +186,13 @@
         }
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "cover_id?",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "category_id?",
         "type_info": "Int8",
         "origin": {
@@ -192,7 +203,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "category_slug?",
         "type_info": "Text",
         "origin": {
@@ -203,7 +214,7 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "category_name?",
         "type_info": "Text",
         "origin": {
@@ -228,6 +239,7 @@
       false,
       false,
       false,
+      false,
       null,
       false,
       true,
@@ -246,5 +258,5 @@
       false
     ]
   },
-  "hash": "4a91f1a4101e4d65183b924f94c8f9233c2a2e452c6faaa1b9412f0d025dbea1"
+  "hash": "3c9b2a86df4f107fabe151b7dadbbf6948b8e9dad42169c5c4230af5c083b41c"
 }

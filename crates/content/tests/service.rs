@@ -105,6 +105,49 @@ fn latest() -> FeedQuery {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn post_is_found_by_post_no_or_id(db: PgPool) {
+    let h = harness(db);
+    let me = h.writer(1).await;
+    // 迁移来的旧帖：id 是小整数，编号与 id 相同。
+    sqlx::query(
+        "INSERT INTO posts (id, post_no, author_id, title, status, published_at, first_published_at, bumped_at)
+         VALUES (6973, 6973, 1, '旧帖', 'published', now(), now(), now())",
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    sqlx::query("SELECT setval('posts_post_no_seq', 6974, false)")
+        .execute(&h.db)
+        .await
+        .unwrap();
+
+    let post = service::create(&h.state, &me, input("新帖"), true)
+        .await
+        .unwrap();
+    let id = post.id.get();
+    let detail = service::detail(&h.state, None, id).await.unwrap();
+    assert_eq!(detail.post_no, 6974);
+    let by_no = service::detail(&h.state, None, 6974).await.unwrap();
+    assert_eq!(by_no.id.get(), id);
+    assert_eq!(by_no.title, "新帖");
+
+    let old = service::detail(&h.state, None, 6973).await.unwrap();
+    assert_eq!((old.id.get(), old.post_no), (6973, 6973));
+
+    let feed = service::feed(&h.state, None, latest()).await.unwrap();
+    let nos: Vec<(i64, i64)> = feed.items.iter().map(|c| (c.id.get(), c.post_no)).collect();
+    assert_eq!(nos, vec![(id, 6974), (6973, 6973)]);
+
+    assert_eq!(
+        service::detail(&h.state, None, 9999)
+            .await
+            .unwrap_err()
+            .code(),
+        "NOT_FOUND"
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn draft_is_private_until_published(db: PgPool) {
     let h = harness(db);
     let me = h.writer(1).await;

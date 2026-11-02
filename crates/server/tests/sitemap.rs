@@ -48,13 +48,13 @@ async fn lists_public_posts_and_profiles(db: PgPool) {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO posts (id, author_id, title, status, is_anonymous, anonymous_seed, published_at, first_published_at, bumped_at, hidden_at) VALUES
-           (100, 10, '公开', 'published', false, NULL, now(), now(), now(), NULL),
-           (101, 10, '被隐藏', 'published', false, NULL, now(), now(), now(), now()),
-           (102, 10, '草稿', 'draft', false, NULL, NULL, NULL, NULL, NULL),
-           (103, 11, '隐藏主页的人发的', 'published', false, NULL, now(), now(), now(), NULL),
-           (104, 12, '注销的人发的', 'published', false, NULL, now(), now(), now(), NULL),
-           (105, 13, '匿名', 'published', true, 's', now(), now(), now(), NULL)",
+        "INSERT INTO posts (id, post_no, author_id, title, status, is_anonymous, anonymous_seed, published_at, first_published_at, bumped_at, hidden_at) VALUES
+           (100, 200, 10, '公开', 'published', false, NULL, now(), now(), now(), NULL),
+           (101, 201, 10, '被隐藏', 'published', false, NULL, now(), now(), now(), now()),
+           (102, 202, 10, '草稿', 'draft', false, NULL, NULL, NULL, NULL, NULL),
+           (103, 203, 11, '隐藏主页的人发的', 'published', false, NULL, now(), now(), now(), NULL),
+           (104, 204, 12, '注销的人发的', 'published', false, NULL, now(), now(), now(), NULL),
+           (105, 205, 13, '匿名', 'published', true, 's', now(), now(), now(), NULL)",
     )
     .execute(&db)
     .await
@@ -79,15 +79,17 @@ async fn lists_public_posts_and_profiles(db: PgPool) {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(ct.as_deref(), Some("application/xml; charset=utf-8"));
     assert!(xml.contains("<loc>https://interk.net/</loc>"));
-    for id in [100, 103, 104, 105] {
+    // 帖子地址用帖子编号。
+    for no in [200, 203, 204, 205] {
         assert!(
-            xml.contains(&format!("<loc>https://interk.net/post/{id}</loc>")),
-            "post {id}"
+            xml.contains(&format!("<loc>https://interk.net/post/{no}</loc>")),
+            "post {no}"
         );
     }
-    for id in [101, 102] {
-        assert!(!xml.contains(&format!("/post/{id}<")), "post {id}");
+    for no in [201, 202] {
+        assert!(!xml.contains(&format!("/post/{no}<")), "post {no}");
     }
+    assert!(!xml.contains("/post/100<"));
     // 主页地址用会员号。
     assert!(xml.contains("<loc>https://interk.net/profile/20</loc>"));
     assert!(!xml.contains("/profile/10<"));

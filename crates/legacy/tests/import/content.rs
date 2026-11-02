@@ -158,6 +158,26 @@ async fn content_is_merged_and_remapped(db: PgPool) {
     .await
     .unwrap();
     assert_eq!(posts.len(), 2);
+    // 帖子编号沿用旧 id（旧链接不变），导入之后发的帖子接着最大的旧 id 往后排。
+    sqlx::query(
+        "INSERT INTO posts (id, author_id, title) VALUES (105188348552810497, 1, '导入后发的')",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let numbers: Vec<(i64, i64)> = sqlx::query_as("SELECT id, post_no FROM posts ORDER BY post_no")
+        .fetch_all(&db)
+        .await
+        .unwrap();
+    let max_old = posts.iter().map(|p| p.id).max().unwrap();
+    assert_eq!(
+        numbers,
+        posts
+            .iter()
+            .map(|p| (p.id, p.id))
+            .chain([(105188348552810497, max_old + 1)])
+            .collect::<Vec<_>>()
+    );
     let p1 = &posts[0];
     assert_eq!((p1.id, p1.author_id, p1.category_id), (10, 1, Some(1)));
     assert_eq!(

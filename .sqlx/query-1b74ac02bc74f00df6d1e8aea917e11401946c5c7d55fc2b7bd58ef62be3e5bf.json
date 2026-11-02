@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT p.id, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS \"cover_id?\",\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.status = 'published' AND p.hidden_at IS NULL\n             AND ($1::bigint IS NULL OR p.category_id = $1)\n             AND ($2::bigint IS NULL OR EXISTS (\n                     SELECT 1 FROM post_tags pt WHERE pt.post_id = p.id AND pt.tag_id = $2))\n             AND (NOT $3 OR p.pinned_at IS NULL)\n             AND ($4::timestamptz IS NULL OR (p.bumped_at, p.id) < ($4, $5::bigint))\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($7)))\n             AND NOT (p.id = ANY($8))\n             AND ($9::bigint[] IS NULL OR (NOT p.is_anonymous AND p.author_id = ANY($9)))\n             AND ($10::bigint IS NULL OR NOT EXISTS (\n                     SELECT 1 FROM post_reads r WHERE r.user_id = $10 AND r.post_id = p.id))\n           ORDER BY p.bumped_at DESC, p.id DESC\n           LIMIT $6",
+  "query": "SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS \"cover_id?\",\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.status = 'published' AND p.hidden_at IS NULL\n             AND ($1::bigint IS NULL OR p.category_id = $1)\n             AND ($2::bigint IS NULL OR EXISTS (\n                     SELECT 1 FROM post_tags pt WHERE pt.post_id = p.id AND pt.tag_id = $2))\n             AND (NOT $3 OR p.pinned_at IS NULL)\n             AND ($4::timestamptz IS NULL OR (p.bumped_at, p.id) < ($4, $5::bigint))\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($7)))\n             AND NOT (p.id = ANY($8))\n             AND ($9::bigint[] IS NULL OR (NOT p.is_anonymous AND p.author_id = ANY($9)))\n             AND ($10::bigint IS NULL OR NOT EXISTS (\n                     SELECT 1 FROM post_reads r WHERE r.user_id = $10 AND r.post_id = p.id))\n           ORDER BY p.bumped_at DESC, p.id DESC\n           LIMIT $6",
   "describe": {
     "columns": [
       {
@@ -16,6 +16,17 @@
       },
       {
         "ordinal": 1,
+        "name": "post_no",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "posts",
+            "name": "post_no"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
         "name": "author_id",
         "type_info": "Int8",
         "origin": {
@@ -26,7 +37,7 @@
         }
       },
       {
-        "ordinal": 2,
+        "ordinal": 3,
         "name": "title",
         "type_info": "Text",
         "origin": {
@@ -37,13 +48,13 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "excerpt_source!",
         "type_info": "Text",
         "origin": "Expression"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "is_anonymous",
         "type_info": "Bool",
         "origin": {
@@ -54,7 +65,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "anonymous_seed",
         "type_info": "Text",
         "origin": {
@@ -65,7 +76,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "pinned_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -76,7 +87,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "solved_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -87,7 +98,7 @@
         }
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "view_count",
         "type_info": "Int8",
         "origin": {
@@ -98,7 +109,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "like_count",
         "type_info": "Int4",
         "origin": {
@@ -109,7 +120,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "comment_count",
         "type_info": "Int4",
         "origin": {
@@ -120,7 +131,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "published_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -131,7 +142,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "bumped_at!",
         "type_info": "Timestamptz",
         "origin": {
@@ -142,7 +153,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "edited_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -153,7 +164,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "last_bumped_by",
         "type_info": "Int8",
         "origin": {
@@ -164,13 +175,13 @@
         }
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "cover_id?",
         "type_info": "Int8",
         "origin": "Expression"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "category_id?",
         "type_info": "Int8",
         "origin": {
@@ -181,7 +192,7 @@
         }
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "category_slug?",
         "type_info": "Text",
         "origin": {
@@ -192,7 +203,7 @@
         }
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "category_name?",
         "type_info": "Text",
         "origin": {
@@ -221,6 +232,7 @@
       false,
       false,
       false,
+      false,
       null,
       false,
       true,
@@ -239,5 +251,5 @@
       false
     ]
   },
-  "hash": "31e2ff54d778d99e94c7b93c935a190461991b42ec0f6c1a13599ff9df4fc381"
+  "hash": "1b74ac02bc74f00df6d1e8aea917e11401946c5c7d55fc2b7bd58ef62be3e5bf"
 }

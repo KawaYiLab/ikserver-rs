@@ -42,7 +42,7 @@ async fn sitemap(State(state): State<AppState>) -> Result<Response, Problem> {
     let mut conn = state.db.acquire().await?;
 
     let posts: Vec<(i64, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT id, GREATEST(COALESCE(edited_at, published_at), bumped_at) AS lastmod
+        "SELECT post_no, GREATEST(COALESCE(edited_at, published_at), bumped_at) AS lastmod
          FROM posts
          WHERE status = 'published' AND hidden_at IS NULL AND published_at IS NOT NULL
          ORDER BY lastmod DESC
@@ -98,8 +98,8 @@ async fn sitemap(State(state): State<AppState>) -> Result<Response, Problem> {
     xml.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
     xml.push_str(r#"<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">"#);
     push_url(&mut xml, &format!("{site}/"), posts.first().map(|p| p.1));
-    for (id, lastmod) in &posts {
-        push_url(&mut xml, &format!("{site}/post/{id}"), Some(*lastmod));
+    for (post_no, lastmod) in &posts {
+        push_url(&mut xml, &format!("{site}/post/{post_no}"), Some(*lastmod));
     }
     for (member_no, lastmod) in &authors {
         push_url(

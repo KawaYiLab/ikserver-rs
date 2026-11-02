@@ -6541,6 +6541,11 @@ export interface components {
                 isSolved: boolean;
                 /** Format: int32 */
                 likeCount: number;
+                /**
+                 * Format: int64
+                 * @description 帖子短编号，帖子地址用它（`/post/{postNo}`）。
+                 */
+                postNo: number;
                 /** Format: date-time */
                 publishedAt: string;
                 tags: components["schemas"]["TagRef"][];
@@ -7119,6 +7124,11 @@ export interface components {
             isSolved: boolean;
             /** Format: int32 */
             likeCount: number;
+            /**
+             * Format: int64
+             * @description 帖子短编号，帖子地址用它（`/post/{postNo}`）。
+             */
+            postNo: number;
             /** Format: date-time */
             publishedAt: string;
             tags: components["schemas"]["TagRef"][];
@@ -7165,6 +7175,11 @@ export interface components {
             liked: boolean;
             /** Format: date-time */
             pinnedAt?: string | null;
+            /**
+             * Format: int64
+             * @description 帖子短编号，帖子地址用它（`/post/{postNo}`）。
+             */
+            postNo: number;
             /** Format: date-time */
             publishedAt: string;
             /** Format: date-time */
@@ -8011,6 +8026,11 @@ export interface components {
                 isSolved: boolean;
                 /** Format: int32 */
                 likeCount: number;
+                /**
+                 * Format: int64
+                 * @description 帖子短编号，帖子地址用它（`/post/{postNo}`）。
+                 */
+                postNo: number;
                 /** Format: date-time */
                 publishedAt: string;
                 tags: components["schemas"]["TagRef"][];
