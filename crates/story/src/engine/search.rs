@@ -187,9 +187,9 @@ fn push_missing_terms(out: &mut String, missing: &[super::response::TermCount], 
     if !nowhere.is_empty() {
         let _ = writeln!(
             out,
-            "全库无此词：{}（当前语料快照，matchIn={}）。",
+            "全库无此词：{}{}。",
             nowhere.join("、"),
-            if body_only { "body" } else { "all" }
+            if body_only { "（只查正文）" } else { "" }
         );
     }
 }
@@ -251,7 +251,185 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
     execute(corpus, args).map(|r| r.text)
 }
 
+/// 检索入口。整句提问（如「安比为什么加入狡兔屋」）常常整句零命中：这时自动拆成语料里存在的词再搜一次，
+/// 结果里写明实际用的检索词。显式翻页（cursor）与 purpose=verify（查原话要求原样匹配）不改写。
 pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputResult {
+    let first = execute_once(corpus, args)?;
+    let Some(rewritten) = rewrite_for_retry(corpus, args, &first) else {
+        return Ok(first);
+    };
+    let mut retry = args.clone();
+    retry.keyword = Some(rewritten.clone());
+    let Ok(mut second) = execute_once(corpus, &retry) else {
+        return Ok(first);
+    };
+    let super::response::ToolData::Search(result) = &mut second.response.data else {
+        return Ok(first);
+    };
+    if result.candidate_count == 0 {
+        return Ok(first);
+    }
+    let original = args.keyword.as_deref().unwrap_or("").trim().to_owned();
+    result.query = original.clone();
+    result.rewritten_keyword = Some(rewritten.clone());
+    second.text.insert_str(
+        0,
+        &format!(
+            "「{original}」没有命中，已拆成「{rewritten}」检索。结果不理想时，换用角色名、地名、事件名等实体词重搜。\n"
+        ),
+    );
+    Ok(second)
+}
+
+/// 句中常见的虚词与疑问词：拆词时去掉，避免它们把同篇 AND 卡死。
+const FILLERS: &[&str] = &[
+    "为什么",
+    "怎么样",
+    "是什么",
+    "什么样",
+    "有没有",
+    "是不是",
+    "怎么",
+    "怎样",
+    "如何",
+    "什么",
+    "哪些",
+    "哪个",
+    "哪里",
+    "哪儿",
+    "是谁",
+    "请问",
+    "一下",
+    "关于",
+    "之间",
+    "为何",
+    "吗",
+    "呢",
+    "吧",
+    "啊",
+    "了",
+    "的",
+    "和",
+    "与",
+    "跟",
+    "及",
+    "是",
+    "在",
+    "被",
+    "把",
+    "对",
+    "给",
+    "谁",
+];
+
+fn rewrite_for_retry(
+    corpus: &Corpus,
+    args: &SearchArgs,
+    first: &super::response::ToolOutput,
+) -> Option<String> {
+    if args.cursor.is_some() || args.purpose.as_deref() == Some("verify") {
+        return None;
+    }
+    let super::response::ToolData::Search(result) = &first.response.data else {
+        return None;
+    };
+    if result.candidate_count > 0 && !result.partial_withheld {
+        return None;
+    }
+    let body_only = args.match_in.as_deref() == Some("body");
+    let keyword = args.keyword.as_deref()?.trim();
+    let mut terms: Vec<String> = Vec::new();
+    let mut changed = false;
+    for term in keyword.split_whitespace() {
+        let absent = result
+            .missing_term_counts
+            .iter()
+            .any(|m| m.term == term && m.corpus_documents == 0)
+            || (result.candidate_count == 0 && corpus_doc_count(corpus, term, body_only) == 0);
+        // 拆不出任何语料里有的词时保留原词，不悄悄丢掉用户写的检索词。
+        let pieces = Some(term)
+            .filter(|t| absent && t.chars().count() >= 3)
+            .map(|t| segment(corpus, t, body_only))
+            .filter(|p| !p.is_empty())
+            .unwrap_or_else(|| vec![term.to_owned()]);
+        if pieces.len() != 1 || pieces[0] != term {
+            changed = true;
+        }
+        for piece in pieces {
+            if !terms.contains(&piece) {
+                terms.push(piece);
+            }
+        }
+    }
+    (changed && !terms.is_empty()).then(|| terms.join(" "))
+}
+
+/// 把一段没有空格的整句拆成语料里存在的词：先认出说话人名字，再去掉虚词与疑问词，
+/// 剩下的部分从左到右取语料中出现过的最长片段（2～8 字），单字丢弃。
+fn segment(corpus: &Corpus, text: &str, body_only: bool) -> Vec<String> {
+    let mut names: Vec<&str> = corpus
+        .speakers
+        .iter()
+        .map(String::as_str)
+        .filter(|n| n.chars().count() >= 2 && text.contains(*n))
+        .collect();
+    names.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
+    // 用占位符切开：名字整体保留，其余片段再拆。
+    let mut parts: Vec<(String, bool)> = vec![(text.to_owned(), false)];
+    for name in names {
+        parts = parts
+            .into_iter()
+            .flat_map(|(part, fixed)| {
+                if fixed || !part.contains(name) {
+                    return vec![(part, fixed)];
+                }
+                let mut out = Vec::new();
+                for (i, piece) in part.split(name).enumerate() {
+                    if i > 0 {
+                        out.push((name.to_owned(), true));
+                    }
+                    out.push((piece.to_owned(), false));
+                }
+                out
+            })
+            .collect();
+    }
+    let mut words = Vec::new();
+    for (part, fixed) in parts {
+        if fixed {
+            words.push(part);
+            continue;
+        }
+        let mut cleaned = part;
+        for filler in FILLERS {
+            cleaned = cleaned.replace(filler, " ");
+        }
+        for chunk in cleaned.split(|c: char| {
+            c.is_whitespace()
+                || c.is_ascii_punctuation()
+                || "，。？！、；：“”‘’（）《》".contains(c)
+        }) {
+            let chars: Vec<char> = chunk.chars().collect();
+            let mut i = 0;
+            while i < chars.len() {
+                let longest = (2..=8.min(chars.len() - i)).rev().find(|&len| {
+                    let piece: String = chars[i..i + len].iter().collect();
+                    corpus_doc_count(corpus, &piece, body_only) > 0
+                });
+                match longest {
+                    Some(len) => {
+                        words.push(chars[i..i + len].iter().collect());
+                        i += len;
+                    }
+                    None => i += 1,
+                }
+            }
+        }
+    }
+    words
+}
+
+fn execute_once(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputResult {
     let full = super::response::detail(args.detail.as_deref())?;
     let mut args = args.clone();
     match args.purpose.as_deref().unwrap_or("browse") {
@@ -428,11 +606,11 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
             "{}",
             if zero_term {
                 format!(
-                    "未退化为部分匹配：有词在当前范围内零命中（{counts}），合并只会等同于单独检索其余词；直接使用 suggestions 中的调用。"
+                    "没有全部词都出现的文档，其中有词一次都没出现（{counts}），所以不返回部分匹配；请用下面的「相关查询」。"
                 )
             } else {
                 format!(
-                    "未退化为部分匹配：这些词在当前范围内没有任何两个出现在同一篇（{counts}），合并只是各词单独结果的拼接；可用 suggestions 分别检索。"
+                    "没有全部词都出现的文档，而且任意两个词都没在同一篇出现过（{counts}），所以不返回部分匹配；请用下面的「相关查询」分别检索。"
                 )
             }
         );

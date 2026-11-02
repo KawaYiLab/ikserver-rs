@@ -67,7 +67,7 @@ fn search_usability_partial_fallback_keeps_filters_and_coverage_order() {
         json!({"keyword":"天空 核心 秘密", "path":"Chapter240"}),
     );
     assert!(
-        default.contains("命中 0 篇") && default.contains("未退化为部分匹配"),
+        default.contains("命中 0 篇") && default.contains("所以不返回部分匹配"),
         "{default}"
     );
     let out = ok(
@@ -1443,4 +1443,35 @@ async fn load_local_source_and_reload() {
     let state = StoryState::new(&broken, db, ids).unwrap();
     assert!(state.load().await.is_err());
     assert!(state.current().is_none());
+}
+
+#[test]
+fn a_whole_question_is_split_into_words_that_exist() {
+    let c = corpus();
+    let Ok(Ok(r)) = tools::call_output(
+        &c,
+        "ik_search",
+        Some(json!({"keyword":"安比为什么加入狡兔屋"})),
+    ) else {
+        panic!("search failed");
+    };
+    assert!(
+        r.text
+            .starts_with("「安比为什么加入狡兔屋」没有命中，已拆成「安比 狡兔屋」检索"),
+        "{}",
+        r.text
+    );
+    let data = serde_json::to_value(&r.response).unwrap();
+    assert_eq!(data["data"]["query"], "安比为什么加入狡兔屋");
+    assert_eq!(data["data"]["rewrittenKeyword"], "安比 狡兔屋");
+    assert!(data["data"]["candidateCount"].as_u64().unwrap() > 0);
+    // 查原话（verify）要求原样匹配，不改写；拆不出词的检索词保留原样，不悄悄丢掉。
+    let verify = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"安比为什么加入狡兔屋","purpose":"verify"}),
+    );
+    assert!(!verify.contains("已拆成"), "{verify}");
+    let kept = ok(&c, "ik_search", json!({"keyword":"安比 旧账"}));
+    assert!(!kept.contains("已拆成"), "{kept}");
 }

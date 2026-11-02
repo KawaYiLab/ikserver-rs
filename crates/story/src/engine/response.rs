@@ -49,7 +49,12 @@ impl NextCall {
                         *k,
                     )
                 });
+                // 取值为 0 的偏移量是缺省值，写出来只是噪声。
                 keys.into_iter()
+                    .filter(|k| {
+                        !(matches!(k.as_str(), "offset" | "directoryOffset" | "batchIndex")
+                            && a[*k].as_u64() == Some(0))
+                    })
                     .map(|k| format!("{k}={}", a[k]))
                     .collect::<Vec<_>>()
                     .join(", ")
@@ -503,6 +508,9 @@ pub struct SearchResult {
     pub next_call: Option<NextCall>,
     pub next_directory_call: Option<NextCall>,
     pub suggestions: Vec<NextCall>,
+    /// 原检索词整句零命中、已自动拆词重搜时，实际使用的检索词（`query` 仍是原句）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewritten_keyword: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

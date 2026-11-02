@@ -17,6 +17,10 @@
 后附该主题的参数与结果字段参考和进阶参数一览。MCP prompts（`chapter_summary` / `character_arc` / `roleplay_profile` / `event_timeline` / `fact_check`）
 返回用户选用的任务文本，后附对应模式的做法部分。
 
+`ik_search` 的检索词整句零命中时（如「安比为什么加入狡兔屋」），自动拆成语料里存在的词再搜一次：先认出说话人名字，去掉疑问词与虚词，
+其余部分从左到右取语料中出现过的最长片段（2～8 字）。结果首行写明实际用的检索词，`structuredContent.data.rewrittenKeyword` 同步给出；
+拆不出词的检索词保留原样。`cursor` 翻页和 `purpose="verify"`（查原话要求原样匹配）不改写。
+
 `detail="compact"`（默认）的文本只留回答用得上的内容：不带语料快照标识，逐篇摘要只列出场说话人。
 快照（`snapshotVersion`、`extractionMode`、`corpusRevision`）、顺序来源、署名覆盖与缺口计数在 `structuredContent` 里，`detail="full"` 时也写进文本。
 

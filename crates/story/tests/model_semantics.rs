@@ -83,7 +83,7 @@ fn a_term_with_no_hits_does_not_degrade_the_query_into_the_other_terms_union() {
     assert_eq!(data["partial"], false, "{text}");
     assert_eq!(data["candidateCount"], 0, "{text}");
     assert!(!text.contains("未命中关键词"), "{text}");
-    assert!(text.contains("未退化为部分匹配"), "{text}");
+    assert!(text.contains("所以不返回部分匹配"), "{text}");
     assert!(
         suggestion_keywords(&data).contains(&("安比".into(), None)),
         "{data}"
@@ -94,7 +94,7 @@ fn a_term_with_no_hits_does_not_degrade_the_query_into_the_other_terms_union() {
     let (text, data) = mcp(&c, "ik_search", json!({"keyword":"录像店 以骸"}));
     assert_eq!(data["partial"], false, "{text}");
     assert_eq!(data["candidateCount"], 0, "{text}");
-    assert!(text.contains("未退化为部分匹配"), "{text}");
+    assert!(text.contains("所以不返回部分匹配"), "{text}");
     assert!(
         text.contains("录像店 1 篇") && text.contains("以骸 1 篇"),
         "{text}"

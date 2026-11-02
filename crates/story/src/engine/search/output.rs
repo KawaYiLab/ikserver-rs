@@ -551,6 +551,7 @@ pub(super) fn typed_result(
         next_call,
         next_directory_call,
         suggestions,
+        rewritten_keyword: None,
     })
 }
 
@@ -563,9 +564,14 @@ pub(super) fn term_document_counts(terms: &[TermDocuments]) -> String {
 }
 
 pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool) -> String {
+    // 只按说话人筛时没有检索词，标题写成「某人的台词」，免得出现空的「」。
+    let label = match (&r.query, &r.resolved_range.speaker) {
+        (q, Some(speaker)) if q.is_empty() => format!("{speaker} 的台词"),
+        (q, _) => format!("「{q}」"),
+    };
     let mut out = format!(
-        "[ik_search] 「{}」 | 命中 {} 篇 · 命中 {} 行 | 正文结果 {} 篇 · 目录建议 {} 篇\n",
-        r.query, r.candidate_count, r.hit_count, r.body_result_count, r.directory_count
+        "[ik_search] {label} | 命中 {} 篇 · 命中 {} 行 | 正文结果 {} 篇 · 目录建议 {} 篇\n",
+        r.candidate_count, r.hit_count, r.body_result_count, r.directory_count
     );
     if local {
         out.insert_str(12, "篇内检索 ");
@@ -603,10 +609,12 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
                 || s.arguments.get("docId").is_none() && r.resolved_range.doc_id.is_some()
                 || s.arguments.get("scope").is_none() && r.resolved_range.scope != "all"
         });
-        out.push_str(if widens {
-            "没有命中。可使用 suggestions 中的调用调整条件；其中去掉范围筛选的调用会扩大检索范围。\n"
+        out.push_str(if r.suggestions.is_empty() {
+            "没有命中。换个说法，或改用角色名、地名、事件名等实体词再试。\n"
+        } else if widens {
+            "没有命中。可以试试下面的「相关查询」；其中去掉范围筛选的调用会扩大检索范围。\n"
         } else {
-            "没有命中。可使用 suggestions 中的调用调整条件，范围保持不变。\n"
+            "没有命中。可以试试下面的「相关查询」，范围保持不变。\n"
         });
     }
     let labels = [

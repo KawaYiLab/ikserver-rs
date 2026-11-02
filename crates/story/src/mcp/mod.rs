@@ -264,14 +264,14 @@ pub fn instructions(c: &Corpus) -> String {
              回答绝区零的剧情、角色、台词出处、设定考据问题时，先用 ik_search 检索候选，再用 ik_read 读原文确认，不要只凭记忆或检索片段作答；\
              要总结整章时先用 ik_catalog 看章节结构；角色相关问题用 ik_character。\
              较复杂的查证、章节总结、角色分析或时间线任务，开始前调用一次 ik_guide 取对应做法。\
-             资料里找不到时直接说明没有找到，不要编造。目录顺序不等于剧情发生顺序。分支取舍：{}。",
+             资料里找不到时直接说明没有找到，不要编造。目录顺序不等于剧情发生顺序。{}",
         c.meta.language,
         thousands(story_docs),
         thousands(lore_docs),
         match c.meta.accuracy_first {
-            Some(true) => "双方分支候选都保留",
-            Some(false) => "默认哲视角，不确定的分支保留",
-            None => "旧语料未声明",
+            Some(true) => "分支取舍：双方分支候选都保留。",
+            Some(false) => "分支取舍：默认哲视角，不确定的分支保留。",
+            None => "",
         }
     )
 }
