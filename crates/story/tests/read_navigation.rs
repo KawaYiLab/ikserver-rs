@@ -65,7 +65,7 @@ fn compact_single_doc_retains_adjacent_navigation_and_preferences() {
     assert_eq!(next["arguments"]["includeSources"], true);
     assert_eq!(next["arguments"]["includeEvidence"], true);
     assert!(text.contains("下一篇（目录相邻"), "{text}");
-    assert!(text.contains("完整返回行"), "{text}");
+    assert!(!text.contains("完整返回行"), "{text}");
     let (_, next_data) = output(&c, next["arguments"].clone());
     assert_eq!(next_data["blocks"][0]["document"]["docId"], c.doc_id(1));
     assert!(next_data["nextDocument"].is_null());

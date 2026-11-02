@@ -560,5 +560,7 @@ fn overview_is_unchanged_and_output_schema_covers_both_shapes() {
     assert!(schema.contains("#/$defs/CharacterResult"), "{schema}");
     let input = &character["inputSchema"]["properties"];
     assert_eq!(input["purpose"]["enum"], json!(["overview", "roleplay"]));
-    assert!(input["until"].is_object() && input["maxScenes"].is_object());
+    assert!(input["until"].is_object());
+    // maxScenes 是进阶参数：不在清单里，但照常接受。
+    assert!(input.get("maxScenes").is_none());
 }

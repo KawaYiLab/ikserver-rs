@@ -183,17 +183,12 @@ pub fn execute(corpus: &Corpus, args: &ReadArgs) -> OutputResult {
             "catalog"
         },
     );
-    let mut snapshot = Snapshot::new(corpus).text();
-    // compact 逐篇摘要省略 unknown 的顺序字段时，在快照头说明一次。头部在读取前就要定稿（计入字数预算），
-    // 所以按事先已知的篇目判断：批量读取看整批，其余看起始篇（同组顺读的提取状态一致）。
-    let known_docs: Vec<usize> = batch_docs.clone().unwrap_or_else(|| vec![doc]);
-    if !full
-        && known_docs
-            .iter()
-            .any(|&d| corpus.doc_summaries[d].order.has_unlisted_unknown())
-    {
-        snapshot.push_str(super::response::UNLISTED_ORDER_NOTE);
-    }
+    // 快照标识只在 full 文本里给；compact 文本只留读原文用得上的内容，快照在 structuredContent 里。
+    let snapshot = if full {
+        Snapshot::new(corpus).text()
+    } else {
+        String::new()
+    };
     let mut blocks = Vec::new();
     let mut continuation_at = None;
     let mut next_document = None;
@@ -526,7 +521,9 @@ fn block_header(
         );
     }
     document.push_summary(&mut out, full);
-    let _ = writeln!(out, "完整返回行：{} {start}-{end}", document.doc_id);
+    if full {
+        let _ = writeln!(out, "完整返回行：{} {start}-{end}", document.doc_id);
+    }
     out
 }
 

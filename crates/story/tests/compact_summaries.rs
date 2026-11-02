@@ -198,7 +198,7 @@ fn derived_summary_cache_does_not_change_revision_or_cursor() {
 }
 
 #[test]
-fn compact_summary_fits_budget_and_mixed_scope_excludes_lore() {
+fn compact_summary_lists_speakers_and_mixed_scope_excludes_lore() {
     let c = corpus();
     let all = (0..c.docs.len()).collect::<Vec<_>>();
     let stats = c.speaker_coverage_for_docs(&all);
@@ -211,19 +211,21 @@ fn compact_summary_fits_budget_and_mixed_scope_excludes_lore() {
         .position(|d| d.kind == ik_story::corpus::DocKind::Story)
         .unwrap();
     let document = ik_story::engine::response::Document::new(&c, d);
+    // compact 只列出场说话人；顺序、缺口与署名计数只在 full 文本和 structuredContent 里。
     let mut summary = String::new();
     document.push_summary(&mut summary, false);
-    assert!(summary.chars().count() <= 180, "{summary}");
-    assert!(summary.contains("archive_table"), "{summary}");
-    // 未知的顺序字段不再逐篇写出；已知的（如上下文）照常保留。
-    assert!(!summary.contains("剧情先后=unknown"), "{summary}");
-    assert!(summary.contains("上下文=unlinked"), "{summary}");
-    assert!(summary.contains("未关联1"), "{summary}");
-    assert!(summary.contains("署名4/6"), "{summary}");
+    assert!(summary.starts_with("出场："), "{summary}");
+    for status in ["archive_table", "上下文=", "未关联", "署名4/6"] {
+        assert!(!summary.contains(status), "{summary}");
+    }
+    let mut full = String::new();
+    document.push_summary(&mut full, true);
+    assert!(full.contains("archive_table"), "{full}");
+    assert!(full.contains("未关联1"), "{full}");
 }
 
 #[test]
-fn long_status_summary_keeps_known_order_source_in_budget_fallback() {
+fn compact_summary_stays_one_short_line_whatever_the_statuses() {
     let mut c = corpus();
     let d = c
         .docs
@@ -232,90 +234,12 @@ fn long_status_summary_keeps_known_order_source_in_budget_fallback() {
         .unwrap();
     let summary = &mut c.doc_summaries[d];
     summary.order.doc_order_source = "an_exceptionally_long_document_order_source".into();
-    summary.order.chronology_status = "an_exceptionally_long_chronology_status".into();
-    summary.order.context_status = "an_exceptionally_long_context_status".into();
-    summary.evidence.no_voice = 6;
-    let text = summary.render_compact(&[], 0);
-    assert!(text.contains("source_key"), "{text}");
-    assert!(text.contains("混合"), "{text}");
-    assert!(text.chars().count() <= 180, "{text}");
-    summary.evidence.placeholders = u32::MAX as usize;
-    summary.evidence.unknown = u32::MAX as usize;
-    summary.evidence.inferred = u32::MAX as usize;
-    summary.evidence.missing = u32::MAX as usize;
-    summary.evidence.unlinked = u32::MAX as usize;
-    summary.evidence.no_voice = u32::MAX as usize;
-    let huge = summary.render_compact(&[], 0);
-    assert!(huge.contains("source_key"), "{huge}");
-    assert!(huge.chars().count() <= 180, "{huge}");
-}
-
-#[test]
-fn budget_fallback_keeps_document_order_source_names_complete() {
-    let mut c = corpus();
-    let d = c
-        .docs
-        .iter()
-        .position(|d| d.kind == ik_story::corpus::DocKind::Story)
-        .unwrap();
-    let summary = &mut c.doc_summaries[d];
-    summary.order.chronology_status = "an_exceptionally_long_chronology_status".into();
-    summary.order.context_status = "an_exceptionally_long_context_status".into();
-    summary.evidence.placeholders = u32::MAX as usize;
-    summary.evidence.unknown = u32::MAX as usize;
-    summary.evidence.inferred = u32::MAX as usize;
-    summary.evidence.missing = u32::MAX as usize;
-    summary.evidence.unlinked = u32::MAX as usize;
-    summary.evidence.no_voice = u32::MAX as usize;
-    for source in ["source_key", "archive_table"] {
-        summary.order.doc_order_source = source.into();
-        let text = summary.render_compact(&[], 0);
-        assert!(text.contains(&format!("篇序={source} ")), "{text}");
-        assert!(text.contains("未关联"), "{text}");
-        assert!(text.contains("缺证据"), "{text}");
-        assert!(text.contains("未知"), "{text}");
-        assert!(text.chars().count() <= 180, "{text}");
-    }
-}
-
-#[test]
-fn budget_fallback_with_large_coverage_preserves_gap_markers() {
-    let mut c = corpus();
-    let d = c
-        .docs
-        .iter()
-        .position(|d| d.kind == ik_story::corpus::DocKind::Story)
-        .unwrap();
-    let summary = &mut c.doc_summaries[d];
-    summary.order.doc_order_source = "archive_table".into();
-    summary.order.chronology_status = "an_exceptionally_long_chronology_status".into();
-    summary.order.context_status = "an_exceptionally_long_context_status".into();
     summary.evidence.placeholders = usize::MAX;
     summary.evidence.unknown = usize::MAX;
-    summary.evidence.inferred = usize::MAX;
-    summary.evidence.missing = usize::MAX;
-    summary.evidence.unlinked = usize::MAX;
-    summary.evidence.no_voice = usize::MAX;
-    summary.coverage.named_lines = usize::MAX;
     summary.coverage.total_lines = usize::MAX;
-    summary.coverage.inferred_lines = usize::MAX;
-    summary.coverage.legacy_named_lines = usize::MAX;
-    summary.coverage.other_named_lines = usize::MAX;
-    let text = summary.render_compact(&[], 0);
-    for marker in [
-        "篇序=archive_table",
-        "source_key",
-        "混合",
-        "占位",
-        "未知",
-        "推断",
-        "缺证据",
-        "未关联",
-        "无配音",
-        "署名",
-        "full",
-    ] {
-        assert!(text.contains(marker), "{text}");
-    }
-    assert!(text.chars().count() <= 180, "{text}");
+    assert_eq!(summary.render_compact(&[], 0), "");
+    let names = ["安比", "妮可", "比利", "猫又", "可琳", "丽娜", "艾莲"];
+    let text = summary.render_compact(&names, names.len());
+    assert_eq!(text, "出场：安比、妮可、比利、猫又、可琳、丽娜 等 7 人\n");
+    assert_eq!(summary.render_compact(&names[..2], 2), "出场：安比、妮可\n");
 }

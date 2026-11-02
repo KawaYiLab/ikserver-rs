@@ -167,9 +167,10 @@ cargo run --release -p ik-server -- story call --source /path/to/corpus \
 }
 ```
 
-工具：`ik_catalog`（章节与场景目录）、`ik_search`（多词先同篇 AND，无完整匹配时默认标注部分匹配；`allowPartial=false` 要求严格匹配）、`ik_read`（按字数预算顺读，
-`follow=true` 跨场景读完整章）、`ik_character`（角色出场与档案）、`ik_guide`（章节 / 角色 / 顺序与时间 / 检索与出处的契约参考）、
-`ik_coverage`（合并调用者累计的 `read.coverageDelta`，对照 `catalog.manifest` 核对资料覆盖与缺口）。
+工具：`ik_search`（检索剧情与设定，多词同篇 AND，无完整匹配时给出部分匹配或改写建议）、`ik_read`（读原文，按章节或版本连读）、
+`ik_catalog`（章节、活动与设定目录）、`ik_character`（角色出场与档案，`purpose=roleplay` 给扮演素材）、
+`ik_guide`（查证 / 总结 / 角色 / 时间线的做法指引与进阶参数）。另有 `ik_coverage`（核对资料覆盖）不在默认清单里，但照常可调用。
+详见 [剧情库检索说明](../../docs/story-search.md)。
 
 版本别名支持 `ik_catalog(path="3.3版本")`、`ik_search(keyword="3.3 核心")` 和
 `ik_read(docId="v3.3")`，限定该版新增主线。别名映射与检索规则见 [剧情库检索说明](../../docs/story-search.md)。

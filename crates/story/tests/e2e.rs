@@ -960,74 +960,60 @@ fn guide_modes() {
 }
 
 #[test]
-fn mcp_contract_leaves_workflow_and_answer_format_to_client() {
+fn mcp_contract_tells_the_model_when_to_use_each_tool() {
     let c = corpus();
-    let mut descriptions = vec![
-        ik_story::mcp::instructions(&c),
-        ik_story::mcp::tools::definitions().unwrap().to_string(),
-    ];
-    for mode in ["summary", "character", "timeline", "verify"] {
-        descriptions.push(ok(&c, "ik_guide", json!({"mode":mode})));
+    // instructions 写明基本流程：先检索、再读原文确认，找不到就说没找到。
+    let instructions = ik_story::mcp::instructions(&c);
+    for phrase in [
+        "先用 ik_search 检索候选，再用 ik_read 读原文确认",
+        "ik_guide",
+        "没有找到",
+    ] {
+        assert!(instructions.contains(phrase), "{phrase}: {instructions}");
     }
-    for detail in ["compact", "full"] {
-        for (tool, mut args) in [
-            ("ik_catalog", json!({})),
-            ("ik_catalog", json!({"path":"ch:Chapter00"})),
-            (
-                "ik_catalog",
-                json!({"path":"ch:Chapter00","manifest":true,"maxResults":1}),
-            ),
-            ("ik_search", json!({"keyword":"狡兔屋"})),
-            ("ik_read", json!({"docId":"ch:Chapter00","follow":true})),
-            ("ik_read", json!({"docIds":[c.doc_id(0)]})),
-            ("ik_character", json!({"name":"安比"})),
-            (
-                "ik_character",
-                json!({"name":"妮可","maxResults":1,"includeEvidence":true}),
-            ),
-            ("ik_character", json!({"name":"妮可","purpose":"roleplay"})),
-            (
-                "ik_character",
-                json!({"name":"安比","purpose":"roleplay","until":"序章"}),
-            ),
-        ] {
-            args["detail"] = json!(detail);
-            descriptions.push(ok(&c, tool, args));
-        }
+    // 每个工具的描述都说明何时用并给出调用例子；参数清单保持精简。
+    let defs = ik_story::mcp::tools::definitions().unwrap();
+    for tool in defs["tools"].as_array().unwrap() {
+        let description = tool["description"].as_str().unwrap();
+        assert!(description.contains("例："), "{tool}");
+        let params = tool["inputSchema"]["properties"].as_object().unwrap().len();
+        assert!(params <= 8, "{}: {params}", tool["name"]);
+        assert!(tool["inputSchema"].get("additionalProperties").is_none());
     }
-    for text in descriptions {
-        for directive in [
-            "先用 ik_search",
-            "先读原文",
-            "分层压缩",
-            "输出建议",
-            "结论三选一",
-            "条目格式",
-            "人物小传",
-            "每章记一条",
-            "不要替原文",
-            "没有说话人的行不要",
-            "不要排进同一条精确时间轴",
-            "较大任务开始前读一次",
-            "整章总结前",
-            "下一步：",
-            "请用 ik_coverage",
-            "累计 ik_read.coverageDelta 后用",
-            "读原文确认登场经过",
-            "不要补写",
-            "提及请用",
-            "优先使用游标",
-            "读上下文：",
-            "建议重查：",
-            "缩小范围",
-        ] {
-            assert!(!text.contains(directive), "{directive}: {text}");
-        }
+    // 做法指引：步骤与证据判断在前，进阶参数（清单里没写的参数）在后。
+    let verify = ok(&c, "ik_guide", json!({"mode":"verify"}));
+    assert!(verify.contains("没读过的原文不算证据"), "{verify}");
+    assert!(verify.contains("进阶参数一览"), "{verify}");
+    assert!(verify.contains("`matchIn`"), "{verify}");
+    for mode in ["summary", "character", "timeline"] {
+        let text = ok(&c, "ik_guide", json!({"mode":mode}));
+        assert!(
+            text.contains("## 步骤") || text.contains("## 角色"),
+            "{text}"
+        );
     }
 }
 
 #[test]
-fn mcp_prompts_only_contain_the_selected_task() {
+fn hidden_parameters_still_work_and_unknown_ones_are_named() {
+    let c = corpus();
+    // 进阶参数不在清单里，但照常生效。
+    let text = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"狡兔屋","matchIn":"body","contextLines":0}),
+    );
+    assert!(text.starts_with("[ik_search]"), "{text}");
+    // 拼错的参数直接报错并给出正确名，而不是被当成缺参数。
+    let error = call(&c, "ik_search", json!({"keywrd":"狡兔屋"})).unwrap_err();
+    assert!(error.contains("keywrd"), "{error}");
+    assert!(error.contains("是不是想写 keyword"), "{error}");
+    let error = call(&c, "ik_read", json!({"docId":c.doc_id(0),"bogus":1})).unwrap_err();
+    assert!(error.contains("没有参数 bogus"), "{error}");
+}
+
+#[test]
+fn mcp_prompts_carry_the_task_and_its_method() {
     let s = server();
     for (name, argument, expected) in [
         (
@@ -1063,7 +1049,9 @@ fn mcp_prompts_only_contain_the_selected_task() {
         let messages = response["result"]["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 1, "{response}");
         assert_eq!(messages[0]["role"], "user");
-        assert_eq!(messages[0]["content"]["text"], expected);
+        let text = messages[0]["content"]["text"].as_str().unwrap();
+        assert!(text.starts_with(expected), "{text}");
+        assert!(text.contains("做法"), "{text}");
     }
 }
 
@@ -1140,12 +1128,11 @@ fn jsonrpc_lifecycle() {
     assert_eq!(
         names,
         vec![
-            "ik_catalog",
             "ik_search",
             "ik_read",
+            "ik_catalog",
             "ik_character",
-            "ik_guide",
-            "ik_coverage"
+            "ik_guide"
         ]
     );
     for t in list["result"]["tools"].as_array().unwrap() {

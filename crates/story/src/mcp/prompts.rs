@@ -1,4 +1,4 @@
-//! MCP prompts：用户选用的任务文本，不附带工具工作流或回答模板。
+//! MCP prompts：用户选用的任务文本，后附对应的做法指引（与 `ik_guide` 的做法部分相同）。
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -10,6 +10,8 @@ struct PromptSpec {
     arg: &'static str,
     arg_description: &'static str,
     task: &'static str,
+    /// 附带的 `ik_guide` 模式。
+    guide: &'static str,
 }
 
 const PROMPTS: &[PromptSpec] = &[
@@ -20,6 +22,7 @@ const PROMPTS: &[PromptSpec] = &[
         arg: "chapter",
         arg_description: "章节 id 或章节名，如 ch:Chapter110、云霞同归处",
         task: "请总结绝区零主线章节「{}」的剧情。",
+        guide: "summary",
     },
     PromptSpec {
         name: "character_arc",
@@ -28,6 +31,7 @@ const PROMPTS: &[PromptSpec] = &[
         arg: "name",
         arg_description: "角色名，如 妮可、星见雅",
         task: "请梳理角色「{}」在绝区零主线中的角色弧线。",
+        guide: "character",
     },
     PromptSpec {
         name: "roleplay_profile",
@@ -36,6 +40,7 @@ const PROMPTS: &[PromptSpec] = &[
         arg: "name",
         arg_description: "角色名，如 妮可、星见雅",
         task: "请整理绝区零角色「{}」的角色扮演参考资料。",
+        guide: "character",
     },
     PromptSpec {
         name: "event_timeline",
@@ -44,6 +49,7 @@ const PROMPTS: &[PromptSpec] = &[
         arg: "topic",
         arg_description: "事件、组织或谜团，如 旧都陷落、赫利俄斯机关",
         task: "请整理「{}」相关的事件时间线。",
+        guide: "timeline",
     },
     PromptSpec {
         name: "fact_check",
@@ -52,6 +58,7 @@ const PROMPTS: &[PromptSpec] = &[
         arg: "claim",
         arg_description: "要查证的台词或说法",
         task: "请查证这个说法是否出自绝区零原文：{}",
+        guide: "verify",
     },
 ];
 
@@ -94,7 +101,11 @@ pub fn get(params: &GetParams) -> Result<GetResult, String> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty());
     let value = value.ok_or_else(|| format!("缺少参数 {}", spec.arg))?;
-    let text = spec.task.replace("{}", value);
+    let mut text = spec.task.replace("{}", value);
+    if let Some(guide) = crate::engine::guide::find(spec.guide) {
+        text.push_str("\n\n");
+        text.push_str(guide.method);
+    }
     Ok(GetResult {
         description: spec.description,
         messages: vec![json!({ "role": "user", "content": { "type": "text", "text": text } })],

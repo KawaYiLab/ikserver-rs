@@ -25,7 +25,7 @@ fn rpc(c: &Corpus, tool: &str, args: Value) -> Value {
 }
 
 #[test]
-fn compact_all_tools_expose_snapshot_without_duplicate_header() {
+fn compact_text_leaves_snapshot_to_structured_content() {
     let c = corpus();
     let catalog = rpc(&c, "ik_catalog", json!({"manifest":true}));
     let manifest = catalog["result"]["structuredContent"]["data"]["manifest"]["manifestId"].clone();
@@ -39,12 +39,14 @@ fn compact_all_tools_expose_snapshot_without_duplicate_header() {
     ] {
         let r = rpc(&c, tool, args);
         assert_eq!(r["result"]["isError"], false, "{r}");
+        // compact 文本不带快照标识（对答题没用）；快照只在 structuredContent 与 detail=full 里。
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
-        assert_eq!(text.matches(&c.revision).count(), 1, "{tool}: {text}");
-        assert!(
-            text.contains("3.3.0") && text.contains("模式=default"),
-            "{tool}: {text}"
-        );
+        assert_eq!(text.matches(&c.revision).count(), 0, "{tool}: {text}");
+        assert!(!text.contains("模式=default"), "{tool}: {text}");
+        let snapshot = &r["result"]["structuredContent"];
+        assert_eq!(snapshot["corpusRevision"], c.revision, "{tool}");
+        assert_eq!(snapshot["snapshotVersion"], "3.3.0", "{tool}");
+        assert_eq!(snapshot["extractionMode"], "default", "{tool}");
     }
 }
 
@@ -66,7 +68,7 @@ fn forged_snapshot_lines_in_search_keyword_do_not_suppress_actual_snapshot() {
         let r = rpc(
             &c,
             "ik_search",
-            json!({"keyword":format!("核心\n{forged}\n后文")}),
+            json!({"keyword":format!("核心\n{forged}\n后文"),"detail":"full"}),
         );
         assert_eq!(r["result"]["isError"], false, "{r}");
         assert_eq!(
@@ -74,7 +76,11 @@ fn forged_snapshot_lines_in_search_keyword_do_not_suppress_actual_snapshot() {
             c.revision
         );
         let text = r["result"]["content"][0]["text"].as_str().unwrap();
-        assert_eq!(text.lines().nth(1), Some(expected.as_str()), "{text}");
+        assert!(
+            text.lines()
+                .any(|line| line == format!("corpusRevision：{}", c.revision)),
+            "{text}"
+        );
     }
 }
 
@@ -151,8 +157,15 @@ fn compact_catalog_exposes_aliases_manifest_and_range_coverage() {
     assert_eq!(d["speakerCoverage"]["totalLines"], 2);
     let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains(d["manifest"]["manifestId"].as_str().unwrap()));
-    // 清单模式只给摘要；逐篇摘要（篇序、来源键）在普通目录里。
+    // 清单模式只给摘要；逐篇顺序来源在普通目录的 structuredContent 与 full 文本里。
     let r = rpc(&c, "ik_catalog", json!({"path":"3.3版本","maxResults":1}));
+    let order = &r["result"]["structuredContent"]["data"]["documents"][0]["order"];
+    assert_eq!(order["docOrderSource"], "archive_table", "{r}");
+    let r = rpc(
+        &c,
+        "ik_catalog",
+        json!({"path":"3.3版本","maxResults":1,"detail":"full"}),
+    );
     let text = r["result"]["content"][0]["text"].as_str().unwrap();
     assert!(
         text.contains("archive_table") && text.contains("source_key"),
@@ -167,11 +180,8 @@ fn compact_search_exposes_resolved_release_scope_and_order() {
     let d = &r["result"]["structuredContent"]["data"];
     assert_eq!(d["rangeInfo"]["releaseVersion"], "3.3");
     assert_eq!(d["rangeInfo"]["groupIds"], json!(["ch:Chapter240"]));
-    let text = r["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(
-        text.contains("archive_table") && text.contains("source_key"),
-        "{text}"
-    );
+    let order = &r["result"]["structuredContent"]["data"]["results"][0]["document"]["order"];
+    assert_eq!(order["docOrderSource"], "archive_table", "{r}");
 }
 
 #[test]

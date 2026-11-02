@@ -260,15 +260,17 @@ pub fn instructions(c: &Corpus) -> String {
         &c.meta.source_version
     };
     format!(
-        "绳网档案（绝区零 Zenless Zone Zero 剧情与世界观知识库），数据版本 {version}（{}），主线 {} 场景、设定 {} 篇{events}。\
-             提供 ik_catalog 目录、ik_search 检索、ik_read 原文、ik_character 角色资料、ik_guide 契约参考与 ik_coverage 返回行覆盖核对。\
-             结果包含文本、structuredContent、快照标识及来源状态。提取模式：{}。",
+        "绳网档案：绝区零（Zenless Zone Zero）剧情与世界观原文库，数据版本 {version}（{}），主线 {} 场景、设定 {} 篇{events}。\
+             回答绝区零的剧情、角色、台词出处、设定考据问题时，先用 ik_search 检索候选，再用 ik_read 读原文确认，不要只凭记忆或检索片段作答；\
+             要总结整章时先用 ik_catalog 看章节结构；角色相关问题用 ik_character。\
+             较复杂的查证、章节总结、角色分析或时间线任务，开始前调用一次 ik_guide 取对应做法。\
+             资料里找不到时直接说明没有找到，不要编造。目录顺序不等于剧情发生顺序。分支取舍：{}。",
         c.meta.language,
         thousands(story_docs),
         thousands(lore_docs),
         match c.meta.accuracy_first {
-            Some(true) => "完整性校对（双方分支候选保留）",
-            Some(false) => "默认哲视角；不确定分支保留，非严格单一路线",
+            Some(true) => "双方分支候选都保留",
+            Some(false) => "默认哲视角，不确定的分支保留",
             None => "旧语料未声明",
         }
     )

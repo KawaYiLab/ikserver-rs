@@ -731,7 +731,7 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     if let Some(info) = &result.range_info {
         info.push_text(&mut text);
     }
-    if let Some(counts) = &result.speaker_coverage {
+    if full && let Some(counts) = &result.speaker_coverage {
         let _ = writeln!(
             text,
             "{}{}（姓名解析不确认播放，设定排除{}行）",
@@ -771,10 +771,11 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
         }
         let _ = writeln!(text, "（{}；只作目录导航）", relation.status);
     }
-    if result
-        .chapter_relations
-        .iter()
-        .any(|r| r.source.kind == "extractorMapping")
+    if full
+        && result
+            .chapter_relations
+            .iter()
+            .any(|r| r.source.kind == "extractorMapping")
     {
         text.push_str(
             "关联依据：提取器 f1b85ab zzz_story/extract.py:L127–137；归属不确认播放顺序。\n",
@@ -793,6 +794,8 @@ pub fn execute(c: &Corpus, args: &CatalogArgs) -> OutputResult {
     }
     Ok(if legacy_text {
         ToolOutput::with_rendered_snapshot(c, text, ToolData::Catalog(result))
+    } else if full {
+        ToolOutput::full(c, text, ToolData::Catalog(result))
     } else {
         ToolOutput::new(c, text, ToolData::Catalog(result))
     })

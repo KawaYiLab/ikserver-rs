@@ -476,14 +476,7 @@ mod tests {
         let names: Vec<&str> = STORY_SPECS.iter().map(|(s, _)| s.name.as_ref()).collect();
         assert_eq!(
             names,
-            [
-                "ik_catalog",
-                "ik_search",
-                "ik_read",
-                "ik_character",
-                "ik_guide",
-                "ik_coverage"
-            ]
+            ["ik_search", "ik_read", "ik_catalog", "ik_character", "ik_guide"]
         );
         for (spec, title) in STORY_SPECS.iter() {
             assert_eq!(spec.parameters["type"], "object");

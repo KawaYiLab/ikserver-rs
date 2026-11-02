@@ -262,9 +262,11 @@ fn evidence_tool_definitions_and_jsonrpc_keep_text_compatibility() {
             .iter()
             .find(|v| v["name"] == tool)
             .unwrap();
-        assert_eq!(
-            definition["inputSchema"]["properties"]["includeEvidence"]["type"],
-            "boolean"
+        // includeEvidence 是进阶参数：不在清单里（清单只放常用参数），但照常接受。
+        assert!(
+            definition["inputSchema"]["properties"]
+                .get("includeEvidence")
+                .is_none()
         );
     }
     let server = ik_story::mcp::Server::new().unwrap();

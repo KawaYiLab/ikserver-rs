@@ -319,7 +319,7 @@ async fn client_talks_to_the_story_endpoint() {
     let url = url.replace("/mcp", "/v1/story/mcp");
     let client = McpClient::build();
     let tools = client.list_tools(endpoint(&url, "")).await.unwrap();
-    assert_eq!(tools.len(), 6);
+    assert_eq!(tools.len(), 5);
     assert!(tools.iter().all(|t| t.read_only));
     let out = client
         .call_tool(endpoint(&url, ""), "ik_guide", json!({ "mode": "summary" }))
@@ -733,8 +733,8 @@ async fn story_tools_are_offered_only_when_the_card_enables_them(db: PgPool) {
         .iter()
         .map(|t| t.name.to_string())
         .collect();
-    // 论坛 7 + 记忆 3（ADR 0007）+ 剧情库 6。
-    assert_eq!(names.len(), 16);
+    // 论坛 7 + 记忆 3（ADR 0007）+ 剧情库 5（ik_coverage 不进默认清单）。
+    assert_eq!(names.len(), 15);
     assert!(names.contains(&"ik_search".to_owned()));
     // 结果回灌：正常结果与参数错误（工具自己的错误文本，让模型改参数）。
     let ChatMessage::Tool { content: ok, .. } = requests[1].messages.last().unwrap() else {

@@ -1,21 +1,24 @@
 # 剧情库检索与 MCP 工具
 
-本文说明当前六个只读工具的检索、证据、分页与资料覆盖契约。服务部署与访问配置见
+本文说明剧情库只读工具的检索、证据、分页与资料覆盖契约。服务部署与访问配置见
 [部署说明](../deploy/interknot/README.md#剧情库mcp)。
 
-## 工具与模型的职责
+## 工具清单与模型的职责
 
-MCP 提供资料、参数语义、分页入口与来源状态。模型自行决定工具调用顺序、阅读范围、分析方法和回答形式。
-初始化的 `instructions` 只介绍知识库范围、工具能力与当前提取模式；工具描述只说明输入输出及数据含义。
-来源标识、未知署名、占位说明、未关联片段和顺序状态随资料返回。
+`tools/list` 只列五个工具：`ik_search`、`ik_read`、`ik_catalog`、`ik_character` 和 `ik_guide`，每个工具只写常用参数（不超过 8 个）。
+其余参数（分页细节、`includeEvidence`、`detail`、`matchIn` 等）照常接受，由结果里的 `nextCall` 带出，并在 `ik_guide` 末尾的「进阶参数一览」里列出
+（由 `crates/story/src/mcp/tools.rs` 的同一份契约生成）。`ik_coverage` 不进默认清单，但照常可调用。
+清单里不写 `additionalProperties:false`，以免严格校验的客户端拒绝带进阶参数的 `nextCall`；不认识的参数由服务端拦下，报错时给出最接近的正确参数名。
 
-`ik_guide` 保留原工具名及 `summary` / `character` / `timeline` / `verify` 模式，返回各主题的参数与结果字段参考。
-它不再包含角色设定、强制搜索/阅读流程、分层压缩、引用格式或最终回答模板。
-MCP prompts 保留 `chapter_summary` / `character_arc` / `event_timeline` / `fact_check` 名称及原参数，另有 `roleplay_profile`（参数 `name`），
-仅返回用户选用的任务文本，不自动附加 guide 内容。
+初始化的 `instructions` 与工具描述说明何时用哪个工具：先 `ik_search` 检索候选，再 `ik_read` 读原文确认；整章总结先 `ik_catalog`；
+角色问题用 `ik_character`；较复杂的任务先取一次 `ik_guide`；找不到时说明没有找到。每个工具描述都附调用例子。
 
-`mcp_contract_leaves_workflow_and_answer_format_to_client` 与 `mcp_prompts_only_contain_the_selected_task`
-回归检查初始化、工具描述、guide、工具返回文本与 prompts 的这项边界。
+`ik_guide` 的 `verify` / `summary` / `character` / `timeline` 四个模式返回做法指引（`crates/story/guides/method/`）：步骤、证据分量与常见坑，
+后附该主题的参数与结果字段参考和进阶参数一览。MCP prompts（`chapter_summary` / `character_arc` / `roleplay_profile` / `event_timeline` / `fact_check`）
+返回用户选用的任务文本，后附对应模式的做法部分。
+
+`detail="compact"`（默认）的文本只留回答用得上的内容：不带语料快照标识，逐篇摘要只列出场说话人。
+快照（`snapshotVersion`、`extractionMode`、`corpusRevision`）、顺序来源、署名覆盖与缺口计数在 `structuredContent` 里，`detail="full"` 时也写进文本。
 
 ## 角色扮演资料
 

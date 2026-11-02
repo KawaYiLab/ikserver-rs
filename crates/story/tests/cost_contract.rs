@@ -97,22 +97,23 @@ fn coverage_ranges_only_need_doc_id_start_and_end() {
         Ok(Err(_))
     ));
 
-    // 工具契约：ranges 每段只要求 docId/start/end。
+    // 工具契约：ranges 每段只要求 docId/start/end。ik_coverage 不在默认工具清单里，但照常可调用。
     let defs = tools::definitions().unwrap();
-    let coverage = defs["tools"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|t| t["name"] == "ik_coverage")
-        .unwrap()
-        .clone();
-    let mut required: Vec<String> =
-        coverage["inputSchema"]["properties"]["ranges"]["items"]["required"]
+    assert!(
+        defs["tools"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|v| v.as_str().unwrap().to_owned())
-            .collect();
+            .all(|t| t["name"] != "ik_coverage")
+    );
+    use utoipa::PartialSchema;
+    let range = serde_json::to_value(ik_story::engine::coverage::RangeInput::schema()).unwrap();
+    let mut required: Vec<String> = range["required"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap().to_owned())
+        .collect();
     required.sort();
     assert_eq!(required, ["docId", "end", "start"]);
 }
@@ -163,10 +164,11 @@ fn compact_document_summary_is_one_line_without_unknown_placeholders() {
         !text.contains("未提供") && !text.contains("=unknown"),
         "{text}"
     );
-    // 关键事实保留：署名覆盖、缺口计数、逐句署名名单。
-    assert!(text.contains("署名3/6"), "{text}");
-    assert!(text.contains("缺署名证据6"), "{text}");
-    assert!(text.contains("逐句署名：铃、哲、妮可"), "{text}");
+    // 署名覆盖与缺口计数只在 full 与 structuredContent 里；compact 只列出场说话人。
+    assert!(!text.contains("署名3/6"), "{text}");
+    assert!(!text.contains("缺署名证据6"), "{text}");
+    assert!(text.contains("出场：铃、哲、妮可"), "{text}");
+    assert_eq!(data["documents"][0]["speakerCoverage"]["namedLines"], 3);
     // 每篇：一行目录 + 一行摘要。
     let docs = data["documents"].as_array().unwrap().len();
     let doc_lines: Vec<&str> = text.lines().filter(|l| l.starts_with("doc_")).collect();
@@ -196,47 +198,16 @@ fn compact_document_summary_is_one_line_without_unknown_placeholders() {
 }
 
 #[test]
-fn compact_output_says_once_that_unlisted_order_fields_are_unknown() {
+fn compact_output_has_no_order_status_boilerplate() {
     let c = corpus();
-    let note = "未列出即 unknown";
-    // 逐篇省略了 unknown 的顺序字段；整份输出说明一次，单篇层面「未知」与「已核验」才可区分。
+    // 逐篇不再列顺序状态，也就不需要「未列出即 unknown」这类整份说明。
     for (tool, args) in [
         ("ik_catalog", json!({"path":"ch:Chapter00"})),
         ("ik_search", json!({"keyword":"安比"})),
         ("ik_read", json!({"docId":"ch:Chapter00","limit":3})),
     ] {
         let (text, _) = mcp(&c, tool, args);
-        assert_eq!(text.matches(note).count(), 1, "{tool}: {text}");
-    }
-    // 没有逐篇摘要（清单）、逐篇已全部写出（full）、不适用（设定）时不加。
-    for args in [
-        json!({"path":"ch:Chapter00","manifest":true}),
-        json!({"path":"ch:Chapter00","detail":"full"}),
-        json!({"path":"lore:agents"}),
-    ] {
-        let (text, _) = mcp(&c, "ik_catalog", args.clone());
-        assert!(!text.contains(note), "{args}: {text}");
-    }
-    // 顺序字段全部已知时不加（说明只在确有省略时出现）。
-    let mut known = corpus();
-    for s in &mut known.doc_summaries {
-        s.order.doc_order_source = "source_key".into();
-        s.order.chronology_status = "linked".into();
-        s.order.context_status = "linked".into();
-        for v in s
-            .order
-            .line_order_sources
-            .iter_mut()
-            .chain(&mut s.order.line_order_statuses)
-        {
-            v.value = "source_key".into();
-        }
-    }
-    for (tool, args) in [
-        ("ik_catalog", json!({"path":"ch:Chapter00"})),
-        ("ik_read", json!({"docId":"ch:Chapter00","limit":3})),
-    ] {
-        let (text, _) = mcp(&known, tool, args);
-        assert!(!text.contains(note), "{tool}: {text}");
+        assert!(!text.contains("未列出即 unknown"), "{tool}: {text}");
+        assert!(!text.contains("corpusRevision"), "{tool}: {text}");
     }
 }

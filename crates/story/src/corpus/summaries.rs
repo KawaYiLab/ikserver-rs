@@ -127,280 +127,29 @@ pub struct DocumentSummary {
 }
 
 impl DocumentSummary {
-    /// Cached compact text exposes all decision-relevant axes; full counts remain in typed data.
+    /// compact 逐篇摘要：只列出场说话人（最多 6 个）。顺序、署名覆盖与缺口计数留在 structuredContent 与 detail=full，
+    /// 逐篇重复这些状态只会占模型的注意力。
     pub fn render_compact(&self, names: &[&str], total_speakers: usize) -> String {
-        if !self.order.applicable {
-            // 设定文档没有顺序与署名可言；逐篇重复「不适用」只是噪音（full 详情仍会说明）。
+        if !self.order.applicable || names.is_empty() {
             return String::new();
         }
-        let short = |value: &str, max: usize| {
-            if value.chars().count() <= max {
-                value.to_owned()
-            } else {
-                format!("{}…", value.chars().take(max).collect::<String>())
-            }
-        };
-        let document_source = |value: &str| match value {
-            "source_key" | "archive_table" => value.to_owned(),
-            _ => short(value, 8),
-        };
-        let sources = |values: &[OrderCount], max: usize, width: usize, mixed_count: bool| {
-            let mut selected = values
-                .iter()
-                .filter(|v| matches!(v.value.as_str(), "source_key" | "archive_table"))
-                .collect::<Vec<_>>();
-            selected.extend(
-                values
-                    .iter()
-                    .filter(|v| !matches!(v.value.as_str(), "source_key" | "archive_table")),
-            );
-            let mut result = selected
-                .iter()
-                .take(max)
-                .map(|v| match v.value.as_str() {
-                    "source_key" | "archive_table" => v.value.clone(),
-                    "notProvided" => "未提供".into(),
-                    _ => short(&v.value, width),
-                })
-                .collect::<Vec<_>>()
-                .join("/");
-            if values.len() > max {
-                if mixed_count {
-                    let _ = write!(result, "/混合{}种(full)", values.len());
+        let shown = names
+            .iter()
+            .take(6)
+            .map(|n| {
+                if n.chars().count() <= 16 {
+                    (*n).to_owned()
                 } else {
-                    result.push_str("/混合(full)");
+                    format!("{}…", n.chars().take(16).collect::<String>())
                 }
-            }
-            result
-        };
-        let o = &self.order;
-        let e = &self.evidence;
-        let c = &self.coverage;
-        let hints = || {
-            [
-                ("占位", e.placeholders),
-                ("未知署名", e.unknown),
-                ("推断", e.inferred),
-                ("缺署名证据", e.missing),
-                ("未关联", e.unlinked),
-                ("无配音关联", e.no_voice),
-            ]
-            .into_iter()
-            .filter(|(_, n)| *n > 0)
-            .map(|(label, n)| format!("{label}{n}"))
-            .collect::<Vec<_>>()
-            .join("/")
-        };
-        // 默认一行：只写已知的顺序字段与非零计数。旧语料的 unknown / 未提供 不逐篇重复；
-        // 超出预算时退回下面的分段压缩格式。
-        let known = |v: &str| !matches!(v, "" | "unknown" | "notProvided" | "notApplicable");
-        let mut parts = Vec::new();
-        let mut attribution = format!("署名{}/{}", c.named_lines, c.total_lines);
-        let detail = [
-            ("推断", c.inferred_lines),
-            ("旧未核验", c.legacy_named_lines),
-            ("待核验", c.other_named_lines),
-        ]
-        .into_iter()
-        .filter(|(_, n)| *n > 0)
-        .map(|(label, n)| format!("{label}{n}"))
-        .collect::<Vec<_>>();
-        if !detail.is_empty() {
-            let _ = write!(attribution, "（{}）", detail.join(" "));
+            })
+            .collect::<Vec<_>>();
+        let mut text = format!("出场：{}", shown.join("、"));
+        if shown.len() < total_speakers {
+            let _ = write!(text, " 等 {total_speakers} 人");
         }
-        parts.push(attribution);
-        let gap_text = hints();
-        if !gap_text.is_empty() {
-            parts.push(format!("缺口可交叉：{gap_text}"));
-        }
-        let mut order = Vec::new();
-        if known(&o.doc_order_source) {
-            order.push(format!("篇序={}", document_source(&o.doc_order_source)));
-        }
-        let known_counts = |values: &[OrderCount]| {
-            values
-                .iter()
-                .filter(|v| known(&v.value))
-                .cloned()
-                .collect::<Vec<_>>()
-        };
-        let line_sources = known_counts(&o.line_order_sources);
-        if !line_sources.is_empty() {
-            order.push(format!("行序={}", sources(&line_sources, 3, 16, true)));
-        }
-        let line_statuses = known_counts(&o.line_order_statuses);
-        if !line_statuses.is_empty() {
-            order.push(format!("局部={}", sources(&line_statuses, 1, 16, true)));
-        }
-        if known(&o.chronology_status) {
-            order.push(format!("剧情先后={}", short(&o.chronology_status, 16)));
-        }
-        if known(&o.context_status) {
-            order.push(format!("上下文={}", short(&o.context_status, 16)));
-        }
-        if !order.is_empty() {
-            parts.push(order.join(" "));
-        }
-        if !names.is_empty() {
-            let shown = names
-                .iter()
-                .take(6)
-                .map(|n| short(n, 16))
-                .collect::<Vec<_>>();
-            let mut list = format!("逐句署名：{}", shown.join("、"));
-            if shown.len() < total_speakers {
-                let _ = write!(list, "（共{total_speakers}人，full）");
-            }
-            parts.push(list);
-        } else if total_speakers > 0 {
-            parts.push(format!("署名名单（共{total_speakers}人，full）"));
-        }
-        let line = format!("{}\n", parts.join(" · "));
-        if line.chars().count() <= 180 {
-            return line;
-        }
-        let mut text = format!(
-            "整篇：篇序={} 行序={} 局部={} 剧情先后={} 上下文={}\n",
-            short(&o.doc_order_source, 16),
-            sources(&o.line_order_sources, 3, 16, true),
-            sources(&o.line_order_statuses, 1, 16, true),
-            short(&o.chronology_status, 16),
-            short(&o.context_status, 16)
-        );
-        let gaps = hints();
-        if !gaps.is_empty() {
-            let _ = writeln!(text, "缺口可交叉：{gaps}");
-        }
-        let _ = writeln!(
-            text,
-            "署名{}/{}（含推断{}、旧未核验{}、待核验{}）",
-            c.named_lines,
-            c.total_lines,
-            c.inferred_lines,
-            c.legacy_named_lines,
-            c.other_named_lines
-        );
-        if text.chars().count() > 155 {
-            // Keep concrete known sources when shortening; a count of kinds alone cannot support evidence assessment.
-            text = format!(
-                "整篇：篇序={} 行序={} 剧情先后={} 上下文={}；局部{}种(full)\n",
-                document_source(&o.doc_order_source),
-                sources(&o.line_order_sources, 2, 16, true),
-                short(&o.chronology_status, 8),
-                short(&o.context_status, 8),
-                o.line_order_statuses.len()
-            );
-            if !gaps.is_empty() {
-                let _ = writeln!(text, "缺口可交叉：{gaps}");
-            }
-            let _ = writeln!(
-                text,
-                "署名{}/{} 推断{} 旧未核验{} 待核验{}；full详情",
-                c.named_lines,
-                c.total_lines,
-                c.inferred_lines,
-                c.legacy_named_lines,
-                c.other_named_lines
-            );
-        }
-        if text.chars().count() > 180 {
-            let count = |n: usize| {
-                if n < 100_000 {
-                    n.to_string()
-                } else {
-                    ">=10万".into()
-                }
-            };
-            text = format!(
-                "整篇：篇序={} 行序={} 剧情先后={} 上下文={} 局部{}种\n",
-                document_source(&o.doc_order_source),
-                sources(&o.line_order_sources, 2, 16, true),
-                short(&o.chronology_status, 8),
-                short(&o.context_status, 8),
-                o.line_order_statuses.len()
-            );
-            let _ = writeln!(
-                text,
-                "缺口可交叉：占位{} 未知{} 推断{} 缺证据{} 未关联{} 无配音{}",
-                count(e.placeholders),
-                count(e.unknown),
-                count(e.inferred),
-                count(e.missing),
-                count(e.unlinked),
-                count(e.no_voice)
-            );
-            let _ = writeln!(
-                text,
-                "署名{}/{} 推断{} 旧未核验{} 待核验{}；full精确计数",
-                count(c.named_lines),
-                count(c.total_lines),
-                count(c.inferred_lines),
-                count(c.legacy_named_lines),
-                count(c.other_named_lines)
-            );
-            if text.chars().count() > 180 {
-                // Bound every remaining variable-width field; typed/full data retains exact counts and statuses.
-                text = format!(
-                    "整篇：篇序={} 行序={} 剧情先后={} 上下文={}；局部见full\n",
-                    document_source(&o.doc_order_source),
-                    sources(&o.line_order_sources, 2, 8, false),
-                    short(&o.chronology_status, 4),
-                    short(&o.context_status, 4)
-                );
-                let _ = writeln!(
-                    text,
-                    "缺口可交叉：占位{} 未知{} 推断{} 缺证据{} 未关联{} 无配音{}",
-                    count(e.placeholders),
-                    count(e.unknown),
-                    count(e.inferred),
-                    count(e.missing),
-                    count(e.unlinked),
-                    count(e.no_voice)
-                );
-                let _ = writeln!(
-                    text,
-                    "署名{}/{} 推断/旧未核验/待核验见full；精确计数",
-                    count(c.named_lines),
-                    count(c.total_lines)
-                );
-            }
-        }
-        let suffix = format!("（共{total_speakers}人，full）");
-        let available = 180usize.saturating_sub(text.chars().count() + 7 + suffix.chars().count());
-        let mut shown = Vec::new();
-        let mut used = 0;
-        for name in names.iter().take(6) {
-            let name = short(name, 16);
-            let cost = name.chars().count() + usize::from(!shown.is_empty());
-            if used + cost > available {
-                break;
-            }
-            used += cost;
-            shown.push(name);
-        }
-        if !shown.is_empty() {
-            let _ = write!(text, "逐句署名：{}", shown.join("、"));
-            if shown.len() < total_speakers {
-                text.push_str(&suffix);
-            }
-            text.push('\n');
-        } else if total_speakers > 0 && text.chars().count() + suffix.chars().count() + 5 <= 180 {
-            let _ = writeln!(text, "署名名单{suffix}");
-        }
+        text.push('\n');
         text
-    }
-}
-
-impl DocumentOrder {
-    /// compact 逐篇摘要会省略值为 unknown / 未提供的顺序字段；有省略时整份输出需要说明一次。
-    pub fn has_unlisted_unknown(&self) -> bool {
-        let unknown = |v: &str| matches!(v, "" | "unknown" | "notProvided");
-        self.applicable
-            && (unknown(&self.doc_order_source)
-                || unknown(&self.chronology_status)
-                || unknown(&self.context_status)
-                || self.line_order_sources.iter().any(|v| unknown(&v.value))
-                || self.line_order_statuses.iter().any(|v| unknown(&v.value)))
     }
 }
 
