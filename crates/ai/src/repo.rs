@@ -1957,7 +1957,7 @@ pub(crate) async fn set_embedding(
 
 // ---------- 记忆第三期：整理、遗忘、翻聊天记录（ADR 0007） ----------
 
-/// 同一用户与同一 AI 的全部会话（久别重逢算上次聊天的时刻，MEM-100）。
+/// 同一用户与同一 AI 的全部会话（久别重逢算上次聊天的时刻 MEM-100；翻聊天记录 MEM-095）。
 pub(crate) async fn pair_sessions(
     conn: &mut PgConnection,
     user_id: i64,
@@ -1970,24 +1970,6 @@ pub(crate) async fn pair_sessions(
     )
     .fetch_all(conn)
     .await
-}
-
-/// 翻聊天记录能看的会话（MEM-095）：同一用户与同一 AI 的会话与各自的上下文起点。
-pub(crate) async fn recall_sessions(
-    conn: &mut PgConnection,
-    user_id: i64,
-    ai_user_id: i64,
-) -> sqlx::Result<Vec<(i64, Option<DateTime<Utc>>)>> {
-    Ok(sqlx::query!(
-        "SELECT conversation_id, context_from FROM ai_sessions WHERE user_id = $1 AND ai_user_id = $2",
-        user_id,
-        ai_user_id,
-    )
-    .fetch_all(conn)
-    .await?
-    .into_iter()
-    .map(|r| (r.conversation_id, r.context_from))
-    .collect())
 }
 
 /// 记下这些事件刚被想起（MEM-090）。

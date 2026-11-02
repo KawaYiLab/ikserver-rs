@@ -122,8 +122,6 @@ const BRIDGE_NOTE: &str = "\n\n【最近在另一个对话里】对方最近在�
 const REUNION_DAYS: i64 = 7;
 /// 翻聊天记录一次最多给几条（MEM-095）。
 const RECALL_HITS: i64 = 8;
-/// 翻聊天记录里每条的上限。
-const RECALL_ITEM_CHARS: usize = 200;
 /// 翻聊天记录最多几个关键词。
 const RECALL_TERMS: usize = 5;
 
@@ -252,10 +250,13 @@ pub(crate) async fn recall(
             .into_iter()
             .filter(|item| !item.content.trim().is_empty())
             .map(|item| {
-                (
-                    item.sender_id == session.ai_user_id,
-                    truncate(&one_line(&item.content), BRIDGE_ITEM_CHARS),
-                )
+                let mine = item.sender_id == session.ai_user_id;
+                let text = if mine {
+                    crate::workflow::answer_only(&item.content, item.workflow.as_ref())
+                } else {
+                    &item.content
+                };
+                (mine, truncate(&one_line(text), BRIDGE_ITEM_CHARS))
             })
             .collect();
     }
@@ -826,10 +827,11 @@ pub(crate) fn tool_specs(scope: &MemoryScope) -> Vec<ToolSpec> {
     }
     let recall = ToolSpec {
         name: RECALL_TOOL.into(),
-        description: "翻看你和对方以前的聊天记录（包括别的会话）。对方问「我们之前聊过什么」「我上次说的那个……」\
-             「我们第一次聊的是什么」，而你的记忆里没有细节时调用。query 写 1-5 个关键词（空格分隔），\
-             可以不写只按时间翻；from / to 限定日期（YYYY-MM-DD，含当天）；order：oldest 从最早的翻起，\
-             newest（默认）从最近的翻起。返回的是聊天原文，按需引用，不要整段复述。"
+        description: "翻看你和对方以前的聊天记录（别的会话和更早的部分；当前对话里看得到的不会再给）。\
+             对方问「我们之前聊过什么」「我上次说的那个……」，而你的记忆和当前对话都对不上时调用；\
+             记忆里已经能确定对方说的是什么，就直接回答（要最新消息就去查），不用翻。\
+             query 写 1-5 个关键词（空格分隔），可以不写只按时间翻；from / to 限定日期（YYYY-MM-DD，含当天）；\
+             order：oldest 从最早的翻起，newest（默认）从最近的翻起。返回的是聊天原文，按需引用，不要整段复述。"
             .into(),
         parameters: json!({
             "type": "object",
@@ -876,7 +878,7 @@ pub(crate) async fn execute_tool_authorized(
             to: parse_date(text("to")),
             oldest_first: text("order") == "oldest",
         };
-        return recall_history(state, user_id, ai_user_id, &search)
+        return recall_history(state, user_id, ai_user_id, scope.conversation_id, &search)
             .await
             .unwrap_or_else(|problem| {
                 tracing::warn!(?problem, tool = name, "翻聊天记录失败");
@@ -989,15 +991,31 @@ fn day_start(date: NaiveDate) -> Option<DateTime<Utc>> {
         .map(|t| t.with_timezone(&Utc))
 }
 
-/// 翻聊天记录（MEM-095）：同一用户与同一 AI 的会话，各自上下文起点之后的原文。
+/// 翻聊天记录（MEM-095）：同一用户与同一 AI 的全部会话（重置之前的也算）。当前会话里已经在上下文
+/// （[`history_from`] 之后）的不再给，否则第一条命中就是刚问的那句。
 async fn recall_history(
     state: &AiState,
     user_id: i64,
     ai_user_id: i64,
+    current: Option<i64>,
     search: &HistorySearch,
 ) -> Result<ToolOutput, Problem> {
     let mut conn = state.db.acquire().await?;
-    let sessions = repo::recall_sessions(&mut conn, user_id, ai_user_id).await?;
+    let current = match current {
+        Some(id) => repo::session(&mut conn, id).await?,
+        None => None,
+    };
+    let sessions: Vec<(i64, Option<DateTime<Utc>>)> =
+        repo::pair_sessions(&mut conn, user_id, ai_user_id)
+            .await?
+            .into_iter()
+            .filter_map(|id| match &current {
+                Some(session) if session.conversation_id == id => {
+                    history_from(session).map(|until| (id, Some(until)))
+                }
+                _ => Some((id, None)),
+            })
+            .collect();
     let hits = ik_messaging::interop::search_across(
         &mut conn,
         user_id,
@@ -1016,15 +1034,18 @@ async fn recall_history(
         hits.sort_by_key(|h| (h.created_at, h.message_id));
         hits.iter()
             .map(|hit| {
-                let who = if hit.sender_id == ai_user_id {
-                    "你"
+                let (who, content) = if hit.sender_id == ai_user_id {
+                    (
+                        "你",
+                        crate::workflow::answer_only(&hit.content, hit.workflow.as_ref()),
+                    )
                 } else {
-                    "对方"
+                    ("对方", hit.content.as_str())
                 };
                 format!(
                     "[{}] {who}：{}",
                     beijing_today(hit.created_at),
-                    truncate(&one_line(&hit.content), RECALL_ITEM_CHARS)
+                    content.trim()
                 )
             })
             .collect::<Vec<_>>()

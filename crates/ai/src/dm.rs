@@ -276,9 +276,11 @@ pub(crate) fn build_messages(
     messages.push(ChatMessage::system(system));
     for (item, digest) in history.iter().zip(digests) {
         if item.sender_id == ai_user_id {
+            // 调工具前说的那几句不喂回去（GEN-052）：工具记录已经写了查过什么，留着模型会照着每条都先铺几行。
+            let answer = workflow::answer_only(&item.content, item.workflow.as_ref());
             let content = match digest {
-                Some(digest) => format!("{digest}\n\n{}", item.content),
-                None => item.content.clone(),
+                Some(digest) => format!("{digest}\n\n{answer}"),
+                None => answer.to_owned(),
             };
             messages.push(ChatMessage::assistant(content));
         } else {

@@ -26,6 +26,8 @@ const ERROR_MAX_CHARS: usize = 80;
 const TITLE_MAX_CHARS: usize = 80;
 /// 时间线文案上限。
 const TOOL_TITLE_MAX_CHARS: usize = 32;
+/// 工具结果概要（剧情库：查了什么、读了哪篇）的上限。
+const DETAIL_MAX_CHARS: usize = 120;
 const SEARCH_ITEMS: usize = 10;
 
 struct Patterns {
@@ -222,7 +224,10 @@ pub fn digest(events: &Value) -> Option<String> {
                     .or_else(|| d["tool"].as_str())
                     .unwrap_or_default();
                 if !name.is_empty() {
-                    parts.push(format!("调用 {name}{failed}"));
+                    match d["detail"].as_str().filter(|s| !s.is_empty()) {
+                        Some(detail) => parts.push(format!("调用 {name}：{detail}{failed}")),
+                        None => parts.push(format!("调用 {name}{failed}")),
+                    }
                 }
             }
             _ => {}
@@ -235,6 +240,53 @@ pub fn digest(events: &Value) -> Option<String> {
         &format!("{DIGEST_MARK}{}", parts.join("；")),
         DIGEST_MAX_CHARS,
     ))
+}
+
+/// 调工具前说的那几句（GEN-052）：时间线里排在最后一个工具步骤之前的回答分段。
+fn narration(events: &Value) -> Vec<&str> {
+    let Some(events) = events.as_array() else {
+        return Vec::new();
+    };
+    let seq = |e: &Value| e["seq"].as_i64().unwrap_or(0);
+    let Some(last_tool) = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e["type"].as_str(),
+                Some("tool.start" | "forum.search.start" | "forum.read.start")
+            )
+        })
+        .map(seq)
+        .max()
+    else {
+        return Vec::new();
+    };
+    let mut parts: Vec<(i64, &str)> = events
+        .iter()
+        .filter(|e| e["type"] == "answer.delta" && seq(e) < last_tool)
+        .filter_map(|e| Some((seq(e), e["data"]["text"].as_str()?)))
+        .collect();
+    parts.sort_by_key(|(seq, _)| *seq);
+    parts.into_iter().map(|(_, text)| text).collect()
+}
+
+/// AI 回复去掉开头那几句「我去查一下」（GEN-052），只留正式回答：喂回模型的历史、翻聊天记录、记忆整理用。
+/// 气泡里照常显示，落库的正文不变。对不上（或去掉后什么都不剩）时原样返回。
+pub fn answer_only<'a>(content: &'a str, events: Option<&Value>) -> &'a str {
+    let Some(events) = events else {
+        return content;
+    };
+    let mut rest = content;
+    for part in narration(events) {
+        match rest.trim_start().strip_prefix(part.trim()) {
+            Some(after) => rest = after,
+            None => return content,
+        }
+    }
+    match rest.trim_start() {
+        "" => content,
+        answer => answer,
+    }
 }
 
 /// 一次生成的时间线记录器。
@@ -527,6 +579,11 @@ impl Workflow {
                     self.cite(*id, title);
                 }
             }
+            (_, ToolMeta::Detail(detail)) => {
+                let mut data = tool_data(name, label, Some(ms));
+                data["detail"] = json!(truncate(detail, DETAIL_MAX_CHARS));
+                self.emit("tool.finish", step, Some(flag(data)), None);
+            }
             _ => self.emit(
                 "tool.finish",
                 step,
@@ -699,6 +756,96 @@ mod tests {
         assert_eq!(
             events[3]["data"],
             json!({ "tool": "get_hot_posts", "ms": 1 })
+        );
+    }
+
+    #[test]
+    fn answer_only_drops_what_was_said_before_tools() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        wf.content("翻一下剧情原文。");
+        let first = wf.tool_start("ik_search", None, ToolLabel::default());
+        wf.tool_finish(
+            &first,
+            "ik_search",
+            &ToolMeta::None,
+            1,
+            ToolLabel::default(),
+            false,
+        );
+        wf.content("再读一下第四章。");
+        let second = wf.tool_start("ik_read", None, ToolLabel::default());
+        wf.tool_finish(
+            &second,
+            "ik_read",
+            &ToolMeta::None,
+            1,
+            ToolLabel::default(),
+            false,
+        );
+        wf.content("提示：结论在这里。\n\n### 依据\n原文如此。");
+        wf.finish(Usage::default());
+        let events = wf.events();
+        let content =
+            "翻一下剧情原文。\n\n再读一下第四章。\n\n提示：结论在这里。\n\n### 依据\n原文如此。";
+        assert_eq!(
+            answer_only(content, Some(&events)),
+            "提示：结论在这里。\n\n### 依据\n原文如此。"
+        );
+        // 没有时间线、没调工具、对不上：原样。
+        assert_eq!(answer_only(content, None), content);
+        assert_eq!(answer_only("别的内容", Some(&events)), "别的内容");
+        let mut plain = Workflow::new(1, OutputMode::Plain);
+        plain.content("直接回答。");
+        plain.finish(Usage::default());
+        assert_eq!(
+            answer_only("直接回答。", Some(&plain.events())),
+            "直接回答。"
+        );
+    }
+
+    #[test]
+    fn answer_only_keeps_everything_when_nothing_follows_the_tools() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        wf.content("我去查一下。");
+        let step = wf.tool_start("ik_search", None, ToolLabel::default());
+        wf.tool_finish(
+            &step,
+            "ik_search",
+            &ToolMeta::None,
+            1,
+            ToolLabel::default(),
+            true,
+        );
+        wf.finish(Usage::default());
+        assert_eq!(
+            answer_only("我去查一下。", Some(&wf.events())),
+            "我去查一下。"
+        );
+    }
+
+    #[test]
+    fn digest_names_the_story_documents_read() {
+        let mut wf = Workflow::new(1, OutputMode::Plain);
+        let label = ToolLabel {
+            title: Some("阅读剧情原文"),
+            source: None,
+        };
+        let read = wf.tool_start("ik_read", None, label);
+        wf.tool_finish(
+            &read,
+            "ik_read",
+            &ToolMeta::Detail(
+                "doc_a3af40ccf34b 「名为『挽昼』的谎言」 | 第 1-20 行 / 共 32 行".into(),
+            ),
+            3,
+            label,
+            false,
+        );
+        assert_eq!(
+            digest(&wf.events()).as_deref(),
+            Some(
+                "【工具记录】调用 阅读剧情原文：doc_a3af40ccf34b 「名为『挽昼』的谎言」 | 第 1-20 行 / 共 32 行"
+            )
         );
     }
 

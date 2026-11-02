@@ -410,9 +410,9 @@ async fn story(state: &AiState, name: &str, arguments: &str) -> ToolOutput {
     .await;
     match outcome {
         Ok(Ok(Ok(output))) => ToolOutput {
+            meta: story_detail(&output.text),
             text: output.text,
             is_error: false,
-            meta: ToolMeta::None,
             images: Vec::new(),
         },
         // 参数错误等工具自己的错误：原样告诉模型（不含内部细节），让它改参数重试。
@@ -427,6 +427,21 @@ async fn story(state: &AiState, name: &str, arguments: &str) -> ToolOutput {
             tracing::warn!(tool = name, %join, "剧情库工具执行失败");
             error_output(format!("工具执行失败：{name}"))
         }
+    }
+}
+
+/// 剧情库结果的第一行（如「[ik_read] doc_… 「篇名」 | 第 1-20 行 / 共 32 行」）去掉工具名，记进工具记录（CTX-012）：
+/// 追问时模型知道上一轮查了什么、读了哪篇。
+fn story_detail(text: &str) -> ToolMeta {
+    let line = text.lines().next().unwrap_or_default().trim();
+    let line = match line.strip_prefix('[').and_then(|l| l.split_once(']')) {
+        Some((_, rest)) => rest.trim(),
+        None => line,
+    };
+    if line.is_empty() {
+        ToolMeta::None
+    } else {
+        ToolMeta::Detail(line.to_owned())
     }
 }
 
@@ -459,6 +474,18 @@ fn truncate(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn story_detail_is_the_first_line_without_the_tool_name() {
+        let text = "[ik_read] doc_a3af40ccf34b 「名为『挽昼』的谎言」 | 第 1-3 行 / 共 32 行\n范围=…\nL1 艾尔妲：…";
+        assert_eq!(
+            story_detail(text),
+            ToolMeta::Detail(
+                "doc_a3af40ccf34b 「名为『挽昼』的谎言」 | 第 1-3 行 / 共 32 行".into()
+            )
+        );
+        assert_eq!(story_detail(""), ToolMeta::None);
+    }
 
     #[test]
     fn missing_required_lists_absent_and_null_keys() {

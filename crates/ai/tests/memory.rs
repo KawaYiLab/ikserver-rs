@@ -898,7 +898,7 @@ async fn remember_can_record_an_event_with_a_follow_up(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn recall_history_reads_old_turns_after_each_reset(db: PgPool) {
+async fn recall_history_reads_old_turns_including_before_reset(db: PgPool) {
     let h = harness(db).await;
     let first = h.session("fairy").await;
     h.turn(
@@ -910,7 +910,7 @@ async fn recall_history_reads_old_turns_after_each_reset(db: PgPool) {
     let secret = h.session("fairy").await;
     h.turn(secret, "零号空洞里我其实有个秘密", "嗯，我听着")
         .await;
-    // 重置过的会话只翻重置之后的（CTX-021：AI 不再记得重置之前的）。
+    // 重置不删聊天记录（CTX-021），翻聊天记录照样翻得到重置之前的。
     sessions::reset(&h.state, &h.me, secret).await.unwrap();
 
     let now_chat = h.session("fairy").await;
@@ -937,12 +937,14 @@ async fn recall_history_reads_old_turns_after_each_reset(db: PgPool) {
     else {
         panic!()
     };
-    // 别的会话里的原文按时间给出，带日期与说话人（MEM-095）；重置之前的不在里面。
+    // 别的会话里的原文按时间给出，带日期与说话人（MEM-095）；重置之前的也在；
+    // 当前对话里已经在上下文的（刚问的这句）不再给。
     assert!(
         result.contains("] 对方：第一次来，想聊聊零号空洞的打法"),
         "{result}"
     );
-    assert!(!result.contains("秘密"), "{result}");
+    assert!(result.contains("秘密"), "{result}");
+    assert!(!result.contains("第一次聊的是什么"), "{result}");
     let events = h.workflow(job).await;
     let start = events.iter().find(|e| e["type"] == "tool.start").unwrap();
     assert_eq!(

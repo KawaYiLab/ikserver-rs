@@ -196,12 +196,14 @@ fn transcript(items: &[HistoryItem], ai_user_id: i64) -> String {
     items
         .iter()
         .map(|item| {
-            let who = if item.sender_id == ai_user_id {
-                "你"
+            let (who, mut text) = if item.sender_id == ai_user_id {
+                (
+                    "你",
+                    crate::workflow::answer_only(&item.content, item.workflow.as_ref()).to_owned(),
+                )
             } else {
-                "对方"
+                ("对方", item.content.clone())
             };
-            let mut text = item.content.clone();
             if !item.image_ids.is_empty() {
                 text.push_str(" [图片]");
             }

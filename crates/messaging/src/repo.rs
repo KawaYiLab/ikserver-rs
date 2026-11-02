@@ -876,19 +876,20 @@ pub(crate) struct SearchRow {
     pub sender_id: i64,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    pub ai_workflow: Option<serde_json::Value>,
     /// 命中的关键词数（排序用）。
     #[allow(dead_code)]
     pub hits: i64,
 }
 
-/// 在几个会话里按关键词翻聊天记录（AI 记忆 MEM-095）：各会话只看上下文起点之后的、`user_id` 仍在场的；
-/// 命中的关键词多的在前，同样多的按 `oldest_first` 从早到晚或从晚到早。没有关键词时只按时间。
+/// 在几个会话里按关键词翻聊天记录（AI 记忆 MEM-095）：`user_id` 仍在场的会话，各会话只看 `until`（有的话）
+/// 之前的（含）；命中的关键词多的在前，同样多的按 `oldest_first` 从早到晚或从晚到早。没有关键词时只按时间。
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn search_across(
     conn: &mut PgConnection,
     user_id: i64,
     conversation_ids: &[i64],
-    context_from: &[Option<DateTime<Utc>>],
+    until: &[Option<DateTime<Utc>>],
     terms: &[String],
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
@@ -897,26 +898,26 @@ pub(crate) async fn search_across(
 ) -> sqlx::Result<Vec<SearchRow>> {
     sqlx::query_as!(
         SearchRow,
-        r#"SELECT m.id, m.conversation_id, m.sender_id, m.content, m.created_at,
+        r#"SELECT m.id, m.conversation_id, m.sender_id, m.content, m.created_at, m.ai_workflow,
                   (SELECT count(*) FROM unnest($4::text[]) AS t(term)
                    WHERE strpos(lower(m.content), lower(t.term)) > 0) AS "hits!"
-           FROM unnest($2::bigint[], $3::timestamptz[]) AS s(conversation_id, context_from)
+           FROM unnest($2::bigint[], $3::timestamptz[]) AS s(conversation_id, until)
            JOIN conversation_members cm
              ON cm.conversation_id = s.conversation_id AND cm.user_id = $1 AND cm.left_at IS NULL
            JOIN messages m ON m.conversation_id = s.conversation_id
            WHERE m.kind = 'text' AND m.withdrawn_at IS NULL
              AND (m.ai_state IS NULL OR m.ai_state IN ('done', 'stopped'))
-             AND (s.context_from IS NULL OR m.created_at > s.context_from)
+             AND (s.until IS NULL OR m.created_at <= s.until)
              AND ($5::timestamptz IS NULL OR m.created_at >= $5)
              AND ($6::timestamptz IS NULL OR m.created_at < $6)
              AND (cardinality($4::text[]) = 0 OR EXISTS (
                   SELECT 1 FROM unnest($4::text[]) AS t(term)
                   WHERE strpos(lower(m.content), lower(t.term)) > 0))
-           ORDER BY 6 DESC, (CASE WHEN $7 THEN m.created_at END) NULLS LAST, m.created_at DESC, m.id
+           ORDER BY 7 DESC, (CASE WHEN $7 THEN m.created_at END) NULLS LAST, m.created_at DESC, m.id
            LIMIT $8"#,
         user_id,
         conversation_ids,
-        context_from as &[Option<DateTime<Utc>>],
+        until as &[Option<DateTime<Utc>>],
         terms,
         from,
         to,

@@ -398,10 +398,12 @@ pub struct SearchHit {
     pub sender_id: i64,
     pub content: String,
     pub created_at: DateTime<Utc>,
+    /// AI 回复的工作流时间线（已脱敏，WF-003）；用来去掉调工具前的那几句（GEN-052）。
+    pub workflow: Option<serde_json::Value>,
 }
 
-/// 按关键词在几个会话里翻聊天记录（AI 记忆 MEM-095）：`sessions` 是（会话 id, 上下文起点），只看起点之后的、
-/// `user_id` 仍在场的；`[from, to)` 限定时间。命中关键词多的在前，同样多的按 `oldest_first` 排。
+/// 按关键词在几个会话里翻聊天记录（AI 记忆 MEM-095）：`sessions` 是（会话 id, 截止时刻），有截止时刻的只看
+/// 它之前的（含）；只看 `user_id` 仍在场的；`[from, to)` 限定时间。命中关键词多的在前，同样多的按 `oldest_first` 排。
 #[allow(clippy::too_many_arguments)]
 pub async fn search_across(
     conn: &mut PgConnection,
@@ -416,12 +418,12 @@ pub async fn search_across(
     if sessions.is_empty() {
         return Ok(Vec::new());
     }
-    let (ids, starts): (Vec<i64>, Vec<Option<DateTime<Utc>>>) = sessions.iter().copied().unzip();
+    let (ids, until): (Vec<i64>, Vec<Option<DateTime<Utc>>>) = sessions.iter().copied().unzip();
     Ok(repo::search_across(
         conn,
         user_id,
         &ids,
-        &starts,
+        &until,
         terms,
         from,
         to,
@@ -436,6 +438,7 @@ pub async fn search_across(
         sender_id: r.sender_id,
         content: r.content,
         created_at: r.created_at,
+        workflow: r.ai_workflow,
     })
     .collect())
 }

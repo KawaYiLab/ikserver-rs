@@ -1076,6 +1076,9 @@ async fn tool_calls_loop_and_the_timeline_is_saved(db: PgPool) {
         "{previous}"
     );
     assert!(history[0].text().contains("系统自动记下"));
+    // 调工具前那句「正在检索相关帖子。」不喂回去（GEN-052），工具之后的正文照留。
+    assert!(!previous.contains("正在检索相关帖子"), "{previous}");
+    assert!(previous.contains("检索完毕。"), "{previous}");
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]

@@ -130,6 +130,8 @@ pub enum ToolMeta {
     Comments {
         post: Option<(i64, String)>,
     },
+    /// 一句概要（剧情库：结果的第一行，查了什么、读了哪篇），写进工具记录（CTX-012）。
+    Detail(String),
     /// 记忆工具（MEM-014/015）：记下的那条（id、种类、正文）与忘掉的那些。
     Memory {
         saved: Option<(i64, String, String)>,
