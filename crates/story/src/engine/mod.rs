@@ -2,6 +2,7 @@
 //!
 //! 与协议层完全解耦，命令行 `call` 子命令与测试直接调用这里。
 
+pub(crate) mod aliases;
 pub mod catalog;
 pub mod chapter_relations;
 pub mod character;

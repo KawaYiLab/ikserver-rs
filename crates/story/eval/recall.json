@@ -1,0 +1,20 @@
+{
+  "note": "剧情库检索召回评测。每题在前 top 条结果（不写 top 时为整段输出）里找 expect 中任一字符串；全部中文按原文。见 examples/recall_eval.rs。",
+  "cases": [
+    {"id": "who-miyabi", "tool": "ik_search", "args": {"keyword": "星见雅"}, "top": 3, "expect": ["代理人档案"]},
+    {"id": "quote-exact", "tool": "ik_search", "args": {"keyword": "今天我好像总在说这样的话呢", "purpose": "verify"}, "top": 1, "expect": ["今天我好像总在说这样的话呢"]},
+    {"id": "quote-misremembered", "tool": "ik_search", "args": {"keyword": "今天我好像一直在说这种话"}, "expect": ["今天我好像总在说这样的话呢"]},
+    {"id": "quote-misremembered-verify", "tool": "ik_search", "args": {"keyword": "今天我好像一直在说这种话", "purpose": "verify"}, "expect": ["今天我好像总在说这样的话呢"]},
+    {"id": "speaker-nicole-debt", "tool": "ik_search", "args": {"speaker": "妮可", "keyword": "债"}, "top": 10, "expect": ["欠债都还清了"], "needs_speakers": true},
+    {"id": "lore-ethereal", "tool": "ik_search", "args": {"keyword": "以骸", "scope": "lore"}, "top": 3, "expect": ["世界观百科"]},
+    {"id": "sentence-phaethon", "tool": "ik_search", "args": {"keyword": "哲和铃为什么被称为法厄同"}, "expect": ["「哲 铃"]},
+    {"id": "new-pheonix", "tool": "ik_search", "args": {"keyword": "菲欧妮 黑枝 裁决官"}, "top": 3, "expect": ["重返天空的旅程"]},
+    {"id": "event-bringer-arrest", "tool": "ik_search", "args": {"keyword": "布林格 逮捕 星见雅"}, "top": 8, "expect": ["第一季 第五章"]},
+    {"id": "nickname-shark", "tool": "ik_search", "args": {"keyword": "鲨鱼妹"}, "top": 3, "expect": ["艾莲"]},
+    {"id": "english-miyabi", "tool": "ik_search", "args": {"keyword": "Miyabi"}, "top": 3, "expect": ["星见雅", "雅（星见 雅）"]},
+    {"id": "english-ellen", "tool": "ik_search", "args": {"keyword": "Ellen"}, "top": 3, "expect": ["艾莲"]},
+    {"id": "nonexistent", "tool": "ik_search", "args": {"keyword": "阿斯特拉·奥古斯塔斯三世"}, "expect": ["全库无此词"]},
+    {"id": "nickname-in-dialogue", "tool": "ik_search", "args": {"keyword": "武痴狐狸"}, "top": 3, "expect": ["第一季 第五章"]},
+    {"id": "who-nicole", "tool": "ik_search", "args": {"keyword": "妮可"}, "top": 3, "expect": ["代理人档案"]}
+  ]
+}

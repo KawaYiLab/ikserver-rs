@@ -490,6 +490,9 @@ pub struct SearchResult {
     pub query: String,
     pub resolved_range: SearchRange,
     pub partial: bool,
+    /// 部分匹配时，排在前面的完整匹配（全部词同篇）篇数。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complete_count: Option<usize>,
     /// 默认未合并为部分匹配（有词零命中或没有任何两词同篇），原因与建议调用见页眉与 suggestions。
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub partial_withheld: bool,
@@ -508,9 +511,24 @@ pub struct SearchResult {
     pub next_call: Option<NextCall>,
     pub next_directory_call: Option<NextCall>,
     pub suggestions: Vec<NextCall>,
+    /// 整句没有原样出现时，按字面重合度找到的最接近的原文行。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub near_lines: Vec<NearLine>,
     /// 原检索词整句零命中、已自动拆词重搜时，实际使用的检索词（`query` 仍是原句）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rewritten_keyword: Option<String>,
+}
+/// 与检索句字面最接近的一行原文。
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NearLine {
+    pub doc_id: String,
+    pub title: String,
+    pub path: String,
+    pub line: SourceLine,
+    /// 检索句的相邻两字组合有百分之几出现在这一行。
+    pub overlap_percent: u8,
+    pub next_read: NextCall,
 }
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
