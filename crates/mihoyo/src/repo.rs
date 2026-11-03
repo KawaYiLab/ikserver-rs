@@ -228,8 +228,8 @@ pub(crate) async fn store_result(
     id_hash: &[u8],
     result: serde_json::Value,
     expires_at: DateTime<Utc>,
-) -> sqlx::Result<()> {
-    sqlx::query!(
+) -> sqlx::Result<bool> {
+    Ok(sqlx::query!(
         "UPDATE mihoyo_qr_logins SET result = $2, result_expires_at = $3, claimed_until = NULL
          WHERE id_hash = $1",
         id_hash,
@@ -237,8 +237,9 @@ pub(crate) async fn store_result(
         expires_at
     )
     .execute(conn)
-    .await?;
-    Ok(())
+    .await?
+    .rows_affected()
+        == 1)
 }
 
 /// 删除二维码与结果都已过期的扫码会话。

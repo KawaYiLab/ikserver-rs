@@ -11,7 +11,7 @@ use ik_kernel::Problem;
 use ik_kernel::db::is_unique_violation;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::PgConnection;
+use sqlx::{Connection, PgConnection};
 
 use crate::MihoyoState;
 use crate::device::new_device;
@@ -360,74 +360,113 @@ pub async fn poll(
     }
     drop(conn);
 
-    let outcome = match process(state, mode, row.user_id, confirmed).await {
-        Ok(outcome) => outcome,
-        Err(problem) => Outcome::Failed {
-            failure: Failure::from_problem(&problem),
-        },
+    let problem = match process(state, mode, row.user_id, &hash, confirmed, meta).await {
+        Ok(polled) => return Ok(polled),
+        Err(problem) => problem,
     };
-    let ttl = if matches!(outcome, Outcome::Failed { .. }) {
-        RESULT_FAILED_SECS
-    } else {
-        RESULT_OK_SECS
+    let outcome = Outcome::Failed {
+        failure: Failure::from_problem(&problem),
     };
     let mut conn = state.auth.db.acquire().await?;
-    repo::store_result(
-        &mut conn,
-        &hash,
-        serde_json::to_value(&outcome).map_err(|e| Problem::internal_from(&e))?,
-        Utc::now() + chrono::Duration::seconds(ttl),
-    )
-    .await?;
+    store_outcome(&mut conn, &hash, &outcome).await?;
     drop(conn);
     replay(state, mode, &hash, outcome, meta).await
 }
 
 /// 已确认：登录与绑定先拉角色（失败不影响登录与绑定，只是没有角色资料），再建号 / 登录 / 绑定；
-/// 注销核验只看身份归属，不拉角色、不改任何数据（MHY-016）。
+/// 账号、绑定、扫码结果与登录会话在同一事务内提交，写入失败时一起回滚。
+/// 注销核验只看身份归属，不拉角色、不改账号数据（MHY-016）。
 async fn process(
     state: &MihoyoState,
     mode: QrMode,
     user_id: Option<i64>,
+    id_hash: &[u8],
     confirmed: Confirmed,
-) -> Result<Outcome, Problem> {
+    meta: &RequestMeta,
+) -> Result<Polled, Problem> {
     let mid = confirmed.mid.as_deref();
-    if mode == QrMode::Delete {
-        let user_id = user_id.ok_or_else(Problem::internal)?;
-        let mut conn = state.auth.db.acquire().await?;
-        let owner = resolve(&mut conn, &confirmed.aid, mid).await?;
-        return Ok(Outcome::DeleteChecked {
-            user_id,
-            matched: owner == Some(user_id),
-        });
-    }
-    let role = match state.api.game_roles(&confirmed.cookies).await {
-        Ok(roles) => upstream::main_role(roles),
-        Err(error) => {
-            tracing::warn!(%error, "拉取绝区零角色失败，跳过角色资料");
-            None
+    let role = if mode == QrMode::Delete {
+        None
+    } else {
+        match state.api.game_roles(&confirmed.cookies).await {
+            Ok(roles) => upstream::main_role(roles),
+            Err(error) => {
+                tracing::warn!(%error, "拉取绝区零角色失败，跳过角色资料");
+                None
+            }
         }
     };
-    let now = Utc::now();
-    match (mode, user_id) {
-        (QrMode::Login, _) => {
-            let (user_id, is_new_user) =
-                login(state, &confirmed.aid, mid, role.as_ref(), now).await?;
-            Ok(Outcome::LoggedIn {
-                user_id,
-                is_new_user,
-            })
+    let mut tx = state.auth.db.begin().await?;
+    let outcome = if mode == QrMode::Delete {
+        let user_id = user_id.ok_or_else(Problem::internal)?;
+        let owner = resolve(&mut tx, &confirmed.aid, mid).await?;
+        Outcome::DeleteChecked {
+            user_id,
+            matched: owner == Some(user_id),
         }
-        (QrMode::Bind, Some(user_id)) => {
-            bind(state, user_id, &confirmed.aid, mid, role.as_ref(), now).await?;
-            Ok(Outcome::Bound { user_id })
+    } else {
+        let now = Utc::now();
+        match (mode, user_id) {
+            (QrMode::Login, _) => {
+                let (user_id, is_new_user) =
+                    login(state, &mut tx, &confirmed.aid, mid, role.as_ref(), now).await?;
+                Outcome::LoggedIn {
+                    user_id,
+                    is_new_user,
+                }
+            }
+            (QrMode::Bind, Some(user_id)) => {
+                bind(&mut tx, user_id, &confirmed.aid, mid, role.as_ref(), now).await?;
+                Outcome::Bound { user_id }
+            }
+            (QrMode::Bind | QrMode::Delete, _) => return Err(Problem::internal()),
         }
-        (QrMode::Bind | QrMode::Delete, _) => Err(Problem::internal()),
+    };
+    store_outcome(&mut tx, id_hash, &outcome).await?;
+    let polled = replay_in_transaction(state, &mut tx, mode, id_hash, outcome, meta).await?;
+    tx.commit().await?;
+    Ok(polled)
+}
+
+async fn store_outcome(
+    conn: &mut PgConnection,
+    id_hash: &[u8],
+    outcome: &Outcome,
+) -> Result<(), Problem> {
+    let ttl = if matches!(outcome, Outcome::Failed { .. }) {
+        RESULT_FAILED_SECS
+    } else {
+        RESULT_OK_SECS
+    };
+    if !repo::store_result(
+        conn,
+        id_hash,
+        serde_json::to_value(outcome).map_err(|e| Problem::internal_from(&e))?,
+        Utc::now() + chrono::Duration::seconds(ttl),
+    )
+    .await?
+    {
+        return Err(Problem::internal());
     }
+    Ok(())
 }
 
 async fn replay(
     state: &MihoyoState,
+    mode: QrMode,
+    id_hash: &[u8],
+    outcome: Outcome,
+    meta: &RequestMeta,
+) -> Result<Polled, Problem> {
+    let mut tx = state.auth.db.begin().await?;
+    let polled = replay_in_transaction(state, &mut tx, mode, id_hash, outcome, meta).await?;
+    tx.commit().await?;
+    Ok(polled)
+}
+
+async fn replay_in_transaction(
+    state: &MihoyoState,
+    conn: &mut PgConnection,
     mode: QrMode,
     id_hash: &[u8],
     outcome: Outcome,
@@ -447,10 +486,9 @@ async fn replay(
             is_new_user,
         } => {
             let secret = session_secret(state, user_id, id_hash)?;
-            let mut tx = state.auth.db.begin().await?;
             let issued = ik_auth::service::issue_session_with_secret(
                 &state.auth,
-                &mut tx,
+                conn,
                 user_id,
                 "mihoyo",
                 &secret,
@@ -458,14 +496,10 @@ async fn replay(
                 Utc::now(),
             )
             .await?;
-            tx.commit().await?;
             (user_id, Some(is_new_user), Some(issued))
         }
     };
-    let mut conn = state.auth.db.acquire().await?;
-    let binding = repo::binding_of(&mut conn, user_id)
-        .await?
-        .map(binding_view);
+    let binding = repo::binding_of(conn, user_id).await?.map(binding_view);
     Ok(Polled {
         status: QrStatus::Confirmed,
         mode: Some(mode),
@@ -531,16 +565,18 @@ async fn sync_role(
 }
 
 /// 扫码登录（MHY-010、MHY-011）：已绑定的账号直接登录并同步角色；没有则建号（注册开关关闭时拒绝）。
-/// 并发首登撞上唯一约束时回滚，重新解析一次，以赢家的账号登录——绝不产生第二个账号。
+/// 并发首登撞上唯一约束时回滚保存点，重新解析一次，以赢家的账号登录——绝不产生第二个账号。
+/// 成功时只释放保存点，由调用方连同扫码结果与登录会话提交事务。
 async fn login(
     state: &MihoyoState,
+    conn: &mut PgConnection,
     aid: &str,
     mid: Option<&str>,
     role: Option<&GameRole>,
     now: DateTime<Utc>,
 ) -> Result<(i64, bool), Problem> {
     for _ in 0..2 {
-        let mut tx = state.auth.db.begin().await?;
+        let mut tx = conn.begin().await?;
         if let Some(user_id) = resolve(&mut tx, aid, mid).await? {
             ik_auth::interop::lock_active_user(&mut tx, user_id)
                 .await?
@@ -558,7 +594,10 @@ async fn login(
         match repo::upsert_identity(&mut tx, user_id, aid, mid).await {
             Ok(()) => {}
             // 另一路同时建好了：回滚，下一轮以它为准。
-            Err(error) if is_identity_taken(&error) => continue,
+            Err(error) if is_identity_taken(&error) => {
+                tx.rollback().await?;
+                continue;
+            }
             Err(error) => return Err(error.into()),
         }
         sync_role(&mut tx, user_id, role, now).await?;
@@ -628,36 +667,34 @@ fn digits(n: usize) -> Result<String, Problem> {
 /// 绑定（MHY-013）：米游社账号已绑在别的账号上 → 409 `IDENTITY_ALREADY_BOUND`（不接管任何账号）；
 /// 当前账号已绑了另一个米游社账号 → 409 `USER_ALREADY_BOUND`；重复绑定同一个是幂等的。
 async fn bind(
-    state: &MihoyoState,
+    conn: &mut PgConnection,
     user_id: i64,
     aid: &str,
     mid: Option<&str>,
     role: Option<&GameRole>,
     now: DateTime<Utc>,
 ) -> Result<(), Problem> {
-    let mut tx = state.auth.db.begin().await?;
-    ik_auth::interop::lock_active_user(&mut tx, user_id)
+    ik_auth::interop::lock_active_user(conn, user_id)
         .await?
         .ok_or_else(ik_auth::service::account_blocked)?;
-    if resolve(&mut tx, aid, mid)
+    if resolve(conn, aid, mid)
         .await?
         .is_some_and(|owner| owner != user_id)
     {
         return Err(identity_already_bound());
     }
-    if repo::binding_of(&mut tx, user_id)
+    if repo::binding_of(conn, user_id)
         .await?
         .is_some_and(|b| b.aid != aid)
     {
         return Err(user_already_bound());
     }
-    match repo::upsert_identity(&mut tx, user_id, aid, mid).await {
+    match repo::upsert_identity(conn, user_id, aid, mid).await {
         Ok(()) => {}
         Err(error) if is_identity_taken(&error) => return Err(identity_already_bound()),
         Err(error) => return Err(error.into()),
     }
-    sync_role(&mut tx, user_id, role, now).await?;
-    tx.commit().await?;
+    sync_role(conn, user_id, role, now).await?;
     Ok(())
 }
 
