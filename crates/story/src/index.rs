@@ -84,6 +84,11 @@ impl BigramIndex {
         }
     }
 
+    /// 含有相邻两字 `a``b` 的行（升序）。
+    pub fn lines_with_pair(&self, a: char, b: char) -> &[u32] {
+        self.postings_for(key(a, b as u32))
+    }
+
     /// 已折叠检索词 → 候选行。
     pub fn candidates(&self, term: &str) -> Candidates {
         let chars: Vec<char> = term.chars().collect();

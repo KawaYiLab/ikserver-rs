@@ -1,7 +1,8 @@
 //! ik_search：全文检索。
 //!
-//! 多个关键词用空格分隔，按「同一文档内全部出现」求交（AND）；没有文档同时包含全部关键词时
-//! 默认明确标注并返回部分匹配，allowPartial=false 可要求严格 AND。
+//! 多个关键词用空格分隔，按「同一文档内全部出现」求交（AND）；同时包含全部关键词的文档不到
+//! 3 篇时，默认在其后附上明确标注的部分匹配，allowPartial=false 可要求严格 AND。
+//! 整句零命中时找字面最接近的原句，并按别称表或拆词重搜。
 //! 正文/逐句署名与仅元数据命中独立呈现；matchIn=body 只允许正文参与覆盖。
 //! 指定 docId 时变为文档内检索，逐行列出命中与行号。
 
@@ -20,6 +21,8 @@ const MAX_TERMS: usize = 8;
 const BM25_K1: f64 = 1.2;
 const BM25_B: f64 = 0.5;
 const TITLE_BOOST: f64 = 1.5;
+/// 完整命中（全部词同篇）少于这么多篇时，把部分匹配接在完整命中后面，免得词选得严一点就只剩一两篇。
+const TOP_UP_BELOW: usize = 3;
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -245,6 +248,8 @@ struct Hits {
     docs: Vec<DocHits>,
     lines: Vec<(u32, u32)>,
     partial: bool,
+    /// 全部词同篇出现的文档数；部分匹配接在它们后面。
+    complete: usize,
 }
 
 pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
@@ -255,7 +260,7 @@ pub fn run(corpus: &Corpus, args: &SearchArgs) -> ToolResult {
 /// 结果里写明实际用的检索词。显式翻页（cursor）与 purpose=verify（查原话要求原样匹配）不改写。
 pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputResult {
     let first = execute_once(corpus, args)?;
-    let Some(rewritten) = rewrite_for_retry(corpus, args, &first) else {
+    let Some((rewritten, aliases)) = rewrite_for_retry(corpus, args, &first) else {
         return Ok(first);
     };
     let mut retry = args.clone();
@@ -272,13 +277,120 @@ pub fn execute(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRes
     let original = args.keyword.as_deref().unwrap_or("").trim().to_owned();
     result.query = original.clone();
     result.rewritten_keyword = Some(rewritten.clone());
-    second.text.insert_str(
-        0,
-        &format!(
+    // 拆词前找到的近似原句一并带上：记错一两个字的台词，最该看的是它们。
+    let near = match &first.response.data {
+        super::response::ToolData::Search(f) => f.near_lines.clone(),
+        _ => Vec::new(),
+    };
+    let near_text = render_near(&near);
+    result.near_lines = near;
+    let note = if aliases.is_empty() {
+        format!(
             "「{original}」没有命中，已拆成「{rewritten}」检索。结果不理想时，换用角色名、地名、事件名等实体词重搜。\n"
-        ),
-    );
+        )
+    } else {
+        let why = aliases
+            .iter()
+            .map(|(from, to, kind)| match kind {
+                super::aliases::Kind::English => format!("「{from}」是「{to}」的英文名"),
+                super::aliases::Kind::Nickname => {
+                    format!("「{from}」是玩家对「{to}」的叫法，不是官方称呼")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("；");
+        format!("「{original}」没有命中，已改用「{rewritten}」检索：{why}。\n")
+    };
+    second.text.insert_str(0, &format!("{near_text}{note}"));
     Ok(second)
+}
+
+/// 整句至少这么多字才找近似原句；短词零命中多半是换个叫法的问题，不是记错台词。
+const NEAR_MIN_CHARS: usize = 6;
+/// 近似原句最多列几行。
+const NEAR_LIMIT: usize = 3;
+
+/// 整句没有原样出现时，按「相邻两字」的重合比例找最像的几行（至少一半重合）。
+/// 用的是现成的二元组倒排，不需要另建索引；结果只说明字面相近，不代表是同一句。
+fn near_lines(corpus: &Corpus, term: &str, filter: &Filter) -> Vec<super::response::NearLine> {
+    let chars: Vec<char> = term.chars().collect();
+    let mut pairs: Vec<(char, char)> = chars.windows(2).map(|w| (w[0], w[1])).collect();
+    pairs.sort_unstable();
+    pairs.dedup();
+    let need = pairs.len().div_ceil(2);
+    let mut counts = vec![0u16; corpus.lines.len()];
+    let mut touched: Vec<u32> = Vec::new();
+    for &(a, b) in &pairs {
+        for &line in corpus.index.lines_with_pair(a, b) {
+            let slot = &mut counts[line as usize];
+            if *slot == 0 {
+                touched.push(line);
+            }
+            *slot += 1;
+        }
+    }
+    let mut best: Vec<(u16, usize, u32)> = touched
+        .into_iter()
+        .filter(|&line| usize::from(counts[line as usize]) >= need)
+        .filter(|&line| {
+            filter.accepts_doc(corpus, corpus.doc_of_line(line))
+                && filter.accepts_line(corpus, line)
+        })
+        .map(|line| {
+            let len = corpus.line_text(line as usize).chars().count();
+            // 同样的重合数，长度越接近检索句越像同一句。
+            (counts[line as usize], len.abs_diff(chars.len()), line)
+        })
+        .collect();
+    best.sort_unstable_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    best.into_iter()
+        .take(NEAR_LIMIT)
+        .map(|(count, _, line)| {
+            let d = corpus.doc_of_line(line);
+            let doc = &corpus.docs[d];
+            let source = super::response::SourceLine::new(corpus, line as usize, false);
+            let offset = source.number.saturating_sub(5).max(1);
+            let doc_id = corpus.doc_id(d);
+            super::response::NearLine {
+                next_read: super::response::NextCall::new(
+                    "ik_read",
+                    serde_json::json!({"docId": doc_id, "offset": offset, "limit": 20}),
+                ),
+                doc_id,
+                title: doc.title.clone(),
+                path: doc.path.clone(),
+                line: source,
+                overlap_percent: (usize::from(count) * 100 / pairs.len()).min(100) as u8,
+            }
+        })
+        .collect()
+}
+
+fn render_near(near: &[super::response::NearLine]) -> String {
+    if near.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "原句没有原样出现。字面最接近的原文（只说明字面相近，引用前请读原文核对）：\n",
+    );
+    for n in near {
+        let speaker = n
+            .line
+            .speaker
+            .as_deref()
+            .map_or_else(String::new, |s| format!("{s}："));
+        let _ = writeln!(
+            out,
+            "- {} 「{}」 L{} {speaker}{}（重合 {}%）→ {}",
+            n.doc_id,
+            n.title,
+            n.line.number,
+            crate::text::truncate_chars(&n.line.text, 120),
+            n.overlap_percent,
+            n.next_read.text()
+        );
+    }
+    out
 }
 
 /// 句中常见的虚词与疑问词：拆词时去掉，避免它们把同篇 AND 卡死。
@@ -322,11 +434,14 @@ const FILLERS: &[&str] = &[
     "谁",
 ];
 
+/// 改写时用到的别称：（原词, 换成的词, 来历）。
+type AliasUse = (String, &'static str, super::aliases::Kind);
+
 fn rewrite_for_retry(
     corpus: &Corpus,
     args: &SearchArgs,
     first: &super::response::ToolOutput,
-) -> Option<String> {
+) -> Option<(String, Vec<AliasUse>)> {
     if args.cursor.is_some() || args.purpose.as_deref() == Some("verify") {
         return None;
     }
@@ -338,7 +453,12 @@ fn rewrite_for_retry(
     }
     let body_only = args.match_in.as_deref() == Some("body");
     let keyword = args.keyword.as_deref()?.trim();
+    // 「Ellen Joe」这类带空格的英文名先整体对照。
+    if let Some((to, kind)) = super::aliases::lookup(&fold(keyword)) {
+        return Some((to.to_owned(), vec![(keyword.to_owned(), to, kind)]));
+    }
     let mut terms: Vec<String> = Vec::new();
+    let mut aliases: Vec<AliasUse> = Vec::new();
     let mut changed = false;
     for term in keyword.split_whitespace() {
         let absent = result
@@ -346,6 +466,14 @@ fn rewrite_for_retry(
             .iter()
             .any(|m| m.term == term && m.corpus_documents == 0)
             || (result.candidate_count == 0 && corpus_doc_count(corpus, term, body_only) == 0);
+        if absent && let Some((to, kind)) = super::aliases::lookup(&fold(term)) {
+            changed = true;
+            aliases.push((term.to_owned(), to, kind));
+            if !terms.iter().any(|t| t == to) {
+                terms.push(to.to_owned());
+            }
+            continue;
+        }
         // 拆不出任何语料里有的词时保留原词，不悄悄丢掉用户写的检索词。
         let pieces = Some(term)
             .filter(|t| absent && t.chars().count() >= 3)
@@ -361,8 +489,11 @@ fn rewrite_for_retry(
             }
         }
     }
-    (changed && !terms.is_empty()).then(|| terms.join(" "))
+    (changed && !terms.is_empty()).then(|| (terms.join(" "), aliases))
 }
+
+/// 单字的人名一般会被当成虚字丢掉；主角兄妹太常被问到，单独保留。
+const SINGLE_CHAR_NAMES: &[&str] = &["哲", "铃"];
 
 /// 把一段没有空格的整句拆成语料里存在的词：先认出说话人名字，再去掉虚词与疑问词，
 /// 剩下的部分从左到右取语料中出现过的最长片段（2～8 字），单字丢弃。
@@ -372,7 +503,15 @@ fn segment(corpus: &Corpus, text: &str, body_only: bool) -> Vec<String> {
         .iter()
         .map(String::as_str)
         .filter(|n| n.chars().count() >= 2 && text.contains(*n))
+        .chain(
+            SINGLE_CHAR_NAMES
+                .iter()
+                .copied()
+                .filter(|n| text.contains(*n)),
+        )
         .collect();
+    names.sort_unstable();
+    names.dedup();
     names.sort_by_key(|n| std::cmp::Reverse(n.chars().count()));
     // 用占位符切开：名字整体保留，其余片段再拆。
     let mut parts: Vec<(String, bool)> = vec![(text.to_owned(), false)];
@@ -590,6 +729,13 @@ fn execute_once(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRe
         result.partial_withheld = true;
         result.suggestions = split_suggestions(args, &terms, &term_hits)?;
     }
+    if result.candidate_count == 0
+        && args.cursor.is_none()
+        && terms.len() == 1
+        && terms[0].chars().count() >= NEAR_MIN_CHARS
+    {
+        result.near_lines = near_lines(corpus, &terms[0], &filter);
+    }
     let rendered = render_typed(corpus, &result, doc.is_some(), full);
     let mut out = String::new();
     if let Some(release) = release {
@@ -599,6 +745,7 @@ fn execute_once(corpus: &Corpus, args: &SearchArgs) -> super::response::OutputRe
         out.push_str("关键词过多，仅检索前 8 个。\n");
     }
     push_missing_terms(&mut out, &result.missing_term_counts, filter.body_only);
+    out.push_str(&render_near(&result.near_lines));
     if withheld {
         let counts = output::term_document_counts(&result.term_documents);
         let _ = writeln!(
@@ -830,7 +977,8 @@ fn assemble(corpus: &Corpus, terms: &[TermHits], allow_partial: bool, force_unio
         selected = intersect(&selected, s);
     }
     let mut partial = false;
-    if force_union || selected.is_empty() && terms.len() > 1 && allow_partial {
+    let complete = selected.len();
+    if force_union || complete < TOP_UP_BELOW && terms.len() > 1 && allow_partial {
         partial = !force_union;
         for s in &sets {
             selected = union_sorted(&selected, s);
@@ -916,6 +1064,7 @@ fn assemble(corpus: &Corpus, terms: &[TermHits], allow_partial: bool, force_unio
         docs,
         lines,
         partial,
+        complete,
     }
 }
 

@@ -106,8 +106,13 @@ fn search_usability_partial_fallback_keeps_filters_and_coverage_order() {
         "ik_search",
         json!({"keyword":"天空 核心", "path":"Chapter240"}),
     );
+    // 完整命中不足 3 篇时，部分匹配接在完整命中后面，完整命中仍排第一。
     assert!(
-        complete.contains("命中 1 篇") && !complete.contains("部分匹配"),
+        complete.contains("完整匹配只有 1 篇") && complete.contains("命中 2 篇"),
+        "{complete}"
+    );
+    assert!(
+        complete.find("核心就在这里").unwrap() < complete.find("天空很远").unwrap(),
         "{complete}"
     );
     let doc = first_doc_id(&complete);
@@ -1474,4 +1479,56 @@ fn a_whole_question_is_split_into_words_that_exist() {
     assert!(!verify.contains("已拆成"), "{verify}");
     let kept = ok(&c, "ik_search", json!({"keyword":"安比 旧账"}));
     assert!(!kept.contains("已拆成"), "{kept}");
+}
+
+#[test]
+fn search_misremembered_sentence_lists_nearest_original_line() {
+    let c = corpus();
+    // 原句「法厄同，这次的报酬可是很丰厚的哦！」，记成了另一种说法。
+    let out = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"法厄同这次报酬可是很丰富的"}),
+    );
+    assert!(out.contains("字面最接近的原文"), "{out}");
+    assert!(out.contains("这次的报酬可是很丰厚的哦"), "{out}");
+    let verify = ok(
+        &c,
+        "ik_search",
+        json!({"keyword":"法厄同这次报酬可是很丰富的","purpose":"verify"}),
+    );
+    assert!(verify.contains("这次的报酬可是很丰厚的哦"), "{verify}");
+    // 短词零命中不找近似原句。
+    let short = ok(&c, "ik_search", json!({"keyword":"不存在的"}));
+    assert!(!short.contains("字面最接近的原文"), "{short}");
+}
+
+#[test]
+fn search_maps_english_names_and_nicknames() {
+    let c = corpus();
+    let out = ok(&c, "ik_search", json!({"keyword":"Nicole"}));
+    assert!(
+        out.contains("已改用「妮可」检索") && out.contains("英文名"),
+        "{out}"
+    );
+    let both = ok(&c, "ik_search", json!({"keyword":"Anby 狡兔屋"}));
+    assert!(both.contains("「安比 狡兔屋」"), "{both}");
+}
+
+#[test]
+fn search_single_name_puts_agent_profile_first() {
+    let c = corpus();
+    let out = ok(&c, "ik_search", json!({"keyword":"妮可"}));
+    let first = out
+        .lines()
+        .find(|l| l.starts_with("1. doc_"))
+        .unwrap_or_default();
+    assert!(first.contains("妮可（妮可·德玛拉）"), "{out}");
+}
+
+#[test]
+fn search_sentence_keeps_protagonist_names() {
+    let c = corpus();
+    let out = ok(&c, "ik_search", json!({"keyword":"哲为什么去零号空洞"}));
+    assert!(out.contains("已拆成「哲 零号空洞」"), "{out}");
 }

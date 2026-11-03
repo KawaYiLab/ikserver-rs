@@ -4,8 +4,8 @@ use sha2::{Digest, Sha256};
 use super::Corpus;
 
 /// Bump when matching, ranking, evidence interpretation or alias parsing changes.
-/// Release mapping data is hashed separately so edits cannot silently reuse cursors.
-const QUERY_CONTRACT: &str = "story-mcp-m3-m5-v1-window-cursor-coverage";
+/// Release mapping and alias data are hashed separately so edits cannot silently reuse cursors.
+const QUERY_CONTRACT: &str = "story-mcp-m3-m5-v2-recall-topup-near-alias";
 
 pub(super) fn revision(corpus: &Corpus) -> Result<String> {
     let mut hash = Sha256::new();
@@ -17,6 +17,7 @@ pub(super) fn revision(corpus: &Corpus) -> Result<String> {
     }
     field(&mut hash, QUERY_CONTRACT)?;
     field(&mut hash, crate::engine::releases::revision_data())?;
+    field(&mut hash, crate::engine::aliases::revision_data())?;
     let meta = &corpus.meta;
     field(
         &mut hash,

@@ -1,0 +1,20 @@
+{
+  "note": "检索别称：键是用户可能写的叫法（英文名、常见外号），值是语料里的叫法。整句或单个检索词在全库零命中时才换用；改动后检索契约随之变化，旧翻页游标失效。外号来自玩家社区，不是官方称呼。",
+  "english": {
+    "Anby": "安比", "Nicole": "妮可", "Billy": "比利", "Nekomata": "猫又",
+    "Corin": "可琳", "Ellen": "艾莲", "Ellen Joe": "艾莲", "Lycaon": "莱卡恩", "Rina": "丽娜",
+    "Grace": "格莉丝", "Anton": "安东", "Ben": "本·比格", "Koleda": "珂蕾妲",
+    "Soldier 11": "11号", "Soukaku": "苍角", "Miyabi": "星见雅", "Yanagi": "月城柳",
+    "Harumasa": "浅羽悠真", "Zhu Yuan": "朱鸢", "Qingyi": "青衣", "Jane": "简·杜", "Jane Doe": "简·杜",
+    "Seth": "赛斯", "Caesar": "凯撒", "Burnice": "柏妮思", "Lucy": "露西", "Piper": "派派",
+    "Lighter": "莱特", "Pulchra": "波可娜", "Hugo": "雨果", "Vivian": "薇薇安",
+    "Astra": "耀嘉音", "Astra Yao": "耀嘉音", "Evelyn": "伊芙琳", "Trigger": "扳机",
+    "Orphie": "奥菲丝", "Yixuan": "仪玄", "Ju Fufu": "橘福福", "Pan Yinhu": "潘引壶",
+    "Yidhari": "伊德海莉", "Yuzuha": "柚叶", "Alice": "爱丽丝", "Manato": "狛野真斗",
+    "Wise": "哲", "Belle": "铃", "Phaethon": "法厄同", "Eous": "伊埃斯",
+    "Bangboo": "邦布", "Ethereal": "以骸", "Hollow": "空洞", "Proxy": "绳匠", "New Eridu": "新艾利都"
+  },
+  "nickname": {
+    "鲨鱼妹": "艾莲", "狼叔": "莱卡恩", "女仆长": "丽娜", "小女仆": "可琳"
+  }
+}

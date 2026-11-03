@@ -53,6 +53,8 @@ pub(super) fn apply_windows(c: &Corpus, hits: &mut Hits, terms: &[String], args:
     }
     let complete = hits.docs.iter().any(|h| !h.windows.is_empty());
     hits.partial = !complete && args.allow_partial.unwrap_or(true);
+    // 窗口模式下「完整」指同一窗口内出现，文档级的完整命中不算数。
+    hits.complete = hits.docs.iter().filter(|h| !h.windows.is_empty()).count();
     hits.docs.retain(|h| {
         if complete {
             !h.windows.is_empty()
@@ -141,6 +143,31 @@ pub(super) fn apply_windows(c: &Corpus, hits: &mut Hits, terms: &[String], args:
     hits.lines = lines;
 }
 
+/// 设定里的闲聊类：街区闲聊、未关联代理人互动。
+fn is_chatter(c: &Corpus, doc: usize) -> bool {
+    let d = &c.docs[doc];
+    c.groups[d.group as usize].id == "lore:street" || d.path.ends_with("未关联代理人互动")
+}
+
+/// 代理人档案里这个名字本人的那一篇：标题形如「妮可（妮可·德玛拉）」「雅（星见 雅）」，
+/// 括号外的称呼或括号里的全名（去掉空格）等于检索词。
+fn is_profile_of(c: &Corpus, doc: usize, term: &str) -> bool {
+    let d = &c.docs[doc];
+    if c.groups[d.group as usize].id != "lore:agents" {
+        return false;
+    }
+    let title: String = crate::text::fold(&d.title)
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .collect();
+    // 折叠后全角括号已变成半角。
+    let (short, full) = match title.split_once('(') {
+        Some((short, rest)) => (short, rest.trim_end_matches(')')),
+        None => (title.as_str(), ""),
+    };
+    short == term || full == term
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn typed_result(
     c: &Corpus,
@@ -174,9 +201,14 @@ pub(super) fn typed_result(
         }
     }
     let coverage = |h: &DocHits| ((h.line_mask | h.title_mask) & all).count_ones();
+    // 只搜一个名字时，这个角色自己的档案排第一；街区闲聊与代理人零散互动篇幅短、命中密，
+    // BM25 容易把它们顶上来，同等条件下排到其他资料后面。
+    let profile = |h: &DocHits| terms.len() == 1 && is_profile_of(c, h.doc, &terms[0]);
+    let street = |h: &DocHits| is_chatter(c, h.doc);
     docs.sort_by(|a, b| {
         (coverage(b) == terms.len() as u32)
             .cmp(&(coverage(a) == terms.len() as u32))
+            .then(profile(b).cmp(&profile(a)))
             .then(b.fields[0].count_ones().cmp(&a.fields[0].count_ones()))
             .then(
                 (b.fields[1] | b.fields[2])
@@ -184,6 +216,7 @@ pub(super) fn typed_result(
                     .cmp(&(a.fields[1] | a.fields[2]).count_ones()),
             )
             .then(coverage(b).cmp(&coverage(a)))
+            .then(street(a).cmp(&street(b)))
             .then(b.score.total_cmp(&a.score))
             .then(c.docs[a.doc].hash.cmp(&c.docs[b.doc].hash))
     });
@@ -538,6 +571,7 @@ pub(super) fn typed_result(
             window_lines: args.window_lines.unwrap_or(12).clamp(1, 100),
         },
         partial: hits.partial,
+        complete_count: hits.partial.then_some(hits.complete),
         partial_withheld: false,
         candidate_count: docs.len(),
         body_result_count: body.len(),
@@ -551,6 +585,7 @@ pub(super) fn typed_result(
         next_call,
         next_directory_call,
         suggestions,
+        near_lines: Vec::new(),
         rewritten_keyword: None,
     })
 }
@@ -594,12 +629,18 @@ pub(super) fn render_typed(c: &Corpus, r: &SearchResult, local: bool, full: bool
             })
             .max()
             .unwrap_or(0);
-        let _ = writeln!(
-            out,
-            "部分匹配：完整匹配 0 篇，以下按命中词数排序（最多命中 {most}/{} 词；{}），不证明全部关键词共现。",
-            r.term_documents.len(),
-            term_document_counts(&r.term_documents)
-        );
+        let counts = term_document_counts(&r.term_documents);
+        let _ = match r.complete_count.unwrap_or(0) {
+            0 => writeln!(
+                out,
+                "部分匹配：完整匹配 0 篇，以下按命中词数排序（最多命中 {most}/{} 词；{counts}），不证明全部关键词共现。",
+                r.term_documents.len(),
+            ),
+            n => writeln!(
+                out,
+                "完整匹配只有 {n} 篇，排在最前；之后附部分匹配，按命中词数排序（{counts}），部分匹配不证明全部关键词共现。"
+            ),
+        };
     }
     if r.candidate_count == 0 && !r.partial_withheld {
         // 去掉范围筛选的建议只在「范围外仍有该词」时出现，必须如实说明它会扩大范围。
