@@ -34,7 +34,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
-    runs-on: instabox-medium
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:18
