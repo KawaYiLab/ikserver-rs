@@ -115,8 +115,10 @@ impl MediaState {
             .await?
             .into_iter()
             .map(|row| {
-                let size = u64::try_from(row.size_bytes).unwrap_or(0);
-                (row.id, self.urls.webp_url(&row.object_key, size))
+                (
+                    row.id,
+                    self.urls.webp_url(&row.object_key, row.image_info()),
+                )
             })
             .collect())
     }
@@ -140,8 +142,7 @@ impl MediaState {
                 let url = if plain && row.size_bytes <= ORIGINAL_MAX_BYTES {
                     self.urls.public_url(&row.object_key)
                 } else {
-                    self.urls
-                        .webp_url(&row.object_key, u64::try_from(row.size_bytes).unwrap_or(0))
+                    self.urls.webp_url(&row.object_key, row.image_info())
                 };
                 (row.id, url)
             })

@@ -15,6 +15,17 @@ pub(crate) struct MediaRow {
     pub created_at: DateTime<Utc>,
 }
 
+impl MediaRow {
+    pub(crate) fn image_info(&self) -> crate::cdn::ImageInfo<'_> {
+        crate::cdn::ImageInfo {
+            mime: &self.mime,
+            size_bytes: u64::try_from(self.size_bytes).unwrap_or(0),
+            width: self.width.and_then(|w| u32::try_from(w).ok()),
+            height: self.height.and_then(|h| u32::try_from(h).ok()),
+        }
+    }
+}
+
 pub(crate) async fn by_receipt(
     conn: &mut PgConnection,
     receipt: &str,

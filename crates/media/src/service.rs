@@ -32,11 +32,11 @@ const MAX_GALLERY: u32 = 100;
 const MAX_DIMENSION: u32 = 100_000;
 
 pub(crate) fn view(urls: &Urls, row: MediaRow) -> MediaView {
-    let size = u64::try_from(row.size_bytes).unwrap_or(0);
+    let thumb_url = urls.thumb_url(&row.object_key, row.image_info());
     MediaView {
         id: Id::new(row.id),
         url: urls.public_url(&row.object_key),
-        thumb_url: urls.thumb_url(&row.object_key, size),
+        thumb_url,
         mime: row.mime,
         size: row.size_bytes,
         width: row.width,
