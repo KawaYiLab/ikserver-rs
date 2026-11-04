@@ -15,8 +15,8 @@ env:
 
 jobs:
   build:
-    # 固定发行版：可执行文件依赖编译机的 glibc，服务器的发行版不能比它旧。
-    runs-on: ubuntu-24.04
+    # 可执行文件依赖编译机的 glibc，目标服务器需提供兼容版本。
+    runs-on: instabox-medium
     permissions:
       contents: write
     steps:
@@ -56,7 +56,7 @@ jobs:
 
   image:
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-24.04
+    runs-on: instabox-medium
     permissions:
       contents: read
       packages: write
