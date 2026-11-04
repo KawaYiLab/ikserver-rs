@@ -11659,7 +11659,7 @@
           "comments"
         ],
         "summary": "帖子的评论",
-        "description": "所有评论按楼层排成一条线（回复也是普通的一层，带上被回复评论的摘要），默认从旧到新，`sort=newest` 时从新到旧。\n第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。",
+        "description": "所有评论按楼层排成一条线（回复也是普通的一层，带上被回复评论的摘要），默认从旧到新，`sort=newest` 时从新到旧。\n采纳与置顶从时间线里提出来，只在时间线开头的那一页单独返回（`items` 里没有它们）；`anchor` 从某条评论所在的楼层开始。",
         "operationId": "list_comments",
         "parameters": [
           {
@@ -11694,7 +11694,7 @@
           {
             "name": "anchor",
             "in": "query",
-            "description": "从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始。\n与 `cursor` 同时给时以 `cursor` 为准。",
+            "description": "从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始；\n它就是采纳 / 置顶时也从第一页开始（它在顶部）。\n与 `cursor` 同时给时以 `cursor` 为准。",
             "required": false,
             "schema": {
               "type": "string"
@@ -17526,7 +17526,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/CommentView",
-                "description": "采纳的最佳答案（只在第一页返回；它在 `items` 里也照常出现在自己的楼层）。"
+                "description": "采纳的最佳答案。它不在 `items` 里，只在时间线开头的那一页（没有 `prevCursor`、也不是往下翻的页）返回。"
               },
               {
                 "type": "null"
@@ -17538,7 +17538,7 @@
             "items": {
               "$ref": "#/components/schemas/CommentView"
             },
-            "description": "评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。"
+            "description": "评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。不含 `accepted` / `pinned`（楼层号照旧，时间线在那一层留空号）。"
           },
           "nextCursor": {
             "type": [
@@ -17551,7 +17551,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/CommentView",
-                "description": "置顶评论（只在第一页返回；同时被采纳时只出现在 `accepted`）。"
+                "description": "置顶评论，规则同 `accepted`；同时被采纳时只出现在 `accepted`。"
               },
               {
                 "type": "null"

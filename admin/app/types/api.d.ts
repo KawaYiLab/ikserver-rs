@@ -3429,7 +3429,7 @@ export interface paths {
         /**
          * 帖子的评论
          * @description 所有评论按楼层排成一条线（回复也是普通的一层，带上被回复评论的摘要），默认从旧到新，`sort=newest` 时从新到旧。
-         *     第一页额外返回采纳与置顶；`anchor` 从某条评论所在的楼层开始。
+         *     采纳与置顶从时间线里提出来，只在时间线开头的那一页单独返回（`items` 里没有它们）；`anchor` 从某条评论所在的楼层开始。
          */
         get: operations["list_comments"];
         put?: never;
@@ -5222,7 +5222,7 @@ export interface components {
         };
         CommentsPage: {
             accepted?: components["schemas"]["CommentView"] | null;
-            /** @description 评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。 */
+            /** @description 评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。不含 `accepted` / `pinned`（楼层号照旧，时间线在那一层留空号）。 */
             items: components["schemas"]["CommentView"][];
             /** @description 沿排序方向往下翻页（默认是更新的楼层，`newest` 时是更早的楼层）。 */
             nextCursor?: string | null;
@@ -16232,7 +16232,8 @@ export interface operations {
                 /** @description 默认 20，最大 50。 */
                 limit?: number;
                 /**
-                 * @description 从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始。
+                 * @description 从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始；
+                 *     它就是采纳 / 置顶时也从第一页开始（它在顶部）。
                  *     与 `cursor` 同时给时以 `cursor` 为准。
                  */
                 anchor?: string;

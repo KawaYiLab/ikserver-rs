@@ -922,28 +922,32 @@ pub async fn hot_comments(
     Ok(Some(HotComments { total, comments }))
 }
 
-/// 从 `from`（不含）往一个方向取一页可见评论：`older` 时往楼层小的方向（楼层降序），否则楼层升序。
-/// 多取一条，第二个值表示这个方向上还有没有。
+/// 从 `from`（不含）往一个方向取一页时间线上的可见评论：`older` 时往楼层小的方向（楼层降序），否则楼层升序。
+/// `featured` 是顶部的采纳 / 置顶，不在时间线里。多取一条，第二个值表示这个方向上还有没有。
 async fn fetch(
     conn: &mut PgConnection,
     post_id: i64,
     excluded: &[i64],
+    featured: &[i64],
     from: i32,
     older: bool,
     limit: i64,
 ) -> Result<(Vec<CommentRow>, bool), Problem> {
     let mut rows = if older {
-        repo::page_before(conn, post_id, excluded, from, limit + 1).await?
+        repo::page_before(conn, post_id, excluded, featured, from, limit + 1).await?
     } else {
-        repo::page_after(conn, post_id, excluded, from, limit + 1).await?
+        repo::page_after(conn, post_id, excluded, featured, from, limit + 1).await?
     };
     let more = rows.len() > usize::try_from(limit).unwrap_or(usize::MAX);
     rows.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
     Ok((rows, more))
 }
 
-/// 帖子的评论，默认按楼层从旧到新，`sort = newest` 时从新到旧。第一页额外返回采纳与置顶
-/// （各最多一条，它们在 `items` 里照常出现）。
+/// 帖子的评论，默认按楼层从旧到新，`sort = newest` 时从新到旧。
+///
+/// 采纳与置顶（各最多一条）从时间线里提出来，放在时间线开头：`items` 里不再有它们，楼层号不变
+/// （时间线在那一层留个空号，和删掉的评论一样）。只有这一页就是时间线开头（往回没有了）时才返回
+/// `accepted` / `pinned`，所以一次只会出现一份。`anchor` 指向它们时，从时间线开头开始。
 ///
 /// 游标只记楼层号和往哪边取（`b` 为 true 往楼层小的方向），与排序无关；排序只决定这一页是
 /// 「往下翻」（`nextCursor`）还是「往回翻」（`prevCursor`），以及 `items` 的顺序。
@@ -964,21 +968,27 @@ pub async fn list(
     let mut conn = state.db.acquire().await?;
     readable_post(&mut conn, post_id, viewer_id).await?;
     let excluded = ik_social::interop::excluded_authors(&mut conn, viewer_id).await?;
+    let accepted = repo::accepted(&mut conn, post_id, &excluded).await?;
+    let pinned = repo::pinned(&mut conn, post_id, &excluded).await?;
+    let featured: Vec<i64> = accepted.iter().chain(pinned.iter()).map(|c| c.id).collect();
 
     let start_floor = match (&cursor, query.anchor) {
-        (None, Some(anchor)) => repo::get(&mut conn, anchor.get())
-            .await?
-            .filter(|c| c.post_id == post_id && c.hidden_at.is_none())
-            .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
-            .map(|c| c.floor),
+        (None, Some(anchor)) if !featured.contains(&anchor.get()) => {
+            repo::get(&mut conn, anchor.get())
+                .await?
+                .filter(|c| c.post_id == post_id && c.hidden_at.is_none())
+                .filter(|c| c.is_anonymous || !excluded.contains(&c.author_id))
+                .map(|c| c.floor)
+        }
         _ => None,
     };
 
     // 往下翻时取的方向（与游标的 `b` 同义）：从旧到新往楼层大的方向取，从新到旧往楼层小的方向取。
     let down = query.sort == CommentSort::Newest;
+    let backward_cursor = cursor.as_ref().is_some_and(|c| c.b != down);
     let (fetched, older, more) = match (cursor, start_floor) {
         (Some(FloorCursor { f, b }), _) => {
-            let (rows, more) = fetch(&mut conn, post_id, &excluded, f, b, limit).await?;
+            let (rows, more) = fetch(&mut conn, post_id, &excluded, &featured, f, b, limit).await?;
             (rows, b, more)
         }
         (None, Some(floor)) => {
@@ -988,12 +998,14 @@ pub async fn list(
             } else {
                 floor - 1
             };
-            let (rows, more) = fetch(&mut conn, post_id, &excluded, from, down, limit).await?;
+            let (rows, more) =
+                fetch(&mut conn, post_id, &excluded, &featured, from, down, limit).await?;
             (rows, down, more)
         }
         (None, None) => {
             let from = if down { i32::MAX } else { 0 };
-            let (rows, more) = fetch(&mut conn, post_id, &excluded, from, down, limit).await?;
+            let (rows, more) =
+                fetch(&mut conn, post_id, &excluded, &featured, from, down, limit).await?;
             (rows, down, more)
         }
     };
@@ -1013,19 +1025,26 @@ pub async fn list(
     if start_floor.is_some()
         && older == down
         && let Some(first) = rows.first()
-        && fetch(&mut conn, post_id, &excluded, first.floor, !down, 0)
-            .await?
-            .1
+        && fetch(
+            &mut conn,
+            post_id,
+            &excluded,
+            &featured,
+            first.floor,
+            !down,
+            0,
+        )
+        .await?
+        .1
     {
         prev_cursor = Some(floor_cursor(first.floor, !down)?);
     }
 
-    let first_page = query.cursor.is_none() && start_floor.is_none();
-    let (accepted, pinned) = if first_page {
-        (
-            repo::accepted(&mut conn, post_id, &excluded).await?,
-            repo::pinned(&mut conn, post_id, &excluded).await?,
-        )
+    // 这一页是不是时间线开头：没有游标也没有锚点的第一页、往回翻到头的一页、从锚点开始但往回没有了的一页。
+    // 往下翻的页（游标方向与排序一致）一定不是开头。
+    let at_head = (query.cursor.is_none() || backward_cursor) && prev_cursor.is_none();
+    let (accepted, pinned) = if at_head {
+        (accepted, pinned)
     } else {
         (None, None)
     };

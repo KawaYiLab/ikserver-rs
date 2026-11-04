@@ -81,11 +81,11 @@ pub struct QuotedComment {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CommentsPage {
-    /// 采纳的最佳答案（只在第一页返回；它在 `items` 里也照常出现在自己的楼层）。
+    /// 采纳的最佳答案。它不在 `items` 里，只在时间线开头的那一页（没有 `prevCursor`、也不是往下翻的页）返回。
     pub accepted: Option<CommentView>,
-    /// 置顶评论（只在第一页返回；同时被采纳时只出现在 `accepted`）。
+    /// 置顶评论，规则同 `accepted`；同时被采纳时只出现在 `accepted`。
     pub pinned: Option<CommentView>,
-    /// 评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。
+    /// 评论，按 `sort` 排：默认楼层从旧到新，`newest` 时从新到旧。不含 `accepted` / `pinned`（楼层号照旧，时间线在那一层留空号）。
     pub items: Vec<CommentView>,
     /// 沿排序方向往下翻页（默认是更新的楼层，`newest` 时是更早的楼层）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -114,7 +114,8 @@ pub struct CommentsQuery {
     pub cursor: Option<String>,
     /// 默认 20，最大 50。
     pub limit: Option<u32>,
-    /// 从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始。
+    /// 从这条评论所在的楼层开始（通知、链接跳转到某条评论）。不在本帖或不可见时忽略，从第一页开始；
+    /// 它就是采纳 / 置顶时也从第一页开始（它在顶部）。
     /// 与 `cursor` 同时给时以 `cursor` 为准。
     #[param(value_type = Option<String>)]
     pub anchor: Option<Id<Comment>>,

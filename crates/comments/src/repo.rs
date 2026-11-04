@@ -186,11 +186,12 @@ pub(crate) async fn unaccept(conn: &mut PgConnection, id: i64) -> sqlx::Result<(
 //
 // 本节所有读取都带 `excluded_authors`：与读者有拉黑关系的人的非匿名评论不出现（BLOCK-014）。
 
-/// 帖子的可见评论，楼层号严格大于 `after`，旧的在前。
+/// 帖子时间线上的可见评论，楼层号严格大于 `after`，旧的在前。`featured`（顶部的采纳 / 置顶）不在时间线里。
 pub(crate) async fn page_after(
     conn: &mut PgConnection,
     post_id: i64,
     excluded_authors: &[i64],
+    featured: &[i64],
     after: i32,
     limit: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
@@ -201,22 +202,25 @@ pub(crate) async fn page_after(
          FROM comments
          WHERE post_id = $1 AND floor > $2 AND hidden_at IS NULL
            AND (is_anonymous OR NOT (author_id = ANY($4)))
+           AND NOT (id = ANY($5))
          ORDER BY floor
          LIMIT $3",
         post_id,
         after,
         limit,
         excluded_authors,
+        featured,
     )
     .fetch_all(conn)
     .await
 }
 
-/// 帖子的可见评论，楼层号严格小于 `before`，新的在前（往回翻；调用方再倒过来）。
+/// 同 [`page_after`]，楼层号严格小于 `before`，新的在前（往回翻；调用方再倒过来）。
 pub(crate) async fn page_before(
     conn: &mut PgConnection,
     post_id: i64,
     excluded_authors: &[i64],
+    featured: &[i64],
     before: i32,
     limit: i64,
 ) -> sqlx::Result<Vec<CommentRow>> {
@@ -227,12 +231,14 @@ pub(crate) async fn page_before(
          FROM comments
          WHERE post_id = $1 AND floor < $2 AND hidden_at IS NULL
            AND (is_anonymous OR NOT (author_id = ANY($4)))
+           AND NOT (id = ANY($5))
          ORDER BY floor DESC
          LIMIT $3",
         post_id,
         before,
         limit,
         excluded_authors,
+        featured,
     )
     .fetch_all(conn)
     .await
@@ -249,7 +255,9 @@ pub(crate) async fn accepted(
                 anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids
          FROM comments
          WHERE post_id = $1 AND hidden_at IS NULL AND accepted_at IS NOT NULL
-           AND (is_anonymous OR NOT (author_id = ANY($2)))",
+           AND (is_anonymous OR NOT (author_id = ANY($2)))
+         ORDER BY accepted_at DESC, id DESC
+         LIMIT 1",
         post_id,
         excluded_authors,
     )
@@ -269,7 +277,9 @@ pub(crate) async fn pinned(
          FROM comments
          WHERE post_id = $1 AND hidden_at IS NULL
            AND pinned_at IS NOT NULL AND accepted_at IS NULL
-           AND (is_anonymous OR NOT (author_id = ANY($2)))",
+           AND (is_anonymous OR NOT (author_id = ANY($2)))
+         ORDER BY pinned_at DESC, id DESC
+         LIMIT 1",
         post_id,
         excluded_authors,
     )

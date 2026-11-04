@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,\n                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments\n         WHERE post_id = $1 AND floor < $2 AND hidden_at IS NULL\n           AND (is_anonymous OR NOT (author_id = ANY($4)))\n         ORDER BY floor DESC\n         LIMIT $3",
+  "query": "SELECT id, post_id, reply_to_id, reply_to_floor, author_id, floor, body, is_anonymous,\n                anonymous_seed, like_count, pinned_at, accepted_at, hidden_at, created_at, image_ids\n         FROM comments\n         WHERE post_id = $1 AND floor < $2 AND hidden_at IS NULL\n           AND (is_anonymous OR NOT (author_id = ANY($4)))\n           AND NOT (id = ANY($5))\n         ORDER BY floor DESC\n         LIMIT $3",
   "describe": {
     "columns": [
       {
@@ -174,6 +174,7 @@
         "Int8",
         "Int4",
         "Int8",
+        "Int8Array",
         "Int8Array"
       ]
     },
@@ -195,5 +196,5 @@
       false
     ]
   },
-  "hash": "be64b4eaad9802d7eb2719e6d18e0d909fdbd73cff574e53a13393f5496ee68c"
+  "hash": "ac5f74de5ed2a84dc6fcc89d3f99293e9e788c42174ffa55880084bfdd70f901"
 }

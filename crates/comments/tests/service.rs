@@ -493,12 +493,12 @@ async fn pin_rules(db: PgPool) {
         Some(b),
         "新置顶替换旧置顶"
     );
+    assert!(page.pinned.as_ref().unwrap().is_pinned);
     assert_eq!(
         page.items.iter().map(|c| c.id.get()).collect::<Vec<_>>(),
-        vec![a, b, reply],
-        "置顶的评论在时间线里照常出现在自己的楼层"
+        vec![a, reply],
+        "置顶的评论只在顶部出现一次，时间线里不再有它；旧置顶回到自己的楼层"
     );
-    assert!(page.items[1].is_pinned);
 
     // 回复也能置顶（所有评论平等）。
     service::pin(&h.comments, &op, reply).await.unwrap();
@@ -565,7 +565,11 @@ async fn accept_rules(db: PgPool) {
         .unwrap();
     assert_eq!(page.accepted.as_ref().map(|c| c.id.get()), Some(b));
     assert!(page.accepted.as_ref().unwrap().is_accepted);
-    assert_eq!(page.items.len(), 2);
+    assert_eq!(
+        page.items.iter().map(|c| c.id.get()).collect::<Vec<_>>(),
+        vec![a],
+        "采纳的评论只在顶部出现"
+    );
 
     // 采纳一条回复。
     let reply = h.comment(&me, qa, Some(a), "补充").await;
@@ -747,6 +751,74 @@ async fn newest_first_pages_both_ways(db: PgPool) {
     let back = list(newest(page.prev_cursor, 2)).await.unwrap();
     assert_eq!(floors(&back), vec![7, 6]);
     assert!(back.prev_cursor.is_none() && back.next_cursor.is_none());
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn featured_comments_sit_at_the_head_of_the_timeline_only(db: PgPool) {
+    let h = harness(db);
+    let op = h.user(1).await;
+    let post = h.post(&op, true).await;
+    let mut all = Vec::new();
+    for i in 0..7 {
+        let who = h.user(10 + i).await;
+        all.push(h.comment(&who, post, None, "x").await);
+    }
+    service::pin(&h.comments, &op, all[2]).await.unwrap();
+    let list = |q: CommentsQuery| service::list(&h.comments, None, post, q);
+    let pinned = |page: &ik_comments::dto::CommentsPage| page.pinned.as_ref().map(|c| c.floor);
+
+    // 从旧到新翻完：第 3 层只在第一页顶部出现一次，楼层号不变。
+    let first = list(page_query(None, 3, None)).await.unwrap();
+    assert_eq!(pinned(&first), Some(3));
+    assert_eq!(floors(&first), vec![1, 2, 4]);
+    let second = list(page_query(first.next_cursor, 3, None)).await.unwrap();
+    assert_eq!(floors(&second), vec![5, 6, 7]);
+    assert!(second.pinned.is_none() && second.next_cursor.is_none());
+
+    // 从新到旧：顶部同样是置顶，时间线跳过第 3 层。
+    let first = list(newest(None, 4)).await.unwrap();
+    assert_eq!(pinned(&first), Some(3));
+    assert_eq!(floors(&first), vec![7, 6, 5, 4]);
+    let rest = list(newest(first.next_cursor, 4)).await.unwrap();
+    assert_eq!(floors(&rest), vec![2, 1]);
+    assert!(rest.pinned.is_none());
+
+    // 从中间开始不带置顶；往回翻到开头的那一页才带上。
+    let mid = list(page_query(None, 2, Some(all[5]))).await.unwrap();
+    assert_eq!(floors(&mid), vec![6, 7]);
+    assert!(mid.pinned.is_none());
+    let back = list(page_query(mid.prev_cursor, 2, None)).await.unwrap();
+    assert_eq!(floors(&back), vec![4, 5]);
+    assert!(back.pinned.is_none());
+    let head = list(page_query(back.prev_cursor, 2, None)).await.unwrap();
+    assert_eq!(floors(&head), vec![1, 2]);
+    assert_eq!(pinned(&head), Some(3));
+    assert!(head.prev_cursor.is_none());
+
+    // 锚点就是置顶本身：从时间线开头开始。
+    let page = list(page_query(None, 3, Some(all[2]))).await.unwrap();
+    assert_eq!(pinned(&page), Some(3));
+    assert_eq!(floors(&page), vec![1, 2, 4]);
+    assert!(page.prev_cursor.is_none());
+
+    // 锚点在第一页里：往回没有了，这一页就是开头。
+    let page = list(page_query(None, 3, Some(all[0]))).await.unwrap();
+    assert_eq!(pinned(&page), Some(3));
+    assert!(page.prev_cursor.is_none());
+
+    // 同时置顶和采纳：只在采纳位置出现一次。
+    service::accept(&h.comments, &op, all[2]).await.unwrap();
+    let page = list(page_query(None, 10, None)).await.unwrap();
+    assert_eq!(page.accepted.as_ref().map(|c| c.floor), Some(3));
+    assert!(page.pinned.is_none());
+    assert_eq!(floors(&page), vec![1, 2, 4, 5, 6, 7]);
+
+    // 采纳一条、置顶另一条：两条都在顶部，时间线里都没有。
+    service::pin(&h.comments, &op, all[6]).await.unwrap();
+    let page = list(page_query(None, 10, None)).await.unwrap();
+    assert_eq!(page.accepted.as_ref().map(|c| c.floor), Some(3));
+    assert_eq!(pinned(&page), Some(7));
+    assert_eq!(floors(&page), vec![1, 2, 4, 5, 6]);
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
