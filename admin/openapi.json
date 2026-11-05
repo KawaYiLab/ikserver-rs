@@ -12547,68 +12547,6 @@
         ]
       }
     },
-    "/v1/posts/{id}/related": {
-      "get": {
-        "tags": [
-          "content"
-        ],
-        "summary": "相关推荐",
-        "description": "帖子详情页底部的推荐：与这篇共享标签越多、同分区、自己没读过、越新越热的越靠前；\n同一作者最多 2 篇，不含这篇本身与自己的帖子。可见性与帖子详情相同。",
-        "operationId": "related_posts",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "默认 6，最大 10。",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "format": "int32",
-              "minimum": 0
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RelatedPosts"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "USER_BLOCKED",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "NOT_FOUND",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemBody"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/posts/{id}/triple": {
       "post": {
         "tags": [
@@ -25011,21 +24949,6 @@
               "type": "string"
             },
             "description": "用户不能改成的用户名（不区分大小写，整名匹配），例如 `admin`、`官方`。后台改名不受限制。"
-          }
-        }
-      },
-      "RelatedPosts": {
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PostCard"
-            },
-            "description": "按相关度从高到低。"
           }
         }
       },

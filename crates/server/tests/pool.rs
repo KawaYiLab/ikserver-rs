@@ -124,7 +124,6 @@ async fn common_endpoints_work_with_a_single_connection(db: PgPool) {
         "/v1/presence".to_owned(),
         format!("/v1/posts/{post_id}"),
         format!("/v1/posts/{post_id}/comments"),
-        format!("/v1/posts/{post_id}/related"),
         format!("/v1/comments/{comment_id}/replies"),
         "/v1/users/1".to_owned(),
         "/v1/users/1/posts".to_owned(),

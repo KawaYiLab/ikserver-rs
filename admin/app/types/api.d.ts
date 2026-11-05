@@ -3586,27 +3586,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/posts/{id}/related": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * 相关推荐
-         * @description 帖子详情页底部的推荐：与这篇共享标签越多、同分区、自己没读过、越新越热的越靠前；
-         *     同一作者最多 2 篇，不含这篇本身与自己的帖子。可见性与帖子详情相同。
-         */
-        get: operations["related_posts"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/posts/{id}/triple": {
         parameters: {
             query?: never;
@@ -7783,10 +7762,6 @@ export interface components {
             open: boolean;
             /** @description 用户不能改成的用户名（不区分大小写，整名匹配），例如 `admin`、`官方`。后台改名不受限制。 */
             reservedUsernames: string[];
-        };
-        RelatedPosts: {
-            /** @description 按相关度从高到低。 */
-            items: components["schemas"]["PostCard"][];
         };
         /** @description 我与某个用户的关系。 */
         RelationView: {
@@ -16788,48 +16763,6 @@ export interface operations {
             };
             /** @description REVISION_CONFLICT */
             412: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemBody"];
-                };
-            };
-        };
-    };
-    related_posts: {
-        parameters: {
-            query?: {
-                /** @description 默认 6，最大 10。 */
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RelatedPosts"];
-                };
-            };
-            /** @description USER_BLOCKED */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemBody"];
-                };
-            };
-            /** @description NOT_FOUND */
-            404: {
                 headers: {
                     [name: string]: unknown;
                 };
