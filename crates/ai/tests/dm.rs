@@ -256,6 +256,57 @@ async fn message_triggers_a_streamed_reply(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn greeting_opens_the_session_and_reminder_rides_each_turn(db: PgPool) {
+    let h = harness(db).await;
+    let file: ImportFile = serde_json::from_value(serde_json::json!({
+        "characters": [
+            { "slug": "fairy", "displayName": "Fairy", "username": format!("user{FAIRY}"),
+              "enabled": true, "systemPrompt": "你是 Fairy。",
+              "allowedModelKeys": ["base", "pro", "lost", "eye"],
+              "greetings": ["  主人终于想起我了？  ", " "],
+              "reminder": " 你是 Fairy，称对方为主人。 " }
+        ]
+    }))
+    .unwrap();
+    service::import(&h.state, file).await.unwrap();
+
+    // 新建对话时先发一条开场白（AI-029）：不调模型、不计额度。
+    let conversation = h.session().await;
+    let opening = sqlx::query!(
+        "SELECT sender_id, kind, content, ai_state, ai_model_key FROM messages
+         WHERE conversation_id = $1 ORDER BY id",
+        conversation
+    )
+    .fetch_all(&h.db)
+    .await
+    .unwrap();
+    assert_eq!(opening.len(), 1);
+    assert_eq!(opening[0].sender_id, FAIRY);
+    assert_eq!(opening[0].kind, "text");
+    assert_eq!(opening[0].content, "主人终于想起我了？");
+    assert_eq!(opening[0].ai_state.as_deref(), Some("done"));
+    assert_eq!(opening[0].ai_model_key, None);
+    assert!(h.fake.requests().is_empty());
+    assert_eq!(h.used().await, 0);
+
+    let trigger = h.send(conversation, "你好").await;
+    h.fake.push(vec![content("哼，有事快说。"), usage(10, 5)]);
+    dm::run_job(&h.state, h.job_for_trigger(trigger).await, false)
+        .await
+        .unwrap();
+    let messages = &h.fake.requests()[0].messages;
+    // 开场白是历史里的第一条 AI 回复；人设提醒附在最后一条用户消息后面（GEN-073）。
+    assert!(messages[0].text().contains("【说话方式】"));
+    assert_eq!(messages[1], ChatMessage::assistant("主人终于想起我了？"));
+    let last = messages[2].text();
+    assert!(last.starts_with("你好"), "{last}");
+    assert!(
+        last.contains("【人设提醒】你是 Fairy，称对方为主人。"),
+        "{last}"
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn history_carries_prior_turns_until_reset(db: PgPool) {
     let h = harness(db).await;
     let conversation = h.session().await;

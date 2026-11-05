@@ -443,16 +443,17 @@ pub async fn search_across(
     .collect())
 }
 
-/// 几个会话里 `before` 之前最后一条文本消息的时刻（AI 久别重逢，MEM-100）。
+/// 几个会话里 `before` 之前 `sender_id` 发的最后一条文本消息的时刻（AI 久别重逢，MEM-100）。
 pub async fn last_text_before(
     conn: &mut PgConnection,
     conversation_ids: &[i64],
+    sender_id: i64,
     before: DateTime<Utc>,
 ) -> Result<Option<DateTime<Utc>>, Problem> {
     if conversation_ids.is_empty() {
         return Ok(None);
     }
-    Ok(repo::last_text_before(conn, conversation_ids, before).await?)
+    Ok(repo::last_text_before(conn, conversation_ids, sender_id, before).await?)
 }
 
 /// 最近的未撤回文本消息（新的在前）。

@@ -135,6 +135,10 @@ pub struct AdminCharacter {
     /// 空 = 全部启用模型。
     pub allowed_model_keys: Vec<String>,
     pub suggested_questions: Vec<String>,
+    /// 开场白（AI-029）。
+    pub greetings: Vec<String>,
+    /// 人设提醒（GEN-073）。
+    pub reminder: String,
     /// 提供剧情库工具（ADR 0004）。
     pub story_tools: bool,
     /// 启用的站外 MCP 服务（服务名）。
@@ -528,6 +532,8 @@ pub async fn characters(state: &AiState) -> Result<Vec<AdminCharacter>, Problem>
             default_model_key: c.default_model_id.and_then(key_of),
             allowed_model_keys: c.allowed_model_ids.into_iter().filter_map(key_of).collect(),
             suggested_questions: c.suggested_questions,
+            greetings: c.greetings,
+            reminder: c.reminder,
             story_tools: c.story_tools,
             mcp_servers: c.mcp_server_ids.into_iter().filter_map(server_of).collect(),
             params: serde_json::from_value(c.params).unwrap_or_default(),

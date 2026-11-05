@@ -14436,6 +14436,8 @@
           "examples",
           "allowedModelKeys",
           "suggestedQuestions",
+          "greetings",
+          "reminder",
           "storyTools",
           "mcpServers",
           "params"
@@ -14481,6 +14483,13 @@
               "$ref": "#/components/schemas/Example"
             }
           },
+          "greetings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "开场白（AI-029）。"
+          },
           "knockVisible": {
             "type": "boolean"
           },
@@ -14500,6 +14509,10 @@
           },
           "qqEnabled": {
             "type": "boolean"
+          },
+          "reminder": {
+            "type": "string",
+            "description": "人设提醒（GEN-073）。"
           },
           "slug": {
             "type": "string"
@@ -16976,6 +16989,13 @@
               "$ref": "#/components/schemas/Example"
             }
           },
+          "greetings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "开场白（AI-029）：新建 AI 对话时随机发一条，最多 10 条。"
+          },
           "knockVisible": {
             "type": "boolean"
           },
@@ -16996,6 +17016,10 @@
           "qqEnabled": {
             "type": "boolean",
             "description": "允许在 QQ 渠道使用此角色，默认关闭（ADR 0008）。"
+          },
+          "reminder": {
+            "type": "string",
+            "description": "人设提醒（GEN-073）：每轮附在最后一条用户消息后面，最多 500 字。"
           },
           "slug": {
             "type": "string"

@@ -166,9 +166,13 @@ fn event_line(happened_on: Option<NaiveDate>, content: &str) -> String {
     }
 }
 
-/// 该不该提待跟进（MEM-055）：会话开场（本会话还没有 AI 的回复），或上一条消息隔了 [`REUNION_HOURS`] 以上。
+/// 该不该提待跟进（MEM-055）：会话开场（对方在本会话里还没说过别的，开场白不算），或上一条消息隔了
+/// [`REUNION_HOURS`] 以上。
 fn is_opening(history: &[HistoryItem], ai_user_id: i64) -> bool {
-    if !history.iter().any(|item| item.sender_id == ai_user_id) {
+    let Some((_, earlier)) = history.split_last() else {
+        return true;
+    };
+    if earlier.iter().all(|item| item.sender_id == ai_user_id) {
         return true;
     }
     match history {
@@ -185,6 +189,7 @@ pub(crate) async fn recall(
     config: &MemoryConfig,
     session: &SessionRow,
     history: &[HistoryItem],
+    greetings: &[String],
     now: DateTime<Utc>,
 ) -> Result<Recall, Problem> {
     let mut recall = Recall {
@@ -203,8 +208,14 @@ pub(crate) async fn recall(
     if is_opening(history, session.ai_user_id) {
         if let Some(trigger) = history.last() {
             let sessions = repo::pair_sessions(conn, session.user_id, session.ai_user_id).await?;
-            let last = ik_messaging::interop::last_text_before(conn, &sessions, trigger.created_at)
-                .await?;
+            // 只看对方说的：新对话的开场白是刚写的，不能算「上次聊天」（AI-029）。
+            let last = ik_messaging::interop::last_text_before(
+                conn,
+                &sessions,
+                session.user_id,
+                trigger.created_at,
+            )
+            .await?;
             if let Some(last) = last {
                 let last_day = beijing_today(last);
                 let days = (beijing_today(trigger.created_at) - last_day).num_days();
@@ -249,6 +260,10 @@ pub(crate) async fn recall(
         recall.bridge = items
             .into_iter()
             .filter(|item| !item.content.trim().is_empty())
+            // 别的对话里的开场白不算聊过（AI-029）。
+            .filter(|item| {
+                item.sender_id != session.ai_user_id || !greetings.contains(&item.content)
+            })
             .map(|item| {
                 let mine = item.sender_id == session.ai_user_id;
                 let text = if mine {
@@ -1392,6 +1407,13 @@ mod tests {
         let mut items = history(1);
         // 会话里还没有 AI 的回复：开场。
         assert!(is_opening(&items, 3));
+        // 只有开场白、对方第一次开口：也是开场（AI-029）。
+        let mut greeted = items.clone();
+        let mut greeting = items[0].clone();
+        greeting.sender_id = 3;
+        greeting.created_at -= chrono::Duration::seconds(30);
+        greeted.insert(0, greeting);
+        assert!(is_opening(&greeted, 3));
         let mut reply = items[0].clone();
         reply.sender_id = 3;
         reply.created_at += chrono::Duration::seconds(5);

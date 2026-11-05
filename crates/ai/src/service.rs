@@ -175,6 +175,9 @@ pub fn assistant() -> AssistantView {
     }
 }
 
+/// 一条开场白的上限（AI-029，消息正文上限 4000 内留出余量）。
+const GREETING_MAX_CHARS: usize = 2000;
+
 static MODEL_KEY: LazyLock<Option<regex::Regex>> =
     LazyLock::new(|| regex::Regex::new(r"^[a-z0-9][a-z0-9._-]{0,63}$").ok());
 static SLUG: LazyLock<Option<regex::Regex>> =
@@ -283,6 +286,18 @@ fn validate_character(index: usize, c: &CharacterInput) -> Result<(), Problem> {
     }
     if c.suggested_questions.len() > 10 {
         return Err(field("suggestedQuestions", "最多 10 条"));
+    }
+    if c.greetings.len() > 10 {
+        return Err(field("greetings", "最多 10 条"));
+    }
+    if c.greetings
+        .iter()
+        .any(|g| g.trim().chars().count() > GREETING_MAX_CHARS)
+    {
+        return Err(field("greetings", "每条最多 2000 字"));
+    }
+    if c.reminder.trim().chars().count() > 500 {
+        return Err(field("reminder", "最多 500 字"));
     }
     validate_sampling(c.params.temperature, c.params.top_p)
         .map_err(|(name, detail)| field(name, detail))?;
@@ -460,6 +475,12 @@ pub(crate) async fn apply(
             .map(|q| q.trim().to_owned())
             .filter(|q| !q.is_empty())
             .collect();
+        let greetings: Vec<String> = c
+            .greetings
+            .iter()
+            .map(|g| g.trim().to_owned())
+            .filter(|g| !g.is_empty())
+            .collect();
         repo::upsert_card(
             tx,
             &repo::NewCard {
@@ -484,6 +505,8 @@ pub(crate) async fn apply(
                 story_tools: c.story_tools,
                 mcp_server_ids: &mcp_server_ids,
                 params: &params,
+                greetings: &greetings,
+                reminder: c.reminder.trim(),
                 now,
             },
         )

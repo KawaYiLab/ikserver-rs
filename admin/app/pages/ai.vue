@@ -325,6 +325,8 @@ interface CharacterDraft {
   defaultModelKey: string
   allowedModelKeys: string[]
   suggestedQuestions: string
+  greetings: string[]
+  reminder: string
   storyTools: boolean
   mcpServers: string[]
   temperature: string
@@ -359,6 +361,8 @@ function editCharacter(character?: Character) {
         defaultModelKey: character.defaultModelKey ?? 'none',
         allowedModelKeys: [...character.allowedModelKeys],
         suggestedQuestions: character.suggestedQuestions.join('\n'),
+        greetings: [...character.greetings],
+        reminder: character.reminder,
         storyTools: character.storyTools,
         mcpServers: [...character.mcpServers],
         temperature: text(character.params.temperature),
@@ -384,6 +388,8 @@ function editCharacter(character?: Character) {
         defaultModelKey: 'none',
         allowedModelKeys: [],
         suggestedQuestions: '',
+        greetings: [],
+        reminder: '',
         storyTools: false,
         mcpServers: [],
         temperature: '',
@@ -428,6 +434,8 @@ async function saveCharacter() {
     defaultModelKey: d.defaultModelKey === 'none' ? null : d.defaultModelKey,
     allowedModelKeys: d.allowedModelKeys,
     suggestedQuestions: d.suggestedQuestions.split('\n').map(q => q.trim()).filter(Boolean),
+    greetings: d.greetings.map(g => g.trim()).filter(Boolean),
+    reminder: d.reminder.trim(),
     storyTools: d.storyTools,
     mcpServers: d.mcpServers,
     params: { temperature: numberOrNull(d.temperature), topP: numberOrNull(d.topP) },
@@ -1419,6 +1427,22 @@ function traceMessages(request: unknown) {
               <Plus class="size-4" />添加示例
             </Button>
           </div>
+          <div class="space-y-2">
+            <Label>开场白</Label>
+            <div v-for="(_, index) in characterDraft.greetings" :key="index" class="grid gap-2 sm:grid-cols-[1fr_auto]">
+              <Textarea v-model="characterDraft.greetings[index]" rows="2" placeholder="新对话里角色先说的话，有多条时随机挑一条" />
+              <Button size="icon" variant="ghost" aria-label="删除开场白" @click="characterDraft.greetings.splice(index, 1)">
+                <X class="size-4" />
+              </Button>
+            </div>
+            <Button v-if="characterDraft.greetings.length < 10" size="sm" variant="outline" @click="characterDraft.greetings.push('')">
+              <Plus class="size-4" />添加开场白
+            </Button>
+          </div>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">人设提醒</span>
+            <Textarea v-model="characterDraft.reminder" rows="2" maxlength="500" placeholder="每轮都会提醒角色，比如：你是 Fairy，称对方为主人，说话简短带点毒舌" />
+          </label>
           <label class="grid gap-2">
             <span class="text-sm leading-none font-medium">推荐问题（每行一个）</span>
             <Textarea v-model="characterDraft.suggestedQuestions" rows="3" />

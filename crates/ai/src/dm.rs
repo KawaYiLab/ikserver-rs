@@ -171,7 +171,18 @@ pub(crate) fn pick_model<'a>(
         .filter(|m| has_provider(&m.provider))
 }
 
-/// system prompt（LLM-003、GEN-071）：人格 + 输出格式要求 + 示例对话（few-shot 块，不伪装成历史）。
+/// 纯文本角色的说话方式（GEN-074）：像聊天，不像客服。
+const CHAT_NOTE: &str = "\n\n【说话方式】像聊天一样回复：对方有情绪时先回应情绪，再说别的；不用客服腔，\
+    不罗列「我可以帮你做什么」；不一味附和，觉得不妥就用你的口吻直说。";
+
+/// 人设提醒（GEN-073）：角色卡里的一小段，每轮附在最后一条用户消息后面（[`memory::append_turn`]），
+/// 长对话、大段工具结果之后也不跑偏；放在最后一条消息里，不破坏前缀缓存（LLM-017）。
+pub(crate) fn reminder_note(card: &RoleCard) -> Option<String> {
+    let text = card.reminder.trim();
+    (!text.is_empty()).then(|| format!("\n\n【人设提醒】{text}"))
+}
+
+/// system prompt（LLM-003、GEN-071、GEN-074）：人格 + 输出格式要求 + 说话方式 + 示例对话（few-shot 块，不伪装成历史）。
 pub(crate) fn system_prompt(card: &RoleCard, mode: OutputMode) -> String {
     let mut prompt = if card.system_prompt.trim().is_empty() {
         format!("你是绳网论坛的 AI 角色「{}」。", card.display_name)
@@ -184,6 +195,9 @@ pub(crate) fn system_prompt(card: &RoleCard, mode: OutputMode) -> String {
         }
         OutputMode::Markdown => "\n\n【输出格式】可以使用 Markdown（标题、列表、代码块、链接）。",
     });
+    if mode == OutputMode::Plain {
+        prompt.push_str(CHAT_NOTE);
+    }
     prompt.push_str(&date_note(Utc::now()));
     if !card.examples.is_empty() {
         prompt.push_str(
@@ -513,12 +527,23 @@ async fn prepare(state: &AiState, job_id: i64, effects: &mut Effects) -> Result<
     toolbox.annotate_system(&mut messages);
     let mut follow_ups = Vec::new();
     if memory_on {
-        let recall = memory::recall(&mut tx, &catalog.memory, &session, &history, now).await?;
+        let recall = memory::recall(
+            &mut tx,
+            &catalog.memory,
+            &session,
+            &history,
+            &card.greetings,
+            now,
+        )
+        .await?;
         memory::annotate(&mut messages, &recall);
         follow_ups = recall.follow_ups.iter().map(|(id, _)| *id).collect();
         if memory::needs_summary(&history, state.config.max_history_messages) {
             memory_jobs::enqueue_summary(&state.jobs, &mut tx, conversation_id).await?;
         }
+    }
+    if let Some(note) = reminder_note(&card) {
+        memory::append_turn(&mut messages, &note);
     }
     let event_query = memory_on
         .then(|| memory::event_query(&history, job.ai_user_id))
@@ -933,6 +958,8 @@ mod tests {
             default_model_id: None,
             allowed_model_ids: Vec::new(),
             suggested_questions: Vec::new(),
+            greetings: Vec::new(),
+            reminder: String::new(),
             story_tools: false,
             mcp_server_ids: Vec::new(),
             params: crate::catalog::CardParams::default(),

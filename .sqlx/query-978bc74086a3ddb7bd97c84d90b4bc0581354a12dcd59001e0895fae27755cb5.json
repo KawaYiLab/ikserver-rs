@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, qq_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids,\n                params\n         FROM ai_role_cards ORDER BY sort_order, id",
+  "query": "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,\n                dm_enabled, comment_enabled, qq_enabled, sort_order, output_mode, system_prompt, examples,\n                default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids,\n                params, greetings, reminder\n         FROM ai_role_cards ORDER BY sort_order, id",
   "describe": {
     "columns": [
       {
@@ -233,6 +233,28 @@
             "name": "params"
           }
         }
+      },
+      {
+        "ordinal": 21,
+        "name": "greetings",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "greetings"
+          }
+        }
+      },
+      {
+        "ordinal": 22,
+        "name": "reminder",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_role_cards",
+            "name": "reminder"
+          }
+        }
       }
     ],
     "parameters": {
@@ -259,8 +281,10 @@
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "86345f352459cdeed7bc0fddc7d94c044306138d41be3da5cfc95b37f1c23841"
+  "hash": "978bc74086a3ddb7bd97c84d90b4bc0581354a12dcd59001e0895fae27755cb5"
 }

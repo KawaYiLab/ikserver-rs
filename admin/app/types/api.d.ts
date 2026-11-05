@@ -4185,6 +4185,8 @@ export interface components {
             dmEnabled: boolean;
             enabled: boolean;
             examples: components["schemas"]["Example"][];
+            /** @description 开场白（AI-029）。 */
+            greetings: string[];
             knockVisible: boolean;
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers: string[];
@@ -4192,6 +4194,8 @@ export interface components {
             /** @description 覆盖模型的采样参数（LLM-016）。 */
             params: components["schemas"]["CardParams"];
             qqEnabled: boolean;
+            /** @description 人设提醒（GEN-073）。 */
+            reminder: string;
             slug: string;
             /** Format: int32 */
             sortOrder: number;
@@ -5016,6 +5020,8 @@ export interface components {
             dmEnabled?: boolean;
             enabled?: boolean;
             examples?: components["schemas"]["Example"][];
+            /** @description 开场白（AI-029）：新建 AI 对话时随机发一条，最多 10 条。 */
+            greetings?: string[];
             knockVisible?: boolean;
             /** @description 启用的站外 MCP 服务（服务名）。 */
             mcpServers?: string[];
@@ -5024,6 +5030,8 @@ export interface components {
             params?: components["schemas"]["CardParams"];
             /** @description 允许在 QQ 渠道使用此角色，默认关闭（ADR 0008）。 */
             qqEnabled?: boolean;
+            /** @description 人设提醒（GEN-073）：每轮附在最后一条用户消息后面，最多 500 字。 */
+            reminder?: string;
             slug: string;
             /** Format: int32 */
             sortOrder?: number;

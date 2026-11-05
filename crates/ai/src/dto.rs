@@ -198,6 +198,12 @@ pub struct CharacterInput {
     pub allowed_model_keys: Vec<String>,
     #[serde(default)]
     pub suggested_questions: Vec<String>,
+    /// 开场白（AI-029）：新建 AI 对话时随机发一条，最多 10 条。
+    #[serde(default)]
+    pub greetings: Vec<String>,
+    /// 人设提醒（GEN-073）：每轮附在最后一条用户消息后面，最多 500 字。
+    #[serde(default)]
+    pub reminder: String,
     /// 提供剧情库工具（ADR 0004）。
     #[serde(default)]
     pub story_tools: bool,

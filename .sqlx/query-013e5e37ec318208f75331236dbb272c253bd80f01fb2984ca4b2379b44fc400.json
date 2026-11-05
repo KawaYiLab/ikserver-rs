@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT max(created_at) FROM messages\n         WHERE conversation_id = ANY($1) AND kind = 'text' AND withdrawn_at IS NULL AND created_at < $2",
+  "query": "SELECT max(created_at) FROM messages\n         WHERE conversation_id = ANY($1) AND sender_id = $3 AND kind = 'text' AND withdrawn_at IS NULL\n           AND created_at < $2",
   "describe": {
     "columns": [
       {
@@ -13,12 +13,13 @@
     "parameters": {
       "Left": [
         "Int8Array",
-        "Timestamptz"
+        "Timestamptz",
+        "Int8"
       ]
     },
     "nullable": [
       null
     ]
   },
-  "hash": "258a110f61057d4c8e8a7acb3fd70c5c1e1b81a76819994e888a5bcae6c3bd1b"
+  "hash": "013e5e37ec318208f75331236dbb272c253bd80f01fb2984ca4b2379b44fc400"
 }

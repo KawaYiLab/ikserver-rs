@@ -166,6 +166,10 @@ pub struct RoleCard {
     /// 空 = 全部启用模型。
     pub allowed_model_ids: Vec<i64>,
     pub suggested_questions: Vec<String>,
+    /// 开场白（AI-029）：新建 AI 对话时随机发一条；空 = 不发。
+    pub greetings: Vec<String>,
+    /// 人设提醒（GEN-073）：每轮附在最后一条用户消息后面；空 = 不附。
+    pub reminder: String,
     /// 提供剧情库工具（ADR 0004）。
     pub story_tools: bool,
     /// 启用的站外 MCP 服务。
@@ -432,6 +436,12 @@ async fn load(db: &PgPool, fixed: Providers) -> Result<Catalog, Problem> {
                 .into_iter()
                 .filter(|q| !q.trim().is_empty())
                 .collect(),
+            greetings: row
+                .greetings
+                .into_iter()
+                .filter(|g| !g.trim().is_empty())
+                .collect(),
+            reminder: row.reminder,
             story_tools: row.story_tools,
             mcp_server_ids: row.mcp_server_ids,
             params: serde_json::from_value(row.params).unwrap_or_default(),
@@ -555,6 +565,8 @@ pub(crate) mod tests {
             default_model_id,
             allowed_model_ids: allowed,
             suggested_questions: Vec::new(),
+            greetings: Vec::new(),
+            reminder: String::new(),
             story_tools: false,
             mcp_server_ids: Vec::new(),
             params: CardParams::default(),

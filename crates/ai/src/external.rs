@@ -253,6 +253,9 @@ async fn prepare_inner(
             memory::append_turn(&mut messages, &note);
         }
     }
+    if let Some(note) = dm::reminder_note(card) {
+        memory::append_turn(&mut messages, &note);
+    }
     let tools = match turn.viewer {
         Some(viewer) => ToolContext::new(state, viewer).await?,
         None => ToolContext::guest(),

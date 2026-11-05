@@ -231,6 +231,8 @@ pub(crate) struct CardRow {
     pub story_tools: bool,
     pub mcp_server_ids: Vec<i64>,
     pub params: serde_json::Value,
+    pub greetings: Vec<String>,
+    pub reminder: String,
 }
 
 pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>> {
@@ -239,7 +241,7 @@ pub(crate) async fn cards(conn: &mut PgConnection) -> sqlx::Result<Vec<CardRow>>
         "SELECT id, slug, display_name, bio, avatar_media_id, bound_user_id, enabled, knock_visible,
                 dm_enabled, comment_enabled, qq_enabled, sort_order, output_mode, system_prompt, examples,
                 default_model_id, allowed_model_ids, suggested_questions, story_tools, mcp_server_ids,
-                params
+                params, greetings, reminder
          FROM ai_role_cards ORDER BY sort_order, id"
     )
     .fetch_all(conn)
@@ -268,6 +270,8 @@ pub(crate) struct NewCard<'a> {
     pub story_tools: bool,
     pub mcp_server_ids: &'a [i64],
     pub params: &'a serde_json::Value,
+    pub greetings: &'a [String],
+    pub reminder: &'a str,
     pub now: DateTime<Utc>,
 }
 
@@ -278,15 +282,16 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
                                     enabled, knock_visible, dm_enabled, comment_enabled, sort_order,
                                     output_mode, system_prompt, examples, default_model_id,
                                     allowed_model_ids, suggested_questions, story_tools,
-                                    mcp_server_ids, created_at, updated_at, qq_enabled, params)
+                                    mcp_server_ids, created_at, updated_at, qq_enabled, params,
+                                    greetings, reminder)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $19,
-                 $20, $18, $18, $21, $22)
+                 $20, $18, $18, $21, $22, $23, $24)
          ON CONFLICT (slug) DO UPDATE SET display_name = $3, bio = $4, avatar_media_id = $5,
              bound_user_id = $6, enabled = $7, knock_visible = $8, dm_enabled = $9,
              comment_enabled = $10, sort_order = $11, output_mode = $12, system_prompt = $13,
              examples = $14, default_model_id = $15, allowed_model_ids = $16,
              suggested_questions = $17, story_tools = $19, mcp_server_ids = $20, updated_at = $18,
-             qq_enabled = $21, params = $22
+             qq_enabled = $21, params = $22, greetings = $23, reminder = $24
          RETURNING id",
         c.id,
         c.slug,
@@ -310,6 +315,8 @@ pub(crate) async fn upsert_card(conn: &mut PgConnection, c: &NewCard<'_>) -> sql
         c.mcp_server_ids,
         c.qq_enabled,
         c.params,
+        c.greetings,
+        c.reminder,
     )
     .fetch_one(conn)
     .await

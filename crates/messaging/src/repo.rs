@@ -932,13 +932,16 @@ pub(crate) async fn search_across(
 pub(crate) async fn last_text_before(
     conn: &mut PgConnection,
     conversation_ids: &[i64],
+    sender_id: i64,
     before: DateTime<Utc>,
 ) -> sqlx::Result<Option<DateTime<Utc>>> {
     sqlx::query_scalar!(
         "SELECT max(created_at) FROM messages
-         WHERE conversation_id = ANY($1) AND kind = 'text' AND withdrawn_at IS NULL AND created_at < $2",
+         WHERE conversation_id = ANY($1) AND sender_id = $3 AND kind = 'text' AND withdrawn_at IS NULL
+           AND created_at < $2",
         conversation_ids,
         before,
+        sender_id,
     )
     .fetch_one(conn)
     .await

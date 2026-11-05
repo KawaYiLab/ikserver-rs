@@ -174,8 +174,38 @@ pub async fn create(
     )
     .await?;
     repo::insert_session(&mut tx, id, me, target.id, now).await?;
+    let mut effects = Effects::new();
+    if let Some(greeting) = pick_greeting(card, now) {
+        // 开场白（AI-029）：以角色的名义直接写一条，不调模型、不计额度；之后作为历史里的第一条 AI 回复。
+        ik_messaging::interop::insert_ai_message(
+            &mut tx,
+            &state.ids,
+            NewAiMessage {
+                conversation_id: id,
+                sender_id: target.id,
+                kind: "text",
+                content: greeting,
+                ai_state: Some("done"),
+                ai_model_key: None,
+            },
+            now,
+            &mut effects,
+        )
+        .await?;
+    }
     tx.commit().await?;
+    effects.dispatch(state.bus.as_ref());
     ik_messaging::service::conversation(&state.messaging, principal, id).await
+}
+
+/// 新对话用哪条开场白（AI-029）：有多条时随便挑一条，没有时为 None。
+fn pick_greeting(card: &RoleCard, now: DateTime<Utc>) -> Option<&str> {
+    let count = card.greetings.len();
+    if count == 0 {
+        return None;
+    }
+    let index = usize::try_from(now.timestamp_subsec_nanos()).unwrap_or(0) % count;
+    card.greetings.get(index).map(String::as_str)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -555,6 +585,20 @@ impl MessageHooks for Hooks {
 mod tests {
     use super::*;
     use crate::dm::DmReply;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn greetings_are_picked_from_the_card() {
+        let at = DateTime::parse_from_rfc3339("2026-11-05T12:00:00.000000003Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let mut card = crate::catalog::tests::card(None, Vec::new());
+        assert_eq!(pick_greeting(&card, at), None);
+        card.greetings = vec!["主人终于来了？".into(), "又有什么事？".into()];
+        assert_eq!(pick_greeting(&card, at), Some("又有什么事？"));
+        let later = at + chrono::Duration::nanoseconds(1);
+        assert_eq!(pick_greeting(&card, later), Some("主人终于来了？"));
+    }
 
     #[test]
     fn auto_titles_use_first_line() {
