@@ -62,6 +62,7 @@ flowchart LR
 - `feed → auth, content, comments`：热榜要合并点赞（content）与评论（comments）两类活动，所以在两者之上；
   各种信息流的 SQL 仍在 content（帖子表归它），feed 只负责热度计算与组合（把展示位 id 交给 content）。
   B 站视频信息（`ik_content::bilibili`，trait 抽象，测试用假实现）在保存帖子的事务之前查询，进程内缓存 10 分钟。
+  请求带 `finger/spi` 给的 buvid Cookie：B 站风控会拦下机房 IP 上不带 `buvid3` 的请求（HTTP 412 + HTML 页面）。
 - `profile`：作者主页要汇总账号、关系、经验、帖子与评论、装扮与米游社绑定，所以在各内容域之上，
   只调用各域的 service / interop；`account` 用于注销，`ai` 的工具和 `admin` 的账号管理调用它。
 - `realtime → auth`：WebSocket 网关（`ik_realtime::Hub`）订阅事件总线，按受众转发；

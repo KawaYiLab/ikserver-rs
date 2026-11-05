@@ -3,13 +3,20 @@
 //! 上游用 trait 抽象，测试换成假实现；真实实现见 [`HttpBilibili`]。查询结果在进程内缓存 10 分钟
 //! （同一个视频的并发查询合并成一次），编辑器预览之后紧接着保存帖子不会再访问上游。
 //! 调用都在数据库事务之外。
+//!
+//! B 站的风控会拦下机房 IP 上不带 `buvid3` Cookie 的请求（HTTP 412 + HTML 页面），
+//! 所以真实实现先向 `finger/spi` 要一对 buvid，之后的请求都带上；被拦时换一对重试一次。
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use moka::future::Cache;
+use reqwest::StatusCode;
+use reqwest::header::{COOKIE, HeaderValue};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 use utoipa::ToSchema;
 
 const CACHE_TTL: Duration = Duration::from_secs(10 * 60);
@@ -17,6 +24,9 @@ const CACHE_CAPACITY: u64 = 10_000;
 const MAX_PAGES: usize = 200;
 /// 这些返回码表示视频不存在、被删除或不可见（不是上游故障）。
 const GONE_CODES: [i64; 5] = [-404, -403, -400, 62002, 62004];
+/// 返回码 -412：请求被风控拦截，和 HTTP 412 一样处理。
+const BLOCKED_CODE: i64 = -412;
+const MAX_BUVID_LEN: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum VideoKey {
@@ -56,6 +66,12 @@ pub struct VideoMeta {
 pub enum UpstreamError {
     #[error("请求 B 站失败：{0}")]
     Http(#[from] reqwest::Error),
+    #[error("B 站风控拦截了请求（412）")]
+    Blocked,
+    #[error("B 站返回 HTTP {0}")]
+    Status(StatusCode),
+    #[error("B 站返回的不是预期的 JSON：{0}")]
+    Json(#[from] serde_json::Error),
     #[error("B 站返回错误 {code}：{message}")]
     Code { code: i64, message: String },
     #[error("B 站返回了无法识别的数据：{0}")]
@@ -110,10 +126,13 @@ impl Videos {
     }
 }
 
-/// 真实实现：`GET {base}/x/web-interface/view?bvid=|aid=`。
+/// 真实实现：`GET {base}/x/web-interface/view?bvid=|aid=`，带上 `GET {base}/x/frontend/finger/spi`
+/// 给的 buvid Cookie（进程内共用一对，被风控拦截时换新的）。
 pub struct HttpBilibili {
     client: reqwest::Client,
     base: String,
+    /// 当前使用的 `buvid3=…; buvid4=…`。还没取过或刚被拦截时为空。
+    cookie: Mutex<Option<HeaderValue>>,
 }
 
 impl HttpBilibili {
@@ -128,16 +147,124 @@ impl HttpBilibili {
         Ok(Self {
             client,
             base: base.trim_end_matches('/').to_owned(),
+            cookie: Mutex::new(None),
         })
+    }
+
+    fn get(&self, path: &str) -> reqwest::RequestBuilder {
+        self.client
+            .get(format!("{}{path}", self.base))
+            .header("Referer", "https://www.bilibili.com/")
+    }
+
+    /// 当前的 buvid Cookie，没有就向 `finger/spi` 要一对（并发的请求只要一次）。
+    async fn cookie(&self) -> Result<HeaderValue, UpstreamError> {
+        let mut slot = self.cookie.lock().await;
+        if let Some(cookie) = slot.as_ref() {
+            return Ok(cookie.clone());
+        }
+        let cookie = self.fetch_buvid().await?;
+        *slot = Some(cookie.clone());
+        Ok(cookie)
+    }
+
+    /// 这对 buvid 被拦截了：丢掉，下次重新要。别的请求已经换过新的就不动。
+    async fn discard(&self, used: &HeaderValue) {
+        let mut slot = self.cookie.lock().await;
+        if slot.as_ref() == Some(used) {
+            *slot = None;
+        }
+    }
+
+    async fn fetch_buvid(&self) -> Result<HeaderValue, UpstreamError> {
+        let envelope: Envelope<SpiData> =
+            decode(self.get("/x/frontend/finger/spi").send().await?).await?;
+        let data = envelope
+            .ok()?
+            .ok_or(UpstreamError::Malformed("finger/spi 缺少 data"))?;
+        let b3 = data
+            .b_3
+            .filter(|v| valid_buvid(v))
+            .ok_or(UpstreamError::Malformed("finger/spi 缺少 b_3"))?;
+        let cookie = match data.b_4.filter(|v| valid_buvid(v)) {
+            Some(b4) => format!("buvid3={b3}; buvid4={b4}"),
+            None => format!("buvid3={b3}"),
+        };
+        HeaderValue::from_str(&cookie)
+            .map_err(|_| UpstreamError::Malformed("finger/spi 的 buvid 无法放进 Cookie"))
+    }
+
+    /// 查一次 view。被拦截时返回 [`UpstreamError::Blocked`]，由调用方决定换 buvid 重试。
+    async fn view(
+        &self,
+        key: &VideoKey,
+        cookie: &HeaderValue,
+    ) -> Result<Option<ViewData>, UpstreamError> {
+        let request = self
+            .get("/x/web-interface/view")
+            .header(COOKIE, cookie.clone());
+        let request = match key {
+            VideoKey::Bvid(bvid) => request.query(&[("bvid", bvid)]),
+            VideoKey::Aid(aid) => request.query(&[("aid", aid)]),
+        };
+        let envelope: Envelope<ViewData> = decode(request.send().await?).await?;
+        if GONE_CODES.contains(&envelope.code) {
+            return Ok(None);
+        }
+        Ok(Some(
+            envelope
+                .ok()?
+                .ok_or(UpstreamError::Malformed("缺少 data"))?,
+        ))
+    }
+}
+
+/// buvid 只接受 B 站实际会给的字符，免得上游的怪值改写 Cookie 头。
+fn valid_buvid(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_BUVID_LEN
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'=' | b'+' | b'/'))
+}
+
+/// 先看状态码再解析 JSON：风控拦截时 B 站回的是 HTTP 412 和一个 HTML 页面。
+async fn decode<T: DeserializeOwned>(response: reqwest::Response) -> Result<T, UpstreamError> {
+    let status = response.status();
+    if status == StatusCode::PRECONDITION_FAILED {
+        return Err(UpstreamError::Blocked);
+    }
+    if !status.is_success() {
+        return Err(UpstreamError::Status(status));
+    }
+    Ok(serde_json::from_slice(&response.bytes().await?)?)
+}
+
+#[derive(Deserialize)]
+struct Envelope<T> {
+    code: i64,
+    #[serde(default)]
+    message: String,
+    data: Option<T>,
+}
+
+impl<T> Envelope<T> {
+    fn ok(self) -> Result<Option<T>, UpstreamError> {
+        match self.code {
+            0 => Ok(self.data),
+            BLOCKED_CODE => Err(UpstreamError::Blocked),
+            code => Err(UpstreamError::Code {
+                code,
+                message: self.message,
+            }),
+        }
     }
 }
 
 #[derive(Deserialize)]
-struct Envelope {
-    code: i64,
-    #[serde(default)]
-    message: String,
-    data: Option<ViewData>,
+struct SpiData {
+    b_3: Option<String>,
+    b_4: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -171,25 +298,19 @@ struct OwnerData {
 #[async_trait]
 impl VideoApi for HttpBilibili {
     async fn bilibili(&self, key: &VideoKey) -> Result<Option<VideoMeta>, UpstreamError> {
-        let request = self
-            .client
-            .get(format!("{}/x/web-interface/view", self.base))
-            .header("Referer", "https://www.bilibili.com/");
-        let request = match key {
-            VideoKey::Bvid(bvid) => request.query(&[("bvid", bvid)]),
-            VideoKey::Aid(aid) => request.query(&[("aid", aid)]),
+        let cookie = self.cookie().await?;
+        let data = match self.view(key, &cookie).await {
+            Err(UpstreamError::Blocked) => {
+                // buvid 可能失效了：换一对再试一次，还被拦就报错。
+                self.discard(&cookie).await;
+                let cookie = self.cookie().await?;
+                self.view(key, &cookie).await?
+            }
+            other => other?,
         };
-        let envelope: Envelope = request.send().await?.json().await?;
-        if GONE_CODES.contains(&envelope.code) {
+        let Some(data) = data else {
             return Ok(None);
-        }
-        if envelope.code != 0 {
-            return Err(UpstreamError::Code {
-                code: envelope.code,
-                message: envelope.message,
-            });
-        }
-        let data = envelope.data.ok_or(UpstreamError::Malformed("缺少 data"))?;
+        };
         let (Some(bvid), Some(aid)) = (data.bvid, data.aid) else {
             return Err(UpstreamError::Malformed("缺少 bvid 或 aid"));
         };
@@ -218,7 +339,13 @@ impl VideoApi for HttpBilibili {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::extract::{Query, State};
+    use axum::http::HeaderMap;
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
 
     use super::*;
 
@@ -246,43 +373,92 @@ mod tests {
         }
     }
 
-    /// 本地桩服务器模拟 B 站 view 接口。
-    async fn stub() -> String {
-        use axum::extract::Query;
-        use axum::routing::get;
-        use std::collections::HashMap;
+    /// 本地桩服务器，按 B 站的真实行为：`finger/spi` 发 buvid；view 不带当前有效的 buvid3 时
+    /// 回 HTTP 412 和 HTML 风控页。
+    #[derive(Default)]
+    struct Stub {
+        /// 发出去的 buvid 对数。
+        issued: AtomicUsize,
+        /// 当前有效的 buvid3。设成 `None` 模拟 buvid 失效。
+        valid: std::sync::Mutex<Option<String>>,
+    }
 
-        let app = axum::Router::new().route(
-            "/x/web-interface/view",
-            get(|Query(q): Query<HashMap<String, String>>| async move {
-                let body = match (q.get("bvid").map(String::as_str), q.get("aid").map(String::as_str)) {
-                    (Some("BV1xx411c7mD"), _) => serde_json::json!({
-                        "code": 0, "message": "0",
-                        "data": {
-                            "bvid": "BV1xx411c7mD", "aid": 170001, "title": "测试视频",
-                            "pic": "http://i0.hdslb.com/bfs/archive/a.jpg", "duration": 300, "cid": 11,
-                            "owner": { "name": "UP 主", "mid": 1 },
-                            "pages": [
-                                { "cid": 11, "page": 1, "part": "上", "duration": 100 },
-                                { "cid": 12, "page": 2, "part": "下", "duration": 200 }
-                            ]
-                        }
-                    }),
-                    (_, Some("404")) => serde_json::json!({ "code": -404, "message": "啥都木有" }),
-                    _ => serde_json::json!({ "code": -412, "message": "请求被拦截" }),
-                };
-                axum::Json(body)
-            }),
-        );
+    async fn stub() -> (String, Arc<Stub>) {
+        let state = Arc::new(Stub::default());
+        let app = axum::Router::new()
+            .route("/x/frontend/finger/spi", get(stub_spi))
+            .route("/x/web-interface/view", get(stub_view))
+            .with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-        format!("http://{addr}")
+        (format!("http://{addr}"), state)
+    }
+
+    async fn stub_spi(State(stub): State<Arc<Stub>>) -> axum::Json<serde_json::Value> {
+        let n = stub.issued.fetch_add(1, Ordering::SeqCst) + 1;
+        let b3 = format!("TEST-{n}infoc");
+        *stub.valid.lock().unwrap() = Some(b3.clone());
+        axum::Json(serde_json::json!({
+            "code": 0, "message": "ok",
+            "data": { "b_3": b3, "b_4": format!("TEST-{n}-b4==") }
+        }))
+    }
+
+    async fn stub_view(
+        State(stub): State<Arc<Stub>>,
+        headers: HeaderMap,
+        Query(q): Query<HashMap<String, String>>,
+    ) -> Response {
+        let valid = stub.valid.lock().unwrap().clone();
+        let cookie = headers
+            .get(COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let has_buvid = valid.is_some_and(|b3| {
+            cookie
+                .split("; ")
+                .any(|c| c.strip_prefix("buvid3=") == Some(b3.as_str()))
+        });
+        let aid = q.get("aid").map(String::as_str);
+        if !has_buvid || aid == Some("412") {
+            let page =
+                "<!DOCTYPE html><html><title>出错啦! - bilibili.com</title>错误号: 412</html>";
+            return (
+                StatusCode::PRECONDITION_FAILED,
+                [("content-type", "text/html")],
+                page,
+            )
+                .into_response();
+        }
+        let body = match (q.get("bvid").map(String::as_str), aid) {
+            (Some("BV1xx411c7mD"), _) => serde_json::json!({
+                "code": 0, "message": "0",
+                "data": {
+                    "bvid": "BV1xx411c7mD", "aid": 170001, "title": "测试视频",
+                    "pic": "http://i0.hdslb.com/bfs/archive/a.jpg", "duration": 300, "cid": 11,
+                    "owner": { "name": "UP 主", "mid": 1 },
+                    "pages": [
+                        { "cid": 11, "page": 1, "part": "上", "duration": 100 },
+                        { "cid": 12, "page": 2, "part": "下", "duration": 200 }
+                    ]
+                }
+            }),
+            (_, Some("404")) => serde_json::json!({ "code": -404, "message": "啥都木有" }),
+            (_, Some("4120")) => serde_json::json!({ "code": -412, "message": "请求被拦截" }),
+            (_, Some("503")) => {
+                return (StatusCode::SERVICE_UNAVAILABLE, "upstream down").into_response();
+            }
+            (_, Some("999")) => return "not json".into_response(),
+            _ => serde_json::json!({ "code": -799, "message": "请求过于频繁" }),
+        };
+        axum::Json(body).into_response()
     }
 
     #[tokio::test]
     async fn http_client_parses_view_and_maps_codes() {
-        let api = HttpBilibili::new(&stub().await, Duration::from_secs(5)).unwrap();
+        let (base, server) = stub().await;
+        let api = HttpBilibili::new(&base, Duration::from_secs(5)).unwrap();
         let meta = api
             .bilibili(&VideoKey::Bvid("BV1xx411c7mD".into()))
             .await
@@ -296,8 +472,39 @@ mod tests {
         assert!(api.bilibili(&VideoKey::Aid(404)).await.unwrap().is_none());
         assert!(matches!(
             api.bilibili(&VideoKey::Aid(5)).await,
-            Err(UpstreamError::Code { code: -412, .. })
+            Err(UpstreamError::Code { code: -799, .. })
         ));
+        assert!(matches!(
+            api.bilibili(&VideoKey::Aid(503)).await,
+            Err(UpstreamError::Status(s)) if s == StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(matches!(
+            api.bilibili(&VideoKey::Aid(999)).await,
+            Err(UpstreamError::Json(_))
+        ));
+        // buvid 只要了一次，之后的请求一直带着。
+        assert_eq!(server.issued.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn http_client_renews_buvid_when_blocked() {
+        let (base, server) = stub().await;
+        let api = HttpBilibili::new(&base, Duration::from_secs(5)).unwrap();
+        let key = VideoKey::Bvid("BV1xx411c7mD".into());
+        assert!(api.bilibili(&key).await.unwrap().is_some());
+
+        // buvid 失效：被拦一次，换一对后成功。
+        *server.valid.lock().unwrap() = None;
+        assert!(api.bilibili(&key).await.unwrap().is_some());
+        assert_eq!(server.issued.load(Ordering::SeqCst), 2);
+
+        // 换了 buvid 还被拦（HTML 页面或返回码 -412）：报 Blocked，只重试一次。
+        for aid in [412, 4120] {
+            let error = api.bilibili(&VideoKey::Aid(aid)).await.unwrap_err();
+            assert!(matches!(error, UpstreamError::Blocked), "{error}");
+            assert!(error.to_string().contains("412"));
+        }
+        assert_eq!(server.issued.load(Ordering::SeqCst), 4);
     }
 
     #[tokio::test]
