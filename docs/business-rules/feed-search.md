@@ -175,6 +175,8 @@
 
 ### 3.8 相关委托（suggested）
 
+> 新系统已于 2026-11-05 移除相关委托，本节只记录旧系统。
+
 - **SUGG-001** 常量：默认 6 条，最多 10 条；未看档只看最近 90 天；随机档取近 365 天；随机池容量 3000，缓存 key `suggested:pool:v1`，TTL 600s。documentId 必须匹配 `/^[a-zA-Z0-9_-]{1,128}$/`。`S/src/utils/suggested-articles.ts:22-31`
 - **SUGG-002** 种子帖必须对当前观众可见：未隐藏（false 或 NULL）、已发布且 `publishedAt ≤ now`，并通过拉黑过滤（匿名帖放行）；不满足时返回 null（对外 404）。`suggested-articles.ts:87-99`
 - **SUGG-003** 登录用户先走未看档：如果种子帖有分区，先查同分区再查全站，否则只查全站；每轮调用未看流查询（拉黑排除传空，`limit = limit×3 + 已排除数`），再按可见性和 `bumpedAt ≥ now−90d` 取卡片，按未看流顺序填入，跳过已选中的、种子帖本身、**观众本人的帖子（包括本人的匿名帖）**。`suggested-articles.ts:102-134`

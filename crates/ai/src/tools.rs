@@ -211,15 +211,13 @@ pub fn specs() -> Vec<ToolSpec> {
             name: Cow::Borrowed("search_posts"),
             description: Cow::Borrowed(
                 "在绳网站内找帖子：query 用短检索词，可用 category 限定公开分区；\
-                 只给 category 时浏览分区最新帖子。或只给 seed_post_id 查该帖的相关推荐，\
-                 不与 query/category 同用。\
+                 只给 category 时浏览分区最新帖子。\
                  结果里的帖子写成 markdown 链接 [标题](/post/id)，引用时必须原样保留该链接。",
             ),
             parameters: object(
                 json!({
                     "query": { "type": "string", "description": "检索词，如「攻略、零号空洞」" },
                     "category": { "type": "string", "description": "公开分区的 slug 或名称关键词" },
-                    "seed_post_id": document_id_param(),
                     "limit": limit_param(10, 5)
                 }),
                 &[],
@@ -647,17 +645,6 @@ async fn search_posts(
         _ => arg_str(args, &["query", "q"]).unwrap_or_default(),
     };
     let category_key = arg_str(args, &["category"]);
-    if let Some(seed) = id_arg(args, &["seed_post_id"]) {
-        if !query.trim().is_empty() || category_key.is_some() {
-            return Ok(ToolOutput::error(
-                "seed_post_id 不能与 query 或 category 同时使用。",
-            ));
-        }
-        return match seed {
-            Ok(id) => related_posts(state, ctx, id, arg_limit(args, 5, 10)).await,
-            Err(raw) => Ok(ToolOutput::error(post_not_found(raw))),
-        };
-    }
     let category = if let Some(raw) = category_key {
         match find_category(state, &raw).await? {
             Ok(category) => Some(category),
@@ -1032,45 +1019,6 @@ async fn post_comments(
         ));
     }
     Ok(ToolOutput::with(text, meta))
-}
-
-/// 复用论坛的相关推荐，在候选截断前应用工具的公开实名口径。
-async fn related_posts(
-    state: &AiState,
-    ctx: &ToolContext,
-    id: i64,
-    limit: u32,
-) -> Result<ToolOutput, Problem> {
-    let Some(seed) = visible_post(state, ctx, id).await? else {
-        return Ok(ToolOutput::text(post_not_found(id)));
-    };
-    let cards =
-        ik_content::service::related_named(&state.forum.content, ctx.viewer_id, id, Some(limit))
-            .await?;
-    let top: Vec<&PostCard> = cards
-        .iter()
-        .filter(|c| !c.is_anonymous && ctx.author_visible(&c.author))
-        .filter(|c| c.id.get() != id && c.author.id.is_none_or(|a| Some(a.get()) != ctx.viewer_id))
-        .take(usize::try_from(limit).unwrap_or(SEARCH_RESULTS))
-        .collect();
-    let header = format!("与《{}》相关的帖子：\n", title_or_placeholder(&seed.title));
-    let (lines, count) = card_lines_budget(
-        &top,
-        MAX_RESULT_CHARS.saturating_sub(header.chars().count()),
-    );
-    let text = if top.is_empty() {
-        "没有找到相关帖子。".to_owned()
-    } else {
-        format!("{header}{lines}")
-    };
-    Ok(ToolOutput::with(
-        text,
-        search_meta(
-            format!("与《{}》相关", seed.title),
-            top.len(),
-            &top[..count],
-        ),
-    ))
 }
 
 // ----- 分区 -----

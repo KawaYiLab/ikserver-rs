@@ -559,7 +559,7 @@ async fn users_are_found_exactly_and_hidden_ones_are_not(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
-async fn categories_hot_and_related(db: PgPool) {
+async fn categories_and_hot(db: PgPool) {
     let w = world(db).await;
     let list = w.text("get_category_list", serde_json::json!({})).await;
     assert_eq!(list, "1. 攻略区（/c/guide） - 攻略与心得");
@@ -583,80 +583,6 @@ async fn categories_hot_and_related(db: PgPool) {
         .text("get_hot_posts", serde_json::json!({ "limit": 3 }))
         .await;
     assert!(!hot.contains(&format!("/post/{})", w.carols)), "{hot}");
-
-    let related = w
-        .text(
-            "search_posts",
-            serde_json::json!({ "seed_post_id": w.guide }),
-        )
-        .await;
-    assert_eq!(related, "没有找到相关帖子。");
-    let more = post(
-        &w.state,
-        DAVE,
-        "防御配装细节",
-        "第二层怎么打。",
-        None,
-        false,
-    )
-    .await;
-    let category = ik_content::service::detail(&w.state.forum.content, None, w.guide)
-        .await
-        .unwrap()
-        .category
-        .unwrap()
-        .id;
-    for _ in 0..10 {
-        post(
-            &w.state,
-            BOB,
-            "匿名推荐候选",
-            "同分区候选排在实名帖前面。",
-            Some(category),
-            true,
-        )
-        .await;
-    }
-    // 游客推荐的前 10 条全被匿名候选占满，AI 仍应找到后面的实名帖。
-    let guest = ik_content::service::related(&w.state.forum.content, None, w.guide, Some(10))
-        .await
-        .unwrap();
-    assert_eq!(guest.len(), 10);
-    assert!(guest.iter().all(|card| card.is_anonymous));
-    let related = w
-        .text(
-            "search_posts",
-            serde_json::json!({ "seed_post_id": w.guide }),
-        )
-        .await;
-    // 标题毫无关键词重合，仍可由论坛推荐算法找到。
-    assert!(related.contains(&format!("[防御配装细节](/post/{more})")));
-    assert!(related.ends_with("第二层怎么打。"));
-    let own = post(
-        &w.state,
-        ALICE,
-        "我的攻略",
-        "自己的帖不推荐给自己。",
-        None,
-        false,
-    )
-    .await;
-    let related = w
-        .run(
-            "search_posts",
-            serde_json::json!({ "seed_post_id": w.guide, "viewerUserId": DAVE }),
-        )
-        .await;
-    for id in [w.guide, w.anonymous, w.carols, w.hidden, own] {
-        assert!(
-            !related.text.contains(&format!("/post/{id})")),
-            "{}",
-            related.text
-        );
-    }
-    assert!(
-        matches!(related.meta, ToolMeta::Search { items, .. } if items.iter().any(|(id, _)| *id == more))
-    );
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
@@ -675,12 +601,6 @@ async fn unknown_tools_and_bad_arguments(db: PgPool) {
     ] {
         let out = tools::execute(&w.state, &ctx, removed, "{}").await;
         assert!(out.is_error, "{removed}");
-    }
-    for args in [
-        serde_json::json!({ "seed_post_id": w.guide, "query": "攻略" }),
-        serde_json::json!({ "seed_post_id": w.guide, "category": "guide" }),
-    ] {
-        assert!(w.run("search_posts", args).await.is_error);
     }
     assert!(
         w.run(
