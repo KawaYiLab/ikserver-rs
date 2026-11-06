@@ -22,10 +22,11 @@ use crate::dto::{
     InboxEntry, InboxItem, InboxPage, InboxPreview, InboxReadResult, NotificationView, PageQuery,
     SenderView, UnreadCount,
 };
-use crate::interop::user_bucket;
+use crate::interop::{SYSTEM_BUCKET, user_bucket};
 use crate::repo::{self, BucketRow};
 use crate::service::{
-    not_found, page_limit, parse_bucket, sender_map, sender_view, summary, system_peer, view,
+    not_found, page_limit, parse_bucket, sender_map, sender_view, summary, system_avatar,
+    system_peer, view,
 };
 
 const DM_PREFIX: &str = "dm-";
@@ -265,7 +266,16 @@ pub async fn list(
             Source::Conversation(_) => None,
         })
         .collect();
+    let has_system = merged.iter().any(|s| match s {
+        Source::Bucket(b) => b.bucket_key == SYSTEM_BUCKET,
+        Source::Conversation(_) => false,
+    });
     let authors = sender_map(state, &mut conn, bucket_peers.into_iter()).await?;
+    let fairy_avatar = if has_system {
+        system_avatar(state, &mut conn).await?
+    } else {
+        None
+    };
 
     let to_entry = |cv: ConversationView| {
         let bucket = is_direct(&cv)
@@ -279,7 +289,7 @@ pub async fn list(
         Source::Bucket(b) => {
             let peer = match parse_bucket(&b.bucket_key).ok().flatten() {
                 Some(id) => sender_view(id, &authors),
-                None => system_peer(),
+                None => system_peer(fairy_avatar.clone()),
             };
             bucket_entry(&b, peer)
         }

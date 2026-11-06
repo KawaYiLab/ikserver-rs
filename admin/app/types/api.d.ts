@@ -4886,7 +4886,7 @@ export interface components {
             lastAt: string;
             /** @description 最后一条通知的概括。 */
             lastSummary: string;
-            /** @description 对方。系统会话的名字固定为「Fairy」，没有 id。 */
+            /** @description 对方。系统会话的名字固定为「Fairy」，没有 id，头像用 Fairy 角色的头像。 */
             peer: components["schemas"]["SenderView"];
             /** Format: int64 */
             unreadCount: number;
@@ -5788,7 +5788,7 @@ export interface components {
             /** @description `conversation` | `notifications` */
             kind: string;
             muted: boolean;
-            /** @description 对方。系统通知的名字固定为「Fairy」，没有 id。 */
+            /** @description 对方。系统通知的名字固定为「Fairy」，没有 id，头像用 Fairy 角色的头像。 */
             peer: components["schemas"]["SenderView"];
             pinned: boolean;
             preview?: components["schemas"]["InboxPreview"] | null;
@@ -6265,7 +6265,7 @@ export interface components {
                 lastAt: string;
                 /** @description 最后一条通知的概括。 */
                 lastSummary: string;
-                /** @description 对方。系统会话的名字固定为「Fairy」，没有 id。 */
+                /** @description 对方。系统会话的名字固定为「Fairy」，没有 id，头像用 Fairy 角色的头像。 */
                 peer: components["schemas"]["SenderView"];
                 /** Format: int64 */
                 unreadCount: number;
@@ -8075,7 +8075,7 @@ export interface components {
         };
         /** @description 通知的发送者。已注销的账号 `id`、`level` 为空，名字显示为「已注销用户」。 */
         SenderView: {
-            /** @description 头像（360 宽缩略图）。系统、已注销、没有设置时省略。 */
+            /** @description 头像（360 宽缩略图）。系统通知用 Fairy 角色的头像；已注销、没有设置时省略。 */
             avatarUrl?: string | null;
             id?: string | null;
             /** Format: int32 */

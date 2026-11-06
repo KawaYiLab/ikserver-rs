@@ -376,3 +376,75 @@ async fn senders_carry_avatars(db: PgPool) {
     let buckets = service::buckets(&h.state, &me, page()).await.unwrap();
     assert!(buckets.items[0].peer.avatar_url.is_some());
 }
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn system_peer_uses_fairy_avatar(db: PgPool) {
+    let h = harness(db);
+    let me = h.user(1).await;
+    h.user(2).await;
+    let mut conn = h.db.acquire().await.unwrap();
+    let mut effects = Effects::new();
+    interop::system(
+        &mut conn,
+        &h.ids,
+        &[1],
+        "你的委托已被移到「里区」分区。",
+        None,
+        Utc::now(),
+        &mut effects,
+    )
+    .await
+    .unwrap();
+    drop(conn);
+    let system_avatar = async || {
+        let inbox = ik_notify::inbox::list(&h.state, &me, page()).await.unwrap();
+        let buckets = service::buckets(&h.state, &me, page()).await.unwrap();
+        assert_eq!(inbox.items[0].peer.name, "Fairy");
+        assert_eq!(buckets.items[0].peer.name, "Fairy");
+        assert_eq!(
+            inbox.items[0].peer.avatar_url,
+            buckets.items[0].peer.avatar_url
+        );
+        buckets.items[0].peer.avatar_url.clone()
+    };
+    assert_eq!(system_avatar().await, None, "没有 Fairy 角色时不给头像");
+
+    sqlx::query!(
+        "INSERT INTO media_files (id, object_key, mime, size_bytes, sha256, receipt)
+         VALUES (900, 'a/900.png', 'image/png', 1, $1, 'r900'),
+                (901, 'a/901.png', 'image/png', 1, $2, 'r901')",
+        "c".repeat(64),
+        "d".repeat(64)
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    sqlx::query!("UPDATE users SET avatar_media_id = 900 WHERE id = 2")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    sqlx::query!(
+        "INSERT INTO ai_role_cards (id, slug, display_name, bound_user_id) VALUES (7, 'fairy', 'Fairy', 2)"
+    )
+    .execute(&h.db)
+    .await
+    .unwrap();
+    assert!(
+        system_avatar()
+            .await
+            .unwrap()
+            .starts_with("https://cdn.test/a/900.png"),
+        "卡上没设头像时用绑定账号的"
+    );
+
+    sqlx::query!("UPDATE ai_role_cards SET avatar_media_id = 901 WHERE id = 7")
+        .execute(&h.db)
+        .await
+        .unwrap();
+    assert!(
+        system_avatar()
+            .await
+            .unwrap()
+            .starts_with("https://cdn.test/a/901.png")
+    );
+}

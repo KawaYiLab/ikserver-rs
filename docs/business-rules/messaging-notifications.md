@@ -225,7 +225,7 @@ system 类精确文案（截 500 字符；`处理备注：` 后缀可拼接）�
 
 - KNOCK-001 伪会话 id：`pseudo:user:{senderId}` / `pseudo:anonymous:{seed}` / `pseudo:system`；`other:{senderId}` 等历史脏形态一律不映射（防两个 senderKey 合并成一个 pseudo:system）；contacts 的 peerKey 必须纯数字。`notification-merge.ts:78-141`
 - KNOCK-002 伪会话项形状与真会话项逐字段一致：`{documentId, kind:'direct', title:null, avatar:null, peer{userId,authorDocumentId,name,avatar,level}, memberCount:2, lastMessageAt, lastMessage{documentId:'notif:<docId>', content, createdAt, kind:'notification', senderUserId}, unreadCount, self:{role:'member',muted:false,pinned:false,lastReadAt:null}, pseudoKind}`。`notification-merge.ts:403-478`
-- KNOCK-003 系统消息对端展示名固定 `Fairy`（`SYSTEM_PEER_NAME`），头像取环境变量 `SYSTEM_NOTIFICATION_AVATAR`（可空，前端回退默认头像）；匿名对端名为 `绳网用户#XXXX`。`notification/utils/conversation.ts:20-28`
+- KNOCK-003 系统消息对端展示名固定 `Fairy`（`SYSTEM_PEER_NAME`），头像用 Fairy 角色卡（slug `fairy`，或显示名为 Fairy）的头像，卡上没设就用它绑定账号的头像；没有 Fairy 角色时省略（前端回退默认头像）；匿名对端名为 `绳网用户#XXXX`。`notification/utils/conversation.ts:20-28`
 
 ### 列表归并（统一收件箱语义）
 

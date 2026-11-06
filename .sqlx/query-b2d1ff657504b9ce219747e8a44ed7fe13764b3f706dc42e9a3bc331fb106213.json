@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_role_cards (id, slug, display_name, bound_user_id) VALUES (7, 'fairy', 'Fairy', 2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "b2d1ff657504b9ce219747e8a44ed7fe13764b3f706dc42e9a3bc331fb106213"
+}

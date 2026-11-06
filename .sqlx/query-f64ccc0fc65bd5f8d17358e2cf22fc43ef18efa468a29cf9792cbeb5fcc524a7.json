@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE ai_role_cards SET avatar_media_id = 901 WHERE id = 7",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f64ccc0fc65bd5f8d17358e2cf22fc43ef18efa468a29cf9792cbeb5fcc524a7"
+}

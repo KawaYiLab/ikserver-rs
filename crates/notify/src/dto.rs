@@ -17,7 +17,7 @@ pub struct SenderView {
     pub name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level: Option<i16>,
-    /// 头像（360 宽缩略图）。系统、已注销、没有设置时省略。
+    /// 头像（360 宽缩略图）。系统通知用 Fairy 角色的头像；已注销、没有设置时省略。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
 }
@@ -89,7 +89,7 @@ pub struct ReadResult {
 pub struct BucketView {
     /// `user-<发送者 id>` 或 `system`。
     pub key: String,
-    /// 对方。系统会话的名字固定为「Fairy」，没有 id。
+    /// 对方。系统会话的名字固定为「Fairy」，没有 id，头像用 Fairy 角色的头像。
     pub peer: SenderView,
     pub unread_count: i64,
     pub last_at: DateTime<Utc>,
@@ -130,7 +130,7 @@ pub struct InboxEntry {
     /// AI 会话的标题。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// 对方。系统通知的名字固定为「Fairy」，没有 id。
+    /// 对方。系统通知的名字固定为「Fairy」，没有 id，头像用 Fairy 角色的头像。
     pub peer: SenderView,
     /// 排序时间：最后一条私信或通知的时间。
     pub activity_at: DateTime<Utc>,

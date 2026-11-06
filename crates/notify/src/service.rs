@@ -79,13 +79,42 @@ pub(crate) fn sender_view(sender_id: i64, senders: &Senders) -> SenderView {
     }
 }
 
-pub(crate) fn system_peer() -> SenderView {
+/// 系统会话的对端（KNOCK-003）：名字固定为 Fairy，头像见 [`system_avatar`]。
+pub(crate) fn system_peer(avatar_url: Option<String>) -> SenderView {
     SenderView {
         id: None,
         name: SYSTEM_PEER_NAME.to_owned(),
         level: None,
-        avatar_url: None,
+        avatar_url,
     }
+}
+
+/// 系统会话的头像：Fairy 角色卡的头像，卡上没设就用它绑定账号的头像；没有 Fairy 角色时为空。
+pub(crate) async fn system_avatar(
+    state: &NotifyState,
+    conn: &mut PgConnection,
+) -> Result<Option<String>, Problem> {
+    let card: Option<(Option<i64>, i64)> = sqlx::query_as(
+        "SELECT avatar_media_id, bound_user_id FROM ai_role_cards
+         WHERE slug = 'fairy' OR lower(display_name) = 'fairy'
+         ORDER BY slug = 'fairy' DESC, id LIMIT 1",
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some((card_media, user_id)) = card else {
+        return Ok(None);
+    };
+    if let Some(media) = card_media
+        && let Some(view) = state.media.views(conn, &[media]).await?.remove(&media)
+    {
+        return Ok(Some(view.thumb_url));
+    }
+    let authors = ik_auth::service::authors(conn, &[user_id]).await?;
+    Ok(state
+        .media
+        .avatar_urls(conn, authors.values())
+        .await?
+        .remove(&user_id))
 }
 
 pub(crate) async fn sender_map(
@@ -274,11 +303,19 @@ pub async fn buckets(
         })
         .collect();
     let authors = sender_map(state, &mut conn, peers.iter().filter_map(|(_, id)| *id)).await?;
+    let fairy_avatar = if peers.iter().any(|(_, id)| id.is_none()) {
+        system_avatar(state, &mut conn).await?
+    } else {
+        None
+    };
     let views = rows
         .into_iter()
         .zip(peers)
         .map(|(row, (_, peer_id))| BucketView {
-            peer: peer_id.map_or_else(system_peer, |id| sender_view(id, &authors)),
+            peer: peer_id.map_or_else(
+                || system_peer(fairy_avatar.clone()),
+                |id| sender_view(id, &authors),
+            ),
             last_summary: summary(&row.kind, row.comment_id, &row.excerpt),
             key: row.bucket_key,
             unread_count: row.unread,
