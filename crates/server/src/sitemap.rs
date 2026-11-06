@@ -45,10 +45,12 @@ async fn sitemap(State(state): State<AppState>) -> Result<Response, Problem> {
         "SELECT post_no, GREATEST(COALESCE(edited_at, published_at), bumped_at) AS lastmod
          FROM posts
          WHERE status = 'published' AND hidden_at IS NULL AND published_at IS NOT NULL
+           AND category_id IS DISTINCT FROM (SELECT id FROM categories WHERE slug = $2)
          ORDER BY lastmod DESC
          LIMIT $1",
     )
     .bind(MAX_URLS)
+    .bind(ik_content::INNER_CATEGORY_SLUG)
     .fetch_all(&mut *conn)
     .await?;
 

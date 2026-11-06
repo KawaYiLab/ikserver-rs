@@ -5222,9 +5222,11 @@ export interface components {
          * @description 后台直接处置的动作（不经举报）。
          * @enum {string}
          */
-        ContentAction: "hide" | "unhide" | "delete";
+        ContentAction: "hide" | "unhide" | "delete" | "move";
         ContentActionRequest: {
             action: components["schemas"]["ContentAction"];
+            /** @description `move` 的目标分区。 */
+            categoryId?: string | null;
             /** @description 1–50 个。 */
             ids: string[];
             /** @description 处理备注（超过 500 字截断）：写入审核日志；通知作者时附在通知里。 */
@@ -6117,8 +6119,8 @@ export interface components {
         /** @description 一条审核记录（处置、自动隐藏、封禁、解封）。 */
         ModerationEntry: {
             /**
-             * @description `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |
-             *     `block_user` | `unblock_user`
+             * @description `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `move_content` |
+             *     `warn_user` | `block_user` | `unblock_user`
              */
             action: string;
             actor?: components["schemas"]["UserRef"] | null;

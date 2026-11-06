@@ -104,13 +104,16 @@ async fn excluded_authors(
 }
 
 /// 回查数据库取卡片，保持命中顺序；分区以数据库为准（索引可能滞后）。
+/// 没选分区时不含里区的帖子（POST-123）。
 async fn post_cards(
     state: &SearchState,
     viewer: Option<&Principal>,
     ids: &[i64],
     category: Option<&str>,
 ) -> Result<Vec<PostCard>, Problem> {
-    let mut cards = ik_content::service::public_cards_in_order(&state.content, viewer, ids).await?;
+    let mut cards =
+        ik_content::service::public_cards_in_order(&state.content, viewer, ids, category.is_none())
+            .await?;
     if let Some(slug) = category {
         cards.retain(|c| c.category.as_ref().is_some_and(|cat| cat.slug == slug));
     }
@@ -286,8 +289,13 @@ pub async fn search_comments(
                 });
             }
             Ok(Hits { ids, total }) => {
-                let items =
-                    ik_comments::service::search_views(&state.comments, viewer, &ids).await?;
+                let items = ik_comments::service::search_views(
+                    &state.comments,
+                    viewer,
+                    &ids,
+                    post_id.is_none(),
+                )
+                .await?;
                 if !items.is_empty() {
                     return Ok(SearchPage {
                         items,
@@ -307,7 +315,9 @@ pub async fn search_comments(
     let ids =
         ik_comments::service::search_comment_ids(&state.comments, viewer, &q, post_id).await?;
     let window: Vec<i64> = ids.iter().skip(offset).take(limit).copied().collect();
-    let items = ik_comments::service::search_views(&state.comments, viewer, &window).await?;
+    let items =
+        ik_comments::service::search_views(&state.comments, viewer, &window, post_id.is_none())
+            .await?;
     Ok(SearchPage {
         items,
         next_cursor: next_cursor(offset, window.len(), ids.len())?,

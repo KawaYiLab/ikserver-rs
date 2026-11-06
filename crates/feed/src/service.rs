@@ -52,7 +52,8 @@ pub async fn hot(
         .map_or(0, |c| c.o);
     let board = state.board();
     let visible =
-        ik_content::service::public_cards_in_order(&state.content, viewer, &board.full).await?;
+        ik_content::service::public_cards_in_order(&state.content, viewer, &board.full, true)
+            .await?;
     let total = visible.len();
     let items: Vec<PostCard> = visible.into_iter().skip(offset).take(limit).collect();
     let next = offset.saturating_add(items.len());

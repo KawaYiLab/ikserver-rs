@@ -562,7 +562,10 @@ async fn users_are_found_exactly_and_hidden_ones_are_not(db: PgPool) {
 async fn categories_and_hot(db: PgPool) {
     let w = world(db).await;
     let list = w.text("get_category_list", serde_json::json!({})).await;
-    assert_eq!(list, "1. 攻略区（/c/guide） - 攻略与心得");
+    assert_eq!(
+        list,
+        "1. 攻略区（/c/guide） - 攻略与心得\n2. 里区（/c/inner） - 不进首页，选中本分区才能看到。"
+    );
     let by_category = w
         .text("search_posts", serde_json::json!({ "category": "攻略" }))
         .await;

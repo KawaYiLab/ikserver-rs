@@ -833,7 +833,7 @@ async fn user_activity(
     // 主页评论按游客读取后，批量复核所在帖子对触发者的拉黑可见性。
     let post_ids: Vec<i64> = comments.iter().map(|c| c.post_id.get()).collect();
     let visible_ids: HashSet<i64> =
-        ik_content::service::public_cards_in_order(&state.forum.content, None, &post_ids)
+        ik_content::service::public_cards_in_order(&state.forum.content, None, &post_ids, false)
             .await?
             .into_iter()
             .filter(|c| ctx.author_visible(&c.author))

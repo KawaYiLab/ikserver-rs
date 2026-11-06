@@ -323,6 +323,17 @@ pub async fn update_category(
     let (slug, name) = checked_category(&input)?;
     let now = Utc::now();
     let mut tx = state.db.begin().await?;
+    // 代码按 slug 认里区（POST-122），改了就不再是里区。
+    if let Some(current) = repo::category_by_id(&mut tx, id).await?
+        && current.slug == crate::INNER_CATEGORY_SLUG
+        && slug != current.slug
+    {
+        return Err(Problem::field(
+            "slug",
+            "INNER_SLUG_LOCKED",
+            "里区的标识不能改",
+        ));
+    }
     let updated = repo::update_category(
         &mut tx,
         &CategoryUpdate {
@@ -663,21 +674,12 @@ pub async fn move_post(
             ));
         }
     }
-    let Some((from, public)) = repo::lock_published(&mut tx, post_id).await? else {
-        return Err(Problem::not_found());
-    };
-    if from == Some(category_id) {
-        return Ok(());
-    }
-    repo::move_post(&mut tx, post_id, category_id, now).await?;
-    if public {
-        effects.publish(crate::service::published_event(
-            post_id,
-            None,
-            Some(category_id),
-            false,
-        )?);
-    }
+    let from =
+        match crate::interop::move_post(&mut tx, post_id, category_id, now, &mut effects).await? {
+            crate::interop::MoveOutcome::NotFound => return Err(Problem::not_found()),
+            crate::interop::MoveOutcome::Unchanged => return Ok(()),
+            crate::interop::MoveOutcome::Moved { from } => from,
+        };
     admin::record(
         &mut tx,
         &state.ids,

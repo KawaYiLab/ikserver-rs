@@ -1172,6 +1172,7 @@ async fn visible_rows(
     conn: &mut PgConnection,
     viewer_id: Option<i64>,
     ids: &[i64],
+    exclude_inner: bool,
 ) -> Result<(Vec<CommentRow>, HashMap<i64, ik_content::interop::PostMeta>), Problem> {
     if ids.is_empty() {
         return Ok((Vec::new(), HashMap::new()));
@@ -1187,7 +1188,8 @@ async fn visible_rows(
         .collect();
     rows.retain(|row| {
         posts.get(&row.post_id).is_some_and(|post| {
-            (row.is_anonymous || !excluded.contains(&row.author_id))
+            !(exclude_inner && post.in_inner)
+                && (row.is_anonymous || !excluded.contains(&row.author_id))
                 && (post.is_anonymous || !excluded.contains(&post.author_id))
         })
     });
@@ -1202,19 +1204,21 @@ pub async fn search_visible_ids(
     ids: &[i64],
 ) -> Result<Vec<i64>, Problem> {
     let mut conn = state.db.acquire().await?;
-    let (rows, _) = visible_rows(&mut conn, viewer.map(|p| p.user_id.get()), ids).await?;
+    let (rows, _) = visible_rows(&mut conn, viewer.map(|p| p.user_id.get()), ids, false).await?;
     Ok(rows.into_iter().map(|r| r.id).collect())
 }
 
-/// 评论搜索结果（保持输入顺序，不可见的跳过）。
+/// 评论搜索结果（保持输入顺序，不可见的跳过）。`exclude_inner`：跳过里区帖子下的评论
+/// （不限定帖子的评论搜索，POST-123）。
 pub async fn search_views(
     state: &CommentsState,
     viewer: Option<&Principal>,
     ids: &[i64],
+    exclude_inner: bool,
 ) -> Result<Vec<CommentSearchView>, Problem> {
     let viewer_id = viewer.map(|p| p.user_id.get());
     let mut conn = state.db.acquire().await?;
-    let (rows, posts) = visible_rows(&mut conn, viewer_id, ids).await?;
+    let (rows, posts) = visible_rows(&mut conn, viewer_id, ids, exclude_inner).await?;
     let refs: Vec<&CommentRow> = rows.iter().collect();
     let liked = liked_set(&mut conn, viewer_id, &refs).await?;
     let lookup = lookup_with(state, &mut conn, &refs, &[], liked).await?;
@@ -1241,7 +1245,7 @@ pub async fn search_views(
 }
 
 /// 数据库兜底搜索（SRCH-033）：正文包含 `q` 的评论 id（新的在前），最多 1000 个候选，
-/// 再按读者可见性过滤。
+/// 再按读者可见性过滤。没限定帖子时跳过里区帖子下的评论（POST-123）。
 pub async fn search_comment_ids(
     state: &CommentsState,
     viewer: Option<&Principal>,
@@ -1253,6 +1257,12 @@ pub async fn search_comment_ids(
     if i64::try_from(candidates.len()).unwrap_or(i64::MAX) >= SEARCH_FALLBACK_CAP {
         tracing::warn!(cap = SEARCH_FALLBACK_CAP, "评论搜索兜底触顶，结果被截断");
     }
-    let (rows, _) = visible_rows(&mut conn, viewer.map(|p| p.user_id.get()), &candidates).await?;
+    let (rows, _) = visible_rows(
+        &mut conn,
+        viewer.map(|p| p.user_id.get()),
+        &candidates,
+        post_id.is_none(),
+    )
+    .await?;
     Ok(rows.into_iter().map(|r| r.id).collect())
 }

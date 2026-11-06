@@ -61,7 +61,7 @@ impl TaskHandler for FanoutNewPost {
     }
 }
 
-/// 执行一批扇出，返回这一批通知到的人数。帖子已经下线、隐藏或删除时什么都不做（剩下的粉丝不再通知）。
+/// 执行一批扇出，返回这一批通知到的人数。帖子已经下线、隐藏、删除或在里区时什么都不做（剩下的粉丝不再通知）。
 pub async fn fanout_batch(state: &ContentState, job: &FanoutNewPost) -> Result<usize, Problem> {
     let mut effects = Effects::new();
     let mut tx = state.db.begin().await?;
@@ -69,6 +69,10 @@ pub async fn fanout_batch(state: &ContentState, job: &FanoutNewPost) -> Result<u
         return Ok(0);
     };
     if post.status != "published" || post.hidden_at.is_some() || post.is_anonymous {
+        return Ok(0);
+    }
+    // 里区的帖子不推给粉丝（POST-125）。
+    if post.category_id.is_some() && post.category_id == repo::inner_category_id(&mut tx).await? {
         return Ok(0);
     }
     let outcome = ik_notify::interop::fanout_new_post(

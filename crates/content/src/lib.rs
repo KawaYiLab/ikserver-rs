@@ -20,3 +20,6 @@ mod video;
 pub use routes::router;
 pub use state::ContentState;
 pub use video::ExternalVideo;
+
+/// 里区的 slug（POST-122）：这个分区的帖子只在选中它时出现，不进首页、热门、关注流、全站搜索等。
+pub const INNER_CATEGORY_SLUG: &str = "inner";

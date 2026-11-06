@@ -17534,7 +17534,8 @@
         "enum": [
           "hide",
           "unhide",
-          "delete"
+          "delete",
+          "move"
         ]
       },
       "ContentActionRequest": {
@@ -17547,6 +17548,13 @@
         "properties": {
           "action": {
             "$ref": "#/components/schemas/ContentAction"
+          },
+          "categoryId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`move` 的目标分区。"
           },
           "ids": {
             "type": "array",
@@ -19882,7 +19890,7 @@
         "properties": {
           "action": {
             "type": "string",
-            "description": "`auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |\n`block_user` | `unblock_user`"
+            "description": "`auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `move_content` |\n`warn_user` | `block_user` | `unblock_user`"
           },
           "actor": {
             "oneOf": [

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS \"cover_id?\",\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.pinned_at IS NOT NULL AND p.status = 'published' AND p.hidden_at IS NULL\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))\n           ORDER BY p.pinned_at DESC, p.id DESC\n           LIMIT $1",
+  "query": "SELECT p.id, p.post_no, p.author_id, p.title, left(p.body, 400) AS \"excerpt_source!\",\n                  p.is_anonymous, p.anonymous_seed, p.pinned_at, p.solved_at,\n                  p.view_count, p.like_count, p.comment_count,\n                  p.published_at AS \"published_at!\", p.bumped_at AS \"bumped_at!\",\n                  p.edited_at, p.last_bumped_by, p.cover_ids[1] AS \"cover_id?\",\n                  c.id AS \"category_id?\", c.slug AS \"category_slug?\", c.name AS \"category_name?\"\n           FROM posts p LEFT JOIN categories c ON c.id = p.category_id\n           WHERE p.id = ANY($1) AND p.status = 'published' AND p.hidden_at IS NULL\n             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))\n             AND ($3::text IS NULL OR c.slug IS DISTINCT FROM $3)",
   "describe": {
     "columns": [
       {
@@ -216,8 +216,9 @@
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Int8Array"
+        "Int8Array",
+        "Int8Array",
+        "Text"
       ]
     },
     "nullable": [
@@ -238,10 +239,10 @@
       true,
       true,
       null,
-      false,
-      false,
-      false
+      true,
+      true,
+      true
     ]
   },
-  "hash": "a0e9a30aecea90fad99b3c6f443874529812515c3f6d0db051ec3e793b6400a3"
+  "hash": "10bbf9cfe7aa68165fd3b0d3dd1ef64d0af8ee12de3c0ce3b5422a9dedb0339d"
 }

@@ -144,6 +144,17 @@ fn exclude_authors(excluded: &[i64]) -> Option<String> {
     Some(format!("NOT authorUserId IN [{}]", ids.join(", ")))
 }
 
+/// 选了分区只搜该分区；没选时去掉里区（POST-123）。没有分区的文档也满足 `!=`。
+fn category_filter(category_slug: Option<&str>) -> String {
+    match category_slug {
+        Some(slug) => format!("categorySlug = {}", filter_string(slug)),
+        None => format!(
+            "categorySlug != {}",
+            filter_string(ik_content::INNER_CATEGORY_SLUG)
+        ),
+    }
+}
+
 fn and(parts: Vec<String>) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" AND "))
 }
@@ -444,10 +455,7 @@ impl Engine {
         offset: usize,
         limit: usize,
     ) -> anyhow::Result<Hits> {
-        let mut parts = Vec::new();
-        if let Some(slug) = category_slug {
-            parts.push(format!("categorySlug = {}", filter_string(slug)));
-        }
+        let mut parts = vec![category_filter(category_slug)];
         parts.extend(exclude_authors(excluded_authors));
         let filter = and(parts);
         let sort_by: &[&str] = match sort {
@@ -485,10 +493,7 @@ impl Engine {
         excluded_authors: &[i64],
         limit: usize,
     ) -> anyhow::Result<Vec<SuggestHit>> {
-        let mut parts = Vec::new();
-        if let Some(slug) = category_slug {
-            parts.push(format!("categorySlug = {}", filter_string(slug)));
-        }
+        let mut parts = vec![category_filter(category_slug)];
         parts.extend(exclude_authors(excluded_authors));
         let filter = and(parts);
         let mut query = self.posts.search();
@@ -622,5 +627,11 @@ mod tests {
             exclude_authors(&[1, 9_007_199_254_740_993]).as_deref(),
             Some(r#"NOT authorUserId IN ["1", "9007199254740993"]"#)
         );
+    }
+
+    #[test]
+    fn category_filter_leaves_out_inner_unless_chosen() {
+        assert_eq!(category_filter(Some("inner")), r#"categorySlug = "inner""#);
+        assert_eq!(category_filter(None), r#"categorySlug != "inner""#);
     }
 }

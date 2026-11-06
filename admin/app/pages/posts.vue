@@ -6,6 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { api, unwrap } from '~/lib/api'
 import type { Schemas } from '~/lib/api'
@@ -71,21 +72,39 @@ async function setPinned(post: Post, pinned: boolean) {
 }
 
 // ---------- 移动分区 ----------
-const moving = ref<Post | null>(null)
+const moving = ref<Post[] | null>(null)
 const moveTo = ref('')
+const moveNote = ref('')
+const moveNotify = ref(true)
 const activeCategories = computed(() => categories.value.filter(c => c.isActive && (isAdmin.value || !c.adminOnly)))
+const movingLabel = computed(() => {
+  const posts = moving.value ?? []
+  return posts.length === 1 ? `《${posts[0]?.title}》` : ` ${posts.length} 篇委托`
+})
+/** 都已经在所选分区时不用移。 */
+const moveIsNoop = computed(() => !!moving.value?.every(post => post.category?.id === moveTo.value))
 
-function startMove(post: Post) {
-  moving.value = post
-  moveTo.value = post.category?.id ?? ''
+function startMove(posts: Post[]) {
+  if (!posts.length) return
+  moving.value = posts
+  const first = posts[0]?.category?.id ?? ''
+  moveTo.value = posts.every(post => (post.category?.id ?? '') === first) ? first : ''
+  moveNote.value = ''
+  moveNotify.value = true
 }
 
 async function move() {
-  const post = moving.value
-  if (!post || !moveTo.value) return
-  const done = await run(() => unwrap(api.PUT('/v1/admin/posts/{id}/category', {
-    params: { path: { id: post.id } },
-    body: { categoryId: moveTo.value },
+  const posts = moving.value
+  if (!posts || !moveTo.value) return
+  const done = await run(() => unwrap(api.POST('/v1/admin/moderation/actions', {
+    body: {
+      targetType: 'post',
+      ids: posts.map(post => post.id),
+      action: 'move',
+      categoryId: moveTo.value,
+      note: moveNote.value.trim() || null,
+      notifyAuthor: moveNotify.value,
+    },
   })).then(() => true), '已移动')
   if (done) {
     moving.value = null
@@ -98,7 +117,7 @@ function rowActions(post: Post): RowAction[] {
   return [
     { label: '在主站打开', icon: ExternalLink, href: siteLink(`/post/${post.id}`) },
     { label: '查看评论', icon: MessageSquare, onSelect: () => navigateTo({ path: '/comments', query: { postId: post.id } }) },
-    { label: '移动分区', icon: ArrowRightLeft, onSelect: () => startMove(post) },
+    { label: '移动分区', icon: ArrowRightLeft, onSelect: () => startMove([post]) },
     {
       label: post.pinnedAt ? '取消置顶' : '置顶',
       icon: post.pinnedAt ? PinOff : Pin,
@@ -116,7 +135,7 @@ function rowActions(post: Post): RowAction[] {
 
 <template>
   <div>
-    <AdminPageHeader title="帖子" description="直接隐藏、恢复、置顶或删除委托。">
+    <AdminPageHeader title="帖子" description="直接隐藏、恢复、移动、置顶或删除委托。">
       <AdminRefreshButton :loading="loading" @click="list.refresh" />
     </AdminPageHeader>
 
@@ -215,6 +234,7 @@ function rowActions(post: Post): RowAction[] {
     <AdminPager v-if="result" :page="result.page" :limit="result.limit" :total="result.total" unit="篇" @change="list.setPage" />
 
     <AdminBulkBar :count="selection.size" unit="篇" @clear="select.clear">
+      <Button size="sm" variant="outline" @click="startMove(selectedPosts)"><ArrowRightLeft class="size-4" />移动分区</Button>
       <Button size="sm" variant="outline" @click="act(selectedPosts, 'unhide')"><Eye class="size-4" />恢复</Button>
       <Button size="sm" variant="outline" @click="act(selectedPosts, 'hide')"><EyeOff class="size-4" />隐藏</Button>
       <Button size="sm" variant="destructive" @click="act(selectedPosts, 'delete')"><Trash2 class="size-4" />删除</Button>
@@ -223,18 +243,28 @@ function rowActions(post: Post): RowAction[] {
     <Dialog :open="!!moving" @update:open="(v) => { if (!v) moving = null }">
       <DialogContent v-if="moving">
         <DialogHeader>
-          <DialogTitle>移动《{{ moving.title }}》</DialogTitle>
-          <DialogDescription>作者尚未发布的修改也会一并改到新分区。</DialogDescription>
+          <DialogTitle>移动{{ movingLabel }}</DialogTitle>
+          <DialogDescription>作者尚未发布的修改也会一并改到新分区。移进里区后，作者不能自己移出来。</DialogDescription>
         </DialogHeader>
-        <Select v-model="moveTo">
-          <SelectTrigger class="w-full"><SelectValue placeholder="选择分区" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem v-for="c in activeCategories" :key="c.id" :value="c.id">{{ c.name }}{{ c.adminOnly ? '（仅管理员发帖）' : '' }}</SelectItem>
-          </SelectContent>
-        </Select>
+        <div class="space-y-4">
+          <Select v-model="moveTo">
+            <SelectTrigger class="w-full"><SelectValue placeholder="选择分区" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="c in activeCategories" :key="c.id" :value="c.id">{{ c.name }}{{ c.adminOnly ? '（仅管理员发帖）' : '' }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <label class="grid gap-2">
+            <span class="text-sm leading-none font-medium">处理备注（选填，写入审核日志）</span>
+            <Textarea v-model="moveNote" maxlength="500" rows="2" />
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <Checkbox v-model="moveNotify" />
+            给作者发系统通知（附上备注）
+          </label>
+        </div>
         <DialogFooter>
           <Button variant="outline" @click="moving = null">取消</Button>
-          <Button :disabled="!moveTo || moveTo === moving.category?.id" @click="move">移动</Button>
+          <Button :disabled="!moveTo || moveIsNoop" @click="move">移动</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -464,6 +464,8 @@ pub enum ContentAction {
     Unhide,
     /// 删除，不可恢复（评论连同回复）。
     Delete,
+    /// 把帖子移到 `categoryId` 分区（只用于帖子，有未结案举报也能移，POST-127）。
+    Move,
 }
 
 impl ContentAction {
@@ -472,6 +474,7 @@ impl ContentAction {
             Self::Hide => "hide",
             Self::Unhide => "unhide",
             Self::Delete => "delete",
+            Self::Move => "move",
         }
     }
 
@@ -480,6 +483,7 @@ impl ContentAction {
             Self::Hide => "hide_content",
             Self::Unhide => "unhide_content",
             Self::Delete => "delete_content",
+            Self::Move => "move_content",
         }
     }
 }
@@ -499,6 +503,10 @@ pub struct ContentActionRequest {
     /// 给作者发系统通知。恢复可见时不发。
     #[serde(default)]
     pub notify_author: bool,
+    /// `move` 的目标分区。
+    #[serde(default)]
+    #[schema(value_type = Option<String>)]
+    pub category_id: Option<Id>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -546,8 +554,8 @@ pub struct ReceivedReport {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ModerationEntry {
-    /// `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `warn_user` |
-    /// `block_user` | `unblock_user`
+    /// `auto_hide` | `reject` | `hide_content` | `unhide_content` | `delete_content` | `move_content` |
+    /// `warn_user` | `block_user` | `unblock_user`
     pub action: String,
     pub target_type: TargetType,
     #[schema(value_type = String)]

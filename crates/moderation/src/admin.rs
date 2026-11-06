@@ -736,6 +736,7 @@ async fn lock_target(
 /// - 恢复可见对两种隐藏原因（版主隐藏、多人举报自动隐藏）都生效。
 /// - 每条改动写一行审核日志；后台审计每次请求一行（批量时 id 列表在 details 里）。
 /// - `notifyAuthor` 时给作者发系统通知（恢复可见不发），删除帖子后通知不再关联它。
+/// - `move` 只用于帖子：移到 `categoryId` 分区，不受未结案举报限制（POST-127）。
 pub async fn act(
     state: &ModerationState,
     op: &ik_auth::Operator,
@@ -763,6 +764,11 @@ pub async fn act(
     let mut effects = Effects::new();
 
     let mut tx = state.db.begin().await?;
+    let target_category = if action == ContentAction::Move {
+        Some(move_target(&mut tx, op, target_type, request.category_id).await?)
+    } else {
+        None
+    };
     let open: std::collections::HashSet<i64> =
         repo::open_targets(&mut tx, target_type.as_str(), &ids)
             .await?
@@ -772,7 +778,7 @@ pub async fn act(
     let mut pending = Vec::new();
     let mut unchanged = Vec::new();
     for id in ids {
-        if open.contains(&id) {
+        if open.contains(&id) && action != ContentAction::Move {
             pending.push(Id::new(id));
             continue;
         }
@@ -782,6 +788,14 @@ pub async fn act(
         };
         let moderator = ik_content::interop::HIDDEN_BY_MODERATOR;
         let changed = match (action, target_type) {
+            (ContentAction::Move, _) => {
+                let category_id = target_category.as_ref().map_or(0, |c| c.id);
+                matches!(
+                    ik_content::interop::move_post(&mut tx, id, category_id, now, &mut effects)
+                        .await?,
+                    ik_content::interop::MoveOutcome::Moved { .. }
+                )
+            }
             (ContentAction::Hide, _) if target.hidden_reason.as_deref() == Some(moderator) => false,
             (ContentAction::Hide, TargetType::Post) => {
                 ik_content::interop::hide_post(
@@ -850,6 +864,9 @@ pub async fn act(
                 "你的{}因违反绳网社区规范已被删除。如有异议请联系管理员。",
                 target.label
             )),
+            ContentAction::Move => target_category
+                .as_ref()
+                .map(|c| format!("你的{}已被移到「{}」分区。", target.label, c.name)),
             ContentAction::Unhide => None,
         };
         if let (true, Some(message)) = (request.notify_author, message) {
@@ -881,6 +898,7 @@ pub async fn act(
                     (_, ContentAction::Hide) => "content.comment.hide",
                     (_, ContentAction::Unhide) => "content.comment.unhide",
                     (_, ContentAction::Delete) => "content.comment.delete",
+                    (_, ContentAction::Move) => "content.post.move",
                 },
                 target_type: target_type.as_str(),
                 target_id: single.then(|| affected[0].to_string()),
@@ -890,6 +908,7 @@ pub async fn act(
                     },
                     "note": note,
                     "notifyAuthor": request.notify_author,
+                    "to": target_category.as_ref().map(|c| c.id.to_string()),
                 }),
             },
             now,
@@ -904,6 +923,38 @@ pub async fn act(
         pending_reports: pending,
         unchanged,
     })
+}
+
+/// `move` 的目标分区：只能移帖子，分区必须存在且启用；仅限管理员发帖的分区只有管理员能移进去。
+async fn move_target(
+    conn: &mut PgConnection,
+    op: &ik_auth::Operator,
+    target_type: TargetType,
+    category_id: Option<Id>,
+) -> Result<ik_content::interop::CategoryInfo, Problem> {
+    if target_type != TargetType::Post {
+        return Err(Problem::field("targetType", "INVALID", "只能移动帖子"));
+    }
+    let Some(category_id) = category_id else {
+        return Err(Problem::field("categoryId", "REQUIRED", "请选择分区"));
+    };
+    match ik_content::interop::category(conn, category_id.get()).await? {
+        Some(category) if category.is_active => {
+            if category.admin_only && !op.principal.role.is_admin() {
+                return Err(Problem::new(
+                    StatusCode::FORBIDDEN,
+                    "CATEGORY_ADMIN_ONLY",
+                    "只有管理员能把帖子移进这个分区",
+                ));
+            }
+            Ok(category)
+        }
+        _ => Err(Problem::field(
+            "categoryId",
+            "NOT_FOUND",
+            "分区不存在或已停用",
+        )),
+    }
 }
 
 /// 账号的处罚记录与收到的举报（管理后台账号详情）。匿名内容相关的一律排除。

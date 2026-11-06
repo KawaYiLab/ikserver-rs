@@ -1267,6 +1267,133 @@ async fn moderators_hide_and_restore_content_directly(db: PgPool) {
 }
 
 #[sqlx::test(migrator = "MIGRATOR")]
+async fn moderators_move_posts_into_inner_and_notify(db: PgPool) {
+    let app = setup(&db).await;
+    seed_content(&db).await;
+    let inner: i64 = sqlx::query_scalar("SELECT id FROM categories WHERE slug = 'inner'")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    // 有未结案举报的也能移（POST-127）。
+    sqlx::query(
+        "INSERT INTO reports (id, reporter_id, target_type, target_id, owner_user_id, reason, snapshot)
+         VALUES (700, 4, 'post', 500, 3, 'spam', '{}')",
+    )
+    .execute(&db)
+    .await
+    .unwrap();
+    let action = json!({ "targetType": "post", "ids": ["500", "502"], "action": "move",
+                         "categoryId": inner.to_string(), "note": "擦边", "notifyAuthor": true });
+
+    let (status, _) = call(
+        &app,
+        USER,
+        "POST",
+        "/v1/admin/moderation/actions",
+        action.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, done) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        action.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["affected"], 2, "{done}");
+    assert_eq!(done["pendingReports"], json!([]));
+    let moved: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM posts WHERE category_id = $1 AND id IN (500, 502)",
+    )
+    .bind(inner)
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(moved, 2);
+    let notices: Vec<String> = sqlx::query_scalar(
+        "SELECT excerpt FROM notifications WHERE recipient_id = 3 AND kind = 'system'",
+    )
+    .fetch_all(&db)
+    .await
+    .unwrap();
+    assert_eq!(notices.len(), 1);
+    assert!(
+        notices[0].contains("《公开帖》已被移到「里区」") && notices[0].contains("擦边"),
+        "{notices:?}"
+    );
+    let logs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM moderation_log WHERE action = 'move_content'")
+            .fetch_one(&db)
+            .await
+            .unwrap();
+    assert_eq!(logs, 2);
+    let audit: serde_json::Value = sqlx::query_scalar(
+        "SELECT details FROM admin_audit_log WHERE action = 'content.post.move'",
+    )
+    .fetch_one(&db)
+    .await
+    .unwrap();
+    assert_eq!(audit["to"], json!(inner.to_string()));
+
+    // 已经在里区：不再改动、不再通知。
+    let (_, again) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        action,
+    )
+    .await;
+    assert_eq!(again["affected"], 0);
+
+    // 首页不再有它们，选中里区才有。
+    let (_, home) = call(&app, USER, "GET", "/v1/feed", Value::Null).await;
+    let ids: Vec<&str> = home["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, vec!["501"], "{home}");
+    let (_, chosen) = call(&app, USER, "GET", "/v1/feed?category=inner", Value::Null).await;
+    assert_eq!(chosen["items"].as_array().unwrap().len(), 2, "{chosen}");
+
+    // 只能移帖子，而且要给分区。
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "comment", "ids": ["600"], "action": "move",
+                "categoryId": inner.to_string() }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "post", "ids": ["500"], "action": "move" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // 仅限管理员发帖的分区，版主移不进去。
+    let (status, _) = call(
+        &app,
+        MODERATOR,
+        "POST",
+        "/v1/admin/moderation/actions",
+        json!({ "targetType": "post", "ids": ["500"], "action": "move", "categoryId": "12" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
 async fn direct_actions_skip_reported_content_and_delete_comments(db: PgPool) {
     let app = setup(&db).await;
     seed_content(&db).await;

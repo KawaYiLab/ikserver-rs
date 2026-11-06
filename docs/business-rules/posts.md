@@ -83,6 +83,15 @@
 - `POST-033` `adminOnly === true` 的分区：非 `user.isAdmin` 用户在 create/update 时传入该分区 → 403 `Only administrators can post in this category`。`article.ts:1249-1251,1341-1343`
 - `POST-034` `allowCommentAccept` 判定必须 `=== true`（Strapi 给存量表加列不会落 schema default，老分区读出 NULL）；帖子无分区视为未开启。详情下发的 `allowCommentAccept` 与 comment.accept 共用 `isCommentAcceptAllowed`。`utils/categories.ts:95-109`
 
+#### 里区（新系统新增，2026-11）
+
+- `POST-122` 里区是 slug 为 `inner` 的普通分区（迁移 `20261126000001_inner_category.sql` 建好，排在最后，谁都能发帖）。代码只按 slug 认它（`ik_content::INNER_CATEGORY_SLUG`），没有分区级开关。
+- `POST-123` 里区的帖子只在「选中里区」时出现：首页（置顶、热门位、最新流）、`GET /v1/posts`、热门榜、关注流、未看流、按标签筛选、不带分区的帖子搜索与联想、不限定帖子的评论搜索、sitemap 都不含里区帖子；选了其他分区自然也不含。帖子详情、作者主页照常显示，链接能打开。
+- `POST-124` 里区帖子置顶后只在里区页显示，不上首页和其他分区页。
+- `POST-125` 发到里区的新帖不推送给粉丝（`content.fanout_new_post` 执行时看帖子当前分区，所以首次发布后很快被移进里区的也不推）。
+- `POST-126` 发布过的帖子只要当前在里区，作者保存或发布时就不能改分区（400 `CATEGORY_LOCKED`），只有版主、管理员能移出。从没发布过的草稿不受限。
+- `POST-127` 版主、管理员移帖走 `POST /v1/admin/moderation/actions` 的 `move`（带 `categoryId`，1–50 篇，可附备注、可通知作者）；有未结案举报的帖子也能移。旧的 `PUT /v1/admin/posts/{id}/category` 保留，不通知作者。
+
 ### 1.7 阅读记录（article-read）
 
 - `POST-035` `article_reads` 表：`user` + `article` + `isRead`(bool 默认 false) + `dedupeKey`（private、unique）。dedupeKey = `u${userId}:a${articleDocumentId}`，由 beforeCreate/beforeUpdate 写入；beforeCreate 还做一次应用层重复检查，重复抛 `DuplicateInteractionError('Article already marked as read')`。「存在记录即已读」，读取侧不看 isRead 字段。`article-read/schema.json`；`article-read/lifecycles.ts:8-43`；`utils/read-status.ts:130-135`

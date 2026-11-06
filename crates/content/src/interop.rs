@@ -262,6 +262,8 @@ pub struct PostMeta {
     pub title: String,
     /// 第一张封面（媒体 id）。
     pub cover_id: Option<i64>,
+    /// 在里区（POST-123）。
+    pub in_inner: bool,
 }
 
 pub async fn public_post_meta(
@@ -282,6 +284,7 @@ pub async fn public_post_meta(
                     is_anonymous: row.is_anonymous,
                     title: row.title,
                     cover_id: row.cover_id,
+                    in_inner: row.in_inner,
                 },
             )
         })
@@ -345,6 +348,62 @@ pub async fn hide_post(
         effects.publish(crate::service::removed_event(post_id)?);
     }
     Ok(true)
+}
+
+/// 移帖的目标分区（版主移帖时校验用）。
+#[derive(Debug, Clone)]
+pub struct CategoryInfo {
+    pub id: i64,
+    pub name: String,
+    pub is_active: bool,
+    pub admin_only: bool,
+}
+
+pub async fn category(conn: &mut PgConnection, id: i64) -> Result<Option<CategoryInfo>, Problem> {
+    Ok(repo::category_by_id(conn, id).await?.map(|c| CategoryInfo {
+        id: c.id,
+        name: c.name,
+        is_active: c.is_active,
+        admin_only: c.admin_only,
+    }))
+}
+
+/// 移帖的结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveOutcome {
+    /// 帖子不存在或还没发布。
+    NotFound,
+    /// 已经在目标分区。
+    Unchanged,
+    /// 移过去了，`from` 是原分区。
+    Moved { from: Option<i64> },
+}
+
+/// 把已发布的帖子移到另一个分区（待发布的修改一并改）。目标分区由调用方校验（存在、启用、权限）。
+/// 公开的帖子会广播 `post.published`（非首次发布），让各端刷新它的分区。
+pub async fn move_post(
+    conn: &mut PgConnection,
+    post_id: i64,
+    category_id: i64,
+    now: DateTime<Utc>,
+    effects: &mut Effects,
+) -> Result<MoveOutcome, Problem> {
+    let Some((from, public)) = repo::lock_published(conn, post_id).await? else {
+        return Ok(MoveOutcome::NotFound);
+    };
+    if from == Some(category_id) {
+        return Ok(MoveOutcome::Unchanged);
+    }
+    repo::move_post(conn, post_id, category_id, now).await?;
+    if public {
+        effects.publish(crate::service::published_event(
+            post_id,
+            None,
+            Some(category_id),
+            false,
+        )?);
+    }
+    Ok(MoveOutcome::Moved { from })
 }
 
 /// 取消隐藏，只在当前隐藏原因是 `reason` 时生效（驳回只恢复自动隐藏，RPTADM-060）。返回是否恢复了。

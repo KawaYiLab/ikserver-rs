@@ -1754,3 +1754,180 @@ async fn videos_get_metadata_on_save_and_keep_it_when_upstream_fails(db: PgPool)
     assert_eq!(legacy.external_videos[0].cover_url, None);
     assert_eq!(legacy.external_videos[0].title.as_deref(), Some("旧"));
 }
+
+async fn inner_id(db: &PgPool) -> i64 {
+    sqlx::query_scalar("SELECT id FROM categories WHERE slug = $1")
+        .bind(ik_content::INNER_CATEGORY_SLUG)
+        .fetch_one(db)
+        .await
+        .unwrap()
+}
+
+fn chosen(category: &str) -> FeedQuery {
+    FeedQuery {
+        category: Some(category.into()),
+        ..latest()
+    }
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn inner_posts_only_show_when_inner_is_chosen(db: PgPool) {
+    let h = harness(db.clone());
+    let me = h.writer(1).await;
+    let admin = h.user(2, Role::Admin, 0, false).await;
+    let inner = inner_id(&db).await;
+    let normal = service::create(&h.state, &me, input("普通"), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let mut post = input("里区的帖");
+    post.category_id = Some(Id::new(inner));
+    let hidden = service::create(&h.state, &me, post, true)
+        .await
+        .unwrap()
+        .id
+        .get();
+
+    // 最新流（POST-123）。
+    assert_eq!(feed_ids(&h, latest()).await.0, vec![normal]);
+    assert_eq!(feed_ids(&h, chosen("inner")).await.0, vec![hidden]);
+
+    // 置顶只在里区页（POST-124）。
+    service::pin(&h.state, &admin, hidden).await.unwrap();
+    let page = service::feed(&h.state, None, latest()).await.unwrap();
+    assert!(page.pinned.is_empty());
+    assert_eq!(
+        page.items.iter().map(|c| c.id.get()).collect::<Vec<_>>(),
+        vec![normal]
+    );
+    let page = service::feed(&h.state, None, chosen("inner"))
+        .await
+        .unwrap();
+    assert_eq!(
+        page.pinned.iter().map(|c| c.id.get()).collect::<Vec<_>>(),
+        vec![hidden]
+    );
+
+    // 首页热门位：热榜还没刷新时也不出现。
+    let home = service::home_feed(&h.state, None, latest(), &[hidden, normal])
+        .await
+        .unwrap();
+    assert_eq!(
+        home.hot.iter().map(|c| c.id.get()).collect::<Vec<_>>(),
+        vec![normal]
+    );
+
+    // 按 id 取卡片：热门榜、搜索去掉里区，作者动态不去。
+    let ids = [hidden, normal];
+    let cards = service::public_cards_in_order(&h.state, None, &ids, true)
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 1);
+    let cards = service::public_cards_in_order(&h.state, None, &ids, false)
+        .await
+        .unwrap();
+    assert_eq!(cards.len(), 2);
+
+    // 热榜候选里也没有（POST-123）。
+    let mut conn = db.acquire().await.unwrap();
+    let recent = ik_content::interop::hot_recent_posts(&mut conn, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        recent.iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![normal]
+    );
+    let picked = ik_content::interop::hot_posts(&mut conn, &ids)
+        .await
+        .unwrap();
+    assert_eq!(
+        picked.iter().map(|p| p.id).collect::<Vec<_>>(),
+        vec![normal]
+    );
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn authors_cannot_move_published_posts_out_of_inner(db: PgPool) {
+    let h = harness(db.clone());
+    let me = h.writer(1).await;
+    let inner = inner_id(&db).await;
+    let other = h.category("chat", false).await;
+    let mut post = input("里区的帖");
+    post.category_id = Some(Id::new(inner));
+    let id = service::create(&h.state, &me, post.clone(), true)
+        .await
+        .unwrap()
+        .id
+        .get();
+
+    // 发布过的：保存、发布都不能改分区（POST-126）。
+    let mut out = post.clone();
+    out.category_id = Some(Id::new(other));
+    let err = service::save_draft(&h.state, &me, id, out.clone(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "CATEGORY_LOCKED");
+    let err = service::publish(&h.state, &me, id, Some(out), None)
+        .await
+        .unwrap_err();
+    assert_eq!(err.field_errors()[0].code, "CATEGORY_LOCKED");
+    let mut none = post.clone();
+    none.category_id = None;
+    assert_eq!(
+        service::save_draft(&h.state, &me, id, none, None)
+            .await
+            .unwrap_err()
+            .field_errors()[0]
+            .code,
+        "CATEGORY_LOCKED"
+    );
+    // 分区不变的编辑照常。
+    let mut edited = post.clone();
+    edited.title = "改了标题".into();
+    service::publish(&h.state, &me, id, Some(edited), None)
+        .await
+        .unwrap();
+
+    // 下线后也一样：它已经发布过。
+    service::unpublish(&h.state, &me, id, false).await.unwrap();
+    let mut out = post.clone();
+    out.category_id = Some(Id::new(other));
+    assert_eq!(
+        service::save_draft(&h.state, &me, id, out, None)
+            .await
+            .unwrap_err()
+            .field_errors()[0]
+            .code,
+        "CATEGORY_LOCKED"
+    );
+
+    // 从没发布过的草稿可以随便改。
+    let draft = service::create(&h.state, &me, post.clone(), false)
+        .await
+        .unwrap()
+        .id
+        .get();
+    let mut out = post;
+    out.category_id = Some(Id::new(other));
+    service::save_draft(&h.state, &me, draft, out, None)
+        .await
+        .unwrap();
+}
+
+#[sqlx::test(migrator = "MIGRATOR")]
+async fn inner_posts_are_not_pushed_to_followers(db: PgPool) {
+    let h = harness(db.clone());
+    h.state.jobs.migrate().await.unwrap();
+    let me = h.writer(1).await;
+    h.followers(1, 100, 102).await;
+    let mut post = input("里区的帖");
+    post.category_id = Some(Id::new(inner_id(&db).await));
+    let hidden = service::create(&h.state, &me, post, true).await.unwrap();
+    let normal = service::create(&h.state, &me, input("普通"), true)
+        .await
+        .unwrap();
+    h.run_jobs().await;
+    assert_eq!(h.follow_notices(hidden.id.get()).await, 0);
+    assert!(h.follow_notices(normal.id.get()).await > 0);
+}

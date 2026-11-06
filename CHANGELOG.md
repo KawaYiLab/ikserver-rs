@@ -7,6 +7,8 @@
 
 ### 新增
 
+- 里区：新分区（slug `inner`），帖子不进首页、热门、关注流、未看流、不带分区的搜索和 sitemap，选中里区才看得到；里区的置顶只在里区页显示，新帖不推送给粉丝。发布过的里区帖子只有版主、管理员能移出。
+- `POST /v1/admin/moderation/actions` 新增 `move`（带 `categoryId`）：版主、管理员批量移帖并可通知作者，不受未结案举报限制；后台帖子页的「移动分区」改用它，支持批量。
 - 首次安装：还没有管理员时，打开 `/admin/setup` 创建第一个管理员；也可以用 `ik-server setup`。
 - Docker 镜像与 `deploy/docker/` 下的 compose 部署，`init.sh` 自动生成数据库密码和密钥。
 - `IK_DATABASE__AUTO_MIGRATE`：启动时自动迁移数据库（镜像里默认打开）。

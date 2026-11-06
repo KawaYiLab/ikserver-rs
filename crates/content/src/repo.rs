@@ -39,6 +39,14 @@ pub(crate) async fn category_by_id(
     .await
 }
 
+/// 里区的 id（还没建时为空）。
+pub(crate) async fn inner_category_id(conn: &mut PgConnection) -> sqlx::Result<Option<i64>> {
+    sqlx::query_scalar("SELECT id FROM categories WHERE slug = $1")
+        .bind(crate::INNER_CATEGORY_SLUG)
+        .fetch_optional(conn)
+        .await
+}
+
 pub(crate) async fn category_by_slug(
     conn: &mut PgConnection,
     slug: &str,
@@ -574,6 +582,8 @@ pub(crate) struct FeedFilter {
     pub author_ids: Option<Vec<i64>>,
     /// 未看流：去掉该用户读过的帖子（UNRD-003，NOT EXISTS 按主键探测）。
     pub unread_for: Option<i64>,
+    /// 去掉里区的帖子（没选中里区时，POST-123）。
+    pub exclude_inner: bool,
 }
 
 /// 公开帖子按 (bumped_at, id) 倒序。可选按分区、标签筛选，以及关注流、未看流的附加条件。
@@ -602,6 +612,7 @@ pub(crate) async fn feed(
              AND ($9::bigint[] IS NULL OR (NOT p.is_anonymous AND p.author_id = ANY($9)))
              AND ($10::bigint IS NULL OR NOT EXISTS (
                      SELECT 1 FROM post_reads r WHERE r.user_id = $10 AND r.post_id = p.id))
+             AND ($11::text IS NULL OR c.slug IS DISTINCT FROM $11)
            ORDER BY p.bumped_at DESC, p.id DESC
            LIMIT $6"#,
         filter.category_id,
@@ -614,15 +625,18 @@ pub(crate) async fn feed(
         &filter.exclude_ids,
         filter.author_ids.as_deref(),
         filter.unread_for,
+        filter.exclude_inner.then_some(crate::INNER_CATEGORY_SLUG),
     )
     .fetch_all(conn)
     .await
 }
 
+/// 置顶卡片。`exclude_inner`：去掉里区的置顶（只在里区页显示，POST-124）。
 pub(crate) async fn pinned_cards(
     conn: &mut PgConnection,
     excluded_authors: &[i64],
     limit: i64,
+    exclude_inner: bool,
 ) -> sqlx::Result<Vec<CardRow>> {
     sqlx::query_as!(
         CardRow,
@@ -635,10 +649,12 @@ pub(crate) async fn pinned_cards(
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.pinned_at IS NOT NULL AND p.status = 'published' AND p.hidden_at IS NULL
              AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))
+             AND ($3::text IS NULL OR c.slug IS DISTINCT FROM $3)
            ORDER BY p.pinned_at DESC, p.id DESC
            LIMIT $1"#,
         limit,
         excluded_authors,
+        exclude_inner.then_some(crate::INNER_CATEGORY_SLUG),
     )
     .fetch_all(conn)
     .await
@@ -1305,11 +1321,13 @@ pub(crate) async fn mark_read(
     Ok(result.rows_affected())
 }
 
-/// 按给定 id 取公开、且不被拉黑过滤的帖子卡片（顺序不保证）。热门榜与首页热门位用。
+/// 按给定 id 取公开、且不被拉黑过滤的帖子卡片（顺序不保证）。热门榜、首页热门位、搜索回查用。
+/// `exclude_inner`：同时去掉里区的帖子（POST-123）。
 pub(crate) async fn public_cards_by_ids(
     conn: &mut PgConnection,
     ids: &[i64],
     excluded_authors: &[i64],
+    exclude_inner: bool,
 ) -> sqlx::Result<Vec<CardRow>> {
     sqlx::query_as!(
         CardRow,
@@ -1321,9 +1339,11 @@ pub(crate) async fn public_cards_by_ids(
                   c.id AS "category_id?", c.slug AS "category_slug?", c.name AS "category_name?"
            FROM posts p LEFT JOIN categories c ON c.id = p.category_id
            WHERE p.id = ANY($1) AND p.status = 'published' AND p.hidden_at IS NULL
-             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))"#,
+             AND (p.is_anonymous OR NOT (p.author_id = ANY($2)))
+             AND ($3::text IS NULL OR c.slug IS DISTINCT FROM $3)"#,
         ids,
         excluded_authors,
+        exclude_inner.then_some(crate::INNER_CATEGORY_SLUG),
     )
     .fetch_all(conn)
     .await
@@ -1352,9 +1372,11 @@ pub(crate) async fn hot_recent(
                   bumped_at AS "bumped_at!", like_count
            FROM posts
            WHERE status = 'published' AND hidden_at IS NULL
+             AND category_id IS DISTINCT FROM (SELECT id FROM categories WHERE slug = $2)
            ORDER BY bumped_at DESC, id DESC
            LIMIT $1"#,
         limit,
+        crate::INNER_CATEGORY_SLUG,
     )
     .fetch_all(conn)
     .await
@@ -1371,8 +1393,10 @@ pub(crate) async fn hot_by_ids(
                   COALESCE(first_published_at, published_at) AS "created_at!",
                   bumped_at AS "bumped_at!", like_count
            FROM posts
-           WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL"#,
+           WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL
+             AND category_id IS DISTINCT FROM (SELECT id FROM categories WHERE slug = $2)"#,
         ids,
+        crate::INNER_CATEGORY_SLUG,
     )
     .fetch_all(conn)
     .await
@@ -1514,6 +1538,7 @@ pub(crate) struct PostMetaRow {
     pub is_anonymous: bool,
     pub title: String,
     pub cover_id: Option<i64>,
+    pub in_inner: bool,
 }
 
 /// `ids` 中公开的帖子：作者、是否匿名、标题。
@@ -1523,9 +1548,12 @@ pub(crate) async fn public_post_meta(
 ) -> sqlx::Result<Vec<PostMetaRow>> {
     sqlx::query_as!(
         PostMetaRow,
-        r#"SELECT id, author_id, is_anonymous, title, cover_ids[1] AS "cover_id?" FROM posts
-           WHERE id = ANY($1) AND status = 'published' AND hidden_at IS NULL"#,
+        r#"SELECT p.id, p.author_id, p.is_anonymous, p.title, p.cover_ids[1] AS "cover_id?",
+                  COALESCE(c.slug = $2, FALSE) AS "in_inner!"
+           FROM posts p LEFT JOIN categories c ON c.id = p.category_id
+           WHERE p.id = ANY($1) AND p.status = 'published' AND p.hidden_at IS NULL"#,
         ids,
+        crate::INNER_CATEGORY_SLUG,
     )
     .fetch_all(conn)
     .await

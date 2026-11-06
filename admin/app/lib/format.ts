@@ -101,6 +101,7 @@ export const moderationActionLabel: Record<string, string> = {
   hide_content: '隐藏内容',
   unhide_content: '恢复内容',
   delete_content: '删除内容',
+  move_content: '移动分区',
   warn_user: '警告',
   block_user: '封禁',
   unblock_user: '解封',

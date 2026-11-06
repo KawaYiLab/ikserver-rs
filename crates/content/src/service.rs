@@ -324,6 +324,28 @@ async fn check_category(
     }
 }
 
+/// 发布过、当前在里区的帖子，作者保存或发布时不能改分区，只有版主、管理员能移出（POST-126）。
+async fn ensure_inner_kept(
+    conn: &mut PgConnection,
+    row: &PostRow,
+    category_id: Option<i64>,
+) -> Result<(), Problem> {
+    let Some(current) = row.category_id else {
+        return Ok(());
+    };
+    if row.first_published_at.is_none() || category_id == Some(current) {
+        return Ok(());
+    }
+    if repo::inner_category_id(conn).await? == Some(current) {
+        return Err(Problem::field(
+            "categoryId",
+            "CATEGORY_LOCKED",
+            "里区的帖子只能由管理员移出",
+        ));
+    }
+    Ok(())
+}
+
 /// 解析标签：已停用的标签整单拒绝（先查后建，不部分创建，POST-025），缺的就建。
 async fn resolve_tags(
     state: &ContentState,
@@ -660,6 +682,7 @@ pub async fn save_draft(
     ensure_anonymity_unchanged(&row, prepared.is_anonymous)?;
     let existing = load_existing(&mut tx, &row).await?;
     let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
+    ensure_inner_kept(&mut tx, &row, content.category_id).await?;
     if row.status == "published" {
         repo::upsert_draft(&mut tx, post_id, &content, now).await?;
         repo::bump_revision(&mut tx, post_id, now).await?;
@@ -744,6 +767,7 @@ pub async fn publish(
     if let Some(prepared) = prepared {
         let existing = load_existing(&mut tx, &row).await?;
         let content = resolve(state, &mut tx, principal, prepared, &existing).await?;
+        ensure_inner_kept(&mut tx, &row, content.category_id).await?;
         category_id = content.category_id;
         title.clone_from(&content.title);
         apply_content(&mut tx, &row, &content, now).await?;
@@ -758,6 +782,7 @@ pub async fn publish(
             return Err(Problem::validation(errors));
         }
         check_category(&mut tx, principal, content.category_id).await?;
+        ensure_inner_kept(&mut tx, &row, content.category_id).await?;
         category_id = content.category_id;
         title.clone_from(&content.title);
         apply_content(&mut tx, &row, &content, now).await?;
@@ -1187,6 +1212,8 @@ fn page_limit(limit: Option<u32>) -> i64 {
 /// 解析后的信息流参数。
 struct FeedScope {
     category_id: Option<i64>,
+    /// 选中的就是里区：只有这时才出现里区的帖子与置顶（POST-123/124）。
+    inner: bool,
     tag_id: Option<i64>,
     after: Option<(DateTime<Utc>, i64)>,
     limit: i64,
@@ -1227,6 +1254,8 @@ async fn feed_scope(conn: &mut PgConnection, query: &FeedQuery) -> Result<FeedSc
     };
     Ok(FeedScope {
         category_id,
+        inner: category_id.is_some()
+            && query.category.as_deref() == Some(crate::INNER_CATEGORY_SLUG),
         tag_id,
         after,
         limit: page_limit(query.limit),
@@ -1270,12 +1299,12 @@ async fn compose(
     let first_page = scope.after.is_none();
 
     let pinned_rows = if show_pinned && first_page {
-        repo::pinned_cards(&mut conn, &excluded_authors, MAX_PINNED).await?
+        repo::pinned_cards(&mut conn, &excluded_authors, MAX_PINNED, !scope.inner).await?
     } else {
         Vec::new()
     };
     let mut hot_rows = if show_hot && first_page {
-        repo::public_cards_by_ids(&mut conn, hot_ids, &excluded_authors).await?
+        repo::public_cards_by_ids(&mut conn, hot_ids, &excluded_authors, true).await?
     } else {
         Vec::new()
     };
@@ -1300,6 +1329,7 @@ async fn compose(
             },
             author_ids: None,
             unread_for: None,
+            exclude_inner: !scope.inner,
         },
     )
     .await?;
@@ -1374,6 +1404,7 @@ pub async fn following_feed(
             exclude_ids: Vec::new(),
             author_ids: Some(followees),
             unread_for: None,
+            exclude_inner: !scope.inner,
         },
     )
     .await?;
@@ -1403,6 +1434,7 @@ pub async fn unread_feed(
             exclude_ids: Vec::new(),
             author_ids: None,
             unread_for: Some(me),
+            exclude_inner: !scope.inner,
         },
     )
     .await?;
@@ -1411,10 +1443,12 @@ pub async fn unread_feed(
 }
 
 /// 按给定顺序取公开、且不被拉黑过滤的帖子卡片；不可见的跳过（热门榜：先过滤再分页，EDGE-006）。
+/// `exclude_inner`：同时跳过里区的帖子（热门榜、不带分区的搜索，POST-123）。
 pub async fn public_cards_in_order(
     state: &ContentState,
     viewer: Option<&Principal>,
     ids: &[i64],
+    exclude_inner: bool,
 ) -> Result<Vec<PostCard>, Problem> {
     if ids.is_empty() {
         return Ok(Vec::new());
@@ -1422,7 +1456,8 @@ pub async fn public_cards_in_order(
     let mut conn = state.db.acquire().await?;
     let excluded_authors =
         ik_social::interop::excluded_authors(&mut conn, viewer.map(|p| p.user_id.get())).await?;
-    let mut rows = repo::public_cards_by_ids(&mut conn, ids, &excluded_authors).await?;
+    let mut rows =
+        repo::public_cards_by_ids(&mut conn, ids, &excluded_authors, exclude_inner).await?;
     rows.sort_by_key(|row| ids.iter().position(|id| *id == row.id));
     cards(state, &mut conn, viewer, rows).await
 }

@@ -15,7 +15,7 @@ const notify = ref(true)
 const typed = ref('')
 const submitting = ref(false)
 
-const titles = { hide: '隐藏', unhide: '恢复可见', delete: '删除' } as const
+const titles = { hide: '隐藏', unhide: '恢复可见', delete: '删除', move: '移动' } as const
 
 watch(pendingModerate, (value) => {
   if (!value) return
